@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.5](https://github.com/mohamed-rekiba/nexus/compare/v0.2.4...v0.2.5) (2026-10-24)
+
+
+### Bug Fixes
+
+* read the rpm package's marker with bsdtar ([55e1bd7](https://github.com/mohamed-rekiba/nexus/commit/55e1bd7431cca3573933768daac53a617a4368be))
+
 ## [0.2.4](https://github.com/mohamed-rekiba/nexus/compare/v0.2.3...v0.2.4) (2026-10-24)
 
 
