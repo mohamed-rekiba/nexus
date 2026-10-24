@@ -2,7 +2,7 @@
 # Checks the packages build-packages.sh made in a folder: every file is in each package, the
 # programs are executable, the packaging marker names the format, and the dependencies are
 # listed. Any mix of deb, rpm and Arch packages is fine, but there must be at least one. Needs
-# dpkg-deb (deb), rpm (rpm) and tar with zstd (Arch).
+# dpkg-deb (deb), rpm and bsdtar (rpm), and tar with zstd (Arch).
 #   packaging/linux/check-packages.sh dist/packages
 set -euo pipefail
 
@@ -65,9 +65,9 @@ if [ ${#rpms[@]} -eq 1 ]; then
     files rpm "$(rpm -qp --queryformat '[%{FILEMODES:perms} %{FILENAMES}\n]' "${rpms[0]}" | normalise)"
     req=$(rpm -qp --requires "${rpms[0]}")
     for dep in "${rpm_deps[@]}"; do grep -q "$dep" <<<"$req" || { echo "rpm doesn't require $dep" >&2; fail=1; }; done
-    mkdir -p "$work/rpm"
-    rpm2cpio "$(realpath "${rpms[0]}")" | (cd "$work/rpm" && cpio -idm --quiet ./usr/lib/nexus/packaged)
-    marker rpm "$(cat "$work/rpm/usr/lib/nexus/packaged")" rpm
+    # bsdtar reads the rpm's payload; rpm2cpio exits 1 on nfpm's rpms, though its output is whole.
+    # The payload's paths start with /.
+    marker rpm "$(bsdtar -xOf "${rpms[0]}" /usr/lib/nexus/packaged)" rpm
     checked+=("$(basename "${rpms[0]}")")
 fi
 

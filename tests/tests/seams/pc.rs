@@ -5,6 +5,7 @@
 use std::path::Path;
 use std::time::Duration;
 
+use crate::common::native;
 use emu_pc::{GAME_FILE, GameManifest, PcPlugin};
 use nexus_api::*;
 use nexus_core::Command;
@@ -183,7 +184,7 @@ async fn a_windows_game_runs_through_proton_on_linux_and_says_what_to_install_wi
     p.test.core.dispatch(launch).await.unwrap();
     let run = p.test.spawner.wait_for(1).await.command;
     assert_eq!(run.program, Path::new("umu-run"));
-    let exe = p.games.path().join("PC/Hollow-Knight/hollow_knight.exe");
+    let exe = p.games.path().join(native("PC/Hollow-Knight/hollow_knight.exe"));
     assert_eq!(run.args, [exe.display().to_string()]);
     assert_eq!(run.env.get("PROTONPATH").map(String::as_str), Some("GE-Proton"));
     assert_eq!(run.env.get("PROTON_USE_WOW64"), None, "this system runs 32-bit programs");
@@ -303,8 +304,11 @@ async fn a_game_a_catalog_download_installed_has_the_offer_s_art_and_the_repack_
     };
     t.core.dispatch(set).await.unwrap();
     t.core.dispatch(Command::Navigate(nexus_core::Route::Catalog)).await.unwrap();
-    for _ in 0..200 {
-        if !t.core.view().catalog.games.games.is_empty() && !t.http.sent().is_empty() {
+    // The Catalog shows the bundled copy first: wait for the one fetched from the address.
+    for _ in 0..500 {
+        let catalog = t.core.view().catalog;
+        let fetched = !catalog.sources.is_empty() && catalog.sources.iter().all(|s| s.contains(": fetched from "));
+        if fetched && !catalog.games.games.is_empty() {
             break;
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -377,7 +381,7 @@ async fn a_portable_wine_game_this_system_can_t_run_starts_its_exe_through_proto
     p.test.core.dispatch(launch).await.unwrap();
     let run = p.test.spawner.wait_for(1).await.command;
     assert_eq!(run.program, Path::new("umu-run"));
-    let exe = p.games.path().join("PC/Pocket-Tanks/game_info/data/pockettanks.exe");
+    let exe = p.games.path().join(native("PC/Pocket-Tanks/game_info/data/pockettanks.exe"));
     assert_eq!(run.args, [exe.display().to_string()]);
     // With no 32-bit libraries, a 32-bit game's graphics come from the 64-bit ones.
     assert_eq!(run.env.get("PROTON_USE_WOW64").map(String::as_str), Some("1"));
@@ -414,7 +418,7 @@ async fn a_windows_game_at_a_resolution_of_its_own_fills_the_screen_through_game
     p.test.core.dispatch(launch.clone()).await.unwrap();
     let run = p.test.spawner.wait_for(1).await.command;
     assert_eq!(run.program, Path::new("gamescope"));
-    let exe = p.games.path().join("PC/Pocket-Tanks/pockettanks.exe").display().to_string();
+    let exe = p.games.path().join(native("PC/Pocket-Tanks/pockettanks.exe")).display().to_string();
     let args: Vec<&str> = run.args.iter().map(String::as_str).collect();
     assert_eq!(args, ["-f", "-w", "800", "-h", "600", "--", "umu-run", &exe]);
     assert_eq!(run.env.get("PROTONPATH").map(String::as_str), Some("GE-Proton"));

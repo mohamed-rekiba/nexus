@@ -1,43 +1,34 @@
-name: os
+name: Nexus OS
 
 # Nexus OS: its images and its USB stick (os/README.md).
 #
 # - Images: ghcr.io/<owner>/nexus-os:minimal (os/Containerfile) and :minimal-nvidia (the same
-#   plus NVIDIA's driver, os/nvidia/). Built, checked and pushed every day, and when release.yml
-#   calls this after a Nexus release, so installed PCs get Fedora's fixes and the newest Nexus
-#   (the image installs the latest Nexus release's rpm). They also get a dated tag, and on an OS
-#   release a version tag (minimal-0.2.0).
-# - The stick (os/build-iso.sh): only when an OS release calls this (release.yml attaches it to
-#   the release), or by hand in test mode. Installed PCs update themselves, so the stick doesn't
-#   follow the daily images. The ISO is kept as this run's `nexus-os-iso` artifact: one file, or
-#   1500 MB parts when it's over 2 GiB (GitHub's limit for a release file), each with a .sha256.
-# - Test mode (by hand): the images go under -test tags (:minimal-test), which no PC follows, and
-#   the stick is only kept as an artifact for a few days.
+#   plus NVIDIA's driver, os/nvidia/). Built, checked and pushed every day, and after each Nexus
+#   release (package.yml starts this once the release is published), so installed PCs get
+#   Fedora's fixes and the newest Nexus (the image installs the latest Nexus release's rpm).
+#   They also get a dated tag, and on an OS release a version tag (minimal-0.2.0).
+# - An OS release: a run on an OS tag (nexus-os-v<version>). release.yml starts it on the tag
+#   Release Please made; when the same push released Nexus too, package.yml starts it after
+#   Nexus's release is published, since the images bundle it. The images are built from the
+#   tag and tagged with the version, then the stick is built, attached to the draft release,
+#   and the release is published, never as the latest: Nexus's updater reads the latest
+#   release, which stays a Nexus one.
+# - The stick is one file, or 1500 MB parts when it's over 2 GiB (GitHub's limit for a release
+#   file), each with a .sha256. It's also this run's `nexus-os-iso` artifact.
+# - Test mode (by hand on a branch, the default): the images go under -test tags
+#   (:minimal-test), which no PC follows, and the stick is only kept as an artifact for a few
+#   days.
 on:
   schedule:
     - cron: "30 5 * * *"
-  workflow_call:
-    inputs:
-      ref:
-        description: The commit to build (default the workflow's own)
-        type: string
-        default: ""
-      version:
-        description: The OS version, to tag the images with (an OS release)
-        type: string
-        default: ""
-      iso:
-        description: Build the stick too
-        type: boolean
-        default: false
   workflow_dispatch:
     inputs:
       test:
-        description: "Test run: images under -test tags no PC follows, the stick as an artifact only"
+        description: "Test run: images under -test tags no PC follows, the stick as an artifact only (not on an OS tag)"
         type: boolean
         default: true
       iso:
-        description: Build the stick too (test runs only)
+        description: Build the stick too (test runs; an OS release always builds it)
         type: boolean
         default: true
       nexus:
@@ -48,14 +39,16 @@ on:
 # Each job asks for what it needs.
 permissions: {}
 
+# One run per kind at a time, so two runs never push the same tags at once.
 concurrency:
-  group: nexus-os-${{ github.event_name }}${{ inputs.test && '-test' || '' }}
+  group: nexus-os-${{ github.ref_type == 'tag' && github.ref_name || (inputs.test && 'test') || 'images' }}
   cancel-in-progress: false
 
 env:
   # Test runs push under -test tags (":minimal-test"), which no PC follows.
-  SUFFIX: ${{ inputs.test && '-test' || '' }}
-  VERSION: ${{ inputs.version }}
+  # An OS release when it runs on an OS tag.
+  RELEASE: ${{ startsWith(github.ref, 'refs/tags/nexus-os-v') && github.ref_name || '' }}
+  SUFFIX: ${{ inputs.test && !startsWith(github.ref, 'refs/tags/nexus-os-v') && '-test' || '' }}
   BASE: quay.io/fedora/fedora-bootc:44
 
 defaults:
@@ -76,7 +69,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ inputs.ref || github.sha }}
 
       - name: Free disk space (the base image is large)
         run: |
@@ -90,7 +82,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           NEXUS: ${{ inputs.nexus }}
-        run: os/fetch-nexus.sh ${NEXUS:+"$NEXUS"}
+        run: |
+          if [ -n "$RELEASE" ] && [ "$RELEASE" != "nexus-os-v$(cat os/version.txt)" ]; then
+            echo "::error::the tag is $RELEASE, but os/version.txt says $(cat os/version.txt)"
+            exit 1
+          fi
+          # OS releases are never the latest, so the latest release is Nexus's.
+          if [ -z "$NEXUS" ] && ! gh api "repos/$GH_REPO/releases/latest" >/dev/null 2>&1; then
+            echo "::error::No Nexus release is published yet: release Nexus first, then run this again"
+            exit 1
+          fi
+          os/fetch-nexus.sh ${NEXUS:+"$NEXUS"}
 
       - name: Build
         run: |
@@ -140,7 +142,7 @@ jobs:
           if [ -z "$SUFFIX" ]; then
             sudo podman tag "$img" "$IMAGE:minimal-$(date -u +%Y%m%d)"
             refs="$refs $IMAGE:minimal-$(date -u +%Y%m%d)"
-            if [ -n "$VERSION" ]; then sudo podman tag "$img" "$IMAGE:minimal-$VERSION"; refs="$refs $IMAGE:minimal-$VERSION"; fi
+            if [ -n "$RELEASE" ]; then VERSION=${RELEASE#nexus-os-v}; sudo podman tag "$img" "$IMAGE:minimal-$VERSION"; refs="$refs $IMAGE:minimal-$VERSION"; fi
           fi
           for ref in $refs; do
             for try in 1 2 3; do sudo podman push --digestfile /tmp/digest "$ref" && break; [ "$try" = 3 ] && exit 1; sleep 30; done
@@ -171,7 +173,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ inputs.ref || github.sha }}
 
       - name: Build
         env:
@@ -217,7 +218,7 @@ jobs:
           if [ -z "$SUFFIX" ]; then
             sudo podman tag "$img" "$IMAGE:minimal-nvidia-$(date -u +%Y%m%d)"
             refs="$refs $IMAGE:minimal-nvidia-$(date -u +%Y%m%d)"
-            if [ -n "$VERSION" ]; then sudo podman tag "$img" "$IMAGE:minimal-nvidia-$VERSION"; refs="$refs $IMAGE:minimal-nvidia-$VERSION"; fi
+            if [ -n "$RELEASE" ]; then VERSION=${RELEASE#nexus-os-v}; sudo podman tag "$img" "$IMAGE:minimal-nvidia-$VERSION"; refs="$refs $IMAGE:minimal-nvidia-$VERSION"; fi
           fi
           for ref in $refs; do
             for try in 1 2 3; do sudo podman push "$ref" && break; [ "$try" = 3 ] && exit 1; sleep 30; done
@@ -234,8 +235,8 @@ jobs:
   iso:
     name: USB stick
     needs: minimal
-    # Called by an OS release with iso, or by hand in test mode.
-    if: inputs.iso && (github.event_name != 'workflow_dispatch' || inputs.test)
+    # An OS release, or by hand in test mode.
+    if: startsWith(github.ref, 'refs/tags/nexus-os-v') || (inputs.iso && inputs.test)
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     permissions:
@@ -244,7 +245,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ inputs.ref || github.sha }}
 
       - name: Free disk space
         run: |
@@ -283,11 +283,38 @@ jobs:
           fi
           ls -l
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: nexus-os-iso
           path: out/*
           if-no-files-found: error
           # A release attaches it right away; a test run keeps it a few days to try.
-          retention-days: ${{ inputs.test && 3 || 1 }}
+          retention-days: ${{ startsWith(github.ref, 'refs/tags/nexus-os-v') && 1 || 3 }}
           compression-level: 0
+
+  # The ISO (or its parts) and the checksums go on the draft, which is then published, but not as
+  # the latest release: Nexus's updater reads the latest release, which stays a Nexus one.
+  publish:
+    name: publish the release
+    needs: [minimal, minimal-nvidia, iso]
+    if: startsWith(github.ref, 'refs/tags/nexus-os-v')
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: nexus-os-iso
+          path: iso
+      - name: Attach the stick and publish, not as the latest
+        working-directory: iso
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ls -l
+          # The whole ISO's checksum stays when it was split into parts; each part has its own.
+          for sum in ./*.sha256; do [ ! -e "${sum%.sha256}" ] || sha256sum -c "$sum"; done
+          gh release upload "$RELEASE" ./* --clobber
+          gh release edit "$RELEASE" --draft=false --latest=false

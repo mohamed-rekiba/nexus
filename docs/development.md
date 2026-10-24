@@ -6,12 +6,12 @@ in [architecture.md](architecture.md).
 
 ## Toolchain
 
-- **Rust 1.92 or newer** (`rust-version` in `Cargo.toml`), on the stable channel.
+- **Rust 1.99 or newer** (`rust-version` in `Cargo.toml`), on the stable channel.
   `rust-toolchain.toml` asks for `stable` with the `rustfmt` and `clippy` components, so
   [rustup](https://rustup.rs) installs both on the first `cargo` call in the repo. To add them
   by hand: `rustup component add rustfmt clippy`. With a distribution's Rust instead of rustup,
   install them as packages: `sudo dnf install rustfmt clippy` (Fedora) or
-  `sudo apt-get install rustfmt rust-clippy` (Debian), and check that `rustc --version` is 1.92
+  `sudo apt-get install rustfmt rust-clippy` (Debian), and check that `rustc --version` is 1.99
   or newer.
 - **Format**: `rustfmt.toml` sets `max_width = 120` and `use_small_heuristics = "Max"`.
 - **Lints**: the workspace denies `unsafe_code` and warns on `clippy::all`. `make lint` and CI
@@ -158,6 +158,7 @@ cargo run -p nexus-app -- --windowed --dev --extensions ~/nexus-themes
 | `--extensions <path>` | The folder of third-party plugins and themes. Default: `<data-dir>/extensions`. Nexus also reads `extensions/` beside the binary (`Contents/Resources/extensions` in `Nexus.app`). |
 | `--folder <name>=<path>` | Maps a named host folder, such as `games=/srv/games`. It is saved. Repeat it for more folders under one name. |
 | `--supports <feature>` | Exits 0 when this launcher has the feature (`gamescope`), else 1. |
+| `--version` | Prints `nexus <version>` on one line, which Nexus OS keeps in its release marker. |
 
 The default data folder is `$XDG_DATA_HOME/nexus` (`~/.local/share/nexus`) on Linux,
 `~/Library/Application Support/nexus` on macOS and `%APPDATA%\nexus` on Windows. It holds
@@ -208,13 +209,19 @@ RUST_LOG=info,nexus_core::facades=debug make run        # the plugins' own debug
 
 ```sh
 cargo test --workspace                       # every test, as `make test`
-cargo test -p nexus-tests --test themes      # one test file in tests/tests/
+cargo test -p nexus-tests --test seams themes::    # one area: a module of tests/tests/seams/
+cargo nextest run --workspace                # every test, each in its own process, all at once
 cd scripts/catalog && npm test               # the catalog collector's tests (Node 20+)
 ```
 
+`scripts/check.sh test` runs the tests with [cargo-nextest](https://nexte.st) when it's installed
+(`cargo install cargo-nextest`), as CI does, and with `cargo test` otherwise. Its settings are in
+`.config/nextest.toml`. The seam tests are one test binary, `seams` (`tests/tests/seams/main.rs`,
+one module per area), so their shared code builds and links once; `spans.rs` is its own binary.
+
 The tests need no window, GPU, controller or sound device: they use Slint's testing backend and
 fakes. `tests/` (the `nexus-tests` crate) holds the seam tests: the core's API, the plugin
-contracts and the composed host. `cargo test -p nexus-tests --test screenshots` renders each
+contracts and the composed host. `cargo test -p nexus-tests --test seams screenshots::` renders each
 default theme screen to PNG files in `target/tmp/screenshots/`.
 
 Some tests touch the real system, the network or files you supply. Each one skips, or returns at
@@ -229,10 +236,10 @@ once, unless its variable is set:
 | `NEXUS_TORRENT_TESTS=1` | `cargo test -p nexus-app a_torrent_downloads`: a real BitTorrent transfer between two sessions on this computer, with no DHT, tracker or network | |
 | `NEXUS_VPN_TESTS=1` | `cargo test -p nexus-app lists_this_computer_s_networks`: lists this computer's networks; it connects nothing | |
 | `NEXUS_REAL_RELEASES=1` | `cargo test -p nexus-app real -- --nocapture`: downloads and installs the newest real KytyPS5 and shadPS4 releases | The network, and some hundreds of megabytes. Anonymous GitHub API calls can hit the rate limit. |
-| `NEXUS_REAL_ARCHIVES=<folder>` | `cargo test -p nexus-tests --test real_archives`: installs real release archives through the plugins on a fake web | The archives, named as GitHub has them (`KytyPS5-*-Linux-x86_64.tar.gz`, `shadps4-linux*.zip` and so on). A missing one is skipped. |
+| `NEXUS_REAL_ARCHIVES=<folder>` | `cargo test -p nexus-tests --test seams real_archives::`: installs real release archives through the plugins on a fake web | The archives, named as GitHub has them (`KytyPS5-*-Linux-x86_64.tar.gz`, `shadps4-linux*.zip` and so on). A missing one is skipped. |
 | `NEXUS_CATALOG_FILES=<file>[:<file>…]` | `cargo test -p release-catalog catalog_files -- --nocapture`: reads catalog files through the plugin's reader and prints what each holds | Catalog files, such as the collector's |
-| `NEXUS_TIMING=1` | `cargo test -p nexus-tests --test timing -- --nocapture`: times the Catalog view with the bundled catalogs | |
-| `NEXUS_COMPARE_OUT=<folder>` | `cargo test -p nexus-tests --test compare`: renders the default theme's screens on a real library into that folder | A KytyPS5 game library in `NEXUS_COMPARE_GAMES` (default `~/Games`); optionally `NEXUS_COMPARE_BUILDS` (an `emu-kyty` plugin folder) and `NEXUS_COMPARE_WEB` (a folder with a `manifest.json` of saved web answers) |
+| `NEXUS_TIMING=1` | `cargo test -p nexus-tests --test seams timing:: -- --nocapture`: times the Catalog view with the bundled catalogs | |
+| `NEXUS_COMPARE_OUT=<folder>` | `cargo test -p nexus-tests --test seams compare::`: renders the default theme's screens on a real library into that folder | A KytyPS5 game library in `NEXUS_COMPARE_GAMES` (default `~/Games`); optionally `NEXUS_COMPARE_BUILDS` (an `emu-kyty` plugin folder) and `NEXUS_COMPARE_WEB` (a folder with a `manifest.json` of saved web answers) |
 | `PS4_TEST_PKG=<file>` | `cargo test --release -p emu-shadps4 real_ps4_package -- --ignored --nocapture`: lists a real PS4 package and copies `param.sfo` | A PS4 fake package |
 | `PS5_TEST_PKG=<file>` | `cargo test -p emulator-kit real_package -- --ignored`: lists a real PS5 debug package and decodes its largest file; `PS5_TEST_FULL=1` decodes every file | A PS5 debug package |
 
@@ -287,7 +294,9 @@ gamescope in its Steam mode with Nexus inside, starts Nexus again when it ends o
 `window shown` line within the watchdog time, and runs it in cage when gamescope can't drive
 the graphics card. It sets `NEXUS_SESSION=1`, which tells Nexus nothing is behind it. Its
 settings are in `/usr/share/nexus/session.conf` (`packaging/linux/session.conf`), and
-`/etc/nexus/session.conf` overrides them. Output goes to `~/.cache/nexus-session.log`.
+`/etc/nexus/session.conf` overrides them. Output goes to `~/.cache/nexus-session.log`. Before each start of Nexus,
+a log over `NEXUS_LOG_MAX_MB` (10 by default) becomes `nexus-session.previous.log`, in place of
+the one before.
 
 What goes into `licenses/`:
 
@@ -332,24 +341,30 @@ Other scripts:
 
 ## CI
 
-`.github/workflows/ci.yml` runs on pushes to `main`, on pull requests, by hand, and every Monday
-at 05:17 UTC. Each job runs on `ubuntu-22.04`, `macos-14` and `windows-2022`, unless the table
-says otherwise.
+The workflows are in `.github/workflows/`:
 
-| Job | What it does |
-|---|---|
-| `check` | `scripts/check.sh`. On failure the log is an artifact for 7 days. |
-| `desktop` | `NEXUS_DESKTOP_TESTS=1 cargo test --locked -p nexus-app --test desktop`. On Linux it runs under Xvfb with openbox, with `NEXUS_DESKTOP_REQUIRE=1`. A macOS runner has no Accessibility permission, so its tests skip and say why. |
-| `cargo-deny` | `cargo deny check`, on Linux only |
-| `real releases` | `NEXUS_REAL_RELEASES=1 cargo test --locked -p nexus-app real`, on the weekly run and by hand only |
-| `package` | On Linux, both Mac processors (`macos-14`, `macos-15-intel`) and Windows: the trailer test (`NEXUS_TRAILER_TESTS=1`, not on Windows), `scripts/package.sh`; on Linux the AppImage (run with `--version`) and the deb, rpm and Arch packages with their checks; on Windows the installer, installed silently, started, and uninstalled. The files are artifacts for 7 days. It doesn't run on the weekly run. |
-| `package-macos` | Joins the two Mac apps into the universal one, makes the disk image, and checks both |
-| `ci ok` | Passes when every job above that ran passed: the one check for branch protection |
+| Workflow | When | What it does |
+|---|---|---|
+| `ci.yml` | Pull requests, pushes to `main`, by hand | On Linux, side by side: `Format` (`cargo fmt --check`), `Clippy` (`-D warnings`), `Test` (cargo-nextest) and `cargo-deny` |
+| `weekly.yml` | Mondays at 05:17 UTC, by hand | The tests on Windows; on Linux: the real emulator releases install (`NEXUS_REAL_RELEASES=1`), the desktop adapter under Xvfb and openbox (`NEXUS_DESKTOP_TESTS=1`), the trailer player plays a real video (`NEXUS_TRAILER_TESTS=1`), and `cargo deny check advisories` |
+| `release.yml` | Pushes to `main` | Release Please; then it starts `package.yml` or `os.yml` on the new tag ([Releases](#releases)) |
+| `package.yml` | On a Nexus tag (started by `release.yml`), by hand | The packages on Linux, both Mac processors and Windows; on a tag it publishes the release, then starts `os.yml` |
+| `os.yml` | Daily, on a Nexus OS tag, after a Nexus release, by hand | The Nexus OS images and USB stick ([os/README.md](../os/README.md#releases)) |
+| `mirror-deps.yml` | By hand | Copies the pinned Windows libmpv build into the `deps` release |
+
+`ci.yml` skips what can't change the build: pushes and pull requests that only touch docs,
+Markdown, `os/` or the other workflows, and Release Please's pull requests (a version and a
+changelog). A new push cancels the older run of the same branch.
+
+`ci.yml` runs on Linux only. macOS and Windows build in `package.yml`: run it by hand on a
+branch to try a change on them. Its files stay as the run's artifacts for 7 days.
+
+For branch protection, require `Format`, `Clippy`, `Test` and `cargo-deny`.
 
 The shared steps are in `.github/actions/`:
 
 - `setup`: the stable toolchain, the Linux build packages, and the
-  [rust-cache](https://github.com/Swatinem/rust-cache) cache. Only `main` saves the cache.
+  [rust-cache](https://github.com/Swatinem/rust-cache) cache.
 - `libmpv`: Homebrew's mpv and dylibbundler on macOS; apt's `libmpv-dev`, `mpv`, `patchelf` and a
   pinned linuxdeploy on Linux; a pinned shinchiro build on Windows, checked against its SHA-256.
   It sets `LINUXDEPLOY`, `LIBMPV_DIR` and `LIBMPV_SOURCE`.
@@ -363,14 +378,20 @@ shinchiro keeps about six weeks of builds, so the Windows build is mirrored in t
 release, and the `libmpv` action takes it from there first. After changing the pin (`FILE`,
 `UPSTREAM` and `SHA256` together), run the `mirror-deps` workflow by hand.
 
-Every third-party action is pinned to a commit.
+The rules every workflow follows:
 
-To keep CI quick: its builds have no debug info (`CARGO_PROFILE_DEV_DEBUG=0`; a failing test
-still says its file and line), which makes the test binaries and the cache about three times
-smaller; GitHub keeps 10 GB of cache for the whole repo, shared by every job. cargo-about comes
-prebuilt (`taiki-e/install-action`), Homebrew doesn't update itself before each install, and the
-`package` jobs run on pull requests only for Release Please's release pull requests or with the
-`package` label. Only `main` saves the cache, so a pull request starts from main's.
+- Every third-party action is pinned to a commit, with its version in a comment. Dependabot
+  updates the pins.
+- Permissions are `contents: read` or none at the top; a job that writes asks for what it needs.
+- Checkouts don't keep the token (`persist-credentials: false`).
+- Every job has a `timeout-minutes`.
+- Cargo runs with `--locked`, so CI fails when `Cargo.lock` is out of date.
+- A new push to a pull request cancels its older CI run.
+
+The cache: only `main` saves it, and a pull request restores `main`'s. So a pull request builds
+only what it changed, and pull requests don't fill GitHub's 10 GB cache for the repo. CI builds
+have no debug info (`CARGO_PROFILE_DEV_DEBUG=0`; a failing test still says its file and line),
+which makes the builds and the cache about three times smaller.
 
 ## Releases
 
@@ -379,30 +400,47 @@ Conventional Commit messages: `feat:` raises the minor version, `fix:` the patch
 1.0, a breaking change raises the minor version). Other prefixes (`docs:`, `ci:`, `refactor:`,
 `test:`, `chore:`) don't make a release.
 
+Release Please, packaging and Nexus OS are separate workflows, each with its own runs.
 `.github/workflows/release.yml` runs on every push to `main`:
 
-1. `release-please` keeps a release pull request open for Nexus with the next version: it bumps
+1. `Release Please` keeps a release pull request open for Nexus with the next version: it bumps
    `version` in `[workspace.package]` and the workspace's crates in `Cargo.lock`, `version.txt`,
    and writes `CHANGELOG.md` (`.github/release-please-config.json` and
-   `.github/release-please-manifest.json`). Changes under `os/` are left out. A pull request
-   opened with the default token doesn't start CI; set a token as the `RELEASE_PLEASE_TOKEN`
-   secret to get checks on it.
-2. Merging that pull request makes a draft release and its tag `v<version>`, and calls
-   `.github/workflows/package.yml` with them:
-   - `version` fails when the tag isn't `v` and the workspace version.
-   - `build`, on Linux, both Mac processors and Windows, without the cache: `scripts/check.sh`,
-     the libmpv and libarchive actions, cargo-about, `scripts/package.sh`; on Linux the AppImage
-     and the deb, rpm and Arch packages; on Windows the signatures when their secrets are set
-     ([signing.md](signing.md)), the zip and the installer; the third-party sources tars.
-   - `macos-universal` joins the two Mac apps, signs and notarizes the app when the secrets are
-     set, and makes the zip and the disk image (signed and notarized too).
-   - `attach` writes a `.sha256` file for each file and `latest.json`
-     (`scripts/update-manifest.sh`), signs the build provenance
-     (`gh attestation verify <file> --repo <owner>/<repo>` checks it), and attaches them all to
-     the draft.
-3. `publish` publishes the release as the latest.
+   `.github/release-please-manifest.json`). Changes under `os/` are left out; Nexus OS has its own
+   release pull request. A pull request opened with the default token doesn't start CI; set a
+   token as the `RELEASE_PLEASE_TOKEN` secret to get checks on it.
+2. Merging that pull request makes a draft release and its tag `v<version>`
+   (`force-tag-creation`, so Release Please finds the release on the next push). Since Nexus's
+   package leaves `os/` out, a Nexus tag means the app changed. `release.yml` then starts
+   `package.yml` on the tag (`gh workflow run --ref <tag>`: GitHub doesn't start workflows for a
+   tag made with a workflow's own token, but does start one asked for by name).
+3. Once the release is published, `package.yml` starts `os.yml`, so the images get the new
+   Nexus.
+4. Merging Nexus OS's release pull request makes the tag `nexus-os-v<version>`, and
+   `release.yml` starts `os.yml` on it: the images and the stick from the tag, and the OS
+   release. When the same push made a Nexus tag too, `package.yml` starts the OS release instead,
+   once Nexus's release is published, since the images bundle it.
 
-`package.yml` can also run by hand with a tag and a commit, to rebuild the files of a draft.
+`package.yml` doesn't run the tests: CI did, on the commit, before it reached `main`.
+
+- `Version` fails when the tag isn't `v` and the workspace version.
+- `Build`, on Linux, both Mac processors and Windows: the libmpv and libarchive actions,
+  cargo-about, `scripts/package.sh`; on Linux the AppImage (run with `--version`) and the deb,
+  rpm and Arch packages with their checks; on Windows the signatures when their secrets are set
+  ([signing.md](signing.md)), the zip, and the installer, installed silently, started, and
+  uninstalled; the third-party sources tars.
+- `macOS universal app` joins the two Mac apps, signs and notarizes the app when the secrets are
+  set, and makes the zip and the disk image (signed, notarized and checked).
+- `Publish the release` (on a tag only) writes a `.sha256` file for each file and
+  `latest.json` (`scripts/update-manifest.sh`), signs the build provenance
+  (`gh attestation verify <file> --repo <owner>/<repo>` checks it), attaches them all to the
+  draft, and publishes it as the latest.
+- `Start Nexus OS` starts `os.yml`: on the OS tag made in the same push (its `os-release`
+  input), or on `main` for new images.
+
+When `package.yml` fails for a release, run it again on the same tag: Actions → Package → Run
+workflow, with the tag under "Use workflow from" (and the OS tag as `os-release`, when that push
+made one). Don't make a new release.
 
 ## The launcher's own update
 

@@ -12,7 +12,7 @@
 //! offset is range-checked, so a damaged or hostile package fails with an error.
 
 use aes::Aes128;
-use aes::cipher::{BlockDecrypt, BlockDecryptMut, BlockEncrypt, KeyInit, KeyIvInit, generic_array::GenericArray};
+use aes::cipher::{BlockCipherDecrypt, BlockCipherEncrypt, BlockModeDecrypt, KeyInit, KeyIvInit};
 use emulator_kit::fail::{Context, Result};
 use emulator_kit::read_at::ReadAt;
 use emulator_kit::{bail, ensure};
@@ -174,7 +174,7 @@ fn cbc_decrypt(iv_key: ([u8; 16], [u8; 16]), data: &mut [u8]) {
     let mut cbc = cbc::Decryptor::<Aes128>::new(&key.into(), &iv.into());
     let whole = data.len() / 16 * 16;
     for block in data[..whole].as_chunks_mut::<16>().0 {
-        cbc.decrypt_block_mut(GenericArray::from_mut_slice(block));
+        cbc.decrypt_block(block.into());
     }
 }
 
@@ -185,7 +185,7 @@ fn pfs_keys(ekpfs: &[u8; 32], seed: &[u8; 16]) -> (Aes128, Aes128) {
     let mut msg = [0u8; 20];
     msg[..4].copy_from_slice(&1u32.to_le_bytes());
     msg[4..].copy_from_slice(seed);
-    let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(ekpfs).expect("HMAC takes any key size");
+    let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(ekpfs).expect("HMAC takes any key size");
     mac.update(&msg);
     let d = mac.finalize().into_bytes();
     (Aes128::new_from_slice(&d[16..]).unwrap(), Aes128::new_from_slice(&d[..16]).unwrap())
@@ -195,10 +195,10 @@ fn pfs_keys(ekpfs: &[u8; 32], seed: &[u8; 16]) -> (Aes128, Aes128) {
 fn xts_decrypt(data_key: &Aes128, tweak_key: &Aes128, sector: u64, buf: &mut [u8]) {
     let mut tweak = [0u8; 16];
     tweak[..8].copy_from_slice(&sector.to_le_bytes());
-    tweak_key.encrypt_block(GenericArray::from_mut_slice(&mut tweak));
+    tweak_key.encrypt_block((&mut tweak).into());
     for block in buf.as_chunks_mut::<16>().0 {
         block.iter_mut().zip(&tweak).for_each(|(b, t)| *b ^= t);
-        data_key.decrypt_block(GenericArray::from_mut_slice(block));
+        data_key.decrypt_block(block.into());
         block.iter_mut().zip(&tweak).for_each(|(b, t)| *b ^= t);
         // Multiply the tweak by x in GF(2^128).
         let carry = tweak[15] >> 7;
@@ -607,21 +607,21 @@ pub mod build {
     }
 
     fn cbc_encrypt(iv_key: ([u8; 16], [u8; 16]), data: &mut [u8]) {
-        use aes::cipher::BlockEncryptMut;
+        use aes::cipher::BlockModeEncrypt;
         let (iv, key) = iv_key;
         let mut cbc = cbc::Encryptor::<Aes128>::new(&key.into(), &iv.into());
         for block in data.as_chunks_mut::<16>().0 {
-            cbc.encrypt_block_mut(GenericArray::from_mut_slice(block));
+            cbc.encrypt_block(block.into());
         }
     }
 
     fn xts_encrypt(data_key: &Aes128, tweak_key: &Aes128, sector: u64, buf: &mut [u8]) {
         let mut tweak = [0u8; 16];
         tweak[..8].copy_from_slice(&sector.to_le_bytes());
-        tweak_key.encrypt_block(GenericArray::from_mut_slice(&mut tweak));
+        tweak_key.encrypt_block((&mut tweak).into());
         for block in buf.as_chunks_mut::<16>().0 {
             block.iter_mut().zip(&tweak).for_each(|(b, t)| *b ^= t);
-            data_key.encrypt_block(GenericArray::from_mut_slice(block));
+            data_key.encrypt_block(block.into());
             block.iter_mut().zip(&tweak).for_each(|(b, t)| *b ^= t);
             let carry = tweak[15] >> 7;
             for i in (1..16).rev() {

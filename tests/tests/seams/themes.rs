@@ -1,8 +1,6 @@
 //! Seam 3, composed host: theme loading, inheritance and the theme rules.
 
-mod common;
-
-use common::*;
+use crate::common::*;
 use nexus_api::{Files, RelPath};
 use nexus_core::Command;
 use nexus_ui_api::{ComponentId, ScreenId, ThemeError, TokenValue};
@@ -275,13 +273,14 @@ fn the_default_settings_screen_edits_a_folder_with_the_keys() {
     press(&host, Key::Return.into());
     host.pump();
     settle(&mut host);
-    for c in "/games".chars() {
+    let typed = full_path("/games");
+    for c in typed.chars() {
         press(&host, c.to_string().into());
     }
     press(&host, Key::Return.into());
     host.pump();
     settle(&mut host);
-    assert_eq!(host.core().kernel().config().get(&["app", "folders", "games"]), serde_json::json!(["/games"]));
+    assert_eq!(host.core().kernel().config().get(&["app", "folders", "games"]), serde_json::json!([typed]));
 
     // The keys reach the sheet again: Down moves on to the Rescan row, and Enter there scans.
     press(&host, Key::DownArrow.into());

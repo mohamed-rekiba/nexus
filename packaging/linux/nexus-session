@@ -19,8 +19,20 @@ bin=${NEXUS_BIN:-/usr/bin/nexus}
 watchdog=${NEXUS_WATCHDOG:-90}
 log=${NEXUS_LOG:-${XDG_CACHE_HOME:-$HOME/.cache}/nexus-session.log}
 read -r -a gamescope_args <<<"${NEXUS_GAMESCOPE_ARGS:--e --xwayland-count 1}"
+log_max_mb=${NEXUS_LOG_MAX_MB:-10}
 mkdir -p "$(dirname "$log")"
 note() { echo "$(date -Is) $*" >>"$log"; }
+# The log grows with every start, so before each one a log over NEXUS_LOG_MAX_MB becomes
+# <name>.previous.log, in place of the one before: at most twice that on disk. Nothing has the
+# log open then, and the watchdog reads it from the size taken after this.
+rotate_log() {
+    local size
+    size=$(stat -c %s "$log" 2>/dev/null || echo 0)
+    if [ "$size" -gt $((log_max_mb * 1024 * 1024)) ]; then
+        mv -f "$log" "${log%.log}.previous.log" && note "the log before this is ${log%.log}.previous.log"
+    fi
+}
+rotate_log
 note "session starting"
 
 # Tells Nexus nothing is behind it: it shows the system's settings and Restart and Shut down.
@@ -78,6 +90,7 @@ watch() {
 failures=0
 while true; do
     started=$(date +%s)
+    rotate_log
     mark=$(stat -c %s "$log" 2>/dev/null || echo 0)
     if ! command -v gamescope >/dev/null 2>&1; then
         why="gamescope isn't installed"

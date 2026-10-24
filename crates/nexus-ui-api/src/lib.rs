@@ -16,9 +16,11 @@ pub use theme::*;
 pub use tokens::*;
 pub use vm::*;
 
-/// The version of this contract. A theme's `ui_api` range must include it.
-pub const UI_API_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// The version of this contract. A theme's `ui_api` range must include it. It is not the crate's
+/// version: that is Nexus's, which every release raises. This one changes by hand, with the
+/// contract, together with the built-in themes' `ui_api`.
+pub const UI_API_VERSION: &str = "0.1.0";
 
 pub fn ui_api_version() -> semver::Version {
-    semver::Version::parse(UI_API_VERSION).expect("the crate version is valid semver")
+    semver::Version::parse(UI_API_VERSION).expect("UI_API_VERSION is valid semver")
 }

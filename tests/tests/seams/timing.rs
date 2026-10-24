@@ -2,11 +2,9 @@
 //! bundled catalogs, which are as big as the project's `assets/catalog/` makes them. Prints
 //! the times; checks only that the Catalog has games.
 
-mod common;
-
 use std::time::Instant;
 
-use common::*;
+use crate::common::*;
 use nexus_core::{Command, Route};
 
 #[test]

@@ -1,8 +1,6 @@
 //! Seam 3, composed host: plugin slot items render in every theme, laid out by the theme.
 
-mod common;
-
-use common::*;
+use crate::common::*;
 use nexus_core::Command;
 use slint_interpreter::Value;
 

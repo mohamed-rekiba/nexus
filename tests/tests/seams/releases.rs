@@ -1,8 +1,6 @@
 //! Seam 1, core app API: the game catalog service, its copies, and the releases it lists.
 
-mod common;
-
-use common::*;
+use crate::common::*;
 use nexus_api::{ConfigScope, ReleaseList, ReleaseSource};
 use nexus_core::Command;
 use std::sync::{Arc, Mutex};
@@ -540,7 +538,8 @@ async fn offering(emulator: &str, console: &'static str, topics: serde_json::Val
         .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
         .plugin(games_on(emulator, console, vec![]).console(console));
     if store {
-        host = host.plugin(common::store("store", vec![("PPSA07777", 4.0, "")], None, std::time::Duration::ZERO));
+        host =
+            host.plugin(crate::common::store("store", vec![("PPSA07777", 4.0, "")], None, std::time::Duration::ZERO));
     }
     let t = host.boot_core().await;
     let file = console.to_ascii_lowercase();

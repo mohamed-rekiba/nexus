@@ -27,6 +27,20 @@ fn package(marker: &str) -> Vec<u8> {
     bytes
 }
 
+/// This system's package for an unpacked install, as the release names it, and its bytes: a
+/// zip on Windows (its files go in one by one), a tar.gz elsewhere (the folder is swapped).
+fn folder_package(marker: &str) -> (&'static str, Vec<u8>) {
+    if !cfg!(windows) {
+        let url = "https://github.com/owner/nexus/releases/download/v9.9.9/nexus-linux-x86_64.tar.gz";
+        return (url, package(marker));
+    }
+    let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    zip.start_file("nexus-windows-x86_64/VERSION", zip::write::SimpleFileOptions::default()).unwrap();
+    zip.write_all(marker.as_bytes()).unwrap();
+    let url = "https://github.com/owner/nexus/releases/download/v9.9.9/nexus-windows-x86_64.zip";
+    (url, zip.finish().unwrap().into_inner())
+}
+
 fn manifest(version: &str, url: &str, sha256: &str) -> Vec<u8> {
     manifest_for(Install::Folder, version, url, sha256)
 }
@@ -40,8 +54,8 @@ fn manifest_for(install: Install, version: &str, url: &str, sha256: &str) -> Vec
 #[tokio::test]
 async fn a_newer_release_is_found_downloaded_checked_and_kept_for_the_next_start() {
     let host = FakeHost::new();
-    let url = "https://github.com/owner/nexus/releases/download/v9.9.9/nexus-linux-x86_64.tar.gz";
-    let sha = host.http().serve(url, package("9.9.9"));
+    let (url, bytes) = folder_package("9.9.9");
+    let sha = host.http().serve(url, bytes);
     host.http().serve(LATEST, manifest("9.9.9", url, &sha));
     let t = host.boot_core().await;
     t.core.kernel().config().set(&["app", "update_repo"], "owner/nexus".into()).unwrap();
@@ -64,9 +78,11 @@ async fn a_newer_release_is_found_downloaded_checked_and_kept_for_the_next_start
     assert_eq!(apply_staged(t.data_dir(), &root).unwrap(), Some("9.9.9".into()));
     assert_eq!(std::fs::read_to_string(root.join("VERSION")).unwrap(), "9.9.9");
     assert!(staged(t.data_dir()).is_none(), "it is tried once");
-    // The old version, still running, stays until the start after.
-    let old = install.path().join("nexus-linux-x86_64.old");
-    assert_eq!(std::fs::read_to_string(old.join("VERSION")).unwrap(), "0.1.0");
+    // The old version, still running, stays until the start after: beside the folder, or on
+    // Windows, where a running program's folder can't be renamed, each file beside itself.
+    let old = if cfg!(windows) { root.join("VERSION.old") } else { install.path().join("nexus-linux-x86_64.old") };
+    let old_version = if cfg!(windows) { old.clone() } else { old.join("VERSION") };
+    assert_eq!(std::fs::read_to_string(old_version).unwrap(), "0.1.0");
     nexus_core::launcher_update::clean_old_files(&root);
     assert!(!old.exists(), "the next start removes it");
 }

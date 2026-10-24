@@ -244,3 +244,39 @@ async fn a_service_loads_through_its_own_trait_and_may_not_run_games() {
         host.report().rejected
     );
 }
+
+/// The plugins and themes in plugins/ must accept the host's API and contract versions. Those are
+/// set by hand, apart from Nexus's own version, which every release raises: when they were the
+/// same, a release refused every built-in plugin.
+#[test]
+fn the_built_in_plugins_and_themes_accept_this_host() {
+    let plugins = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../plugins");
+    let manifests = [
+        "emulators/kytyps5/plugin.toml",
+        "emulators/shadps4/plugin.toml",
+        "emulators/pc/plugin.toml",
+        "services/release-catalog/plugin.toml",
+        "services/playstation-store/plugin.toml",
+        "system/host/plugin.toml",
+        "themes/default/theme/theme.toml",
+    ];
+    for file in manifests {
+        let text = std::fs::read_to_string(plugins.join(file)).unwrap();
+        let plugin = nexus_api::PluginManifest::from_toml(&text).unwrap();
+        assert!(
+            plugin.host_api.matches(&nexus_api::api_version()),
+            "{file}: host_api {} refuses API {}",
+            plugin.host_api,
+            nexus_api::API_VERSION
+        );
+        if file.ends_with("theme.toml") {
+            let theme = nexus_ui_api::ThemeManifest::from_plugin(&plugin).unwrap();
+            assert!(
+                theme.theme.ui_api.matches(&nexus_ui_api::ui_api_version()),
+                "{file}: ui_api {} refuses contract {}",
+                theme.theme.ui_api,
+                nexus_ui_api::UI_API_VERSION
+            );
+        }
+    }
+}

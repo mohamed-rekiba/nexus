@@ -40,7 +40,7 @@ runs:
       env:
         OUTPUT: ${{ inputs.output }}
       run: |
-        sudo apt-get install -y --no-install-recommends rpm zstd > /dev/null
+        sudo apt-get install -y --no-install-recommends rpm zstd libarchive-tools > /dev/null
         packaging/linux/check-packages.sh "$OUTPUT/packages"
         mv "$OUTPUT"/packages/* "$OUTPUT/"
         rmdir "$OUTPUT/packages"

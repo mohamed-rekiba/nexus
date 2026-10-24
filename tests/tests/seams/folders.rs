@@ -5,6 +5,7 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+use crate::common::{full_path, native};
 use nexus_api::*;
 use nexus_core::{Command, CoreError};
 use nexus_testkit::{FakeHost, StubPlugin, TestCore};
@@ -397,9 +398,10 @@ async fn a_folder_can_have_another_default_on_one_system() {
 async fn settings_show_a_folder_in_the_home_folder_with_a_tilde() {
     let home = tempfile::tempdir().unwrap();
     let (t, _folders) = boot(FakeHost::new().home(home.path())).await;
-    map(&t, "games", &[&home.path().join("Games"), Path::new("/Volumes/Big/Games")]);
+    let big = full_path("/Volumes/Big/Games");
+    map(&t, "games", &[&home.path().join("Games"), Path::new(&big)]);
 
     let games = t.core.view().settings.folders.into_iter().find(|f| f.name == "games").unwrap();
-    assert_eq!(games.shown, "~/Games; /Volumes/Big/Games");
+    assert_eq!(games.shown, format!("{}; {big}", native("~/Games")));
     assert!(games.text.starts_with(home.path().to_str().unwrap()), "the text to edit keeps the full path");
 }

@@ -15,6 +15,16 @@ use nexus_testkit::{FakeHost, StubPlugin, TestCore};
 use nexus_ui_host::{ThemeHost, UiRequest};
 use slint_interpreter::ComponentHandle;
 
+/// `path` with this system's separator: `~/Games` is `~\Games` on Windows, as the app shows it.
+pub fn native(path: &str) -> String {
+    path.replace('/', std::path::MAIN_SEPARATOR_STR)
+}
+
+/// A full path on this system for a Unix one: `/x` stays `/x`, and is `C:\x` on Windows.
+pub fn full_path(unix: &str) -> String {
+    if cfg!(windows) { format!("C:{}", native(unix)) } else { unix.to_owned() }
+}
+
 pub fn id(s: &str) -> PluginId {
     PluginId::new(s).unwrap()
 }
@@ -29,9 +39,63 @@ pub struct Composed {
 /// Boots a core with the default theme plus whatever `build` adds, and a theme host on it.
 /// Starts Slint's testing backend for this thread.
 pub fn composed(build: impl FnOnce(FakeHost) -> FakeHost) -> Composed {
-    thread_local!(static SLINT: () = i_slint_backend_testing::init_no_event_loop());
+    thread_local!(static SLINT: () = quiet_testing_backend());
     SLINT.with(|_| {});
     composed_on_current_platform(build)
+}
+
+/// False for the log line Slint's element search writes for the items its interpreter keeps no
+/// element info for (see [`quiet_testing_backend`]); every test platform drops it.
+pub fn keeps_log_line(arguments: &std::fmt::Arguments) -> bool {
+    !arguments.to_string().starts_with("The use of the ElementHandle API requires")
+}
+
+/// Slint's testing backend, as `i_slint_backend_testing::init_no_event_loop` sets it up, minus one
+/// log line. Slint 1.18's interpreter keeps no element info for the items it adds itself (layout
+/// and clip wrappers), so every accessible-label search logs "The use of the ElementHandle API
+/// requires the presence of debug info…" for each of them, tens of thousands of times a run;
+/// `SLINT_EMIT_DEBUG_INFO` doesn't change that. The search works all the same. Every other log
+/// line goes through. It doesn't forward `bind_context`: the backend only needs the context for
+/// its event loop, which a backend without threading doesn't have.
+fn quiet_testing_backend() {
+    use i_slint_backend_testing::{TestingBackend, TestingBackendOptions};
+    use slint::platform::{Clipboard, EventLoopProxy, Platform, PlatformError, WindowAdapter};
+
+    struct Quiet(TestingBackend);
+
+    impl Platform for Quiet {
+        fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, PlatformError> {
+            self.0.create_window_adapter()
+        }
+        fn duration_since_start(&self) -> std::time::Duration {
+            self.0.duration_since_start()
+        }
+        fn set_clipboard_text(&self, text: &str, clipboard: Clipboard) {
+            self.0.set_clipboard_text(text, clipboard)
+        }
+        fn clipboard_text(&self, clipboard: Clipboard) -> Option<String> {
+            self.0.clipboard_text(clipboard)
+        }
+        fn run_event_loop(&self) -> Result<(), PlatformError> {
+            self.0.run_event_loop()
+        }
+        fn new_event_loop_proxy(&self) -> Option<Box<dyn EventLoopProxy>> {
+            self.0.new_event_loop_proxy()
+        }
+        fn open_url(&self, url: &str) -> Result<(), PlatformError> {
+            self.0.open_url(url)
+        }
+        fn debug_log(&self, arguments: std::fmt::Arguments) {
+            if keeps_log_line(&arguments) {
+                self.0.debug_log(arguments)
+            }
+        }
+    }
+
+    // renderer_name exists only when the testing backend is built with a renderer.
+    #[allow(clippy::needless_update)] // the update fills renderer_name when it exists
+    let options = TestingBackendOptions { mock_time: true, threading: false, ..Default::default() };
+    slint::platform::set_platform(Box::new(Quiet(TestingBackend::new(options)))).expect("platform already initialized");
 }
 
 /// Like [`composed`], for a test that set its own Slint platform.
@@ -111,17 +175,19 @@ impl Composed {
     }
 }
 
-/// Waits until each catalog the core has is the copy fetched from the catalog address, or a
-/// second passes: the Game Catalog fetches in the background, and the first read gets the
-/// bundled copy.
+/// Waits until each catalog the core has is the copy fetched from the catalog address: the Game
+/// Catalog fetches in the background, and the first read gets the bundled copy. A busy runner
+/// can take seconds; after ten it fails, rather than letting the test go on with the bundled
+/// copy and fail somewhere that doesn't say why.
 pub async fn catalogs_fetched(core: &Core) {
-    for _ in 0..100 {
+    for _ in 0..1000 {
         let sources = core.view().catalog.sources;
         if !sources.is_empty() && sources.iter().all(|s| s.contains(": fetched from ")) {
             return;
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
+    panic!("the catalogs weren't fetched in 10 s: {:?}", core.view().catalog.sources);
 }
 
 /// Lets the theme's moves reach the core, as the app would: a move in the Home row or a grid

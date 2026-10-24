@@ -1,8 +1,6 @@
 //! Seam 3, composed host: switching themes at runtime.
 
-mod common;
-
-use common::*;
+use crate::common::*;
 use futures::StreamExt;
 use nexus_api::Event;
 use nexus_core::{Command, Route};

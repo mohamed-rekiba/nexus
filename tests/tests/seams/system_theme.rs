@@ -3,11 +3,9 @@
 //! the battery wherever the PC has one; Settings → System; and on Nexus OS's USB stick, the
 //! Welcome and Install screens.
 
-mod common;
-
 use std::path::PathBuf;
 
-use common::*;
+use crate::common::*;
 use nexus_api::{
     AudioLevel, AudioOutput, Battery, BluetoothDevice, Connection, InstallDisk, Installed, NetworkStatus, WifiNetwork,
 };

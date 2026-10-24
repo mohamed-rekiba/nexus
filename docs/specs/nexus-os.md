@@ -4,8 +4,6 @@ Status: ready for implementation, after the ISO proof (the first step under Impl
 Decisions).
 
 Related specs:
-- [releases-and-packaging.md](releases-and-packaging.md): the Linux package and the Nexus
-  session that Nexus OS installs, and the release stream it shares.
 - [system-plugin.md](system-plugin.md): the SystemPlugin that provides network, Bluetooth,
   sound and power, plus the on-screen keyboard. This spec adds its two OS capabilities.
 

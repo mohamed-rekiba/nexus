@@ -185,7 +185,7 @@ impl ResolvedTheme {
                 if !path.starts_with(&root) {
                     return Err(error("leaves the theme folder"));
                 }
-                Ok(path.to_string_lossy().into_owned())
+                Ok(without_verbatim_prefix(path).to_string_lossy().into_owned())
             })
             .collect()
     }
@@ -255,6 +255,19 @@ fn expected_exports() -> BTreeMap<String, &'static str> {
         .chain(ComponentId::ALL.into_iter().map(|c| (c.file(), c.component())))
         .chain([(SHELL_FILE.to_owned(), contract::SHELL_COMPONENT)])
         .collect()
+}
+
+/// `path` without the `\\?\` prefix that `canonicalize` puts on Windows paths: Slint can't
+/// open a font by such a path. Other systems' paths come back as they are.
+fn without_verbatim_prefix(path: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    if let Some(rest) = path.to_str().and_then(|p| p.strip_prefix(r"\\?\")) {
+        return match rest.strip_prefix(r"UNC\") {
+            Some(share) => PathBuf::from(format!(r"\\{share}")),
+            None => PathBuf::from(rest),
+        };
+    }
+    path
 }
 
 /// Writes a built-in theme's font to `<temp>/launcher-fonts/<theme>/<path>`, unless the same

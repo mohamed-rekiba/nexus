@@ -11,7 +11,7 @@ license.workspace = true
 nexus-api.workspace = true
 # The refresh runs in a task of its own: spawn, Notify and timers only. Not the workspace
 # tokio, so the plugin's own list names no fs, process or io feature.
-tokio = { version = "1.53", default-features = false, features = ["rt", "sync", "time"] }
+tokio = { version = "1.54", default-features = false, features = ["rt", "sync", "time"] }
 
 [lints]
 workspace = true

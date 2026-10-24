@@ -1,11 +1,9 @@
 //! Seam 3, composed host: the core fetches the art the player is likely to see next. The fake
 //! network records each address asked for; it serves none of them, so each fetch is a 404.
 
-mod common;
-
 use std::time::Duration;
 
-use common::*;
+use crate::common::*;
 use nexus_core::{Command, Grid};
 use nexus_ui_host::UiRequest;
 use slint_interpreter::ComponentHandle;

@@ -1,9 +1,7 @@
 //! Seam 1, core app API: the game catalog service refreshes a console's catalog from its forums'
 //! Atom feed and forum list, when **Refresh from the forums** is on.
 
-mod common;
-
-use common::*;
+use crate::common::*;
 use nexus_api::{ConfigScope, ReleaseList};
 use nexus_core::Command;
 
@@ -12,8 +10,8 @@ use nexus_testkit::{FakeHost, TestCore};
 const CATALOG: &str = "https://xyz.dev/catalog/ps5.json";
 /// The catalog sources the tests serve, so they don't depend on the project's own file.
 const SOURCES: &str = "https://xyz.dev/catalog-sources.json";
-const FEED_ANSWER: &str = include_str!("../../plugins/services/release-catalog/fixtures/forum-546.atom");
-const PVC_ANSWER: &str = include_str!("../../plugins/services/release-catalog/fixtures/pvc-546.json");
+const FEED_ANSWER: &str = include_str!("../../../plugins/services/release-catalog/fixtures/forum-546.atom");
+const PVC_ANSWER: &str = include_str!("../../../plugins/services/release-catalog/fixtures/pvc-546.json");
 const FORUM: &str = "https://xyz.net/forum/viewforum.php?f=546";
 const KEPT: &str = "plugins/release-catalog/refreshed/ps5";
 

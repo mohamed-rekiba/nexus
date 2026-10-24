@@ -9,7 +9,7 @@ Write the title as a conventional commit: it becomes the squash-merge commit.
 
 - [ ] `scripts/check.sh` passes
 - [ ] Tried it on: macOS / Linux (X11, Wayland, Gamescope) / Windows (say which)
-- [ ] A theme change: screenshots looked at (`tests/tests/screenshots.rs`)
+- [ ] A theme change: screenshots looked at (`tests/tests/seams/screenshots.rs`)
 
 ## Notes for the reviewer
 
