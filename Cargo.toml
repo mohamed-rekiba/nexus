@@ -52,7 +52,7 @@ flate2 = "1"
 futures = "0.3"
 gilrs = "0.11"
 hex = "0.4"
-hmac = "0.12"
+hmac = "0.13"
 url = "2"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 inventory = "0.3"
