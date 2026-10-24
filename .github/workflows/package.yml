@@ -6,23 +6,20 @@ name: Package
 #            the Developer ID and notarized when the secrets are set (docs/signing.md)
 #   Windows  the zip and the installer, signed when the certificate is set
 #
-# With a tag (release.yml calls it so, or run it by hand for a release whose build failed) it
-# attaches the files to the tag's draft release, with a SHA-256 file and signed build
-# provenance for each and latest.json for the launcher's updater, then publishes the release as
-# the latest. Without a tag it only builds, and the files stay as this run's artifacts: run it
-# so to try a packaging change.
+# On a Nexus tag (v<version>) it attaches the files to the tag's draft release, with a SHA-256
+# file and signed build provenance for each and latest.json for the launcher's updater, and
+# publishes the release as the latest. Then it starts os.yml: the Nexus OS release made in the
+# same push, if any (os-release), or else new images with this Nexus. release.yml starts it on
+# the tag Release Please made; to build a release again, run it by hand on the tag ("Use
+# workflow from"). On a branch it only builds, and the files stay as the run's artifacts: run
+# it so to try a packaging change.
 #
 # It doesn't run the tests: CI did on the commit before it reached main.
 on:
-  workflow_call:
-    inputs:
-      tag:
-        type: string
-        default: ""
   workflow_dispatch:
     inputs:
-      tag:
-        description: A release's tag to build and publish (for example v0.2.0); empty only builds
+      os-release:
+        description: A Nexus OS tag released in the same push, to build once this release is out
         type: string
         default: ""
 
@@ -30,7 +27,7 @@ permissions: {}
 
 # Two runs for the same release never upload to it at once.
 concurrency:
-  group: package-${{ inputs.tag || github.run_id }}
+  group: package-${{ github.ref_type == 'tag' && github.ref_name || github.run_id }}
   cancel-in-progress: false
 
 env:
@@ -38,7 +35,7 @@ env:
   # Homebrew updates itself before each install unless told not to: minutes per macOS job.
   HOMEBREW_NO_AUTO_UPDATE: "1"
   HOMEBREW_NO_INSTALL_CLEANUP: "1"
-  TAG: ${{ inputs.tag }}
+  TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
 
 defaults:
   run:
@@ -57,7 +54,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ inputs.tag || github.sha }}
       - id: version
         run: |
           version=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
@@ -89,7 +85,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ inputs.tag || github.sha }}
       - uses: ./.github/actions/setup
         with:
           cache-key: package-${{ matrix.name }}
@@ -191,7 +186,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ inputs.tag || github.sha }}
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: build-macos-*
@@ -276,7 +270,7 @@ jobs:
   publish:
     name: Publish the release
     needs: [build, macos]
-    if: inputs.tag != ''
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -290,7 +284,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ inputs.tag }}
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: build-*
@@ -331,3 +324,25 @@ jobs:
         run: |
           gh release upload "$TAG" ./* --clobber
           gh release edit "$TAG" --draft=false --latest
+
+  os:
+    name: Start Nexus OS
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      # To start os.yml.
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      OS_RELEASE: ${{ inputs.os-release }}
+    steps:
+      # The OS release made with this one, on its tag; or new images with this Nexus for the
+      # PCs already installed.
+      - run: |
+          if [ -n "$OS_RELEASE" ]; then
+            gh workflow run os.yml --ref "$OS_RELEASE"
+          else
+            gh workflow run os.yml --ref main -f test=false -f iso=false
+          fi

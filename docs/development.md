@@ -346,17 +346,17 @@ The workflows are in `.github/workflows/`:
 |---|---|---|
 | `ci.yml` | Pull requests, pushes to `main`, by hand | On Linux, side by side: `Format` (`cargo fmt --check`), `Clippy` (`-D warnings`), `Test` (cargo-nextest) and `cargo-deny` |
 | `weekly.yml` | Mondays at 05:17 UTC, by hand | The tests on Windows; on Linux: the real emulator releases install (`NEXUS_REAL_RELEASES=1`), the desktop adapter under Xvfb and openbox (`NEXUS_DESKTOP_TESTS=1`), the trailer player plays a real video (`NEXUS_TRAILER_TESTS=1`), and `cargo deny check advisories` |
-| `release.yml` | Pushes to `main` | Release Please, then `package.yml` and `os.yml` for what it released ([Releases](#releases)) |
-| `package.yml` | Called by `release.yml`, by hand | The packages on Linux, both Mac processors and Windows; with a tag, it publishes the release |
-| `os.yml` | Daily, called by `release.yml`, by hand | The Nexus OS images and USB stick ([os/README.md](../os/README.md#releases)) |
+| `release.yml` | Pushes to `main` | Release Please; then it starts `package.yml` or `os.yml` on the new tag ([Releases](#releases)) |
+| `package.yml` | On a Nexus tag (started by `release.yml`), by hand | The packages on Linux, both Mac processors and Windows; on a tag it publishes the release, then starts `os.yml` |
+| `os.yml` | Daily, on a Nexus OS tag, after a Nexus release, by hand | The Nexus OS images and USB stick ([os/README.md](../os/README.md#releases)) |
 | `mirror-deps.yml` | By hand | Copies the pinned Windows libmpv build into the `deps` release |
 
 `ci.yml` skips what can't change the build: pushes and pull requests that only touch docs,
 Markdown, `os/` or the other workflows, and Release Please's pull requests (a version and a
 changelog). A new push cancels the older run of the same branch.
 
-`ci.yml` runs on Linux only. macOS and Windows build in `package.yml`: run it by hand without a
-tag to try a change on them. Its files stay as the run's artifacts for 7 days.
+`ci.yml` runs on Linux only. macOS and Windows build in `package.yml`: run it by hand on a
+branch to try a change on them. Its files stay as the run's artifacts for 7 days.
 
 For branch protection, require `Format`, `Clippy`, `Test` and `cargo-deny`.
 
@@ -399,7 +399,8 @@ Conventional Commit messages: `feat:` raises the minor version, `fix:` the patch
 1.0, a breaking change raises the minor version). Other prefixes (`docs:`, `ci:`, `refactor:`,
 `test:`, `chore:`) don't make a release.
 
-`.github/workflows/release.yml` runs on every push to `main`, all in one run:
+Release Please, packaging and Nexus OS are separate workflows, each with its own runs.
+`.github/workflows/release.yml` runs on every push to `main`:
 
 1. `Release Please` keeps a release pull request open for Nexus with the next version: it bumps
    `version` in `[workspace.package]` and the workspace's crates in `Cargo.lock`, `version.txt`,
@@ -408,11 +409,16 @@ Conventional Commit messages: `feat:` raises the minor version, `fix:` the patch
    release pull request. A pull request opened with the default token doesn't start CI; set a
    token as the `RELEASE_PLEASE_TOKEN` secret to get checks on it.
 2. Merging that pull request makes a draft release and its tag `v<version>`
-   (`force-tag-creation`, so Release Please finds the release on the next push). The same run
-   then calls `package.yml` with the tag.
-3. `os.yml` runs after it: for a Nexus release it rebuilds the images with the new Nexus; for a
-   Nexus OS release (tag `nexus-os-v<version>`) it builds the images and the stick from the tag
-   and publishes the OS release.
+   (`force-tag-creation`, so Release Please finds the release on the next push). Since Nexus's
+   package leaves `os/` out, a Nexus tag means the app changed. `release.yml` then starts
+   `package.yml` on the tag (`gh workflow run --ref <tag>`: GitHub doesn't start workflows for a
+   tag made with a workflow's own token, but does start one asked for by name).
+3. Once the release is published, `package.yml` starts `os.yml`, so the images get the new
+   Nexus.
+4. Merging Nexus OS's release pull request makes the tag `nexus-os-v<version>`, and
+   `release.yml` starts `os.yml` on it: the images and the stick from the tag, and the OS
+   release. When the same push made a Nexus tag too, `package.yml` starts the OS release instead,
+   once Nexus's release is published, since the images bundle it.
 
 `package.yml` doesn't run the tests: CI did, on the commit, before it reached `main`.
 
@@ -424,14 +430,16 @@ Conventional Commit messages: `feat:` raises the minor version, `fix:` the patch
   uninstalled; the third-party sources tars.
 - `macOS universal app` joins the two Mac apps, signs and notarizes the app when the secrets are
   set, and makes the zip and the disk image (signed, notarized and checked).
-- `Publish the release` (with a tag only) writes a `.sha256` file for each file and
+- `Publish the release` (on a tag only) writes a `.sha256` file for each file and
   `latest.json` (`scripts/update-manifest.sh`), signs the build provenance
   (`gh attestation verify <file> --repo <owner>/<repo>` checks it), attaches them all to the
   draft, and publishes it as the latest.
+- `Start Nexus OS` starts `os.yml`: on the OS tag made in the same push (its `os-release`
+  input), or on `main` for new images.
 
-When `package.yml` fails for a release, run it again for the same tag: Actions → Package → Run
-workflow, with the tag. Don't make a new release. Then run `os.yml` by hand with "test" off and
-"iso" off, so the images get the new Nexus.
+When `package.yml` fails for a release, run it again on the same tag: Actions → Package → Run
+workflow, with the tag under "Use workflow from" (and the OS tag as `os-release`, when that push
+made one). Don't make a new release.
 
 ## The launcher's own update
 
