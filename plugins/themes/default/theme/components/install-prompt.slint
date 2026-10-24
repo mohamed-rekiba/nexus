@@ -1,0 +1,109 @@
+import { Vm, Host } from "../types.slint";
+import { Tokens } from "../tokens.slint";
+import { Look } from "look.slint";
+import { Pill } from "widgets.slint";
+
+// Which button of the install prompt the keys are on: 0 installs and plays, 1 is "Not now".
+export global Prompt {
+    in-out property <int> focus;
+
+    // Handles a key while the prompt is open. It takes every key: the prompt is modal.
+    public function key(text: string) -> bool {
+        // Install and play is on the start side: Left, or Right from right to left, goes to it.
+        if (text == Key.LeftArrow || text == Key.RightArrow) {
+            root.focus = (text == Key.RightArrow) == Look.rtl ? 0 : 1;
+            Host.play-sound("move");
+        } else if (text == Key.Return || text == " ") {
+            if (root.focus == 0) { Host.confirm-install(); } else { Host.cancel-install(); }
+            root.focus = 0;
+        } else if (text == Key.Escape || text == Key.Backspace) {
+            Host.play-sound("back");
+            Host.cancel-install();
+            root.focus = 0;
+        }
+        true
+    }
+}
+
+// "Install KytyPS5?": a first play asks before the emulator downloads. The old launcher's
+// dialog card over a dark wash, rising in.
+export component InstallPrompt inherits Rectangle {
+    property <bool> entered;
+    // After the first frame, so the entry animates from its start.
+    Timer { interval: 16ms; running: !root.entered; triggered => { root.entered = true; } }
+    background: root.entered ? #03050ccc : #03050c00;
+    animate background { duration: Tokens.motion-normal; }
+    TouchArea {}
+
+    property <float> mb: Vm.install-prompt.size / 1048576;
+    property <string> size: Vm.install-prompt.size <= 0 ? ""
+        : root.mb >= 1024 ? " (" + Math.round(root.mb / 102.4) / 10 + " GB)"
+        : " (" + Math.round(root.mb) + " MB)";
+
+    Rectangle {
+        width: Math.min(root.width - 80 * Look.px, 820 * Look.px);
+        height: box.preferred-height;
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2 + (root.entered ? 0 : 30 * Look.px);
+        opacity: root.entered ? 1 : 0;
+        animate y { duration: Tokens.motion-slow; easing: ease-out-expo; }
+        animate opacity { duration: Tokens.motion-normal; easing: ease-out-quad; }
+        border-radius: 24 * Look.px;
+        background: @linear-gradient(130deg, #152743, #10182c);
+        border-width: 1px;
+        border-color: #ffffff24;
+        drop-shadow-blur: 36 * Look.px;
+        drop-shadow-color: #00000088;
+
+        box := VerticalLayout {
+            padding: 40 * Look.px;
+            spacing: 18 * Look.px;
+            Text {
+                text: "Install " + Vm.install-prompt.emulator + "?";
+                font-size: 38 * Look.px;
+                font-weight: 600;
+                color: Tokens.color-text;
+                horizontal-alignment: Look.rtl ? right : left;
+                accessible-role: text;
+                accessible-label: "install-prompt";
+                accessible-value: self.text;
+            }
+            Text {
+                text: "To play " + Vm.install-prompt.game + ", " + Vm.install-prompt.emulator + " "
+                    + Vm.install-prompt.version + " downloads first" + root.size + ". It checks the download, then the game starts.";
+                font-size: 21 * Look.px;
+                color: Tokens.color-text-muted;
+                wrap: word-wrap;
+                horizontal-alignment: Look.rtl ? right : left;
+                accessible-role: text;
+                accessible-label: "install-prompt-text";
+                accessible-value: self.text;
+            }
+            // Install and play first: on the left, or on the right from right to left.
+            HorizontalLayout {
+                padding-top: 16 * Look.px;
+                spacing: 16 * Look.px;
+                alignment: Look.rtl ? end : start;
+                height: 76 * Look.px;
+                if Look.rtl : Pill {
+                    text: "Not now";
+                    focused: Prompt.focus == 1;
+                    clicked => { Prompt.focus = 0; Host.cancel-install(); }
+                }
+                Pill {
+                    text: "Install and play";
+                    icon: "play";
+                    primary: true;
+                    focused: Prompt.focus == 0;
+                    dim: Prompt.focus != 0;
+                    clicked => { Prompt.focus = 0; Host.confirm-install(); }
+                }
+                if !Look.rtl : Pill {
+                    text: "Not now";
+                    focused: Prompt.focus == 1;
+                    clicked => { Prompt.focus = 0; Host.cancel-install(); }
+                }
+            }
+        }
+    }
+}

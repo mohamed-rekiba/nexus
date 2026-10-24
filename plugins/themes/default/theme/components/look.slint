@@ -1,0 +1,148 @@
+import { Vm } from "../types.slint";
+import { Tokens } from "../tokens.slint";
+
+// Values the default theme's screens share. The old launcher lays everything out on a 1920×1080 canvas;
+// `k` maps that canvas to the window, so a size here is `N * Look.k` for N px at 1080p.
+export global Look {
+    out property <bool> rtl: Tokens.layout-direction == "rtl";
+    // The window's own height, which the shell sets as soon as the window has one: the host's
+    // `Vm.viewport` comes with the first render, so the first frame would be drawn at the
+    // smallest scale without it.
+    in-out property <length> window-height;
+    // The player's "Size of everything" multiplies it. It is 0 until the first render.
+    out property <float> size: Vm.viewport.size > 0 ? Vm.viewport.size : 1;
+    out property <float> k: Math.max(root.window-height > 0 ? root.window-height : Vm.viewport.height, 360px) / 1080px * root.size;
+    // Text that must stay readable (Settings) never scales below 0.75.
+    out property <float> t: Math.max(root.k, 0.75);
+    out property <length> px: 1px * root.k;
+    out property <length> tpx: 1px * root.t;
+
+    // How long a new game's hero and art wait for its details before they come in without.
+    out property <duration> wait-for-details: 450ms;
+    // How long after the last move in the Home row or a grid the core hears of the selection.
+    // Not an animation: it stays with Animations off.
+    out property <duration> select-after: 100ms;
+
+    // Colors of ui/theme.slint that have no token.
+    out property <color> text3: #7d88a3;
+    out property <color> line: #ffffff1c;
+    // A button on a dark band, and the same button under the keys.
+    out property <color> fill: #ffffff14;
+    out property <color> fill-lit: #ffffff26;
+    out property <color> glow: #0a6cff8c;
+    out property <color> ring: #ffffff;
+    out property <color> ink: #0a0d18;
+    // The Library's header band, and the fades at the edges of the genre row over it.
+    out property <color> band: #070a14;
+    out property <color> band-clear: #070a1400;
+    out property <duration> move: Tokens.motion-normal > 0 ? 240ms : 0ms;
+    // A fixed animation time: `time` with Animations on, 0 with Animations off, as the
+    // motion tokens.
+    public pure function timed(time: duration) -> duration { Tokens.motion-normal > 0 ? time : 0ms }
+
+    // A compatibility level's color: in-game and playable green, menus yellow, boots
+    // orange, nothing red, unknown grey.
+    public pure function compat-color(level: string) -> color {
+        level == "playable" || level == "ingame" ? Tokens.color-success
+            : level == "menus" ? #ffd24d
+            : level == "boots" ? #ff9f43
+            : level == "nothing" ? Tokens.color-danger
+            : #8a93ab
+    }
+    // An emulator download's state from the core, in the player's words.
+    public pure function job-state-label(state: string) -> string {
+        state == "queued" ? "Waiting" : state == "downloading" ? "Downloading" : state == "verifying" ? "Checking"
+            : state == "unpacking" ? "Unpacking" : state == "paused" ? "Paused" : state == "installing" ? "Installing"
+            : state == "done" ? "Done" : state == "failed" ? "Failed" : state == "cancelled" ? "Cancelled" : state
+    }
+    // ProtonDB's tier as words and as a color: green runs well, red doesn't run.
+    public pure function protondb-label(tier: string) -> string {
+        tier == "platinum" ? "Platinum" : tier == "gold" ? "Gold" : tier == "silver" ? "Silver"
+            : tier == "bronze" ? "Bronze" : tier == "borked" ? "Borked" : tier == "native" ? "Native"
+            : tier == "pending" ? "Pending" : tier
+    }
+    public pure function protondb-color(tier: string) -> color {
+        tier == "platinum" || tier == "gold" || tier == "native" ? Tokens.color-success
+            : tier == "borked" ? Tokens.color-danger
+            : tier == "silver" || tier == "bronze" ? Tokens.color-warning
+            : #8a93ab
+    }
+    // How a game runs on this PC as a color: green runs well, orange may run slowly, red
+    // won't start or doesn't fit.
+    public pure function pc-color(level: string) -> color {
+        level == "good" ? Tokens.color-success
+            : level == "slow" ? Tokens.color-warning
+            : level == "no" ? Tokens.color-danger
+            : #8a93ab
+    }
+    // A badge tone's color.
+    public pure function tone(tone: string) -> color {
+        tone == "success" ? Tokens.color-success
+            : tone == "warning" ? Tokens.color-warning
+            : tone == "danger" ? Tokens.color-danger
+            : tone == "info" ? Tokens.color-info
+            : Tokens.color-text-muted
+    }
+    // The art a game without a cover shows: its console's colors.
+    public pure function console-art(platform: string) -> brush {
+        platform == "PC" ? @linear-gradient(160deg, #1d3a2f 0%, #0d1714 100%)
+            : platform == "PS4" ? @linear-gradient(160deg, #1b2d52 0%, #0b1224 100%)
+            : @linear-gradient(160deg, #26304f 0%, #0e1222 100%)
+    }
+    // A card's console badge, big enough to tell a game on PS5, PS4 and PC apart at a glance:
+    // each console has its own fill, edge and text color.
+    public pure function console-fill(platform: string) -> color {
+        platform == "PS4" ? #12306be8 : platform == "PC" ? #12452fe8 : #000000d9
+    }
+    public pure function console-edge(platform: string) -> color {
+        platform == "PS4" ? #8fc2ff80 : platform == "PC" ? #7ee2b080 : #ffffff59
+    }
+    public pure function console-ink(platform: string) -> color {
+        platform == "PS4" ? #b8d8ff : platform == "PC" ? #a8f0cc : #ffffff
+    }
+    // How easy a release is to download, as a color: good green, low amber, none or unknown
+    // grey.
+    public pure function availability-color(level: string) -> color {
+        level == "good" ? Tokens.color-success : level == "low" ? Tokens.color-warning : root.text3
+    }
+    // A platform's full name. "" is every platform.
+    public pure function system-name(platform: string) -> string {
+        platform == "" ? "All Games"
+            : platform == "PS5" ? "PlayStation 5"
+            : platform == "PS4" ? "PlayStation 4"
+            : platform
+    }
+    // The player's own result after playing, as words and as a color.
+    public pure function result-label(level: string) -> string {
+        level == "ingame" ? "Reaches gameplay" : level == "menus" ? "Main menu" : level == "boots" ? "Intro logos" : level == "nothing" ? "Doesn't start" : ""
+    }
+    public pure function result-color(level: string) -> color {
+        level == "ingame" ? Tokens.color-success : level == "menus" ? #ffd24d : level == "boots" ? #ff9f43 : Tokens.color-danger
+    }
+    // "Shooter · Arcade": the first two, as the old launcher's genre chip.
+    public pure function join(items: [string]) -> string {
+        items.length == 0 ? "" : items.length == 1 ? items[0] : items[0] + " · " + items[1]
+    }
+    // What the Library's and the Catalog's sort button says.
+    public pure function sort-label(sort: string) -> string {
+        sort == "played" ? "Recently played" : sort == "size" ? "Size (largest first)"
+            : sort == "smallest" ? "Size (smallest first)" : sort == "rating" ? "Top rated"
+            : sort == "release" ? "Newest" : sort == "compat" ? "Runs best" : sort == "added" ? "Recently added" : "Title"
+    }
+    public pure function games(count: int) -> string {
+        count == 1 ? "1 game" : count + " games"
+    }
+    public pure function releases(count: int) -> string {
+        count == 1 ? "1 release" : count + " releases"
+    }
+    // A theme option's choice, in words.
+    public pure function choice(value: string) -> string {
+        value == "ltr" ? "Left to right"
+            : value == "rtl" ? "Right to left"
+            : value == "on" ? "On"
+            : value == "off" ? "Off"
+            : value == "true" ? "On"
+            : value == "false" ? "Off"
+            : value
+    }
+}

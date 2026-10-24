@@ -1,0 +1,48 @@
+name: libmpv
+description: >-
+  libmpv, which the package ships for the trailer player, and the tools that bundle it:
+  Homebrew's mpv and dylibbundler on macOS, apt's libmpv and patchelf and a pinned linuxdeploy
+  on Linux, and a pinned shinchiro build on Windows (each checked against its SHA-256). Sets
+  LINUXDEPLOY on Linux and LIBMPV_DIR on Windows.
+runs:
+  using: composite
+  steps:
+    - name: macOS
+      if: runner.os == 'macOS'
+      shell: bash
+      run: brew install mpv dylibbundler
+    - name: Linux
+      if: runner.os == 'Linux'
+      shell: bash
+      env:
+        # linuxdeploy, for the AppImage: a tagged release and its SHA-256 as GitHub lists it.
+        LINUXDEPLOY_URL: https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage
+        LINUXDEPLOY_SHA256: c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d
+      run: |
+        sudo apt-get install -y --no-install-recommends libmpv-dev mpv patchelf file
+        tool="$RUNNER_TEMP/linuxdeploy-x86_64.AppImage"
+        curl -fsSL --retry 3 -o "$tool" "$LINUXDEPLOY_URL"
+        echo "$LINUXDEPLOY_SHA256  $tool" | sha256sum -c -
+        chmod +x "$tool"
+        echo "LINUXDEPLOY=$tool" >> "$GITHUB_ENV"
+    - name: Windows
+      if: runner.os == 'Windows'
+      shell: bash
+      env:
+        # Change all three together (and run the mirror-deps workflow again): the build's
+        # file, where shinchiro published it, and its SHA-256 as GitHub lists it. shinchiro
+        # keeps about six weeks of builds, so this repo's `deps` release holds a copy.
+        FILE: mpv-dev-x86_64-20261018-git-01e2533f31.7z
+        UPSTREAM: https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20261018
+        SHA256: d7f5621f42b6e161fe032df914a10bdece28a89df3e57c6c3e16a5a250929b5e
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        archive="$RUNNER_TEMP/$FILE"
+        if ! gh release download deps -R "$GITHUB_REPOSITORY" --pattern "$FILE" --dir "$RUNNER_TEMP" 2> /dev/null; then
+          echo "no copy in this repo's deps release; from shinchiro"
+          curl -fsSL --retry 3 -o "$archive" "$UPSTREAM/$FILE"
+        fi
+        echo "$SHA256  $archive" | sha256sum -c -
+        7z x -y -o"$RUNNER_TEMP/libmpv" "$archive" > /dev/null
+        echo "LIBMPV_DIR=$RUNNER_TEMP/libmpv" >> "$GITHUB_ENV"
+        echo "LIBMPV_SOURCE=$UPSTREAM/$FILE" >> "$GITHUB_ENV"

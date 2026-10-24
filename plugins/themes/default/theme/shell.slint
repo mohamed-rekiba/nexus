@@ -1,0 +1,449 @@
+import { Vm, Host } from "types.slint";
+import { Tokens } from "tokens.slint";
+import { Look } from "components/look.slint";
+import { Nav } from "components/nav.slint";
+import { Backdrop } from "components/backdrop.slint";
+import { Button } from "components/button.slint";
+import { TopBar, Hints } from "components/top-bar.slint";
+import { HomeScreen } from "screens/home.slint";
+import { GameDetailScreen, Hub } from "screens/game-detail.slint";
+import { CatalogScreen } from "screens/catalog.slint";
+import { DownloadsScreen, Dl } from "screens/downloads.slint";
+import { SettingsScreen } from "screens/settings.slint";
+import { Prefs } from "components/settings-rows.slint";
+import { EmulatorsScreen } from "screens/emulators.slint";
+import { ThemesScreen } from "screens/themes.slint";
+import { PluginList } from "components/plugin-list.slint";
+import { PluginScreen } from "screens/plugin.slint";
+import { GameSettingsScreen } from "screens/game-settings.slint";
+import { RunningScreen, Splash } from "screens/running.slint";
+import { InstallPrompt, Prompt } from "components/install-prompt.slint";
+import { BootScreen } from "components/boot.slint";
+import { ResultPrompt, Ask } from "components/result-prompt.slint";
+import { Lingering } from "components/lingering.slint";
+import { GameMenu, GameMenuSheet } from "components/game-menu.slint";
+import { Viewer, ShotViewer } from "components/shot-viewer.slint";
+import { Trailers, TrailerPlayer } from "components/trailer-player.slint";
+import { Notices, NoticeStack } from "components/notices.slint";
+import { Osk, OnScreenKeyboard } from "components/keyboard.slint";
+import { Sys, SystemSheet } from "components/system-panel.slint";
+import { Setup, InstallOs } from "components/install-os.slint";
+
+// The default theme: the old launcher's look. One backdrop of game art behind every screen, the top bar
+// over the main screens, and the keys that do something in a pill at the bottom. A gamepad's
+// d-pad and buttons arrive as arrow, Return, Escape and Tab keys.
+export component Shell inherits Window {
+    title: "Nexus";
+    background: Tokens.color-bg;
+    preferred-width: 1280px;
+    preferred-height: 720px;
+    min-width: 640px;
+    min-height: 360px;
+    default-font-family: Tokens.font-family;
+    default-font-size: Tokens.font-size-m;
+    forward-focus: keys;
+
+    property <bool> home: Vm.screen == "home" || Vm.screen == "running";
+    property <bool> bar: root.home || Vm.screen == "catalog" || Vm.screen == "downloads";
+    // A sheet: Settings, or a plugin's page.
+    // A list of plugins: Emulators or Themes.
+    property <bool> list: Vm.screen == "emulators" || Vm.screen == "themes";
+    property <bool> sheet: Vm.screen == "settings" || root.list || Vm.screen == "plugin" || Vm.screen == "game-settings";
+    // The art behind: the shown game's art once its details are loaded, its cover until then.
+    property <image> art: Vm.screen == "game-detail" && Vm.detail.background.width > 0 ? Vm.detail.background
+        : Vm.screen == "game-detail" ? Vm.detail.cover
+        : Nav.has-detail && Vm.detail.background.width > 0 ? Vm.detail.background
+        : Nav.has-game ? Nav.games[Nav.shown].cover
+        : Vm.detail.background;
+
+    // Sizes follow the window from its first frame.
+    init => { Look.window-height = root.height; }
+    changed height => { Look.window-height = root.height; }
+
+    // A game that starts is the one Home shows, with the keys on its Resume button, so Cross
+    // brings it back.
+    property <bool> has-running: Vm.has-running;
+    changed has-running => {
+        if (root.has-running) {
+            Host.play-sound("start");
+            Nav.select-now(Vm.running.key);
+            Nav.go-home();
+            Nav.zone = "actions";
+            Nav.action = 0;
+        }
+    }
+    // A move in the Home row or a grid goes to the core once the moves stop: each move
+    // starts the wait again.
+    send := Timer {
+        interval: Look.select-after;
+        running: Nav.moving && !Nav.sent;
+        triggered => { Nav.send(); }
+    }
+    property <int> moves: Nav.moves;
+    changed moves => { send.restart(); }
+    // The core's selection changed: the cursor follows it, unless a move waits.
+    property <string> core-key: Nav.core-key;
+    changed core-key => { Nav.core-moved(); }
+    // A new screen starts with its first button.
+    changed home => { if (root.home) { Nav.zone = Nav.view == "library" ? "grid" : "row"; } }
+    property <string> screen: Vm.screen;
+    changed screen => {
+        Hub.focus = 0;
+        Hub.details = false;
+        Hub.shots = false;
+        Hub.reading = -1;
+        Hub.release = -1;
+        Hub.consent = -1;
+        if (Nav.to-releases && Vm.screen == "game-detail") { Hub.release = 0; }
+        Nav.to-releases = false;
+        Dl.reset();
+        Viewer.open = false;
+        GameMenu.close();
+        Nav.sort-open = false;
+        // A sheet opens at its first row; the Catalog at its grid.
+        Prefs.reset();
+        if (Vm.screen == "catalog") { Nav.zone = "grid"; Nav.typing = false; }
+        keys.focus();
+    }
+    // A text box closed: the keys come back here.
+    property <bool> editing: Prefs.editing;
+    changed editing => { if (!root.editing) { keys.focus(); } }
+    // A new notice that is a problem plays the error sound. The ids grow, so a notice that
+    // goes doesn't count as new.
+    property <int> newest-notice: Notices.count > 0 ? Vm.notice-cards[Notices.count - 1].id : -1;
+    property <int> notices-seen: -1;
+    changed newest-notice => {
+        if (root.newest-notice > root.notices-seen) {
+            if (Vm.notice-cards[Notices.count - 1].kind == "error") { Host.play-sound("error"); }
+            root.notices-seen = root.newest-notice;
+        }
+    }
+    // The Welcome screen closed: Start.
+    property <bool> welcome: Vm.boot.welcome;
+    changed welcome => { if (!root.welcome) { Host.play-sound("start"); } }
+    // The Library's search box closed: the keys come back here.
+    property <bool> typing: Nav.typing;
+    changed typing => { if (!root.typing) { keys.focus(); } }
+    // A Wi-Fi password was typed or given up: the keys come back here.
+    property <string> asking: Sys.asking;
+    changed asking => { if (root.asking == "") { keys.focus(); } }
+
+    Backdrop {
+        width: root.width;
+        height: root.height;
+        art: root.art;
+        // On Home, a newly selected game's art waits for its details.
+        ready: !root.home || !Nav.has-game || Nav.extra || Nav.has-detail;
+        // Settings and the running card draw their own wash.
+        dim: root.home || Vm.screen == "game-detail" || root.sheet ? 0 : 0.84;
+    }
+
+    keys := FocusScope {
+        // Every key comes here first, whichever element has the focus: the on-screen keyboard
+        // takes the controller's while it is open, and ✕ on a text field opens it again.
+        capture-key-pressed(event) => {
+            Osk.pad = Vm.pad-key;
+            if (Osk.open) {
+                return Osk.key(event.text, event.repeat, event.modifiers.control) ? accept : reject;
+            }
+            if (Osk.pad && event.text == Key.Return && !event.repeat && Osk.owner != "") {
+                Osk.reopen();
+                return accept;
+            }
+            reject
+        }
+        // The keys are back here: no text field has the focus.
+        changed has-focus => { if (self.has-focus) { Osk.drop(); } }
+        key-pressed(event) => {
+            // A held Enter doesn't repeat: it would play, download or install again.
+            if (event.repeat && event.text == Key.Return) { return accept; }
+            // The Welcome screen: Enter is Start, once the library is in.
+            if (Vm.boot.welcome) {
+                if (event.text == Key.Return && Vm.boot.ready && Vm.art-ready) { Host.finish-welcome(); }
+                return accept;
+            }
+            // Nexus OS's USB stick: Welcome, then installing, before anything else.
+            if (Setup.shown) { Setup.key(event.text); return accept; }
+            // A panel of the machine's settings is open under the top bar.
+            if (Sys.open >= 0 && Sys.key(event.text)) { return accept; }
+            // The launch splash lists the game's keys: they are the game's. Escape (Back) and
+            // Ctrl+Q still go on, as on the splash without the keys.
+            if (Splash.keys && event.text != Key.Escape
+                && !(event.modifiers.control && (event.text == "q" || event.text == "Q"))) {
+                return accept;
+            }
+            // Delete closes the newest notice: no other screen uses it.
+            if (event.text == Key.Delete && Notices.count > 0) { Notices.close-newest(); return accept; }
+            if (Vm.has-trailer) { Trailers.key(event.text); return accept; }
+            if (Vm.has-result-prompt) { Ask.key(event.text); return accept; }
+            if (GameMenu.open) { GameMenu.key(event.text); return accept; }
+            if (Viewer.open) { Viewer.key(event.text); return accept; }
+            if (Nav.sort-open) { Nav.sort-key(event.text); return accept; }
+            // Options on a pad, or the Menu key: the shown game's menu.
+            if (event.text == Key.Menu && root.game-keys) {
+                GameMenu.show();
+                return accept;
+            }
+            if (Vm.has-install-prompt) { Prompt.key(event.text); return accept; }
+            // Ctrl+Q quits; Ctrl+D opens Downloads.
+            if (event.modifiers.control && (event.text == "q" || event.text == "Q")) { Host.quit(); return accept; }
+            if (event.modifiers.control && (event.text == "d" || event.text == "D")) { Host.navigate("downloads"); return accept; }
+            // Triangle or /: search the Catalog on its screen, else the Library.
+            if (event.text == "/" && !Nav.typing && !Prefs.editing) {
+                if (!Nav.catalog) {
+                    Nav.go-home();
+                    Nav.open-library();
+                }
+                Nav.zone = "bar";
+                Nav.bar = 0;
+                Nav.typing = true;
+                return accept;
+            }
+            // Square (the pad's Insert), or T outside the Library's typing: the shown game's trailer.
+            if ((event.text == Key.Insert || ((event.text == "t" || event.text == "T") && !(root.home && Nav.library) && !Nav.catalog))
+                && root.trailer-key) {
+                Trailers.watch();
+                return accept;
+            }
+            // L1 or Shift+Tab: the screen before.
+            if (event.text == Key.Backtab && !Prefs.editing) {
+                Host.navigate(root.home ? "settings"
+                    : Vm.screen == "settings" ? "themes"
+                    : Vm.screen == "themes" ? "emulators"
+                    : Vm.screen == "emulators" ? "downloads"
+                    : Vm.screen == "downloads" && Vm.catalog-available ? "catalog"
+                    : "home");
+                return accept;
+            }
+            if (event.text == Key.Tab && !Prefs.editing) {
+                Host.navigate(root.home && Vm.catalog-available ? "catalog"
+                    : root.home || Vm.screen == "catalog" ? "downloads"
+                    : Vm.screen == "downloads" ? "emulators"
+                    : Vm.screen == "emulators" ? "themes"
+                    : Vm.screen == "themes" ? "settings"
+                    : "home");
+                return accept;
+            }
+            if ((root.home || Nav.catalog) && Nav.key(event.text)) { return accept; }
+            if (!root.list && root.sheet && Prefs.key(event.text)) { return accept; }
+            if (root.list && PluginList.key(event.text)) { return accept; }
+            if (Vm.screen == "game-detail" && Hub.key(event.text)) { return accept; }
+            if (Vm.screen == "downloads" && Dl.key(event.text)) { return accept; }
+            if (event.text == Key.Escape || event.text == Key.Backspace) {
+                // Home is where back ends: no sound there.
+                if (!root.home) { Host.play-sound("back"); }
+                Host.back();
+                return accept;
+            }
+            reject
+        }
+
+        // Home stays under the other screens, so coming back doesn't rebuild it. Under a side
+        // sheet it steps back and dims, so the sheet sits in front of it.
+        HomeScreen {
+            width: parent.width;
+            height: parent.height;
+            opacity: root.home ? 1 : root.sheet ? 0.3 : 0;
+            visible: self.opacity > 0;
+            animate opacity { duration: Tokens.motion-normal; easing: ease-out-quad; }
+        }
+        if Vm.screen == "game-detail" : GameDetailScreen { width: parent.width; height: parent.height; }
+        if Vm.screen == "catalog" : CatalogScreen { width: parent.width; height: parent.height; }
+        if Vm.screen == "downloads" : DownloadsScreen { width: parent.width; height: parent.height; }
+        // A plugin's sheet opens beside the Plugins sheet, which stays. Each sheet slides in
+        // from the edge and, when it closes, back out before it goes.
+        emulators-sheet := Lingering { open: Vm.screen == "emulators" || (Vm.screen == "plugin" && !PluginList.themes); }
+        themes-sheet := Lingering { open: Vm.screen == "themes" || (Vm.screen == "plugin" && PluginList.themes); }
+        plugin-sheet := Lingering { open: Vm.screen == "plugin"; }
+        settings-sheet := Lingering { open: Vm.screen == "settings"; }
+        game-settings-sheet := Lingering { open: Vm.screen == "game-settings"; }
+        if emulators-sheet.shown : EmulatorsScreen { width: parent.width; height: parent.height; open: emulators-sheet.open; pushed: Vm.screen == "plugin"; }
+        if themes-sheet.shown : ThemesScreen { width: parent.width; height: parent.height; open: themes-sheet.open; pushed: Vm.screen == "plugin"; }
+        if plugin-sheet.shown : PluginScreen { width: parent.width; height: parent.height; open: plugin-sheet.open; }
+        if settings-sheet.shown : SettingsScreen { width: parent.width; height: parent.height; open: settings-sheet.open; }
+        if game-settings-sheet.shown : GameSettingsScreen { width: parent.width; height: parent.height; open: game-settings-sheet.open; }
+
+        if root.bar : TopBar {
+            y: 0;
+            width: parent.width;
+            keys: root.home;
+        }
+        if Sys.open >= 0 && Vm.system.whole-screen : SystemSheet { width: parent.width; height: parent.height; }
+
+        RunningScreen { width: parent.width; height: parent.height; }
+        if Vm.has-install-prompt : InstallPrompt { width: parent.width; height: parent.height; }
+        if Viewer.open : ShotViewer { width: parent.width; height: parent.height; }
+        if Vm.has-trailer : TrailerPlayer { width: parent.width; height: parent.height; }
+        if GameMenu.open : GameMenuSheet { width: parent.width; height: parent.height; }
+        if Vm.has-result-prompt : ResultPrompt { width: parent.width; height: parent.height; }
+        if Setup.shown : InstallOs { width: parent.width; height: parent.height; }
+    }
+
+    // The shown game's menu and trailer: the keys that open them work here.
+    // The download sheet keeps them.
+    property <bool> game-keys: Vm.has-detail && Hub.consent < 0 && !Nav.sort-open
+        && (Vm.screen == "game-detail" || (root.home && Nav.has-detail && !Nav.extra));
+    property <bool> trailer-key: root.game-keys && Vm.detail.trailer-url != "";
+    property <bool> overlay: Vm.has-install-prompt || GameMenu.open || Vm.has-trailer || Viewer.open || Nav.sort-open
+        || Osk.open;
+    // No pill over the Library's and the Catalog's cards, as the old launcher: it would cover
+    // their titles. Over their header rows (search, filters, genres) it says how the keys move.
+    // Over a trailer, the hints hide with its controls.
+    property <bool> grid-header: ((root.home && Nav.library) || Vm.screen == "catalog")
+        && (Nav.zone == "bar" || Nav.zone == "filters" || Nav.zone == "genres") && !Nav.typing;
+    if (root.overlay || root.grid-header || !((root.home && Nav.library) || Vm.screen == "catalog"))
+        && !(Vm.has-trailer && Vm.trailer.playing && !Trailers.controls)
+        // Over the launch splash's keys, the keys are the game's.
+        && !Splash.keys : Hints {
+        // In Settings the sheet is on the far side, so the hints go on the near one.
+        x: Look.rtl != root.sheet ? 76 * Look.px : root.width - self.width - 76 * Look.px;
+        y: root.height - self.height - 30 * Look.px;
+        hints: Osk.open ? [
+                { pad: "✕", key: "Enter", label: "Type" },
+                { pad: "□", key: "⌫", label: "Delete" },
+                { pad: "△", key: "Space", label: "Space" },
+                { pad: "R2", key: "Enter", label: "Done" },
+                { pad: "○", key: "Esc", label: "Close" },
+            ]
+            : Vm.has-install-prompt ? [
+                { pad: "✕", key: "Enter", label: Prompt.focus == 0 ? "Install and play" : "Not now" },
+                { pad: "○", key: "Esc", label: "Not now" },
+            ]
+            : GameMenu.open ? [
+                { pad: "✕", key: "Enter", label: "Pick" },
+                { pad: "○", key: "Esc", label: "Close" },
+            ]
+            : Nav.sort-open ? [
+                { pad: "✕", key: "Enter", label: "Pick" },
+                { pad: "○", key: "Esc", label: "Close" },
+            ]
+            : Vm.has-trailer ? [
+                { pad: "✕", key: "Enter", label: Vm.trailer.playing ? "Pause" : "Play" },
+                { pad: "◀ ▶", key: "← →", label: "10 s" },
+                { pad: "○", key: "Esc", label: "Close" },
+            ]
+            : Viewer.open ? [
+                { pad: "◀ ▶", key: "← →", label: "Move" },
+                { pad: "○", key: "Esc", label: "Close" },
+            ]
+            : root.grid-header ? [
+                { pad: "◀ ▶", key: "← →", label: "Move" },
+                { pad: "✕", key: "Enter", label: "Choose" },
+                { pad: "▲ ▼", key: "↑ ↓", label: "Rows" },
+                { pad: "○", key: "Esc", label: "Back" },
+            ]
+            : root.home && Nav.zone == "tabs" ? [
+                { pad: "✕", key: "Enter", label: "Select" },
+                { pad: "R1", key: "Tab", label: "Next" },
+            ]
+            : root.home && root.trailer-key ? [
+                { pad: "✕", key: "Enter", label: "Select" },
+                { pad: "R1", key: "Tab", label: Vm.catalog-available ? "Search" : "Downloads" },
+                { pad: "□", key: "T", label: "Trailer" },
+                { pad: "☰", key: "Menu", label: "Options" },
+            ]
+            : root.home && root.game-keys ? [
+                { pad: "✕", key: "Enter", label: "Select" },
+                { pad: "R1", key: "Tab", label: Vm.catalog-available ? "Search" : "Downloads" },
+                { pad: "☰", key: "Menu", label: "Options" },
+            ]
+            : root.home ? [
+                { pad: "✕", key: "Enter", label: "Select" },
+                { pad: "R1", key: "Tab", label: Vm.catalog-available ? "Search" : "Downloads" },
+            ]
+            : Vm.screen == "game-detail" && Hub.consent >= 0 ? [
+                { pad: "✕", key: "Enter", label: Hub.consent-focus == 0 ? "Look up metadata" : Hub.consent-focus == 1 ? "Not now" : "Change" },
+                { pad: "○", key: "Esc", label: "Not now" },
+            ]
+            : Vm.screen == "game-detail" && root.trailer-key ? [
+                { pad: "✕", key: "Enter", label: Hub.shots ? "View" : Vm.detail.can-launch && Hub.focus == 0 ? "Play" : "Select" },
+                { pad: "○", key: "Esc", label: "Back" },
+                { pad: "□", key: "T", label: "Trailer" },
+                { pad: "☰", key: "Menu", label: "Options" },
+            ]
+            : Vm.screen == "game-detail" ? [
+                { pad: "✕", key: "Enter", label: Hub.shots ? "View" : Vm.detail.can-launch && Hub.focus == 0 ? "Play" : "Select" },
+                { pad: "○", key: "Esc", label: "Back" },
+                { pad: "☰", key: "Menu", label: "Options" },
+            ]
+            : Vm.screen == "downloads" && Dl.removing ? [
+                { pad: "▲ ▼", key: "↑ ↓", label: "Choose" },
+                { pad: "✕", key: "Enter", label: Dl.remove-focus == 0 ? "Remove" : Dl.remove-focus == 1 ? "Delete files" : "Not now" },
+                { pad: "○", key: "Esc", label: "Not now" },
+            ]
+            : Vm.screen == "downloads" && Dl.install >= 0 ? [
+                { pad: "✕", key: "Enter", label: Dl.install-focus == 0 ? "Install" : Dl.install-focus == 1 ? "Not now" : "Change" },
+                { pad: "○", key: "Esc", label: "Not now" },
+            ]
+            : Vm.screen == "downloads" && Dl.rows > 0 ? [
+                { pad: "▲ ▼", key: "↑ ↓", label: "Move" },
+                { pad: "◀ ▶", key: "← →", label: "Buttons" },
+                { pad: "✕", key: "Enter", label: "Select" },
+                { pad: "○", key: "Esc", label: "Back" },
+            ]
+            : root.sheet ? [
+                { pad: "✕", key: "Enter", label: root.list ? "Open" : "Change" },
+                { pad: "○", key: "Esc", label: "Back" },
+            ]
+            : [
+                { pad: "R1", key: "Tab", label: "Next" },
+                { pad: "○", key: "Esc", label: "Back" },
+            ];
+    }
+
+    // The notices, as the old launcher's notification cards, on the far side.
+    NoticeStack {
+        x: Look.rtl ? 40 * Look.px : root.width - self.width - 40 * Look.px;
+        y: 120 * Look.px;
+        width: 480 * Look.px;
+    }
+
+    // Work in the background, as the old launcher's status pill at the bottom corner.
+    if Vm.task != "" && root.home && !root.sheet : Rectangle {
+        property <bool> shown;
+        // After the first frame, so the entry animates from its start.
+        Timer { interval: 16ms; running: !parent.shown; triggered => { parent.shown = true; } }
+        x: Look.rtl ? root.width - self.width - 36 * Look.px : 36 * Look.px;
+        y: root.height - self.height - 30 * Look.px;
+        width: task-row.preferred-width;
+        height: 50 * Look.px;
+        border-radius: 25 * Look.px;
+        background: #070a14e6;
+        border-width: 1px;
+        border-color: Look.line;
+        opacity: self.shown ? 1 : 0;
+        animate opacity { duration: Tokens.motion-normal; }
+        task-row := HorizontalLayout {
+            padding-left: 18 * Look.px;
+            padding-right: 22 * Look.px;
+            spacing: 12 * Look.px;
+            alignment: center;
+            Path {
+                width: 20 * Look.px;
+                height: 20 * Look.px;
+                y: 15 * Look.px;
+                viewbox-width: 24;
+                viewbox-height: 24;
+                stroke: Tokens.color-text-muted;
+                stroke-width: 2.4 * Look.px;
+                commands: "M 12 3 A 9 9 0 1 1 3 12";
+                transform-rotation: animation-tick() / 1ms * 0.4deg;
+            }
+            Text {
+                text: Vm.task;
+                font-size: 17 * Look.px;
+                color: Tokens.color-text-muted;
+                vertical-alignment: center;
+                accessible-role: text;
+                accessible-label: "task";
+                accessible-value: self.text;
+            }
+        }
+    }
+
+    // The on-screen keyboard, over the screens and under the boot screen.
+    if Osk.open && Osk.owner != "" : OnScreenKeyboard { width: root.width; height: root.height; }
+
+    // The boot screen is over everything, from the first frame.
+    BootScreen { width: root.width; height: root.height; }
+}

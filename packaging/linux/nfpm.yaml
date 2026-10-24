@@ -1,0 +1,128 @@
+# The deb, rpm and Arch packages, with nfpm (https://nfpm.goreleaser.com), from the Linux folder
+# scripts/package.sh made. Nothing is compiled again. build-packages.sh runs it once per format
+# with these set:
+#   FOLDER    the release folder, dist/nexus-linux-x86_64
+#   VERSION   the version, without a leading v
+#   PACKAGED  a file holding the format (deb, rpm or arch): /usr/lib/nexus/packaged, which tells
+#             Nexus it was installed this way and updates through the package manager
+name: nexus
+arch: amd64
+platform: linux
+version: ${VERSION}
+version_schema: semver
+release: 1
+section: games
+priority: optional
+maintainer: Nexus <https://github.com/mohamed-rekiba/nexus>
+homepage: https://github.com/mohamed-rekiba/nexus
+license: GPL-2.0-or-later
+description: |
+  A game launcher for PS5, PS4 and PC games, made for a TV and a controller.
+  It plays PS5 games with KytyPS5, PS4 games with shadPS4, and PC games natively or through
+  Wine or Proton. With gamescope it is also a session of its own, without a desktop: choose
+  "Nexus" at the login screen.
+
+contents:
+  # The release folder as it is: Nexus finds its libraries and extensions beside the binary.
+  - src: ${FOLDER}/nexus
+    dst: /usr/lib/nexus/nexus
+    expand: true
+    file_info:
+      mode: 0755
+  - src: ${FOLDER}/lib
+    dst: /usr/lib/nexus/lib
+    type: tree
+    expand: true
+  - src: ${FOLDER}/licenses
+    dst: /usr/lib/nexus/licenses
+    type: tree
+    expand: true
+  - src: ${FOLDER}/LICENSE
+    dst: /usr/lib/nexus/LICENSE
+    expand: true
+  - dst: /usr/lib/nexus/extensions
+    type: dir
+  - src: ${PACKAGED}
+    dst: /usr/lib/nexus/packaged
+    expand: true
+  - src: /usr/lib/nexus/nexus
+    dst: /usr/bin/nexus
+    type: symlink
+  - src: packaging/linux/nexus-session
+    dst: /usr/bin/nexus-session
+    file_info:
+      mode: 0755
+  - src: packaging/linux/session.conf
+    dst: /usr/share/nexus/session.conf
+  - src: packaging/linux/nexus.desktop
+    dst: /usr/share/applications/nexus.desktop
+  - src: packaging/linux/nexus-session.desktop
+    dst: /usr/share/wayland-sessions/nexus.desktop
+  - src: assets/nexus.png
+    dst: /usr/share/icons/hicolor/512x512/apps/nexus.png
+  - src: ${FOLDER}/README.md
+    dst: /usr/share/doc/nexus/README.md
+    expand: true
+
+# What Nexus links and loads at run time (sound, fonts, controllers, the window, Vulkan for This
+# PC), the tools it runs to bring games to the front (ps, xdotool, xprop), and, recommended, the
+# session's display servers and the tools of Settings → System (NetworkManager, BlueZ, pactl).
+overrides:
+  deb:
+    depends:
+      - libc6 (>= 2.35)
+      - libasound2 | libasound2t64
+      - libfontconfig1
+      - libudev1
+      - libxkbcommon0
+      - libxkbcommon-x11-0
+      - libegl1
+      - procps
+      - xdotool
+      - x11-utils
+    recommends:
+      - gamescope
+      - cage
+      - libvulkan1
+      - network-manager
+      - bluez
+      - pulseaudio-utils
+  rpm:
+    depends:
+      - glibc >= 2.35
+      - alsa-lib
+      - fontconfig
+      - systemd-libs
+      - libxkbcommon
+      - libxkbcommon-x11
+      - libglvnd-egl
+      - procps-ng
+      - xdotool
+      - xprop
+    recommends:
+      - gamescope
+      - cage
+      - vulkan-loader
+      - NetworkManager
+      - bluez
+      - pulseaudio-utils
+  archlinux:
+    depends:
+      - glibc
+      - alsa-lib
+      - fontconfig
+      - systemd-libs
+      - libxkbcommon
+      - libxkbcommon-x11
+      - libglvnd
+      - procps-ng
+      - xdotool
+      - xorg-xprop
+    # Arch's optional dependencies.
+    suggests:
+      - gamescope
+      - cage
+      - vulkan-icd-loader
+      - networkmanager
+      - bluez-utils
+      - libpulse

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+<title>xyz.net - PS5 games</title>
+<id>tag:rto.feed,2026-10-07:/f/546</id>
+<link href="https://xyz.net/forum/viewforum.php?f=546"/>
+<updated>2026-10-07T14:00:00+00:00</updated>
+<entry>
+<id>tag:rto.feed,2026-10-07:/t/6912345</id>
+<link href="https://xyz.net/forum/viewtopic.php?t=6912345"/>
+<updated>2026-10-07T13:55:12+00:00</updated>
+<title type="html"><![CDATA[[PS5] Astro [EUR / RUS / ENG / v01.10 / Лицензия] [12.34 GB]]]></title>
+<author><name>uploader</name></author>
+<category term="546" label="PS5 games"/>
+</entry>
+<entry>
+<id>tag:rto.feed,2026-10-07:/t/6912346</id>
+<link href="https://xyz.net/forum/viewtopic.php?t=6912346"/>
+<updated>2026-10-07T12:01:40+00:00</updated>
+<title type="html"><![CDATA[[PS5 VR] Moss &amp; Friends [EUR]]]></title>
+<author><name>vr-fan</name></author>
+<category term="546" label="PS5 games"/>
+</entry>
+<entry>
+<id>tag:rto.feed,2026-10-06:/t/6900002</id>
+<link href="https://xyz.net/forum/viewtopic.php?t=6900002"/>
+<updated>2026-10-06T21:30:00+00:00</updated>
+<title type="html"><![CDATA[[Обновлено] [PS5] Bolt [EUR / v1.02]]]></title>
+<author><name>keeper</name></author>
+<category term="546" label="PS5 games"/>
+</entry>
+</feed>

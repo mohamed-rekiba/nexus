@@ -1,0 +1,91 @@
+[package]
+name = "nexus-app"
+description = "The launcher: the core, the built-in plugins and themes, and a Slint window."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "nexus"
+path = "src/main.rs"
+
+[dependencies]
+async-trait.workspace = true
+futures.workspace = true
+gilrs.workspace = true
+nexus-api.workspace = true
+nexus-core.workspace = true
+nexus-ui-api.workspace = true
+nexus-ui-host.workspace = true
+reqwest.workspace = true
+rodio.workspace = true
+# winit's window, to bring the launcher back to the front.
+slint = { workspace = true, features = ["unstable-winit-030"] }
+slint-interpreter = { workspace = true, features = ["backend-winit", "renderer-femtovg"] }
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+# Linked so their compile-time factories register. Don't remove as "unused".
+emu-kyty.workspace = true
+emu-shadps4.workspace = true
+emu-pc.workspace = true
+playstation-store.workspace = true
+release-catalog.workspace = true
+system-host.workspace = true
+theme-default.workspace = true
+# Vulkan, for "This PC": the graphics cards, read in a child process (src/gpu_probe.rs).
+ash = "0.38"
+# libmpv at run time, for trailers in the window (src/trailer.rs). Already in the lock file
+# through ash.
+libloading = "0.8"
+# BitTorrent, for the games a catalog offers (src/torrents.rs). Pinned: the adapter follows
+# its API as of this version.
+librqbit = { version = "=9.0.1", default-features = false, features = ["rust-tls"] }
+# The archives a download holds (src/archives.rs): zip and GOG installers, tar and tar.gz,
+# and 7z, pinned like librqbit. RAR goes through the system's libarchive, loaded at run time
+# with libloading (src/libarchive.rs): UnRAR's licence adds terms the GPL doesn't allow.
+flate2.workspace = true
+sevenz-rust2 = { version = "=0.23.0", default-features = false, features = ["ppmd", "deflate"] }
+tar.workspace = true
+zip.workspace = true
+
+# The local time for the clock (src/clock.rs). Already in the lock file through tokio.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# KDE's windows on Wayland, through KWin's scripting over D-Bus (src/desktop.rs). Already in
+# the lock file through winit.
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = { version = "5.14", default-features = false, features = ["async-io", "blocking-api"] }
+
+# The window in front, and bringing a window to it (src/desktop.rs), and the local time.
+# Already in the lock file through winit and tokio.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[dev-dependencies]
+# Builds 7z archives for the archives adapter's tests.
+sevenz-rust2 = { version = "=0.23.0", default-features = false, features = ["compress"] }
+
+# The desktop adapter against the real windowing system. Its own main: a helper window must
+# run on a process's main thread. Opt in with NEXUS_DESKTOP_TESTS=1.
+[[test]]
+name = "desktop"
+harness = false
+
+[lints]
+workspace = true
+
+[build-dependencies]
+# The icon and version info in nexus.exe (build.rs). It compiles everywhere and only acts
+# when the target is Windows.
+winresource = "0.1"

@@ -1,0 +1,259 @@
+import { Vm, Host } from "../types.slint";
+import { Tokens } from "../tokens.slint";
+import { Look } from "look.slint";
+import { Icon } from "icon.slint";
+import { Trailers } from "trailer-player.slint";
+
+// A game's options, as the old launcher's menu: the Game Hub (from Home), the emulator's own
+// actions, then open the game's folder, view the emulator's log, rate how it runs, the
+// community list, the ProtonDB page, Settings, and Uninstall for an installed game. Items the game doesn't
+// have are left out. Options on a pad, the Menu key, or the "⋯" button open it; up and down move, Enter
+// picks, Escape closes. Uninstall asks first in the same card, with the keys on Not now.
+export global GameMenu {
+    in-out property <bool> open;
+    in-out property <int> focus;
+    // Uninstall asks first: the card shows the question, and the keys are on Uninstall (0) or
+    // Not now (1).
+    in-out property <bool> confirming;
+    in-out property <int> confirm-focus: 1;
+    // The menu is for the game whose details are shown.
+    out property <string> game: Vm.detail.key;
+    // A card's Uninstall asks for its own game (`ask-uninstall`); empty for the shown game.
+    in-out property <string> uninstall-key;
+    in-out property <string> uninstall-title;
+    out property <bool> hub: Vm.screen != "game-detail";
+    out property <int> actions: Vm.detail.actions.length;
+    // The fixed items after the emulator's actions.
+    out property <[{ id: string, label: string, icon: string, on: bool }]> items: [
+        { id: "settings-game", label: "Game settings", icon: "gear", on: Vm.detail.settings.length > 0 },
+        { id: "folder", label: "Open game folder", icon: "folder", on: Vm.detail.has-folder },
+        { id: "log", label: "View emulator log", icon: "log", on: Vm.detail.has-log },
+        { id: "trailer", label: "Watch trailer", icon: "film", on: Vm.detail.trailer-url != "" },
+        { id: "rate", label: "Rate how it runs", icon: "star", on: true },
+        { id: "compat", label: "Compatibility list", icon: "web", on: Vm.detail.compat-page != "" },
+        { id: "protondb", label: "ProtonDB page", icon: "web", on: Vm.detail.protondb-url != "" },
+        { id: "settings", label: "Settings", icon: "gear", on: true },
+        { id: "hide", label: Vm.detail.hidden ? "Show in the Catalog" : "Hide from the Catalog",
+            icon: Vm.detail.hidden ? "eye" : "eye-off", on: Vm.detail.releases.length > 0 },
+        { id: "uninstall", label: "Uninstall", icon: "close", on: Vm.detail.can-uninstall },
+    ];
+    // Index 0 is the Game Hub; 1 to `actions` the emulator's actions; then `items`.
+    out property <int> count: 1 + root.actions + root.items.length;
+
+    public pure function shown(i: int) -> bool {
+        i == 0 ? root.hub : i <= root.actions ? true : root.items[i - 1 - root.actions].on
+    }
+    public function show() {
+        root.open = true;
+        root.confirming = false;
+        root.focus = root.hub ? 0 : 1;
+        if (!root.shown(root.focus)) { root.step(1); }
+        Host.play-sound("select");
+    }
+    public function close() { root.open = false; root.confirming = false; root.uninstall-key = ""; root.uninstall-title = ""; }
+    // A card's Uninstall: the question alone, for `key`, with the keys on Not now.
+    public function ask-uninstall(key: string, title: string) {
+        root.uninstall-key = key;
+        root.uninstall-title = title;
+        root.open = true;
+        root.confirming = true;
+        root.confirm-focus = 1;
+        Host.play-sound("select");
+    }
+    // The answer to "Uninstall …?": 0 uninstalls, 1 is Not now. Either closes the menu.
+    public function answer(choice: int) {
+        if (choice == 0) { Host.uninstall-game(root.uninstall-key != "" ? root.uninstall-key : root.game); }
+        root.close();
+        Host.play-sound(choice == 0 ? "select" : "back");
+    }
+    // Moves to the next shown item, skipping the hidden ones.
+    function step(delta: int) {
+        let a = Math.clamp(root.focus + delta, 0, root.count - 1);
+        let b = Math.clamp(a + delta, 0, root.count - 1);
+        let c = Math.clamp(b + delta, 0, root.count - 1);
+        let d = Math.clamp(c + delta, 0, root.count - 1);
+        root.focus = root.shown(a) ? a : root.shown(b) ? b : root.shown(c) ? c : root.shown(d) ? d : root.focus;
+    }
+    public function key(text: string) -> bool {
+        if (root.confirming) {
+            if (text == Key.UpArrow || text == Key.DownArrow || text == Key.LeftArrow || text == Key.RightArrow) {
+                root.confirm-focus = 1 - root.confirm-focus;
+                Host.play-sound("move");
+            } else if (text == Key.Return) {
+                root.answer(root.confirm-focus);
+            } else if (text == Key.Escape || text == Key.Backspace || text == Key.Menu) {
+                root.answer(1);
+            }
+            return true;
+        }
+        if (text == Key.UpArrow || text == Key.DownArrow) {
+            root.step(text == Key.DownArrow ? 1 : -1);
+            Host.play-sound("move");
+            return true;
+        }
+        if (text == Key.Return) { root.pick(root.focus); return true; }
+        if (text == Key.Escape || text == Key.Backspace || text == Key.Menu) { root.close(); Host.play-sound("back"); return true; }
+        true
+    }
+    public function pick(i: int) {
+        if (i > root.actions && root.items[i - 1 - root.actions].id == "uninstall") {
+            root.confirming = true;
+            root.confirm-focus = 1;
+            Host.play-sound("select");
+            return;
+        }
+        root.open = false;
+        Host.play-sound("select");
+        if (i == 0) {
+            Host.open-game(root.game);
+        } else if (i <= root.actions) {
+            let action = Vm.detail.actions[i - 1];
+            Host.run-action(action.plugin, action.action, root.game, action.args);
+        } else {
+            let id = root.items[i - 1 - root.actions].id;
+            if (id == "settings-game") { Host.open-game-settings(root.game); }
+            if (id == "folder") { Host.open-game-folder(root.game); }
+            if (id == "log") { Host.open-game-log(root.game); }
+            if (id == "trailer") { Trailers.watch(); }
+            if (id == "rate") { Host.ask-result(root.game); }
+            if (id == "compat") { Host.open-url(Vm.detail.compat-page); }
+            if (id == "protondb") { Host.open-url(Vm.detail.protondb-url); }
+            if (id == "settings") { Host.navigate("settings"); }
+            if (id == "hide") { Host.hide-game(root.game, !Vm.detail.hidden); }
+        }
+    }
+}
+
+// One item, with the gap under it; an item that is off takes no room.
+component MenuRow inherits Rectangle {
+    in property <string> label;
+    in property <string> icon;
+    in property <bool> focused;
+    in property <bool> on: true;
+    // Red: it deletes something.
+    in property <bool> danger;
+    // A choice of a question: a faint box shows it is one, also when it isn't focused.
+    in property <bool> boxed;
+    // The label tests and screen readers find it by.
+    in property <string> name: "game-menu";
+    callback picked();
+    property <color> fg: root.focused ? (root.danger ? #ffffff : #0a0d18) : root.danger ? Tokens.color-danger : Tokens.color-text-muted;
+    height: root.on ? 64 * Look.px : 0;
+    visible: root.on;
+    accessible-role: button;
+    accessible-label: root.on ? root.name : "";
+    accessible-value: root.label;
+    accessible-item-selected: root.focused;
+    accessible-action-default => { root.picked(); }
+    Rectangle {
+        height: 58 * Look.px;
+        y: 0;
+        border-radius: 12 * Look.px;
+        background: root.focused ? (root.danger ? Tokens.color-danger : #ffffff) : ta.has-hover ? #ffffff14 : root.boxed ? #ffffff0d : transparent;
+        animate background { duration: Tokens.motion-fast; }
+    }
+    HorizontalLayout {
+        height: 58 * Look.px;
+        y: 0;
+        padding-left: 18 * Look.px;
+        padding-right: 18 * Look.px;
+        spacing: 16 * Look.px;
+        Rectangle {
+            width: 24 * Look.px;
+            if root.icon != "" : Icon { name: root.icon; color: root.fg; width: 24 * Look.px; height: 24 * Look.px; }
+        }
+        Text { text: root.label; font-size: 20 * Look.px; color: root.danger || root.focused ? root.fg : Tokens.color-text; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+    }
+    ta := TouchArea { height: 58 * Look.px; y: 0; mouse-cursor: pointer; clicked => { root.picked(); } }
+}
+
+export component GameMenuSheet inherits Rectangle {
+    property <bool> entered;
+    // After the first frame, so the entry animates from its start.
+    Timer { interval: 16ms; running: !root.entered; triggered => { root.entered = true; } }
+    background: root.entered ? #03050c99 : #03050c00;
+    animate background { duration: Look.timed(200ms); }
+    TouchArea { clicked => { GameMenu.close(); } }
+    Rectangle {
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        opacity: root.entered ? 1 : 0;
+        transform-scale: root.entered ? 1.0 : 0.94;
+        animate opacity { duration: Look.timed(180ms); easing: ease-out-quad; }
+        animate transform-scale { duration: Look.timed(320ms); easing: ease-out-back; }
+        width: 520 * Look.px;
+        height: col.preferred-height;
+        border-radius: 22 * Look.px;
+        background: #121a31fa;
+        border-width: 1px;
+        border-color: Look.line;
+        drop-shadow-blur: 40 * Look.px;
+        drop-shadow-color: #00000099;
+        TouchArea {}
+        col := VerticalLayout {
+            padding: 18 * Look.px;
+            padding-bottom: 12 * Look.px;
+            spacing: 0;
+            // The question names the game itself.
+            if !GameMenu.confirming : Text {
+                text: Vm.detail.title;
+                font-size: 20 * Look.px;
+                font-weight: 600;
+                color: Tokens.color-text-muted;
+                overflow: elide;
+                horizontal-alignment: Look.rtl ? right : left;
+            }
+            if !GameMenu.confirming : Rectangle { height: 18 * Look.px; }
+            if GameMenu.confirming : VerticalLayout {
+                spacing: 14 * Look.px;
+                Text {
+                    text: "Uninstall " + (GameMenu.uninstall-title != "" ? GameMenu.uninstall-title : Vm.detail.title) + "?";
+                    width: parent.width;
+                    font-size: 26 * Look.px;
+                    font-weight: 700;
+                    color: Tokens.color-text;
+                    wrap: word-wrap;
+                    horizontal-alignment: Look.rtl ? right : left;
+                    accessible-role: text;
+                    accessible-label: "uninstall-title";
+                    accessible-value: self.text;
+                }
+                Text {
+                    text: "Its folder is deleted from your game folder, with its update and add-ons. A download it came from stays in Downloads.";
+                    width: parent.width;
+                    font-size: 18 * Look.px;
+                    color: Tokens.color-text-muted;
+                    wrap: word-wrap;
+                    horizontal-alignment: Look.rtl ? right : left;
+                }
+                Rectangle { height: 4 * Look.px; }
+                for choice in [0, 1] : MenuRow {
+                    label: choice == 0 ? "Uninstall" : "Not now";
+                    icon: choice == 0 ? "close" : "chevl";
+                    boxed: true;
+                    danger: choice == 0;
+                    focused: GameMenu.confirm-focus == choice;
+                    name: "uninstall-choice";
+                    picked => { GameMenu.answer(choice); }
+                }
+            }
+            if !GameMenu.confirming && GameMenu.hub : MenuRow { label: "Game Hub"; icon: "info"; focused: GameMenu.focus == 0; picked => { GameMenu.pick(0); } }
+            if !GameMenu.confirming : VerticalLayout {
+            for action[i] in Vm.detail.actions : MenuRow {
+                label: action.text;
+                icon: "play";
+                focused: GameMenu.focus == i + 1;
+                picked => { GameMenu.pick(i + 1); }
+            }
+            for item[i] in GameMenu.items : MenuRow {
+                on: item.on;
+                label: item.label;
+                icon: item.icon;
+                focused: GameMenu.focus == i + 1 + GameMenu.actions;
+                danger: item.id == "uninstall";
+                picked => { GameMenu.pick(i + 1 + GameMenu.actions); }
+            }
+            }
+        }
+    }
+}

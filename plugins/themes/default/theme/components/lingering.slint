@@ -1,0 +1,15 @@
+import { Tokens } from "../tokens.slint";
+
+// Keeps a sheet on screen while it slides out: `shown` stays true for the sheet's slide time
+// after `open` turns false.
+export component Lingering {
+    in property <bool> open;
+    out property <bool> shown: root.open || root.closing;
+    property <bool> closing;
+    changed open => { root.closing = !root.open; }
+    Timer {
+        interval: Math.max(Tokens.motion-slow, 1ms);
+        running: root.closing;
+        triggered => { root.closing = false; }
+    }
+}

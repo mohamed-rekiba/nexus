@@ -1,0 +1,15 @@
+id = "release-catalog"
+# A service: it runs no games, it lists the games each emulator's catalog offers to download.
+kind = "service"
+name = "Game Catalog"
+version = "0.1.0"
+host_api = "^0.1"
+platforms = ["linux", "macos", "windows"]
+capabilities = ["releases", "configurator", "slots"]
+
+[permissions]
+# The host the catalog files are fetched from. A catalog address on another host is refused.
+# The hosts of the refresh's forum list API and Atom feed (`refresh::API`, `refresh::FEED`).
+# Steam's image hosts serve the art a catalog's Steam data names. The topics' pictures are on
+# imageban.ru and fastpic.org: a picture on another host is left out.
+network = ["xyz.dev", "api.rutracker.cc", "feed.rutracker.cc", "*.steamstatic.com", "*.imageban.ru", "*.fastpic.org"]

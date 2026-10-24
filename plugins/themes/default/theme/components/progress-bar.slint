@@ -1,0 +1,17 @@
+import { Tokens } from "../tokens.slint";
+import { Look } from "look.slint";
+
+export component ProgressBar inherits Rectangle {
+    in property <float> progress;
+    in property <brush> bar-color: Tokens.color-accent;
+    height: 7 * Look.px;
+    border-radius: self.height / 2;
+    background: #ffffff14;
+    Rectangle {
+        x: Look.rtl ? parent.width - self.width : 0;
+        width: parent.width * Math.clamp(root.progress, 0, 1);
+        border-radius: parent.border-radius;
+        background: root.bar-color;
+        animate width { duration: Look.timed(300ms); }
+    }
+}

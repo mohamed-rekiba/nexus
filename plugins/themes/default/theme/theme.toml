@@ -1,0 +1,110 @@
+id = "default"
+kind = "theme"
+name = "Default"
+version = "0.3.0"
+host_api = "^0.1"
+capabilities = ["theme"]
+activation = "eager"
+
+# The built-in theme: the old launcher's own look (its ui/*.slint), ported to the theme
+# contract. Every value is laid out on a 1920×1080 canvas and scaled to the window.
+[theme]
+ui_api = "^0.1"
+screens = ["home", "game-detail", "catalog", "downloads", "settings", "emulators", "themes", "plugin", "running"]
+components = ["card", "button", "list-item", "progress-bar", "dialog", "slot-badges", "slot-actions", "slot-sections"]
+input = ["gamepad", "pointer"]
+navigation = "focus"
+
+[[theme.breakpoints]]
+name = "compact"
+max_width = 900
+
+[[theme.breakpoints]]
+name = "regular"
+
+[theme.assets]
+fonts = [
+    "fonts/Inter-Regular.ttf",
+    "fonts/Inter-Medium.ttf",
+    "fonts/Inter-SemiBold.ttf",
+    "fonts/Inter-Bold.ttf",
+    "fonts/Tajawal-Regular.ttf",
+    "fonts/Tajawal-Bold.ttf",
+]
+
+[theme.assets.images]
+# The Nexus emblem (assets/logo.svg in the repository, drawn at 512 px).
+logo = "images/logo.png"
+
+# select, back, error and start are made by scripts/make-sounds.py.
+[theme.assets.sounds]
+move = "sounds/move.wav"
+select = "sounds/select.wav"
+back = "sounds/back.wav"
+error = "sounds/error.wav"
+start = "sounds/start.wav"
+
+[theme.tokens]
+# The old launcher's Theme global (ui/theme.slint).
+color-bg = "#05070f"
+color-surface = "#121a31"
+color-surface-raised = "#1a2440"
+color-text = "#f5f7fb"
+color-text-muted = "#b9c3da"
+color-accent = "#0a6cff"
+color-on-accent = "#ffffff"
+color-focus = "#ffffff"
+color-success = "#3ddc97"
+color-warning = "#ffb547"
+color-danger = "#ff5a6a"
+color-info = "#7ab4ff"
+color-overlay = "#03050ccc"
+font-family = "Inter"
+font-size-s = 15
+font-size-m = 19
+font-size-l = 26
+font-size-xl = 44
+font-weight-regular = 400
+font-weight-bold = 700
+space-xs = 4
+space-s = 10
+space-m = 18
+space-l = 28
+space-xl = 48
+radius-s = 8
+radius-m = 14
+radius-l = 20
+shadow-color = "#00000099"
+shadow-blur-1 = 18
+shadow-blur-2 = 36
+motion-fast = 160
+motion-normal = 260
+motion-slow = 420
+layout-direction = "ltr"
+
+[theme.options.direction]
+label = "Layout direction"
+type = "choice"
+default = "ltr"
+
+[theme.options.direction.choices.ltr]
+layout-direction = "ltr"
+
+[theme.options.direction.choices.rtl]
+layout-direction = "rtl"
+
+# "off" turns the transitions into cuts.
+[theme.options.motion]
+label = "Animations"
+type = "choice"
+default = "on"
+
+[theme.options.motion.choices.on]
+motion-fast = 160
+motion-normal = 260
+motion-slow = 420
+
+[theme.options.motion.choices.off]
+motion-fast = 0
+motion-normal = 0
+motion-slow = 0

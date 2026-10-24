@@ -1,0 +1,16 @@
+# On the USB stick: a larger /var/tmp in memory. The live root is an overlay kept under /run,
+# which is small, and installing a system (ostree, bootc) writes large temporary files there.
+[Unit]
+Description=Larger temporary folder in memory (Nexus OS USB stick)
+ConditionKernelCommandLine=rd.live.image
+DefaultDependencies=no
+Before=local-fs.target
+
+[Mount]
+What=tmpfs
+Where=/var/tmp
+Type=tmpfs
+Options=mode=1777,size=50%,nr_inodes=1m
+
+[Install]
+WantedBy=local-fs.target

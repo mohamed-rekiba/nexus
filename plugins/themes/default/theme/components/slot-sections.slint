@@ -1,0 +1,64 @@
+import { Slot } from "../types.slint";
+import { Tokens } from "../tokens.slint";
+import { Look } from "look.slint";
+
+// Plugin sections as the old launcher's fact cards: a small-caps key over each value.
+export component SlotSections inherits VerticalLayout {
+    in property <[Slot]> items;
+    spacing: 22 * Look.px;
+
+    // Only sections: actions in the same list are buttons, drawn by the screen.
+    for item in root.items : VerticalLayout {
+        visible: item.kind == "section";
+        height: item.kind == "section" ? self.preferred-height : 0;
+        accessible-role: text;
+        accessible-label: item.label;
+        spacing: 14 * Look.px;
+        Text {
+            text: item.text.to-uppercase();
+            font-size: 18 * Look.px;
+            font-weight: 600;
+            letter-spacing: 2 * Look.px;
+            color: Look.text3;
+            horizontal-alignment: Look.rtl ? right : left;
+        }
+        Rectangle {
+            accessible-role: groupbox;
+            accessible-label: "section-card";
+            border-radius: 16 * Look.px;
+            background: #0b1020b8;
+            border-width: 1px;
+            border-color: Look.line;
+            VerticalLayout {
+                padding: 22 * Look.px;
+                spacing: 16 * Look.px;
+                // The key over its value, each as wide as the card inside its padding. The width
+                // is set, not left to the layout: a wrapped text's height is measured at its
+                // width, and one the layout gives comes too late, so the card counted each
+                // value as one line and the last rows ran out of it.
+                for row in item.rows : VerticalLayout {
+                    spacing: 4 * Look.px;
+                    if row.label != "" : Text {
+                        width: root.width - 44 * Look.px;
+                        text: row.label;
+                        font-size: 15 * Look.px;
+                        color: Look.text3;
+                        wrap: word-wrap;
+                        horizontal-alignment: Look.rtl ? right : left;
+                    }
+                    Text {
+                        accessible-role: text;
+                        accessible-label: "section-value";
+                        accessible-value: self.text;
+                        width: root.width - 44 * Look.px;
+                        text: row.value;
+                        font-size: 18 * Look.px;
+                        color: Tokens.color-text-muted;
+                        wrap: word-wrap;
+                        horizontal-alignment: Look.rtl ? right : left;
+                    }
+                }
+            }
+        }
+    }
+}

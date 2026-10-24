@@ -1,0 +1,39 @@
+name: Setup
+description: >-
+  The Rust toolchain, the system packages the build needs on Linux, and the dependency cache.
+  Every job that builds runs this, so the setup lives in one place.
+inputs:
+  components:
+    description: Extra toolchain components, comma-separated (for example "rustfmt, clippy")
+    default: ""
+  linux-packages:
+    description: Extra apt packages on Linux, space-separated
+    default: ""
+  cache-key:
+    description: Keeps unrelated jobs' caches apart
+    default: ""
+  save-cache:
+    description: "Whether this job saves the cache ('true' or 'false'). Only the check saves it."
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      with:
+        toolchain: stable
+        components: ${{ inputs.components }}
+    # Slint needs fontconfig and xkbcommon; gilrs needs udev (controllers); rodio needs ALSA.
+    - name: Linux system packages
+      if: runner.os == 'Linux'
+      shell: bash
+      env:
+        EXTRA: ${{ inputs.linux-packages }}
+      run: >-
+        sudo apt-get update && sudo apt-get install -y --no-install-recommends
+        libfontconfig1-dev libxkbcommon-dev libudev-dev libasound2-dev $EXTRA
+    # The key includes Cargo.lock: changed dependencies rebuild, the rest is reused.
+    - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+      with:
+        key: ${{ inputs.cache-key }}
+        save-if: ${{ inputs.save-cache == 'true' }}
+        cache-on-failure: true

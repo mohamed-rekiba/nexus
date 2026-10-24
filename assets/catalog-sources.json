@@ -1,0 +1,7 @@
+{
+  "ps5": { "platform": "PS5", "forums": [{ "key": "ps5", "url": "https://rutracker.net/forum/viewforum.php?f=546", "tag": "PS5" }] },
+  "ps4": { "platform": "PS4", "forums": [{ "key": "ps4", "url": "https://rutracker.net/forum/viewforum.php?f=973", "tag": "PS4" }] },
+  "pc":  { "platform": "PC",  "forums": [
+    { "key": "linux", "url": "https://rutracker.net/forum/viewforum.php?f=1992", "system": "linux" },
+    { "key": "wine",  "url": "https://rutracker.net/forum/viewforum.php?f=2059", "system": "linux", "wine": true } ] }
+}

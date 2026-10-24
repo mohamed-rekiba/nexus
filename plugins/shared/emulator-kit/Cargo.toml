@@ -1,0 +1,23 @@
+[package]
+name = "emulator-kit"
+description = "Shared code for the emulator plugins, not a plugin: GitHub releases, cached JSON, build folders, game folders, compatibility lists, keyboard keys, and the PS5 package and exFAT readers. Depends on nexus-api, tokio and the vendored Kraken decoder."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[features]
+# The synthetic-package and exFAT-image builders, for other crates' tests.
+fixtures = []
+
+[dependencies]
+nexus-api.workspace = true
+tokio.workspace = true
+oozextract = { path = "../../../third_party/oozextract", features = ["verbose_errors"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

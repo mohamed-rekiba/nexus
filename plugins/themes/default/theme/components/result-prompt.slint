@@ -1,0 +1,95 @@
+import { Vm, Host } from "../types.slint";
+import { Tokens } from "../tokens.slint";
+import { Look } from "look.slint";
+import { Icon } from "icon.slint";
+
+// "How far did it get?", after a game closes, as the old launcher's menu: the player's own
+// result for the game, kept with its compatibility. Up and down move, Enter answers, Escape
+// is Not now.
+export global Ask {
+    in-out property <int> focus;
+    out property <[{ label: string, icon: string, result: string }]> items: [
+        { label: "In game: reaches gameplay", icon: "play", result: "ingame" },
+        { label: "Main menu, but not gameplay", icon: "grid", result: "menus" },
+        { label: "Intro logos, then stops", icon: "film", result: "boots" },
+        { label: "Doesn't start", icon: "stop", result: "nothing" },
+        { label: "Not now", icon: "", result: "" },
+    ];
+    public function key(text: string) -> bool {
+        if (text == Key.UpArrow || text == Key.DownArrow) {
+            root.focus = Math.clamp(root.focus + (text == Key.DownArrow ? 1 : -1), 0, root.items.length - 1);
+            Host.play-sound("move");
+            return true;
+        }
+        if (text == Key.Return) { root.answer(root.focus); return true; }
+        if (text == Key.Escape || text == Key.Backspace) { root.answer(root.items.length - 1); return true; }
+        true
+    }
+    public function answer(index: int) {
+        Host.report-result(root.items[index].result);
+        root.focus = 0;
+    }
+}
+
+export component ResultPrompt inherits Rectangle {
+    property <bool> entered;
+    // After the first frame, so the entry animates from its start.
+    Timer { interval: 16ms; running: !root.entered; triggered => { root.entered = true; } }
+    background: root.entered ? #03050c99 : #03050c00;
+    animate background { duration: Look.timed(200ms); }
+    TouchArea { clicked => { Ask.answer(Ask.items.length - 1); } }
+    Rectangle {
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        opacity: root.entered ? 1 : 0;
+        transform-scale: root.entered ? 1.0 : 0.94;
+        animate opacity { duration: Look.timed(180ms); easing: ease-out-quad; }
+        animate transform-scale { duration: Look.timed(320ms); easing: ease-out-back; }
+        width: 520 * Look.px;
+        height: col.preferred-height;
+        border-radius: 22 * Look.px;
+        background: #121a31fa;
+        border-width: 1px;
+        border-color: Look.line;
+        drop-shadow-blur: 40 * Look.px;
+        drop-shadow-color: #00000099;
+        TouchArea {}
+        col := VerticalLayout {
+            padding: 18 * Look.px;
+            spacing: 6 * Look.px;
+            Text {
+                text: "How far did " + Vm.result-prompt + " get?";
+                font-size: 20 * Look.px;
+                font-weight: 600;
+                color: Tokens.color-text-muted;
+                overflow: elide;
+                horizontal-alignment: Look.rtl ? right : left;
+                accessible-role: text;
+                accessible-label: "result-prompt";
+                accessible-value: self.text;
+            }
+            Rectangle { height: 6 * Look.px; }
+            for m[i] in Ask.items : item := Rectangle {
+                property <bool> f: Ask.focus == i;
+                height: 58 * Look.px;
+                border-radius: 12 * Look.px;
+                background: self.f ? #ffffff : transparent;
+                animate background { duration: Tokens.motion-fast; }
+                accessible-role: button;
+                accessible-label: "result:" + m.result;
+                accessible-action-default => { Ask.answer(i); }
+                HorizontalLayout {
+                    padding-left: 18 * Look.px;
+                    padding-right: 18 * Look.px;
+                    spacing: 16 * Look.px;
+                    Rectangle {
+                        width: 24 * Look.px;
+                        if m.icon != "" : Icon { name: m.icon; color: item.f ? #0a0d18 : Tokens.color-text-muted; width: 24 * Look.px; height: 24 * Look.px; }
+                    }
+                    Text { text: m.label; font-size: 20 * Look.px; color: item.f ? #0a0d18 : Tokens.color-text; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                }
+                TouchArea { mouse-cursor: pointer; clicked => { Ask.answer(i); } }
+            }
+        }
+    }
+}

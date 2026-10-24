@@ -1,0 +1,86 @@
+//! Seam 1, core app API: a store plugin describes the games other plugins find.
+
+mod common;
+
+use std::time::Duration;
+
+use common::*;
+use nexus_core::Command;
+use nexus_testkit::FakeHost;
+use nexus_ui_api::ImageRef;
+
+#[tokio::test]
+async fn the_first_library_load_waits_for_the_stores_descriptions() {
+    let t = FakeHost::new()
+        .plugin(games("emu-a", vec!["Alpha", "Beta"]))
+        .plugin(store(
+            "store",
+            vec![("CUSA00000", 4.5, "")],
+            Some("https://art.example/alpha.png".into()),
+            Duration::from_millis(300),
+        ))
+        .boot_core()
+        .await;
+
+    t.core.dispatch(Command::RefreshLibrary).await.unwrap();
+
+    let view = t.core.view();
+    assert!(view.boot.ready);
+    let alpha = view.home.games.iter().find(|g| g.title == "Alpha").unwrap();
+    assert_eq!(alpha.rating, Some(4.5), "described before the boot is ready");
+    assert_eq!(
+        alpha.cover,
+        Some(ImageRef::Url { plugin: id("store"), url: "https://art.example/alpha.png".into() }),
+        "the store's art in place of the plugin's"
+    );
+}
+
+#[tokio::test]
+async fn a_game_the_store_does_not_know_keeps_its_own_details() {
+    let t = FakeHost::new()
+        .plugin(games("emu-a", vec!["Alpha", "Beta"]))
+        .plugin(store(
+            "store",
+            vec![("CUSA00000", 4.5, "")],
+            Some("https://art.example/alpha.png".into()),
+            Duration::ZERO,
+        ))
+        .boot_core()
+        .await;
+
+    t.core.dispatch(Command::RefreshLibrary).await.unwrap();
+
+    let view = t.core.view();
+    let beta = view.home.games.iter().find(|g| g.title == "Beta").unwrap();
+    assert_eq!(beta.rating, None);
+    assert_eq!(beta.cover, None, "the plugin's own cover, which is none");
+}
+
+#[tokio::test]
+async fn the_library_filters_to_games_in_game_and_sorts_by_rating_and_release() {
+    let t = FakeHost::new()
+        .plugin(games("emu-a", vec!["Alpha", "Beta", "Gamma"]))
+        .plugin(store("store", vec![("CUSA00000", 3.0, ""), ("CUSA00001", 4.8, "")], None, Duration::ZERO))
+        .boot_core()
+        .await;
+    t.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    let titles = |t: &nexus_testkit::TestCore| -> Vec<String> {
+        t.core.view().home.library.games.iter().map(|g| g.title.clone()).collect()
+    };
+
+    // The player's own result: Beta reaches gameplay.
+    t.core.kernel().config().set(&["app", "results", "emu-a:G1"], "ingame".into()).unwrap();
+    t.core.dispatch(Command::LibrarySystem(Some(nexus_core::INGAME_FILTER.into()))).await.unwrap();
+    assert_eq!(titles(&t), ["Beta"]);
+    let chip = t.core.view().home.library.systems.into_iter().find(|f| f.id == nexus_core::INGAME_FILTER).unwrap();
+    assert!(chip.on && chip.count == 1, "{chip:?}");
+    // "All" clears it.
+    t.core.dispatch(Command::LibrarySystem(None)).await.unwrap();
+    assert_eq!(titles(&t).len(), 3);
+
+    // Top rated first; a game the store doesn't rate goes last.
+    t.core.dispatch(Command::LibrarySort("rating".into())).await.unwrap();
+    assert_eq!(titles(&t), ["Beta", "Alpha", "Gamma"]);
+    t.core.dispatch(Command::LibrarySort("compat".into())).await.unwrap();
+    assert_eq!(titles(&t)[0], "Beta", "the game that runs best first");
+}

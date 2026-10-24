@@ -1,0 +1,21 @@
+[package]
+name = "system-host"
+description = "The machine's own settings: network and Wi-Fi, VPNs, Bluetooth, sound, power and battery, and Nexus OS's updates and installer."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+nexus-api.workspace = true
+tokio.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

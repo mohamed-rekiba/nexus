@@ -1,0 +1,381 @@
+import { Vm, Host, Field, Folder } from "../types.slint";
+import { Tokens } from "../tokens.slint";
+import { Look } from "look.slint";
+import { Icon } from "icon.slint";
+import { Switch } from "widgets.slint";
+import { Osk, TextField } from "keyboard.slint";
+
+// The rows of a settings sheet (Settings, and a plugin's page), and where the keys are in it.
+// A sheet is a list of sections; each has rows. In Settings:
+//   0   GAMES: the game folders, then "Rescan game folders"
+//   1   UPDATES: "Update automatically", "Nexus updates"
+//   2   LAUNCHER: full screen, size of everything, back to the launcher, interface sounds,
+//       start at login (in an installed build), the screen (with two monitors or more), quit
+//   3   DOWNLOADS: "Download only through a VPN", one row per VPN (one that says none when
+//       there is none), "Add a VPN" where the system can, then "Keep sharing finished
+//       downloads". Where the system can't bind downloads to a VPN: the switch and sharing.
+//   4   THIS PC: processor, memory, graphics, then one verdict per emulator (they only show)
+//   5   SYSTEM, when Nexus is the whole screen: Internet, Sound, Bluetooth (each opens its
+//       panel), Nexus OS updates (on Nexus OS), "Install Nexus OS on this PC" (on its USB
+//       stick), then Restart and Shut down, which ask again before they act
+// On a theme's page:
+//   0   "Use this theme"
+//   1   its options, when it is the one in use
+// On a game's own settings:
+//   0   its fields
+// On an emulator's or a service's page:
+//   0              "Turned on"
+//   1              its build (install or update), "Uninstall" when installed, then its actions
+//   2 .. 1+panels  one section per settings panel
+//   2 + panels     its folders
+export global Prefs {
+    in-out property <int> section;
+    in-out property <int> row;
+    // A text row is open for typing.
+    in-out property <bool> editing;
+    in-out property <string> edit-text;
+    // The last key for the focused row: left (-1), right (1) or Return (0). `serial` counts
+    // the keys, so the focused row sees each one.
+    in-out property <int> pending;
+    in-out property <int> serial;
+
+    out property <bool> page: Vm.screen == "plugin";
+    // A game's own settings: one section, its fields.
+    out property <bool> game-page: Vm.screen == "game-settings";
+    out property <bool> theme-page: root.page && Vm.plugin-page.plugin.kind == "theme";
+    out property <bool> on: Vm.plugin-page.plugin.enabled;
+    out property <int> panels: root.page && !root.theme-page && root.on ? Vm.plugin-page.settings.length : 0;
+    out property <int> sections: root.game-page ? 1
+        : root.theme-page ? (Vm.plugin-page.current ? 2 : 1)
+        : root.page ? (root.on ? 3 + root.panels : 1)
+        : 5 + (Vm.system.whole-screen ? 1 : 0);
+    // The page's build rows: the build, then "Uninstall" when it is installed.
+    out property <int> builds: !root.page || root.theme-page || !root.on || !Vm.plugin-page.is-emulator || !Vm.plugin-page.emulator.has-builds ? 0
+        : Vm.plugin-page.emulator.installed.length > 0 ? 2 : 1;
+    // The page's action rows: an emulator's with builds, and a service's.
+    out property <int> actions: !root.page || root.theme-page || !root.on
+        || (Vm.plugin-page.is-emulator && root.builds == 0) ? 0 : Vm.plugin-page.actions.length;
+
+    // LAUNCHER's rows after the fixed four: the screen and quit move down when "Start at
+    // login" shows.
+    out property <int> screen-row: Vm.can-start-at-login ? 5 : 4;
+    out property <int> quit-row: root.screen-row + (Vm.monitors.length > 1 ? 1 : 0);
+    // DOWNLOADS' rows after the VPN switch: the VPNs, "Add a VPN", then sharing.
+    out property <int> vpn-rows: Vm.vpn.problem != "" ? 0 : Math.max(1, Vm.vpn.vpns.length);
+    out property <bool> vpn-import: Vm.vpn.problem == "" && Vm.vpn.can-import;
+    out property <int> import-row: 1 + root.vpn-rows;
+    out property <int> share-row: root.import-row + (root.vpn-import ? 1 : 0);
+    // SYSTEM's rows after Internet, Sound and Bluetooth (-1 for one that doesn't show).
+    out property <int> os-row: Vm.system.os-update != "" ? 3 : -1;
+    out property <int> install-row: Vm.system.stick ? 3 + (root.os-row >= 0 ? 1 : 0) : -1;
+    out property <int> restart-row: 3 + (root.os-row >= 0 ? 1 : 0) + (root.install-row >= 0 ? 1 : 0);
+    out property <int> system-rows: Vm.system.power-available ? root.restart-row + 2 : root.restart-row;
+
+    public pure function rows(section: int) -> int {
+        root.game-page ? (Vm.detail.settings.length > 0 ? Vm.detail.settings[0].fields.length : 0)
+            : root.theme-page ? (section == 0 ? 1 : Vm.theme-options.length)
+            : root.page ? (section == 0 ? 1
+                : section == 1 ? root.builds + root.actions
+                : section <= root.panels + 1 ? Vm.plugin-page.settings[section - 2].fields.length
+                : Vm.plugin-page.folders.length)
+            : section == 0 ? Vm.folders.length + 1
+            : section == 1 ? 2
+            : section == 2 ? root.quit-row + 1
+            : section == 3 ? root.share-row + 1
+            : section == 4 ? (Vm.hardware.known ? 2 + Vm.hardware.graphics.length + Vm.hardware.verdicts.length : 1)
+            : root.system-rows
+    }
+    // Back to the first row, as a sheet opens.
+    public function reset() {
+        root.section = 0;
+        root.row = 0;
+        root.editing = false;
+    }
+    public pure function is(section: int, row: int) -> bool {
+        root.section == section && root.row == row
+    }
+
+    function step(delta: int) {
+        if (delta > 0 && root.row + 1 < root.rows(root.section)) {
+            root.row += 1;
+            return;
+        }
+        if (delta < 0 && root.row > 0) {
+            root.row -= 1;
+            return;
+        }
+        // The next section with rows, if there is one.
+        let next = root.section + delta;
+        if (next >= 0 && next < root.sections && root.rows(next) > 0) {
+            root.section = next;
+            root.row = delta > 0 ? 0 : root.rows(next) - 1;
+        } else if (next >= 0 && next < root.sections) {
+            let after = next + delta;
+            if (after >= 0 && after < root.sections && root.rows(after) > 0) {
+                root.section = after;
+                root.row = delta > 0 ? 0 : root.rows(after) - 1;
+            }
+        }
+    }
+
+    // Handles a key in Settings. Returns whether it did anything.
+    public function key(text: string) -> bool {
+        if (root.editing) {
+            if (text == Key.Escape) { root.editing = false; return true; }
+            return false;
+        }
+        if (text == Key.DownArrow) { root.step(1); Host.play-sound("move"); return true; }
+        if (text == Key.UpArrow) { root.step(-1); Host.play-sound("move"); return true; }
+        if (text == Key.LeftArrow) { root.act(Look.rtl ? 1 : -1); return true; }
+        if (text == Key.RightArrow) { root.act(Look.rtl ? -1 : 1); return true; }
+        if (text == Key.Return || text == " ") { root.act(0); return true; }
+        false
+    }
+    public function act(delta: int) {
+        Prefs.pending = delta;
+        Prefs.serial += 1;
+    }
+}
+
+// A section's small-caps title.
+export component Header inherits Text {
+    font-size: 16 * Look.tpx;
+    font-weight: 600;
+    letter-spacing: 2 * Look.px;
+    color: Look.text3;
+    horizontal-alignment: Look.rtl ? right : left;
+    // The space above it is part of the header.
+    height: self.preferred-height + 48 * Look.px;
+    vertical-alignment: bottom;
+}
+
+// One row of a section card, as in the old launcher's Settings: rows between two headers share
+// one card, and the focused row gets a white edge.
+export component Row inherits Rectangle {
+    in property <string> label;
+    in property <string> hint;
+    // 0 dim, 1 good, 2 bad
+    in property <int> hint-kind;
+    in property <bool> focused;
+    in property <bool> first;
+    in property <bool> last;
+    in property <bool> danger;
+    // The row is in the sheet's viewport: the sheet scrolls to it when it gets the focus.
+    callback reveal(length, length);
+    callback clicked();
+
+    property <length> r: 14 * Look.px;
+    background: root.focused ? (root.danger ? #ff5a6a33 : #ffffff1f) : (root.danger ? #ff5a6a0d : #ffffff0b);
+    border-top-left-radius: root.first || root.focused ? root.r : 0;
+    border-top-right-radius: root.first || root.focused ? root.r : 0;
+    border-bottom-left-radius: root.last || root.focused ? root.r : 0;
+    border-bottom-right-radius: root.last || root.focused ? root.r : 0;
+    border-width: root.focused ? 3 * Look.px : 0;
+    border-color: root.danger ? Tokens.color-danger : #ffffff;
+    min-height: body.preferred-height;
+    animate background { duration: Tokens.motion-fast; }
+    changed focused => { if (root.focused) { root.reveal(self.absolute-position.y, self.height); } }
+
+    if !root.first && !root.focused : Rectangle {
+        x: 18 * Look.px;
+        y: 0;
+        width: parent.width - 36 * Look.px;
+        height: 1px;
+        background: Look.line;
+    }
+    // A click is not the controller: a text box it opens doesn't open the on-screen keyboard.
+    TouchArea { mouse-cursor: pointer; clicked => { Osk.pad = false; root.clicked(); } }
+    body := VerticalLayout {
+        padding-left: 18 * Look.px;
+        padding-right: 18 * Look.px;
+        padding-top: 14 * Look.px;
+        padding-bottom: 14 * Look.px;
+        spacing: 4 * Look.px;
+        HorizontalLayout {
+            spacing: 16 * Look.px;
+            min-height: 36 * Look.px;
+            // Layouts don't mirror: in right-to-left the label comes after the value.
+            if !Look.rtl : Text {
+                text: root.label;
+                font-size: 19 * Look.tpx;
+                font-weight: 500;
+                color: root.danger ? #ffb3bb : Tokens.color-text;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                overflow: elide;
+                horizontal-alignment: Look.rtl ? right : left;
+            }
+            @children
+            if Look.rtl : Text {
+                text: root.label;
+                font-size: 19 * Look.tpx;
+                font-weight: 500;
+                color: root.danger ? #ffb3bb : Tokens.color-text;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                overflow: elide;
+                horizontal-alignment: Look.rtl ? right : left;
+            }
+        }
+        if root.hint != "" : Text {
+            text: root.hint;
+            font-size: 15 * Look.tpx;
+            wrap: word-wrap;
+            color: root.hint-kind == 1 ? Tokens.color-success : root.hint-kind == 2 ? Tokens.color-danger : Look.text3;
+            horizontal-alignment: Look.rtl ? right : left;
+        }
+    }
+}
+
+// The value at the end of a row: plain, a switch, or ‹ a choice ›.
+export component Value inherits HorizontalLayout {
+    in property <string> text;
+    // text | toggle | choice | action
+    in property <string> kind: "text";
+    in property <bool> on;
+    in property <bool> focused;
+    // 0 dim, 1 good, 2 bad, 3 call to action, 4 warning
+    in property <int> tone;
+    spacing: 8 * Look.px;
+    alignment: Look.rtl ? start : end;
+    if root.kind == "toggle" : VerticalLayout { alignment: center; Switch { on: root.on; } }
+    if root.kind == "choice" : Icon {
+        name: "chevl";
+        color: root.focused ? Tokens.color-text : Look.text3;
+        width: 22 * Look.px;
+        height: 22 * Look.px;
+        y: (parent.height - self.height) / 2;
+    }
+    if root.kind != "toggle" : Text {
+        text: root.text;
+        font-size: (root.kind == "choice" ? 19 : 17) * Look.tpx;
+        font-weight: root.tone == 3 ? 600 : 400;
+        font-family: Tokens.font-family;
+        color: root.tone == 1 ? Tokens.color-success
+            : root.tone == 2 ? Tokens.color-danger
+            : root.tone == 3 ? Tokens.color-info
+            : root.tone == 4 ? Tokens.color-warning
+            : root.kind == "choice" ? Tokens.color-text
+            : root.text == "—" ? Look.text3 : Tokens.color-text-muted;
+        vertical-alignment: center;
+        horizontal-alignment: Look.rtl ? left : right;
+        overflow: elide;
+        max-width: 360 * Look.tpx;
+    }
+    if root.kind == "choice" : Icon {
+        name: "chevr";
+        color: root.focused ? Tokens.color-text : Look.text3;
+        width: 22 * Look.px;
+        height: 22 * Look.px;
+        y: (parent.height - self.height) / 2;
+    }
+}
+
+// The text box a row opens for typing.
+export component Editor inherits Rectangle {
+    in property <bool> secret;
+    // What is typed, over the on-screen keyboard's keys.
+    in property <string> title;
+    callback done(string);
+    height: 50 * Look.tpx;
+    min-width: 320 * Look.tpx;
+    border-radius: 10 * Look.px;
+    background: #00000040;
+    border-width: 1px;
+    border-color: Look.line;
+    // The on-screen keyboard types here too, when the controller opened it.
+    input := TextField {
+        x: 14 * Look.px;
+        width: parent.width - 28 * Look.px;
+        height: parent.height;
+        name: "editor";
+        title: root.title;
+        password: root.secret;
+        text: Prefs.edit-text;
+        font-size: 18 * Look.tpx;
+        font-family: Tokens.font-family;
+        text-color: Tokens.color-text;
+        init => { self.focus(); self.select-all(); }
+        accepted => { root.done(self.text); Prefs.editing = false; }
+    }
+}
+
+// A plugin's settings field as a row: a switch, ‹ a choice ›, or a value to type.
+export component FieldRow inherits Row {
+    in property <Field> field;
+    in property <int> section;
+    in property <int> index;
+    callback set(string);
+
+    label: root.field.label;
+    hint: root.field.help;
+    accessible-role: button;
+    accessible-label: "setting:" + root.field.key;
+    accessible-value: root.field.value;
+    accessible-action-default => { root.act(0); }
+    focused: Prefs.is(root.section, root.index);
+    property <bool> typing: Prefs.editing && root.focused;
+    // The current choice's place in `choices`.
+    property <int> chosen;
+    property <bool> on: root.field.value == "true";
+    clicked => { Prefs.section = root.section; Prefs.row = root.index; root.act(0); }
+    property <int> seen: Prefs.serial;
+    changed seen => { if (root.focused) { root.act(Prefs.pending); } }
+
+    function act(delta: int) {
+        if (root.field.kind == "toggle") {
+            if (delta == 0 || (delta > 0) != root.on) { root.set(root.on ? "false" : "true"); }
+        } else if (root.field.kind == "choice") {
+            if (root.field.choices.length > 0) {
+                root.set(root.field.choices[Math.mod(root.chosen + (delta == 0 ? 1 : delta) + root.field.choices.length, root.field.choices.length)]);
+            }
+        } else if (delta == 0) {
+            Prefs.edit-text = root.field.value;
+            Prefs.editing = true;
+        }
+    }
+    for choice[j] in root.field.choices : Rectangle {
+        width: 0;
+        visible: false;
+        property <bool> current: choice == root.field.value;
+        init => { if (self.current) { root.chosen = j; } }
+        changed current => { if (self.current) { root.chosen = j; } }
+    }
+    if !root.typing : Value {
+        kind: root.field.kind == "toggle" ? "toggle" : root.field.kind == "choice" ? "choice" : "text";
+        text: root.field.kind == "choice"
+            ? (root.field.labels[root.chosen] != "" && root.field.choices[root.chosen] == root.field.value ? root.field.labels[root.chosen] : Look.choice(root.field.value))
+            : root.field.value != "" ? root.field.value : "—";
+        on: root.on;
+        focused: root.focused;
+    }
+    if root.typing : Editor {
+        horizontal-stretch: 2;
+        title: root.label;
+        done(text) => { root.set(text); }
+    }
+}
+
+// A host folder as a row: Enter opens it for typing, several folders separated with ;.
+export component FolderRow inherits Row {
+    in property <Folder> folder;
+    in property <int> section;
+    in property <int> index;
+    property <bool> typing: Prefs.editing && root.focused;
+    label: root.folder.title != "" ? root.folder.title : root.folder.name;
+    hint: root.folder.help != "" ? root.folder.help : "For " + root.folder.requested-by + (root.folder.write ? " · can write here" : "") + " · separate several folders with ;";
+    focused: Prefs.is(root.section, root.index);
+    accessible-role: button;
+    accessible-label: "folder:" + root.folder.name;
+    accessible-value: root.folder.text;
+    clicked => { Prefs.section = root.section; Prefs.row = root.index; Prefs.act(0); }
+    if !root.typing : Value { text: root.folder.shown != "" ? root.folder.shown : "—"; }
+    if root.typing : Editor { horizontal-stretch: 2; title: root.label; done(text) => { Host.set-folder(root.folder.name, text); } }
+    property <int> seen: Prefs.serial;
+    changed seen => {
+        if (root.focused && Prefs.pending == 0 && !Prefs.editing) {
+            Prefs.edit-text = root.folder.text;
+            Prefs.editing = true;
+        }
+    }
+}

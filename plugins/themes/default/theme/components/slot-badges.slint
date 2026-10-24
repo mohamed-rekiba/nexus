@@ -1,0 +1,48 @@
+import { Slot } from "../types.slint";
+import { Tokens } from "../tokens.slint";
+import { Look } from "look.slint";
+
+// Plugin badges as the old launcher's small dark tags, with a dot in the badge's tone.
+export component SlotBadges inherits HorizontalLayout {
+    in property <[Slot]> items;
+    in property <length> size: 13 * Look.px;
+    // Small places, such as a card: each badge's short text.
+    in property <bool> short;
+    spacing: 6 * Look.px;
+    alignment: Look.rtl ? end : start;
+
+    for item in root.items : Rectangle {
+        accessible-role: text;
+        accessible-label: item.label;
+        accessible-value: item.text;
+        height: root.size * 2;
+        border-radius: 6 * Look.px;
+        background: #000000c4;
+        HorizontalLayout {
+            padding-left: 9 * Look.px;
+            padding-right: 9 * Look.px;
+            spacing: 6 * Look.px;
+            if item.icon.width > 0 : Image {
+                source: item.icon;
+                width: root.size;
+                height: root.size;
+                y: (parent.height - self.height) / 2;
+            }
+            if item.icon.width == 0 && item.tone != "neutral" : Rectangle {
+                width: root.size * 0.62;
+                height: self.width;
+                y: (parent.height - self.height) / 2;
+                border-radius: self.width / 2;
+                background: Look.tone(item.tone);
+            }
+            Text {
+                text: root.short && item.short != "" ? item.short : item.text;
+                color: #ffffff;
+                font-size: root.size;
+                font-weight: 700;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+    }
+}

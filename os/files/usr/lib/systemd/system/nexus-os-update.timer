@@ -1,0 +1,12 @@
+[Unit]
+Description=Check for a new Nexus OS version every day
+
+[Timer]
+# Soon after starting: a PC installed without internet gets its NVIDIA driver the first time it's online.
+OnBootSec=3min
+OnUnitActiveSec=1d
+RandomizedDelaySec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

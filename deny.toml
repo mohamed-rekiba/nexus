@@ -1,0 +1,50 @@
+# cargo-deny: security advisories, licences and sources of every dependency. CI runs
+# `cargo deny check` (see .github/workflows/ci.yml).
+
+[advisories]
+# Every advisory in the RustSec database fails the check, and so does an unmaintained crate.
+# To accept one, add its id here with the reason on the same line.
+ignore = [
+    { id = "RUSTSEC-2023-0071", reason = "rsa timing leak: the shadPS4 plugin decrypts PS4 package keys on this computer, with no network to time it; no fixed release exists" },
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser unmaintained: comes in through winit's window decorations (ab_glyph); no maintained version to move to yet" },
+    { id = "RUSTSEC-2026-0370", reason = "zvariant unmaintained: comes in through Slint's winit backend (zbus, accessibility on Linux)" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names unmaintained: comes in through Slint's winit backend (zbus)" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive unmaintained: comes in through Slint's winit backend (zbus)" },
+    { id = "RUSTSEC-2026-0293", reason = "ringbuf 0.4 double drop when an element's Drop panics: comes in through librqbit-utp 0.7, whose ring buffer holds u8, which has no Drop; the fix is ringbuf 0.5, which librqbit 9.0.1 can't take" },
+]
+
+[licenses]
+# The launcher is GPL-2.0-or-later, so every licence here must allow use in a GPL work.
+# Apache-2.0 and GPL-3.0-only are fine because of "or later". Slint is GPL-3.0-only (or its
+# own licences); MPL-2.0 is the symphonia audio decoders; CDLA-Permissive-2.0 is the
+# webpki root certificates.
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "GPL-3.0-only",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Zlib",
+]
+# The workspace's own crates aren't published.
+private = { ignore = true }
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# The workspace's own path dependencies have no version; they are never published.
+allow-wildcard-paths = true
+
+[sources]
+# crates.io only: no git or other registries.
+unknown-registry = "deny"
+unknown-git = "deny"

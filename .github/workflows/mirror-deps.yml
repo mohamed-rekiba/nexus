@@ -1,0 +1,37 @@
+name: mirror-deps
+
+# Copies the pinned Windows libmpv build (in .github/actions/libmpv) into this repo's `deps`
+# release, so packaging still works after shinchiro drops the build (they keep about six
+# weeks). Run it by hand after changing the pin.
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  mirror:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      # To make the release and upload the file.
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          action=.github/actions/libmpv/action.yml
+          file=$(sed -n 's/^ *FILE: //p' "$action")
+          upstream=$(sed -n 's/^ *UPSTREAM: //p' "$action")
+          sha=$(sed -n 's/^ *SHA256: //p' "$action")
+          curl -fsSL --retry 3 -o "$file" "$upstream/$file"
+          echo "$sha  $file" | sha256sum -c -
+          gh release view deps > /dev/null 2>&1 \
+            || gh release create deps --title "Build dependencies" --notes "Pinned files the packages are built with, kept here so the builds keep working."
+          gh release upload deps "$file" --clobber

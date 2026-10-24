@@ -1,0 +1,55 @@
+import { Tokens } from "../tokens.slint";
+import { Look } from "look.slint";
+
+// A small round button, as the old launcher's Downloads and Settings buttons are. Primary and
+// the current choice are white; the others are glass and light up on hover and focus. It has
+// no keys of its own: the shell's keys move the focus (`focused`), and a click goes straight to
+// its touch area.
+export component Button inherits Rectangle {
+    in property <string> text;
+    in property <bool> primary;
+    // Marks the current tab or choice.
+    in property <bool> active;
+    in property <bool> enabled: true;
+    // The screen's keys are on it.
+    in property <bool> focused;
+    callback clicked();
+
+    property <bool> ringed: root.focused;
+    property <bool> lit: touch.has-hover || root.ringed;
+    property <bool> solid: root.primary || root.active;
+    min-width: label.preferred-width + 48 * Look.px;
+    min-height: 48 * Look.px;
+    border-radius: self.height / 2;
+    background: !root.enabled ? #ffffff08
+        : root.solid ? (root.lit ? #ffffff : #ffffffeb)
+        : root.lit ? #ffffff2e : #ffffff14;
+    border-width: root.ringed ? 3 * Look.px : 1px;
+    // On a white button a white ring can't show: the accent does.
+    border-color: !root.ringed ? Look.line : root.solid ? Tokens.color-accent : Look.ring;
+    drop-shadow-blur: root.lit && root.solid ? 22 * Look.px : 0;
+    drop-shadow-color: #8cb9ff88;
+    opacity: root.enabled ? 1 : 0.5;
+    transform-scale: touch.pressed ? 0.96 : root.lit ? 1.03 : 1;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-item-selected: root.ringed;
+    accessible-action-default => { root.clicked(); }
+    animate background, drop-shadow-blur { duration: Tokens.motion-fast; }
+    animate transform-scale { duration: Tokens.motion-fast; easing: ease-out-back; }
+
+    label := Text {
+        text: root.text;
+        color: root.solid && root.enabled ? Look.ink : Tokens.color-text;
+        font-size: 18 * Look.px;
+        font-weight: 600;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}

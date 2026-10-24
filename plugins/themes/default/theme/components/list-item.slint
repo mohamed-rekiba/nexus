@@ -1,0 +1,93 @@
+import { Tokens } from "../tokens.slint";
+import { Look } from "look.slint";
+
+// A row of a card, as the old launcher's: a label, a quiet line under it, and a value at the end. The
+// selected row lights up with a white edge.
+export component ListItem inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+    in property <string> trailing;
+    in property <bool> selected;
+    // Its place in the list: rows rise in one after another.
+    in property <int> order;
+    callback clicked();
+
+    property <float> shown: 0;
+    init => { root.shown = 1; }
+    animate shown { duration: Tokens.motion-normal; delay: Look.timed(Math.min(root.order, 10) * 30ms); easing: ease-out; }
+    opacity: root.shown;
+
+    property <bool> lit: root.selected || touch.has-hover;
+    min-height: 64 * Look.px;
+    border-radius: 14 * Look.px;
+    background: root.selected ? #ffffff1f : touch.has-hover ? #ffffff14 : #ffffff0b;
+    border-width: root.selected ? 3 * Look.px : 0;
+    border-color: Look.ring;
+    accessible-role: button;
+    accessible-label: root.title;
+    accessible-action-default => { root.clicked(); }
+    animate background { duration: Tokens.motion-fast; }
+
+    touch := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+
+    HorizontalLayout {
+        padding-left: 18 * Look.px;
+        padding-right: 18 * Look.px;
+        padding-top: 12 * Look.px;
+        padding-bottom: 12 * Look.px;
+        spacing: 16 * Look.px;
+        // Layouts don't mirror: in right-to-left the title comes last.
+        if !Look.rtl : VerticalLayout {
+            alignment: center;
+            spacing: 4 * Look.px;
+            Text {
+                text: root.title;
+                color: Tokens.color-text;
+                font-size: 19 * Look.px;
+                font-weight: 500;
+                overflow: elide;
+                horizontal-alignment: Look.rtl ? right : left;
+            }
+            if root.subtitle != "" : Text {
+                text: root.subtitle;
+                color: Look.text3;
+                font-size: 15 * Look.px;
+                overflow: elide;
+                horizontal-alignment: Look.rtl ? right : left;
+            }
+        }
+        if Look.rtl : Text {
+            text: root.trailing;
+            color: Tokens.color-text-muted;
+            font-size: 17 * Look.px;
+            vertical-alignment: center;
+        }
+        Rectangle { horizontal-stretch: 1; }
+        if !Look.rtl : Text {
+            text: root.trailing;
+            color: Tokens.color-text-muted;
+            font-size: 17 * Look.px;
+            vertical-alignment: center;
+        }
+        @children
+        if Look.rtl : VerticalLayout {
+            alignment: center;
+            spacing: 4 * Look.px;
+            Text {
+                text: root.title;
+                color: Tokens.color-text;
+                font-size: 19 * Look.px;
+                font-weight: 500;
+                overflow: elide;
+                horizontal-alignment: Look.rtl ? right : left;
+            }
+            if root.subtitle != "" : Text {
+                text: root.subtitle;
+                color: Look.text3;
+                font-size: 15 * Look.px;
+                overflow: elide;
+                horizontal-alignment: Look.rtl ? right : left;
+            }
+        }
+    }
+}

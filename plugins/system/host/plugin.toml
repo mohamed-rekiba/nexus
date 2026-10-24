@@ -1,0 +1,34 @@
+id = "system"
+# A system plugin: the machine's settings and devices, through the system's own tools.
+kind = "system"
+name = "This PC"
+version = "0.1.0"
+host_api = "^0.1"
+platforms = ["linux", "macos", "windows"]
+# Linux's. On macOS and Windows the plugin provides vpn and power only (see src/lib.rs).
+capabilities = ["network", "vpn", "bluetooth", "audio", "power", "os_updates", "os_install"]
+
+[permissions]
+# NetworkManager, BlueZ, PipeWire's sound tools, systemd, rpm-ostree (Nexus OS's updates),
+# the Nexus OS USB stick's installer, and macOS's battery.
+process = [
+    "system:nmcli",
+    "system:bluetoothctl",
+    "system:pactl",
+    "system:systemctl",
+    "system:rpm-ostree",
+    "system:nexus-os-install",
+    "system:pmset",
+]
+# Joining a network, scanning, pairing and installing take longer than a quick read, and an
+# action's exit code and errors come with a streamed run.
+long_running = [
+    "system:nmcli",
+    "system:bluetoothctl",
+    "system:pactl",
+    "system:systemctl",
+    "system:nexus-os-install",
+]
+# Installing Nexus OS erases a disk: the installer runs as the administrator, which the USB
+# stick's polkit rule allows for its player.
+polkit = ["system:nexus-os-install"]

@@ -1,0 +1,15 @@
+[package]
+name = "emu-kyty"
+description = "KytyPS5, the PS5 emulator: official builds from GitHub, PS5 games in the game folders, community compatibility."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+emulator-kit.workspace = true
+nexus-api.workspace = true
+
+[lints]
+workspace = true

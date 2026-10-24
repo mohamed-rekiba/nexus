@@ -1,0 +1,506 @@
+import { Vm, Host } from "../types.slint";
+import { Tokens } from "../tokens.slint";
+import { Look } from "look.slint";
+
+// The on-screen keyboard, as azrak-launcher's Wi-Fi password card: ten keys a row, a numbers
+// row and three letter rows (or the symbols), and the action row under them. Every text field
+// is a `TextField`, which opens it when the field gets the focus with the controller and the
+// last key was a controller's (`pad`, from `Vm.pad-key`); a physical keyboard types straight
+// into the field, and the keyboard stays shut.
+//
+// Controller: the d-pad moves, ✕ presses the key, □ deletes, △ adds a space, L1 is Shift (for
+// one letter), R1 the symbols, R2 or Options Done, ○ closes and keeps the text. Keyboard: typing
+// goes into the field and leaves the highlight where it is; Enter right after typing is Done,
+// after the arrows it presses the highlighted key. Esc closes; Tab shows a password.
+//
+// The keys the controller sends arrive first at the shell, which hands them here while the
+// keyboard is open (`key`). The field follows `edits` and `dones`.
+export global Osk {
+    // The last key came from a controller: the shell sets it at each key.
+    in-out property <bool> pad;
+    // The focused text field ("" for none) and what it is: the keyboard types into it.
+    in-out property <string> owner;
+    in-out property <bool> password;
+    // What the field is for, over the keys: "Search games".
+    in-out property <string> title;
+    in-out property <bool> open;
+    // The field's text, as the keyboard has it.
+    in-out property <string> text;
+    in-out property <bool> shift;
+    in-out property <bool> symbols;
+    // A password shows as it is.
+    in-out property <bool> show;
+    // The last key was typed on a physical keyboard: Enter means Done.
+    in-out property <bool> typed;
+    // The highlighted key: rows 0 to 3 have ten keys each, row 4 is the action row.
+    in-out property <int> row: 1;
+    in-out property <int> col;
+    // Count the keyboard's own changes to `text`, and Done: the field follows them.
+    in-out property <int> edits;
+    in-out property <int> dones;
+
+    out property <[[string]]> letters: [
+        ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
+        ["q", "w", "e", "r", "t", "y", "u", "i", "o", "p"],
+        ["a", "s", "d", "f", "g", "h", "j", "k", "l", "'"],
+        ["z", "x", "c", "v", "b", "n", "m", ",", ".", "-"],
+    ];
+    out property <[[string]]> signs: [
+        ["!", "@", "#", "$", "%", "^", "&", "*", "(", ")"],
+        ["-", "_", "=", "+", "[", "]", "{", "}", "\\", "|"],
+        [";", ":", "\"", "<", ">", "/", "?", "~", "`", "€"],
+        ["£", "¥", "§", "°", "•", "«", "»", "¿", "¡", " "],
+    ];
+    // The action row: each key, and where it starts and ends in keys, out of ten. Show is for
+    // a password only.
+    out property <[string]> actions: root.password ? ["shift", "layer", "space", "delete", "show", "done"]
+        : ["shift", "layer", "space", "delete", "done"];
+    out property <[float]> starts: root.password ? [0, 1.5, 3, 5.5, 7, 8.5] : [0, 1.5, 3, 7, 8.5];
+    out property <[float]> ends: root.password ? [1.5, 3, 5.5, 7, 8.5, 10] : [1.5, 3, 7, 8.5, 10];
+    // What the field shows: a hidden password as one dot a character.
+    out property <string> shown: root.password && !root.show ? root.dots(root.text.character-count) : root.text;
+
+    // The character key at `row`, `col` on the current layer.
+    public pure function char-at(row: int, col: int) -> string {
+        root.symbols ? root.signs[row][col] : root.shift ? root.letters[row][col].to-uppercase() : root.letters[row][col]
+    }
+    public pure function action-label(i: int) -> string {
+        root.actions[i] == "shift" ? "Shift"
+            : root.actions[i] == "layer" ? (root.symbols ? "ABC" : "Symbols")
+            : root.actions[i] == "space" ? "Space"
+            : root.actions[i] == "delete" ? "Delete"
+            : root.actions[i] == "show" ? (root.show ? "Hide" : "Show")
+            : "Done"
+    }
+    // `count` dots, up to 127.
+    public pure function dots(count: int) -> string {
+        (Math.mod(Math.floor(count / 64), 2) == 1 ? "●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●" : "")
+            + (Math.mod(Math.floor(count / 32), 2) == 1 ? "●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●" : "")
+            + (Math.mod(Math.floor(count / 16), 2) == 1 ? "●●●●●●●●●●●●●●●●" : "")
+            + (Math.mod(Math.floor(count / 8), 2) == 1 ? "●●●●●●●●" : "")
+            + (Math.mod(Math.floor(count / 4), 2) == 1 ? "●●●●" : "")
+            + (Math.mod(Math.floor(count / 2), 2) == 1 ? "●●" : "")
+            + (Math.mod(count, 2) == 1 ? "●" : "")
+    }
+    // The last character of `t`, among those a keyboard types in English (every printable
+    // ASCII character, and the symbols layer's); "" for another. Slint strings have no slices.
+    pure function last-char(t: string) -> string {
+        t.ends-with(" ") ? " " : t.ends-with("!") ? "!" : t.ends-with("\"") ? "\"" : t.ends-with("#") ? "#" :
+            t.ends-with("$") ? "$" : t.ends-with("%") ? "%" : t.ends-with("&") ? "&" : t.ends-with("'") ? "'" :
+            t.ends-with("(") ? "(" : t.ends-with(")") ? ")" : t.ends-with("*") ? "*" : t.ends-with("+") ? "+" :
+            t.ends-with(",") ? "," : t.ends-with("-") ? "-" : t.ends-with(".") ? "." : t.ends-with("/") ? "/" :
+            t.ends-with("0") ? "0" : t.ends-with("1") ? "1" : t.ends-with("2") ? "2" : t.ends-with("3") ? "3" :
+            t.ends-with("4") ? "4" : t.ends-with("5") ? "5" : t.ends-with("6") ? "6" : t.ends-with("7") ? "7" :
+            t.ends-with("8") ? "8" : t.ends-with("9") ? "9" : t.ends-with(":") ? ":" : t.ends-with(";") ? ";" :
+            t.ends-with("<") ? "<" : t.ends-with("=") ? "=" : t.ends-with(">") ? ">" : t.ends-with("?") ? "?" :
+            t.ends-with("@") ? "@" : t.ends-with("A") ? "A" : t.ends-with("B") ? "B" : t.ends-with("C") ? "C" :
+            t.ends-with("D") ? "D" : t.ends-with("E") ? "E" : t.ends-with("F") ? "F" : t.ends-with("G") ? "G" :
+            t.ends-with("H") ? "H" : t.ends-with("I") ? "I" : t.ends-with("J") ? "J" : t.ends-with("K") ? "K" :
+            t.ends-with("L") ? "L" : t.ends-with("M") ? "M" : t.ends-with("N") ? "N" : t.ends-with("O") ? "O" :
+            t.ends-with("P") ? "P" : t.ends-with("Q") ? "Q" : t.ends-with("R") ? "R" : t.ends-with("S") ? "S" :
+            t.ends-with("T") ? "T" : t.ends-with("U") ? "U" : t.ends-with("V") ? "V" : t.ends-with("W") ? "W" :
+            t.ends-with("X") ? "X" : t.ends-with("Y") ? "Y" : t.ends-with("Z") ? "Z" : t.ends-with("[") ? "[" :
+            t.ends-with("\\") ? "\\" : t.ends-with("]") ? "]" : t.ends-with("^") ? "^" : t.ends-with("_") ? "_" :
+            t.ends-with("`") ? "`" : t.ends-with("a") ? "a" : t.ends-with("b") ? "b" : t.ends-with("c") ? "c" :
+            t.ends-with("d") ? "d" : t.ends-with("e") ? "e" : t.ends-with("f") ? "f" : t.ends-with("g") ? "g" :
+            t.ends-with("h") ? "h" : t.ends-with("i") ? "i" : t.ends-with("j") ? "j" : t.ends-with("k") ? "k" :
+            t.ends-with("l") ? "l" : t.ends-with("m") ? "m" : t.ends-with("n") ? "n" : t.ends-with("o") ? "o" :
+            t.ends-with("p") ? "p" : t.ends-with("q") ? "q" : t.ends-with("r") ? "r" : t.ends-with("s") ? "s" :
+            t.ends-with("t") ? "t" : t.ends-with("u") ? "u" : t.ends-with("v") ? "v" : t.ends-with("w") ? "w" :
+            t.ends-with("x") ? "x" : t.ends-with("y") ? "y" : t.ends-with("z") ? "z" : t.ends-with("{") ? "{" :
+            t.ends-with("|") ? "|" : t.ends-with("}") ? "}" : t.ends-with("~") ? "~" : t.ends-with("€") ? "€" :
+            t.ends-with("£") ? "£" : t.ends-with("¥") ? "¥" : t.ends-with("§") ? "§" : t.ends-with("°") ? "°" :
+            t.ends-with("•") ? "•" : t.ends-with("«") ? "«" : t.ends-with("»") ? "»" : t.ends-with("¿") ? "¿" :
+            t.ends-with("¡") ? "¡" : ""
+    }
+
+    // The field `name` got the focus: the keyboard opens for it when the controller did it.
+    public function take(name: string, text: string, password: bool, title: string) {
+        root.owner = name;
+        root.text = text;
+        root.password = password;
+        root.title = title;
+        root.shift = false;
+        root.symbols = false;
+        root.show = false;
+        root.typed = false;
+        root.row = 1;
+        root.col = 0;
+        root.open = root.pad;
+    }
+    // The field `name` lost the focus.
+    public function release(name: string) {
+        if (root.owner == name) { root.drop(); }
+    }
+    // No field has the focus.
+    public function drop() {
+        root.owner = "";
+        root.open = false;
+    }
+    // ✕ on the focused field, with the keyboard closed: it opens again where it was.
+    public function reopen() {
+        root.typed = false;
+        root.open = true;
+        Host.play-sound("select");
+    }
+    // A text field's own text changed: typed on a physical keyboard.
+    public function follow(name: string, text: string) {
+        if (root.owner == name) { root.text = text; }
+    }
+
+    function type(c: string) {
+        root.text += c;
+        root.edits += 1;
+    }
+    function delete() {
+        let last = root.last-char(root.text);
+        if (last != "") {
+            // The sentinel is only at the end, so only the last character goes.
+            root.text = (root.text + "\u{1}").replace-all(last + "\u{1}", "");
+            root.edits += 1;
+        }
+    }
+    function finish() {
+        root.open = false;
+        root.show = false;
+        root.dones += 1;
+        Host.play-sound("select");
+    }
+    function close() {
+        root.open = false;
+        root.show = false;
+        Host.play-sound("back");
+    }
+    // The highlighted key, pressed.
+    public function press() {
+        root.typed = false;
+        if (root.row < 4) {
+            let c = root.char-at(root.row, root.col);
+            root.type(c);
+            // Shift is for one letter, as on a phone.
+            if (c.to-uppercase() != c.to-lowercase()) { root.shift = false; }
+            Host.play-sound("move");
+            return;
+        }
+        let action = root.actions[root.col];
+        if (action == "done") { root.finish(); return; }
+        if (action == "shift") { root.shift = !root.shift; }
+        if (action == "layer") { root.symbols = !root.symbols; }
+        if (action == "space") { root.type(" "); }
+        if (action == "delete") { root.delete(); }
+        if (action == "show") { root.show = !root.show; }
+        Host.play-sound("move");
+    }
+    // The key at `row`, `col`, clicked or tapped.
+    public function press-at(row: int, col: int) {
+        root.row = row;
+        root.col = col;
+        root.press();
+    }
+
+    // From a character row to the action row and back, keeping about the same place.
+    pure function col-to-action(col: int) -> int {
+        let at = col + 0.5;
+        at <= root.ends[0] ? 0 : at <= root.ends[1] ? 1 : at <= root.ends[2] ? 2 : at <= root.ends[3] ? 3
+            : at <= root.ends[4] ? 4 : root.actions.length - 1
+    }
+    pure function action-to-col(action: int) -> int {
+        Math.min(Math.floor((root.starts[action] + root.ends[action]) / 2), 9)
+    }
+    // Moves the highlight; false at the keyboard's edge.
+    function step(text: string) -> bool {
+        root.typed = false;
+        // Left and right follow the reading direction.
+        let right = (text == Key.RightArrow) != Look.rtl;
+        if (text == Key.UpArrow && root.row > 0) {
+            if (root.row == 4) { root.col = root.action-to-col(root.col); }
+            root.row -= 1;
+        } else if (text == Key.DownArrow && root.row < 4) {
+            root.row += 1;
+            if (root.row == 4) { root.col = root.col-to-action(root.col); }
+        } else if ((text == Key.LeftArrow || text == Key.RightArrow) && !right && root.col > 0) {
+            root.col -= 1;
+        } else if ((text == Key.LeftArrow || text == Key.RightArrow) && right
+            && root.col + 1 < (root.row == 4 ? root.actions.length : 10)) {
+            root.col += 1;
+        } else {
+            return false;
+        }
+        Host.play-sound("move");
+        true
+    }
+
+    // A key while the keyboard is open. True when it is the keyboard's; a character typed on a
+    // physical keyboard goes on to the field.
+    public function key(text: string, repeat: bool, control: bool) -> bool {
+        let arrow = text == Key.UpArrow || text == Key.DownArrow || text == Key.LeftArrow || text == Key.RightArrow;
+        if (arrow) { root.step(text); return true; }
+        if (root.pad) {
+            // A held button repeats only the moves and the delete.
+            if (text == Key.Insert) { root.delete(); return true; }
+            if (repeat) { return true; }
+            if (text == Key.Return) { root.press(); }
+            if (text == "/") { root.type(" "); root.typed = false; }
+            if (text == Key.Backtab) { root.shift = !root.shift; }
+            if (text == Key.Tab) { root.symbols = !root.symbols; }
+            if (text == Key.PageDown || text == Key.Menu) { root.finish(); }
+            if (text == Key.Escape) { root.close(); }
+            // Every other button is the keyboard's too, so nothing behind it moves.
+            return true;
+        }
+        if (text == Key.Return) {
+            if (!repeat) {
+                if (root.typed) { root.finish(); } else { root.press(); }
+            }
+            return true;
+        }
+        if (text == Key.Escape) { root.close(); return true; }
+        if (text == Key.Tab) {
+            if (root.password) { root.show = !root.show; }
+            return true;
+        }
+        if (control) { return false; }
+        // Backspace and the characters go to the field, as typing.
+        if (text == Key.Backspace || (text.character-count == 1 && text >= " " && text != Key.Delete
+            && !(text >= "\u{f700}" && text <= "\u{f8ff}"))) {
+            root.typed = true;
+        }
+        false
+    }
+}
+
+// A text box that types with the on-screen keyboard. A field opts in by being one: it opens the
+// keyboard when it gets the focus with the controller, and ✕ on it opens it again. `name` is its
+// accessible label (valued with what it shows) and must be unique on screen; `password` hides
+// the text, and the keyboard gets a Show key. `accepted` is Enter, or the keyboard's Done.
+export component TextField inherits Rectangle {
+    in property <string> name;
+    in property <bool> password;
+    // What the field is for, over the keyboard's keys.
+    in property <string> title;
+    in-out property <string> text <=> input.text;
+    in property <length> font-size <=> input.font-size;
+    in property <string> font-family <=> input.font-family;
+    in property <brush> text-color <=> input.color;
+    in property <TextHorizontalAlignment> horizontal-alignment <=> input.horizontal-alignment;
+    out property <bool> has-focus: input.has-focus;
+    // The text changed, on either keyboard.
+    callback edited();
+    callback accepted();
+    // A key the field doesn't use itself.
+    callback key-pressed(KeyEvent) -> EventResult;
+
+    forward-focus: input;
+    public function select-all() { input.select-all(); }
+    // The cursor to the end of the text.
+    public function to-end() { input.set-selection-offsets(2147483647, 2147483647); }
+
+    property <bool> mine: root.name != "" && Osk.owner == root.name;
+    property <int> edits: Osk.edits;
+    changed edits => {
+        if (root.mine && input.text != Osk.text) {
+            input.text = Osk.text;
+            root.to-end();
+            root.edited();
+        }
+    }
+    property <int> dones: Osk.dones;
+    changed dones => {
+        if (root.mine) {
+            if (input.text != Osk.text) { input.text = Osk.text; root.edited(); }
+            root.accepted();
+        }
+    }
+
+    accessible-role: text-input;
+    accessible-label: root.name;
+    accessible-value: root.password && !(root.mine && Osk.show) ? Osk.dots(input.text.character-count) : input.text;
+    input := TextInput {
+        width: 100%;
+        height: 100%;
+        single-line: true;
+        vertical-alignment: center;
+        input-type: root.password && !(root.mine && Osk.show) ? InputType.password : InputType.text;
+        accessible-role: none;
+        changed has-focus => {
+            if (self.has-focus) {
+                Osk.take(root.name, self.text, root.password, root.title);
+            } else {
+                Osk.release(root.name);
+            }
+        }
+        edited => {
+            Osk.follow(root.name, self.text);
+            root.edited();
+        }
+        accepted => { root.accepted(); }
+        key-pressed(event) => { root.key-pressed(event) }
+    }
+}
+
+// One key: a character or an action. The highlight is white, and a switch that is on (Shift,
+// Show) is filled with the accent, so only one key ever looks selected.
+component OskKey inherits Rectangle {
+    in property <string> label;
+    in property <bool> lit;
+    in property <bool> on;
+    in property <bool> switch;
+    // Done.
+    in property <bool> main;
+    in property <int> index;
+    in property <length> text-size;
+    in property <length> line;
+    callback clicked();
+    background: root.lit ? #ffffff : root.on ? Tokens.color-accent : ta.has-hover ? #ffffff2e
+        : root.main ? #3d8bff38 : #ffffff17;
+    border-width: root.line;
+    border-color: root.lit ? #ffffff : root.main ? #3d8bff80 : #ffffff1c;
+    animate background { duration: Tokens.motion-fast; }
+    accessible-role: button;
+    accessible-label: "osk-key";
+    accessible-value: root.label;
+    accessible-item-selectable: true;
+    accessible-item-selected: root.lit;
+    accessible-item-index: root.index;
+    accessible-checkable: root.switch;
+    accessible-checked: root.on;
+    accessible-action-default => { root.clicked(); }
+    Text {
+        text: root.label;
+        font-size: root.text-size;
+        font-weight: root.label.character-count > 1 ? 600 : 500;
+        color: root.lit ? Look.ink : Tokens.color-text;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    ta := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+// The keyboard itself, over the bottom of the screen while `Osk.open`. Every size and place is
+// a whole number of the screen's pixels, so the keys stay crisp at every scale.
+export component OnScreenKeyboard inherits Rectangle {
+    property <float> dpr: Vm.viewport.scale > 0 ? Vm.viewport.scale : 1;
+    pure function snap(size: length) -> length {
+        Math.round(size * root.dpr / 1px) * 1px / root.dpr
+    }
+    property <length> key-width: root.snap(78 * Look.px);
+    property <length> key-height: root.snap(66 * Look.px);
+    property <length> gap: root.snap(10 * Look.px);
+    property <length> pitch: root.key-width + root.gap;
+    property <length> inset: root.snap(26 * Look.px);
+    property <length> line: root.snap(Math.max(1px, 2 * Look.px));
+    property <length> grid-width: 10 * root.key-width + 9 * root.gap;
+    property <length> preview-height: root.snap(64 * Look.px);
+    property <length> title-height: Osk.title != "" ? root.snap(34 * Look.px) : 0;
+
+    // Clicks around the keyboard don't reach the screen behind it.
+    TouchArea { }
+
+    panel := Rectangle {
+        width: root.grid-width + 2 * root.inset;
+        height: root.inset + root.title-height + root.preview-height + root.gap * 2 + 5 * root.key-height
+            + 4 * root.gap + root.inset;
+        x: root.snap((root.width - self.width) / 2);
+        // Over the key hints at the bottom.
+        y: root.snap(root.height - self.height - 104 * Look.px);
+        border-radius: root.snap(24 * Look.px);
+        background: #0e1526f7;
+        border-width: 1px;
+        border-color: #ffffff28;
+        drop-shadow-blur: root.snap(40 * Look.px);
+        drop-shadow-color: #000000a0;
+        accessible-role: groupbox;
+        accessible-label: "osk";
+        accessible-value: (Osk.symbols ? "symbols" : "letters") + (Osk.shift && !Osk.symbols ? " shift" : "");
+        TouchArea { }
+
+        if Osk.title != "" : Text {
+            x: root.inset;
+            y: root.inset;
+            width: root.grid-width;
+            height: root.title-height;
+            text: Osk.title;
+            font-size: root.snap(17 * Look.px);
+            font-weight: 600;
+            color: Look.text3;
+            horizontal-alignment: Look.rtl ? right : left;
+            vertical-alignment: top;
+            overflow: elide;
+        }
+        // The text as typed, or a password's dots.
+        Rectangle {
+            x: root.inset;
+            y: root.inset + root.title-height;
+            width: root.grid-width;
+            height: root.preview-height;
+            border-radius: root.snap(14 * Look.px);
+            background: #00000059;
+            border-width: root.line;
+            border-color: #ffffff;
+            preview := Text {
+                x: Look.rtl ? parent.width - self.width - root.inset : root.inset;
+                width: Math.min(self.preferred-width, parent.width - 2 * root.inset - root.line * 2);
+                height: parent.height;
+                text: Osk.shown;
+                font-size: root.snap(26 * Look.px);
+                color: Tokens.color-text;
+                vertical-alignment: center;
+                overflow: elide;
+                accessible-role: text;
+                accessible-label: "osk-text";
+                accessible-value: Osk.shown;
+            }
+            // The caret, after the text.
+            Rectangle {
+                x: Look.rtl ? preview.x - root.line - root.snap(3 * Look.px)
+                    : preview.x + preview.width + root.snap(3 * Look.px);
+                y: root.snap((parent.height - self.height) / 2);
+                width: root.line;
+                height: root.snap(30 * Look.px);
+                background: Tokens.color-accent;
+            }
+        }
+
+        keys := Rectangle {
+            x: root.inset;
+            y: root.inset + root.title-height + root.preview-height + 2 * root.gap;
+            width: root.grid-width;
+            height: 5 * root.key-height + 4 * root.gap;
+            for r in 4 : Rectangle {
+                y: r * (root.key-height + root.gap);
+                height: root.key-height;
+                for c in 10 : OskKey {
+                    // Right to left, the row is mirrored.
+                    x: (Look.rtl ? 9 - c : c) * root.pitch;
+                    width: root.key-width;
+                    height: root.key-height;
+                    border-radius: root.snap(12 * Look.px);
+                    label: Osk.char-at(r, c) == " " ? "␣" : Osk.char-at(r, c);
+                    lit: Osk.row == r && Osk.col == c;
+                    index: r * 10 + c;
+                    text-size: root.snap(26 * Look.px);
+                    line: root.line;
+                    clicked => { Osk.press-at(r, c); }
+                }
+            }
+            for i in Osk.actions.length : OskKey {
+                property <length> start: root.snap(Osk.starts[i] * root.pitch);
+                property <length> end: root.snap(Osk.ends[i] * root.pitch) - root.gap;
+                x: Look.rtl ? keys.width - self.end : self.start;
+                y: 4 * (root.key-height + root.gap);
+                width: self.end - self.start;
+                height: root.key-height;
+                border-radius: root.snap(12 * Look.px);
+                label: Osk.action-label(i);
+                lit: Osk.row == 4 && Osk.col == i;
+                on: (Osk.actions[i] == "shift" && Osk.shift) || (Osk.actions[i] == "show" && Osk.show);
+                switch: Osk.actions[i] == "shift" || Osk.actions[i] == "show";
+                main: Osk.actions[i] == "done";
+                index: 40 + i;
+                text-size: root.snap(19 * Look.px);
+                line: root.line;
+                clicked => { Osk.press-at(4, i); }
+            }
+        }
+    }
+}

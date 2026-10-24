@@ -1,0 +1,249 @@
+import { Vm, Host, GameCard } from "../types.slint";
+import { Icon } from "icon.slint";
+import { Tokens } from "../tokens.slint";
+import { Look } from "look.slint";
+import { FocusRing, Cover } from "widgets.slint";
+import { Nav } from "nav.slint";
+import { GameMenu } from "game-menu.slint";
+import { SlotBadges } from "slot-badges.slint";
+
+// A Library card, as the old launcher's: its 2:3 cover with the console on top, how it runs and its
+// rating at the bottom; then two lines for the title, and its size. A game a catalog offers
+// also says how many releases it has, beside the size, and how easy its best release is to
+// download, under it. The focused card grows a little and gets the white ring. Its interface is the contract's: the focus comes from the
+// Library's or the Catalog's keys, at once (`Nav.selected-key`), before the core hears of the move.
+export component Card inherits Rectangle {
+    in property <GameCard> game;
+    in property <length> cover-height: self.width * 1.5;
+    callback activated();
+
+    property <bool> focused: (Vm.screen == "home" || Nav.catalog) && Nav.zone == "grid" && Nav.selected-key == root.game.key;
+    property <bool> lit: root.focused || touch.has-hover;
+    property <bool> small: root.width < 200 * Look.px;
+    property <bool> offered: root.game.releases > 0;
+    width: 240 * Look.px;
+    height: root.cover-height + 14 * Look.px + (root.small ? 84 : 112) * Look.px + (root.offered ? 28 * Look.px : 0);
+    accessible-role: button;
+    accessible-label: root.game.title;
+    accessible-item-selected: root.focused;
+    accessible-action-default => { root.activated(); }
+
+    touch := TouchArea { mouse-cursor: pointer; clicked => { root.activated(); } }
+
+    Rectangle {
+        y: 0;
+        height: root.cover-height;
+        transform-scale: root.focused ? 1.05 : 1.0;
+        animate transform-scale { duration: Look.timed(220ms); easing: ease-out-back; }
+        FocusRing { w: parent.width; h: parent.height; on: root.lit; radius: 14 * Look.px; }
+        Rectangle {
+            border-radius: 14 * Look.px;
+            clip: true;
+            background: Tokens.color-surface;
+            Cover {
+                radius: 14 * Look.px;
+                source: root.game.cover;
+                state: root.game.cover-state;
+                title: root.game.title;
+                platform: root.game.platform;
+                name-size: Math.max(15 * Look.px, parent.width * 0.11);
+            }
+            // The console, in its own colors.
+            if root.game.platform != "" : Rectangle {
+                x: Look.rtl ? 8 * Look.px : parent.width - self.width - 8 * Look.px;
+                y: 8 * Look.px;
+                width: console.preferred-width + (root.small ? 14 : 18) * Look.px;
+                height: (root.small ? 24 : 30) * Look.px;
+                border-radius: 8 * Look.px;
+                background: Look.console-fill(root.game.platform);
+                border-width: 1px;
+                border-color: Look.console-edge(root.game.platform);
+                accessible-role: text;
+                accessible-label: "card-console";
+                accessible-value: root.game.platform;
+                console := Text {
+                    text: root.game.platform;
+                    font-size: (root.small ? 14 : 17) * Look.px;
+                    font-weight: 800;
+                    letter-spacing: 0.5 * Look.px;
+                    color: Look.console-ink(root.game.platform);
+                }
+            }
+            // A Catalog game's eye: hides the game, or shows a hidden one again. On the focused
+            // or pointed card, and always on a hidden one. The pad's way is the game's menu.
+            if root.offered : Rectangle {
+                x: Look.rtl ? parent.width - self.width - 8 * Look.px : 8 * Look.px;
+                y: 8 * Look.px;
+                width: (root.small ? 30 : 36) * Look.px;
+                height: self.width;
+                border-radius: self.height / 2;
+                background: eye.has-hover ? #000000e0 : #000000a0;
+                opacity: root.lit || eye.has-hover || root.game.hidden ? 1 : 0;
+                animate opacity { duration: Tokens.motion-fast; }
+                accessible-role: button;
+                accessible-label: "card-hide";
+                accessible-value: (root.game.hidden ? "Show " : "Hide ") + root.game.title;
+                accessible-action-default => { Host.hide-game(root.game.key, !root.game.hidden); }
+                Icon {
+                    width: parent.width * 0.6;
+                    height: self.width;
+                    name: root.game.hidden ? "eye-off" : "eye";
+                }
+                eye := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { Host.hide-game(root.game.key, !root.game.hidden); }
+                }
+            }
+            // Uninstall for an installed game (in the Catalog, the game the offer is), else
+            // Download for a game a catalog offers: its Game Hub, with the keys on its
+            // releases. On the focused or pointed card, above the badges.
+            if root.game.uninstall != "" || root.offered : pill := Rectangle {
+                property <bool> removes: root.game.uninstall != "";
+                x: (parent.width - self.width) / 2;
+                y: parent.height - self.height - (root.small ? 44 : 52) * Look.px;
+                width: action-row.preferred-width;
+                height: (root.small ? 32 : 38) * Look.px;
+                border-radius: self.height / 2;
+                background: act.has-hover ? (self.removes ? Tokens.color-danger : #ffffff) : #000000c0;
+                border-width: 1px;
+                border-color: #ffffff40;
+                opacity: root.lit || act.has-hover ? 1 : 0;
+                animate opacity { duration: Tokens.motion-fast; }
+                accessible-role: button;
+                accessible-label: self.removes ? "card-uninstall" : "card-download";
+                accessible-value: (self.removes ? "Uninstall " : "Download ") + root.game.title;
+                accessible-action-default => { self.act(); }
+                function act() {
+                    if (self.removes) {
+                        GameMenu.ask-uninstall(root.game.uninstall, root.game.title);
+                    } else {
+                        Nav.to-releases = true;
+                        root.activated();
+                    }
+                }
+                action-row := HorizontalLayout {
+                    padding-left: 12 * Look.px;
+                    padding-right: 14 * Look.px;
+                    spacing: 6 * Look.px;
+                    alignment: center;
+                    Icon {
+                        width: 16 * Look.px;
+                        height: 16 * Look.px;
+                        y: (parent.height - self.height) / 2;
+                        name: pill.removes ? "close" : "download";
+                        color: act.has-hover && !pill.removes ? #000000 : #ffffff;
+                    }
+                    Text {
+                        text: pill.removes ? "Uninstall" : "Download";
+                        font-size: (root.small ? 14 : 16) * Look.px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                        color: act.has-hover && !pill.removes ? #000000 : #ffffff;
+                    }
+                }
+                act := TouchArea { mouse-cursor: pointer; clicked => { parent.act(); } }
+            }
+            // How it runs, and the plugin's other badges, as small dark tags: short, and cut
+            // before the rating.
+            SlotBadges {
+                x: Look.rtl ? parent.width - self.width - 10 * Look.px : 10 * Look.px;
+                y: parent.height - self.height - 10 * Look.px;
+                width: Math.min(self.preferred-width, parent.width - 20 * Look.px - (root.game.rating > 0 ? star.width + 8 * Look.px : 0));
+                height: self.preferred-height;
+                items: root.game.badges;
+                size: 13 * Look.px;
+                short: true;
+            }
+            star := Rectangle {
+                visible: root.game.rating > 0;
+                x: Look.rtl ? 10 * Look.px : parent.width - self.width - 10 * Look.px;
+                y: parent.height - self.height - 10 * Look.px;
+                width: rating.preferred-width + 16 * Look.px;
+                height: 26 * Look.px;
+                border-radius: 6 * Look.px;
+                background: #000000b8;
+                rating := Text { text: "★ " + Math.round(root.game.rating * 10) / 10; font-size: 14 * Look.px; font-weight: 700; color: #ffd666; }
+            }
+        }
+    }
+    VerticalLayout {
+        y: root.cover-height + 14 * Look.px;
+        width: root.width;
+        height: self.preferred-height;
+        alignment: start;
+        spacing: 4 * Look.px;
+        // Every card keeps two lines for the title, short ones too.
+        Rectangle {
+            height: (root.small ? 42 : 52) * Look.px;
+            clip: true;
+            Text {
+                y: 0;
+                width: parent.width;
+                height: parent.height;
+                text: root.game.title;
+                font-size: (root.small ? 16 : 20) * Look.px;
+                font-weight: 500;
+                color: root.focused ? #ffffff : Tokens.color-text;
+                wrap: word-wrap;
+                overflow: elide;
+                vertical-alignment: top;
+                horizontal-alignment: Look.rtl ? right : left;
+            }
+        }
+        // The size; for a game a catalog offers, its releases on the far side.
+        Rectangle {
+            height: 26 * Look.px;
+            Text {
+                x: Look.rtl ? parent.width - self.width : 0;
+                width: parent.width - (root.offered ? count.preferred-width + 8 * Look.px : 0);
+                height: parent.height;
+                text: root.game.size != "" ? root.game.size : Look.system-name(root.game.platform);
+                font-size: (root.small ? 15 : 18) * Look.px;
+                font-weight: 500;
+                color: Tokens.color-text-muted;
+                overflow: elide;
+                vertical-alignment: center;
+                horizontal-alignment: Look.rtl ? right : left;
+                accessible-role: text;
+                accessible-label: "card-size";
+                accessible-value: self.text;
+            }
+            count := Text {
+                visible: root.offered;
+                x: Look.rtl ? 0 : parent.width - self.width;
+                height: parent.height;
+                text: Look.releases(root.game.releases);
+                font-size: (root.small ? 13 : 15) * Look.px;
+                color: Look.text3;
+                vertical-alignment: center;
+                accessible-role: text;
+                accessible-label: root.offered ? "card-releases" : "";
+                accessible-value: self.text;
+            }
+        }
+        // How easy its best release is to download; the counts are in the Game Hub.
+        if root.offered && root.game.availability != "" : Rectangle {
+            height: 24 * Look.px;
+            label := Text {
+                x: Look.rtl ? parent.width - self.width : 0;
+                height: parent.height;
+                text: "Availability:";
+                font-size: (root.small ? 14 : 16) * Look.px;
+                color: Look.text3;
+                vertical-alignment: center;
+            }
+            Text {
+                x: Look.rtl ? label.x - self.width - 6 * Look.px : label.width + 6 * Look.px;
+                height: parent.height;
+                text: root.game.availability-text;
+                font-size: (root.small ? 14 : 16) * Look.px;
+                font-weight: 600;
+                color: Look.availability-color(root.game.availability);
+                vertical-alignment: center;
+                accessible-role: text;
+                accessible-label: "card-availability";
+                accessible-value: self.text;
+            }
+        }
+    }
+}

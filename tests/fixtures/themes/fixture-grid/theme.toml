@@ -1,0 +1,48 @@
+id = "fixture-grid"
+kind = "theme"
+name = "Fixture grid"
+version = "0.1.0"
+host_api = "^0.1"
+capabilities = ["theme"]
+
+[runtime]
+type = "data"
+
+[theme]
+ui_api = "^0.1"
+extends = "default"
+screens = ["home"]
+components = ["card"]
+input = ["pointer"]
+navigation = "pointer"
+
+[[theme.breakpoints]]
+name = "compact"
+max_width = 1000
+
+[[theme.breakpoints]]
+name = "wide"
+
+[theme.assets]
+fonts = ["fonts/Inter-Regular.ttf", "fonts/Inter-Bold.ttf"]
+
+[theme.tokens]
+color-bg = "#eef0f4"
+color-surface = "#ffffff"
+color-surface-raised = "#e3e7ef"
+color-text = "#151821"
+color-text-muted = "#5b6475"
+color-accent = "#0f9d8a"
+color-on-accent = "#ffffff"
+color-focus = "#0f9d8a"
+color-overlay = "#151821b3"
+shadow-color = "#1518212e"
+font-family = "Inter"
+radius-m = 10
+radius-l = 14
+
+[theme.options.accent]
+label = "Accent color"
+type = "color"
+token = "color-accent"
+default = "#0f9d8a"

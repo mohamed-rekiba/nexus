@@ -1,0 +1,420 @@
+import { Vm, Host, SystemJobItem } from "../types.slint";
+import { Tokens } from "../tokens.slint";
+import { Look } from "look.slint";
+import { Icon } from "icon.slint";
+import { Switch } from "widgets.slint";
+import { TextField } from "keyboard.slint";
+
+// The machine's settings in the top bar (`Vm.system`): the network, sound and Bluetooth icons
+// open a panel under them. The icons and panels show when Nexus is the whole screen (the Nexus
+// session, Nexus OS); a desktop has its own. The battery shows wherever the PC has one.
+//
+// Each panel is a list of rows the keys move through:
+//   0 Network     "Look for networks", then one row per Wi-Fi network
+//   1 Sound       the volume (left and right change it), mute, then one row per output
+//   2 Bluetooth   on or off, "Pair a device", then one row per device
+// A secured network that isn't saved asks for its password first, with the on-screen keyboard.
+export global Sys {
+    // The open panel, or -1.
+    in-out property <int> open: -1;
+    in-out property <int> row;
+    // The network whose password is being typed; "" for none.
+    in-out property <string> asking;
+
+    out property <bool> network-on: Vm.system.network-available;
+    out property <bool> audio-on: Vm.system.audio-available;
+    out property <bool> bluetooth-on: Vm.system.bluetooth-available;
+
+    public pure function rows(panel: int) -> int {
+        panel == 0 ? (root.network-on ? 1 + Vm.system.wifi.length : 0)
+            : panel == 1 ? (root.audio-on ? 2 + Vm.system.outputs.length : 0)
+            : panel == 2 ? (root.bluetooth-on ? (Vm.system.bluetooth-on ? 2 + Vm.system.devices.length : 1) : 0)
+            : 0
+    }
+    public function show(panel: int) {
+        root.open = panel;
+        root.row = 0;
+        root.asking = "";
+        Host.play-sound("select");
+        Host.refresh-system();
+    }
+    public function close() {
+        root.open = -1;
+        root.asking = "";
+    }
+    // The volume a step away, 0 to 100.
+    function volume(delta: int) {
+        Host.set-volume(Math.clamp(Vm.system.volume + delta, 0, 100));
+        Host.play-sound("move");
+    }
+    public function activate() {
+        let r = root.row;
+        if (root.open == 0) {
+            if (r == 0) { Host.scan-wifi(); return; }
+            let net = Vm.system.wifi[r - 1];
+            if (net.active) { return; }
+            if (net.secured && !net.saved) { root.asking = net.ssid; return; }
+            Host.join-wifi(net.ssid, "");
+        } else if (root.open == 1) {
+            if (r == 0) { return; }
+            if (r == 1) { Host.set-muted(!Vm.system.muted); return; }
+            Host.set-audio-output(Vm.system.outputs[r - 2].name);
+        } else if (root.open == 2) {
+            if (r == 0) { Host.set-bluetooth(!Vm.system.bluetooth-on); return; }
+            if (r == 1) { Host.scan-bluetooth(); return; }
+            let device = Vm.system.devices[r - 2];
+            if (!device.paired) { Host.pair-device(device.address); }
+            else if (device.connected) { Host.disconnect-device(device.address); }
+            else { Host.connect-device(device.address); }
+        }
+        Host.play-sound("select");
+    }
+    // Handles a key while a panel is open. Returns whether it did anything.
+    public function key(text: string) -> bool {
+        if (text == Key.Escape || text == Key.Backspace) { root.close(); Host.play-sound("back"); return true; }
+        if (text == Key.DownArrow) {
+            if (root.row + 1 < root.rows(root.open)) { root.row += 1; Host.play-sound("move"); }
+            return true;
+        }
+        if (text == Key.UpArrow) {
+            if (root.row > 0) { root.row -= 1; Host.play-sound("move"); }
+            return true;
+        }
+        if (root.open == 1 && root.row == 0 && (text == Key.LeftArrow || text == Key.RightArrow)) {
+            root.volume((text == Key.RightArrow) != Look.rtl ? 10 : -10);
+            return true;
+        }
+        // Left and right go to the panel beside, as on the top bar.
+        if (text == Key.LeftArrow || text == Key.RightArrow) {
+            let next = root.open + ((text == Key.RightArrow) != Look.rtl ? 1 : -1);
+            if (next >= 0 && next <= 2) { root.show(next); }
+            return true;
+        }
+        // Delete (the pad's Select) forgets a saved network or a paired device.
+        if (text == Key.Delete) {
+            if (root.open == 0 && root.row > 0 && Vm.system.wifi[root.row - 1].saved) {
+                Host.forget-wifi(Vm.system.wifi[root.row - 1].ssid);
+            } else if (root.open == 2 && root.row > 1 && Vm.system.devices[root.row - 2].paired) {
+                Host.remove-device(Vm.system.devices[root.row - 2].address);
+            }
+            return true;
+        }
+        if (text == Key.Return || text == " ") { root.activate(); return true; }
+        true
+    }
+}
+
+// The network icon: Wi-Fi's strength over a dim full fan, a cable, or a slashed fan offline.
+export component NetIcon inherits Rectangle {
+    in property <color> tint: Tokens.color-text;
+    width: 26 * Look.px;
+    height: 26 * Look.px;
+    if Vm.system.connection == "wired" : Icon { name: "wired"; color: root.tint; width: parent.width; height: parent.height; }
+    if Vm.system.connection != "wired" : Icon { name: "wifi-4"; color: root.tint.with-alpha(0.3); width: parent.width; height: parent.height; }
+    if Vm.system.connection == "wifi" && Vm.system.signal-bars > 0 : Icon {
+        name: "wifi-" + Vm.system.signal-bars;
+        color: root.tint;
+        width: parent.width;
+        height: parent.height;
+    }
+    if Vm.system.connection == "none" : Icon { name: "slash"; color: root.tint; width: parent.width; height: parent.height; }
+}
+
+// The sound icon: the speaker with as many waves as the volume, or crossed out when muted.
+export component SoundIcon inherits Icon {
+    name: Vm.system.muted ? "volume-mute" : Vm.system.volume == 0 ? "volume-0" : Vm.system.volume < 50 ? "volume-1" : "volume-2";
+    width: 26 * Look.px;
+    height: 26 * Look.px;
+}
+
+// The Bluetooth icon: off, on, or with a device connected.
+export component BluetoothIcon inherits Icon {
+    name: !Vm.system.bluetooth-on ? "bluetooth-off" : Vm.system.connected-devices > 0 ? "bluetooth-on" : "bluetooth";
+    width: 26 * Look.px;
+    height: 26 * Look.px;
+}
+
+// A laptop's battery beside the clock: green while charging, amber at 20% or less, red at 10%
+// or less. Sizes are whole pixels, so its edges stay sharp at every scale.
+export component BatteryIcon inherits Rectangle {
+    property <length> unit: Math.max(1px, Math.round(Look.px / 1px) * 1px);
+    property <color> level: Vm.system.battery-charging ? Tokens.color-success
+        : Vm.system.battery-percent <= 10 ? Tokens.color-danger
+        : Vm.system.battery-percent <= 20 ? Tokens.color-warning : Tokens.color-text;
+    width: row.preferred-width;
+    accessible-role: text;
+    accessible-label: "battery";
+    accessible-value: Vm.system.battery-percent + (Vm.system.battery-charging ? " charging" : "");
+    row := HorizontalLayout {
+        height: parent.height;
+        spacing: 6 * Look.px;
+        alignment: center;
+        Text { text: Vm.system.battery-percent + "%"; font-size: 18 * Look.px; color: Tokens.color-text-muted; vertical-alignment: center; }
+        VerticalLayout {
+            alignment: center;
+            HorizontalLayout {
+                spacing: 0;
+                body := Rectangle {
+                    width: 18 * root.unit * 2;
+                    height: 10 * root.unit * 2;
+                    border-width: 2 * root.unit;
+                    border-radius: 3 * root.unit;
+                    border-color: root.level;
+                    Rectangle {
+                        x: 4 * root.unit;
+                        y: 4 * root.unit;
+                        width: Math.max(root.unit, Math.round((parent.width - 8 * root.unit) * Vm.system.battery-percent / 100 / 1px) * 1px);
+                        height: parent.height - 8 * root.unit;
+                        border-radius: root.unit;
+                        background: root.level;
+                    }
+                    if Vm.system.battery-charging : Icon { name: "bolt"; color: Look.ink; width: parent.height; height: parent.height; }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle { width: 2 * root.unit; height: 8 * root.unit; border-radius: root.unit; background: root.level; }
+                }
+            }
+        }
+    }
+}
+
+// One row of a panel.
+component PanelRow inherits Rectangle {
+    in property <string> label;
+    in property <string> detail;
+    in property <bool> focused;
+    in property <bool> current;
+    in property <string> name;
+    in property <string> value;
+    callback clicked();
+    height: 56 * Look.px;
+    border-radius: 12 * Look.px;
+    background: root.focused ? #ffffff26 : ta.has-hover ? #ffffff12 : transparent;
+    border-width: root.focused ? 2 * Look.px : 0;
+    border-color: #ffffff;
+    accessible-role: button;
+    accessible-label: root.name;
+    accessible-value: root.value;
+    accessible-item-selected: root.focused;
+    accessible-action-default => { root.clicked(); }
+    HorizontalLayout {
+        padding-left: 18 * Look.px;
+        padding-right: 18 * Look.px;
+        spacing: 12 * Look.px;
+        @children
+        Text {
+            text: root.label;
+            font-size: 19 * Look.tpx;
+            font-weight: root.current ? 600 : 400;
+            color: Tokens.color-text;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+        Text { text: root.detail; font-size: 16 * Look.tpx; color: Look.text3; vertical-alignment: center; }
+        if root.current : Icon { name: "check"; color: Tokens.color-success; width: 22 * Look.px; height: 22 * Look.px; y: (parent.height - self.height) / 2; }
+    }
+    ta := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+// The open panel, under the top bar on the side of its icons.
+export component SystemSheet inherits Rectangle {
+    // Closed by a click outside it.
+    TouchArea { clicked => { Sys.close(); } }
+    property <[SystemJobItem]> jobs: Vm.system.jobs;
+    // The newest job of a kind for this panel, as a line of text.
+    property <string> job-text: Sys.open == 0 ? root.job-of("join")
+        : Sys.open == 2 ? (root.job-of("pair") != "" ? root.job-of("pair") : root.job-of("scan")) : "";
+    // The newest of the last two jobs that is of `kind`: the panel's own work.
+    pure function job-of(kind: string) -> string {
+        root.jobs.length > 0 && root.jobs[root.jobs.length - 1].kind == kind ? root.jobs[root.jobs.length - 1].text
+            : root.jobs.length > 1 && root.jobs[root.jobs.length - 2].kind == kind ? root.jobs[root.jobs.length - 2].text : ""
+    }
+
+    panel := Rectangle {
+        width: Math.min(root.width - 32 * Look.px, 520 * Look.tpx);
+        x: Look.rtl ? 96 * Look.px : root.width - self.width - 96 * Look.px;
+        y: 96 * Look.px;
+        height: Math.min(root.height - self.y - 40 * Look.px, body.preferred-height);
+        border-radius: 22 * Look.px;
+        background: #121b36f2;
+        border-width: 1px;
+        border-color: Look.line;
+        drop-shadow-blur: 24 * Look.px;
+        drop-shadow-color: #00000080;
+        accessible-role: list;
+        accessible-label: "system-panel";
+        accessible-value: Sys.open == 0 ? "network" : Sys.open == 1 ? "sound" : "bluetooth";
+        TouchArea {}
+        clip: true;
+        body := VerticalLayout {
+            padding: 18 * Look.px;
+            spacing: 6 * Look.px;
+            Text {
+                text: Sys.open == 0 ? (Vm.system.connection == "wifi" ? "Wi-Fi · " + Vm.system.network-name
+                        : Vm.system.connection == "wired" ? "Cable · " + Vm.system.network-name : "Not connected")
+                    : Sys.open == 1 ? (Vm.system.muted ? "Sound · Muted" : "Sound · " + Vm.system.volume + "%")
+                    : (Vm.system.bluetooth-on ? "Bluetooth · " + Vm.system.connected-devices + " connected" : "Bluetooth · Off");
+                font-size: 22 * Look.tpx;
+                font-weight: 600;
+                color: Tokens.color-text;
+                width: parent.width;
+                wrap: word-wrap;
+            }
+            if root.job-text != "" : Text {
+                text: root.job-text;
+                font-size: 16 * Look.tpx;
+                color: Tokens.color-info;
+                width: parent.width;
+                wrap: word-wrap;
+                accessible-role: text;
+                accessible-label: "system-job";
+                accessible-value: self.text;
+            }
+            // Why this part can't be used here.
+            property <string> reason: Sys.open == 0 ? Vm.system.network-reason : Sys.open == 1 ? Vm.system.audio-reason : Vm.system.bluetooth-reason;
+            if Sys.rows(Sys.open) == 0 && self.reason != "" : Text {
+                text: parent.reason;
+                font-size: 17 * Look.tpx;
+                color: Look.text3;
+                width: parent.width;
+                wrap: word-wrap;
+                accessible-role: text;
+                accessible-label: "system-reason";
+                accessible-value: self.text;
+            }
+
+            // The password of the network being joined.
+            if Sys.asking != "" : Rectangle {
+                height: 56 * Look.px;
+                border-radius: 12 * Look.px;
+                background: #ffffff14;
+                border-width: 2 * Look.px;
+                border-color: Tokens.color-accent;
+                field := TextField {
+                    x: 16 * Look.px;
+                    width: parent.width - 32 * Look.px;
+                    height: parent.height;
+                    name: "wifi-password";
+                    title: "Password for " + Sys.asking;
+                    password: true;
+                    font-size: 19 * Look.tpx;
+                    font-family: Tokens.font-family;
+                    text-color: Tokens.color-text;
+                    init => { self.focus(); }
+                    accepted => {
+                        Host.join-wifi(Sys.asking, self.text);
+                        Sys.asking = "";
+                    }
+                    key-pressed(event) => {
+                        if (event.text == Key.Escape) { Sys.asking = ""; return accept; }
+                        reject
+                    }
+                }
+            }
+
+            // Network.
+            if Sys.open == 0 && Sys.network-on : PanelRow {
+                label: "Look for networks";
+                name: "wifi-scan";
+                focused: Sys.row == 0 && Sys.asking == "";
+                clicked => { Sys.row = 0; Sys.activate(); }
+                Icon { name: "search"; color: Tokens.color-text-muted; width: 22 * Look.px; height: 22 * Look.px; y: (parent.height - self.height) / 2; }
+            }
+            if Sys.open == 0 && Sys.network-on : VerticalLayout {
+                spacing: 6 * Look.px;
+                for net[i] in Vm.system.wifi : PanelRow {
+                    label: net.ssid;
+                    detail: net.active ? "Connected" : net.saved ? "Saved" : net.secured ? "Secured" : "Open";
+                    current: net.active;
+                    name: "wifi";
+                    value: net.ssid;
+                    focused: Sys.row == 1 + i && Sys.asking == "";
+                    clicked => { Sys.row = 1 + i; Sys.activate(); }
+                    Rectangle {
+                        width: 22 * Look.px;
+                        Icon { name: "wifi-4"; color: Tokens.color-text.with-alpha(0.3); width: parent.width; height: parent.width; }
+                        if net.bars > 0 : Icon { name: "wifi-" + net.bars; color: Tokens.color-text; width: parent.width; height: parent.width; }
+                    }
+                }
+            }
+
+            // Sound.
+            if Sys.open == 1 && Sys.audio-on : PanelRow {
+                label: "Volume";
+                detail: Vm.system.volume + "%";
+                name: "volume";
+                value: Vm.system.volume;
+                focused: Sys.row == 0;
+                clicked => { Sys.row = 0; }
+                SoundIcon { color: Tokens.color-text-muted; width: 22 * Look.px; height: 22 * Look.px; y: (parent.height - self.height) / 2; }
+            }
+            if Sys.open == 1 && Sys.audio-on : Rectangle {
+                height: 8 * Look.px;
+                Rectangle {
+                    x: 18 * Look.px;
+                    width: parent.width - 36 * Look.px;
+                    height: 6 * Look.px;
+                    border-radius: 3 * Look.px;
+                    background: #ffffff1f;
+                    Rectangle {
+                        x: 0;
+                        width: parent.width * Vm.system.volume / 100;
+                        border-radius: 3 * Look.px;
+                        background: Vm.system.muted ? Look.text3 : Tokens.color-accent;
+                        animate width { duration: Tokens.motion-fast; }
+                    }
+                }
+            }
+            if Sys.open == 1 && Sys.audio-on : PanelRow {
+                label: "Mute";
+                name: "mute";
+                value: Vm.system.muted ? "on" : "off";
+                focused: Sys.row == 1;
+                clicked => { Sys.row = 1; Sys.activate(); }
+                VerticalLayout { alignment: center; Switch { on: Vm.system.muted; } }
+            }
+            if Sys.open == 1 && Sys.audio-on : VerticalLayout {
+                spacing: 6 * Look.px;
+                for out[i] in Vm.system.outputs : PanelRow {
+                    label: out.description;
+                    current: out.current;
+                    name: "audio-output";
+                    value: out.description;
+                    focused: Sys.row == 2 + i;
+                    clicked => { Sys.row = 2 + i; Sys.activate(); }
+                }
+            }
+
+            // Bluetooth.
+            if Sys.open == 2 && Sys.bluetooth-on : PanelRow {
+                label: "Bluetooth";
+                name: "bluetooth-power";
+                value: Vm.system.bluetooth-on ? "on" : "off";
+                focused: Sys.row == 0;
+                clicked => { Sys.row = 0; Sys.activate(); }
+                VerticalLayout { alignment: center; Switch { on: Vm.system.bluetooth-on; } }
+            }
+            if Sys.open == 2 && Sys.bluetooth-on && Vm.system.bluetooth-on : PanelRow {
+                label: "Pair a device";
+                detail: "Put it in pairing mode first";
+                name: "bluetooth-scan";
+                focused: Sys.row == 1;
+                clicked => { Sys.row = 1; Sys.activate(); }
+            }
+            if Sys.open == 2 && Sys.bluetooth-on && Vm.system.bluetooth-on : VerticalLayout {
+                spacing: 6 * Look.px;
+                for device[i] in Vm.system.devices : PanelRow {
+                    label: device.name;
+                    detail: device.connected ? "Connected" : device.paired ? "Paired" : "Pair";
+                    current: device.connected;
+                    name: "bluetooth-device";
+                    value: device.name;
+                    focused: Sys.row == 2 + i;
+                    clicked => { Sys.row = 2 + i; Sys.activate(); }
+                }
+            }
+        }
+    }
+}

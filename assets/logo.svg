@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-labelledby="title description">
+  <title id="title">Nexus</title>
+  <desc id="description">An N drawn as a small network: four glowing nodes joined by strokes, its diagonal a beam of light, with an orbit ring around it, on a deep space tile.</desc>
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#141a3c"/>
+      <stop offset="0.55" stop-color="#0a0e24"/>
+      <stop offset="1" stop-color="#05060f"/>
+    </linearGradient>
+    <radialGradient id="core" cx="0.5" cy="0.52" r="0.5">
+      <stop offset="0" stop-color="#5b7cff" stop-opacity="0.45"/>
+      <stop offset="0.55" stop-color="#7c4dff" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#7c4dff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="orbit" gradientUnits="userSpaceOnUse" x1="36" y1="60" x2="220" y2="196">
+      <stop offset="0" stop-color="#3ee6ff"/>
+      <stop offset="0.5" stop-color="#7c6bff"/>
+      <stop offset="1" stop-color="#ff4fd8"/>
+    </linearGradient>
+    <linearGradient id="beam" gradientUnits="userSpaceOnUse" x1="84" y1="72" x2="172" y2="184">
+      <stop offset="0" stop-color="#e8fbff"/>
+      <stop offset="0.5" stop-color="#8fd8ff"/>
+      <stop offset="1" stop-color="#c58bff"/>
+    </linearGradient>
+    <linearGradient id="stemL" gradientUnits="userSpaceOnUse" x1="84" y1="64" x2="84" y2="192">
+      <stop offset="0" stop-color="#3ee6ff"/>
+      <stop offset="1" stop-color="#3a7bff"/>
+    </linearGradient>
+    <linearGradient id="stemR" gradientUnits="userSpaceOnUse" x1="172" y1="64" x2="172" y2="192">
+      <stop offset="0" stop-color="#9c7bff"/>
+      <stop offset="1" stop-color="#ff4fd8"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="6" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- The tile, with a soft core of light. -->
+  <rect x="8" y="8" width="240" height="240" rx="58" fill="url(#tile)"/>
+  <rect x="8" y="8" width="240" height="240" rx="58" fill="url(#core)"/>
+  <rect x="9" y="9" width="238" height="238" rx="57" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="2"/>
+
+  <!-- The orbit: a tilted ring around the N. -->
+  <ellipse cx="128" cy="130" rx="98" ry="40" transform="rotate(-24 128 130)" fill="none" stroke="url(#orbit)" stroke-width="6" stroke-opacity="0.9"/>
+
+  <!-- The N: two stems and the beam that joins them. -->
+  <g filter="url(#glow)" stroke-linecap="round">
+    <path d="M84 184V72" stroke="url(#stemL)" stroke-width="22" fill="none"/>
+    <path d="M172 72V184" stroke="url(#stemR)" stroke-width="22" fill="none"/>
+    <path d="M84 72L172 184" stroke="url(#beam)" stroke-width="22" fill="none"/>
+  </g>
+
+  <!-- The four nodes where the paths meet. -->
+  <g filter="url(#glow)">
+    <circle cx="84" cy="72" r="11" fill="#ffffff"/>
+    <circle cx="84" cy="184" r="9" fill="#3ee6ff"/>
+    <circle cx="172" cy="72" r="9" fill="#b38bff"/>
+    <circle cx="172" cy="184" r="11" fill="#ffffff"/>
+  </g>
+  <circle cx="84" cy="72" r="4.5" fill="#3ee6ff"/>
+  <circle cx="172" cy="184" r="4.5" fill="#ff4fd8"/>
+</svg>

@@ -1,0 +1,292 @@
+name: ci
+
+# The full check (format, clippy, every test) on Linux, macOS and Windows, then a package for
+# each, the desktop adapter against real windows, and cargo-deny (advisories, licences,
+# sources). Runners have no GPU, controller or audio device: the check uses Slint's testing
+# backend and fakes, and only the `desktop` job opens real windows.
+#
+# Every Monday it also runs on main without a change: new advisories show up, and the real
+# KytyPS5 and shadPS4 releases install (`real-releases`), so a changed upstream build is
+# found before a player finds it.
+on:
+  push:
+    branches: [main]
+  # `labeled`: adding the `package` label runs the package jobs on a pull request.
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # No debug info in CI builds: it made each test binary about 800 MB, and the build, the
+  # links and the cache (10 GB for the whole repo, shared by every job) several times bigger.
+  # A failing test still says its file and line.
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  # Homebrew updates itself before each install unless told not to: minutes per macOS job.
+  HOMEBREW_NO_AUTO_UPDATE: "1"
+  HOMEBREW_NO_INSTALL_CLEANUP: "1"
+
+# Explicit bash enables pipefail; on Windows it is Git's bash, which the scripts need.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check:
+    name: check (${{ matrix.os }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: linux, runner: ubuntu-22.04 }
+          - { os: macos, runner: macos-14 }
+          - { os: windows, runner: windows-2022 }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          components: rustfmt, clippy
+          cache-key: ${{ matrix.os }}
+          # Only main's cache is kept: a pull request can't fill it for everyone else.
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+      - run: scripts/check.sh 2>&1 | tee check.log
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: check-log-${{ matrix.os }}
+          path: check.log
+          retention-days: 7
+
+  # The desktop adapter against real windows: show a window, read which one is in front, see
+  # a window go while its program runs. Linux runs it under a virtual X server with a window
+  # manager, where a skip is a failure; Windows and macOS on the runner's desktop, where a
+  # runner that can't do it (macOS has no Accessibility permission here) skips and says why.
+  desktop:
+    name: desktop (${{ matrix.os }})
+    needs: check
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: linux, runner: ubuntu-22.04 }
+          - { os: macos, runner: macos-14 }
+          - { os: windows, runner: windows-2022 }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          cache-key: ${{ matrix.os }}
+          linux-packages: xvfb openbox xdotool x11-utils libxkbcommon-x11-0 libxcursor1 libxrandr2 libxi6
+      - name: Desktop adapter (Linux, X11)
+        if: runner.os == 'Linux'
+        env:
+          NEXUS_DESKTOP_TESTS: "1"
+          NEXUS_DESKTOP_REQUIRE: "1"
+        # Waits for openbox to own the screen before the test starts.
+        run: >-
+          xvfb-run -a -s "-screen 0 1280x800x24"
+          bash -c 'openbox & for i in $(seq 50); do xprop -root _NET_SUPPORTING_WM_CHECK | grep -q window && break; sleep 0.2; done;
+          cargo test --locked -p nexus-app --test desktop'
+      - name: Desktop adapter
+        if: runner.os != 'Linux'
+        env:
+          NEXUS_DESKTOP_TESTS: "1"
+        run: cargo test --locked -p nexus-app --test desktop
+
+  deny:
+    name: cargo-deny
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Reads deny.toml. An accepted advisory is listed there with its reason.
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check
+
+  # Downloads and installs the real emulator releases. Weekly and by hand only: it needs the
+  # network and takes hundreds of megabytes. It calls the GitHub API without a token, so
+  # GitHub's limit for anonymous calls can fail it on a busy runner; run it again then.
+  real-releases:
+    name: real releases (${{ matrix.os }})
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: linux, runner: ubuntu-22.04 }
+          - { os: macos, runner: macos-14 }
+          - { os: windows, runner: windows-2022 }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          cache-key: ${{ matrix.os }}
+      - run: cargo test --locked -p nexus-app real -- --nocapture
+        env:
+          NEXUS_REAL_RELEASES: "1"
+
+  # Every file a release makes, from this change: a wrong file list, dependency or installer
+  # fails here, not when a release is made.
+  # On main and by hand always; on a pull request only for Release Please's release pull
+  # requests and one labelled `package`, so a dependency bump doesn't build every package on
+  # four runners. Main's run still catches what a pull request skipped.
+  package:
+    name: package (${{ matrix.os }})
+    needs: check
+    if: >-
+      github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+      || (github.event_name == 'pull_request' && (startsWith(github.head_ref, 'release-please--')
+      || contains(github.event.pull_request.labels.*.name, 'package')))
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: linux, runner: ubuntu-22.04 }
+          # Each Mac processor on a runner of its own kind; package-macos joins them.
+          - { os: macos-arm64, runner: macos-14 }
+          - { os: macos-x86_64, runner: macos-15-intel }
+          - { os: windows, runner: windows-2022 }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          cache-key: package-${{ matrix.os }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+      # libmpv for the trailer player, which the package ships with its licence.
+      - uses: ./.github/actions/libmpv
+      # libarchive for RAR and the other archives, which the package ships with its licences.
+      - uses: ./.github/actions/libarchive
+      # A real video through libmpv, where the action installed one with ffmpeg beside it.
+      - name: Trailer player (macOS, Linux)
+        if: runner.os != 'Windows'
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then sudo apt-get install -y --no-install-recommends ffmpeg; fi
+          NEXUS_TRAILER_TESTS=1 cargo test -p nexus-app libmpv_plays
+      # The crates' licences for the package (about.toml).
+      # A prebuilt binary: compiling it took minutes in each job.
+      - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+        with:
+          tool: cargo-about@0.9.2
+      # Builds, runs `nexus --help` from the package, and packs it.
+      - run: scripts/package.sh
+      - name: AppImage (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          scripts/appimage.sh
+          APPIMAGE_EXTRACT_AND_RUN=1 dist/Nexus-x86_64.AppImage --version
+      - id: version
+        run: echo "version=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)" >> "$GITHUB_OUTPUT"
+      - name: deb, rpm and Arch packages (Linux)
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/linux-packages
+        with:
+          version: ${{ steps.version.outputs.version }}
+      # The installer installs silently, Nexus starts from where it put it, and the uninstaller
+      # takes it all away again.
+      - name: Installer (Windows)
+        if: runner.os == 'Windows'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          scripts/windows-installer.sh "$VERSION"
+          dist/nexus-windows-x86_64-setup.exe //VERYSILENT //SUPPRESSMSGBOXES //NORESTART //TASKS=""
+          # The installer's [Run] entry starts Nexus after a silent install: end it.
+          sleep 5; taskkill //IM nexus.exe //F 2> /dev/null || true
+          app="$LOCALAPPDATA/Programs/Nexus"
+          test -f "$app/installed-by-setup"
+          "$app/nexus.exe" --help > /dev/null
+          "$app/unins000.exe" //VERYSILENT //SUPPRESSMSGBOXES //NORESTART
+          for _ in $(seq 30); do [ ! -e "$app/nexus.exe" ] && break; sleep 1; done
+          test ! -e "$app/nexus.exe"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: nexus-${{ matrix.os }}
+          # The Linux tarball and the macOS zip keep the executable bit; Windows has none, so
+          # its folder goes as is.
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.rpm
+            dist/*.pkg.tar.zst
+            dist/*-setup.exe
+            dist/nexus-windows-*/
+          if-no-files-found: error
+          retention-days: 7
+
+  # The two Mac builds joined into the universal app, and its disk image, as a release makes
+  # them (signed ad hoc here).
+  package-macos:
+    name: package (macOS universal)
+    needs: package
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: nexus-macos-*
+          path: built
+          merge-multiple: true
+      - name: Join, check and make the disk image
+        run: |
+          for arch in aarch64 x86_64; do
+            ditto -x -k "built/nexus-macos-$arch.zip" "built/$arch"
+          done
+          packaging/macos/universal.sh built/aarch64/nexus-macos-aarch64/Nexus.app \
+            built/x86_64/nexus-macos-x86_64/Nexus.app dist/Nexus.app
+          dist/Nexus.app/Contents/MacOS/nexus --help > /dev/null
+          packaging/macos/make-dmg.sh dist/Nexus.app dist/nexus-macos-universal.dmg
+          hdiutil verify dist/nexus-macos-universal.dmg
+          mounted=$(hdiutil attach -nobrowse -readonly dist/nexus-macos-universal.dmg | awk -F'\t' '/Volumes/ {print $NF}')
+          test -x "$mounted/Nexus.app/Contents/MacOS/nexus"
+          test -L "$mounted/Applications"
+          hdiutil detach "$mounted"
+
+  # One required check for branch protection: it passes only when every job above that ran
+  # passed. A job skipped on purpose (real releases on a push) doesn't count against it.
+  ci-ok:
+    name: ci ok
+    if: always()
+    needs: [check, desktop, deny, package, package-macos]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          for result in $RESULTS; do
+            case "$result" in success | skipped) ;; *) exit 1 ;; esac
+          done

@@ -1,0 +1,24 @@
+[package]
+name = "nexus-testkit"
+description = "Fake host harness, fakes for HTTP and processes, and contract test suites for plugins."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+futures.workspace = true
+hex.workspace = true
+nexus-api.workspace = true
+nexus-core.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

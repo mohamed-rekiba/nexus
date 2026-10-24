@@ -1,0 +1,335 @@
+name: package
+
+# Builds a Nexus release's files for a tag and attaches them to its draft release. release.yml
+# calls it when Release Please makes a release; it can also run by hand for a tag whose draft
+# exists (for example after a failed run).
+#
+#   Linux    the tar.gz, the AppImage, and the deb, rpm and Arch packages
+#   macOS    one universal Nexus.app (Apple Silicon and Intel), as a .zip and a .dmg, signed with
+#            the Developer ID and notarized when the secrets are set
+#   Windows  the zip and the installer, signed when the certificate is set
+#
+# Each file gets a SHA-256 file and signed build provenance (`gh attestation verify <file> --repo
+# <owner>/<repo>` checks it). latest.json, which the launcher reads to update itself, lists them.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+      ref:
+        description: The commit to build
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The release's tag (for example v0.2.0)
+        required: true
+        type: string
+      ref:
+        description: The commit or tag to build
+        required: true
+        type: string
+
+# Each job asks for what it needs.
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+  # No debug info in CI builds: it made each test binary about 800 MB, and the build, the
+  # links and the cache (10 GB for the whole repo, shared by every job) several times bigger.
+  # A failing test still says its file and line.
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  # Homebrew updates itself before each install unless told not to: minutes per macOS job.
+  HOMEBREW_NO_AUTO_UPDATE: "1"
+  HOMEBREW_NO_INSTALL_CLEANUP: "1"
+  TAG: ${{ inputs.tag }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  version:
+    name: tag matches the version
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref }}
+      - id: version
+        run: |
+          version=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::the tag is $TAG, but Cargo.toml says version $version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: build (${{ matrix.name }})
+    needs: version
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { name: linux, runner: ubuntu-22.04 }
+          # Each Mac processor is built on a runner of its own kind; macos-universal joins them.
+          - { name: macos-arm64, runner: macos-14 }
+          - { name: macos-x86_64, runner: macos-15-intel }
+          - { name: windows, runner: windows-2022 }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref }}
+      # Setup without the cache: a release builds from nothing, so a poisoned cache can't
+      # reach it.
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+      - name: Linux system packages
+        if: runner.os == 'Linux'
+        run: >-
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends
+          libfontconfig1-dev libxkbcommon-dev libudev-dev libasound2-dev
+      # The full check first: a release never ships what the check would refuse.
+      - run: scripts/check.sh
+      # libmpv for the trailer player, which the package ships with its licence.
+      - uses: ./.github/actions/libmpv
+      # libarchive for RAR and the other archives, which the package ships with its licences.
+      - uses: ./.github/actions/libarchive
+      # The crates' licences for the package (about.toml).
+      # A prebuilt binary: compiling it took minutes in each job.
+      - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+        with:
+          tool: cargo-about@0.9.2
+      # Builds, runs `nexus --help` from the package, and packs it on Linux and macOS.
+      - run: scripts/package.sh
+      - name: AppImage (Linux)
+        if: runner.os == 'Linux'
+        run: scripts/appimage.sh
+      - name: deb, rpm and Arch packages (Linux)
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/linux-packages
+        with:
+          version: ${{ needs.version.outputs.version }}
+      # The source of the GPL code the package ships (mpv, FFmpeg), to publish beside it. The
+      # macOS sources go with the universal app.
+      - name: Third-party sources
+        if: runner.os != 'macOS'
+        run: |
+          for dir in dist/nexus-*/; do
+            scripts/fetch-sources.sh "${dir%/}"
+          done
+      # An Authenticode signature, when WINDOWS_CERT_PFX (the certificate, base64) and
+      # WINDOWS_CERT_PASSWORD are set. Without it SmartScreen warns on the first start.
+      - name: Sign nexus.exe (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERT_PFX: ${{ secrets.WINDOWS_CERT_PFX }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          if (-not $env:WINDOWS_CERT_PFX) {
+            Write-Output "::warning::no WINDOWS_CERT_PFX: nexus.exe is not signed"
+            exit 0
+          }
+          $pfx = Join-Path $env:RUNNER_TEMP "cert.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX))
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1
+          Get-ChildItem dist\nexus-windows-*\*.exe, dist\nexus-windows-*\*.dll | ForEach-Object {
+            & $signtool.FullName sign /f $pfx /p $env:WINDOWS_CERT_PASSWORD /fd sha256 /tr http://timestamp.digicert.com /td sha256 $_.FullName
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - name: Zip and installer (Windows)
+        if: runner.os == 'Windows'
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          (cd dist && 7z a -tzip nexus-windows-x86_64.zip nexus-windows-x86_64 > /dev/null)
+          scripts/windows-installer.sh "$VERSION"
+      - name: Sign the installer (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERT_PFX: ${{ secrets.WINDOWS_CERT_PFX }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          if (-not $env:WINDOWS_CERT_PFX) {
+            Write-Output "::warning::no WINDOWS_CERT_PFX: the installer is not signed"
+            exit 0
+          }
+          $pfx = Join-Path $env:RUNNER_TEMP "cert.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX))
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1
+          & $signtool.FullName sign /f $pfx /p $env:WINDOWS_CERT_PASSWORD /fd sha256 /tr http://timestamp.digicert.com /td sha256 dist\nexus-windows-x86_64-setup.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: build-${{ matrix.name }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.tar
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.rpm
+            dist/*.pkg.tar.zst
+            dist/*-setup.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  macos-universal:
+    name: macOS universal app
+    needs: build
+    runs-on: macos-14
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: build-macos-*
+          path: built
+          merge-multiple: true
+      - name: Join the two apps
+        run: |
+          for arch in aarch64 x86_64; do
+            ditto -x -k "built/nexus-macos-$arch.zip" "built/$arch"
+          done
+          mkdir -p dist/nexus-macos-universal
+          packaging/macos/universal.sh built/aarch64/nexus-macos-aarch64/Nexus.app \
+            built/x86_64/nexus-macos-x86_64/Nexus.app dist/nexus-macos-universal/Nexus.app
+          cp built/aarch64/nexus-macos-aarch64/{README.md,LICENSE} dist/nexus-macos-universal/
+          dist/nexus-macos-universal/Nexus.app/Contents/MacOS/nexus --help > /dev/null
+      - name: Third-party sources
+        run: scripts/fetch-sources.sh dist/nexus-macos-universal
+      # A Developer ID signature and Apple's notarization, when the secrets are set:
+      # MACOS_CERT_P12 (the certificate, base64), MACOS_CERT_PASSWORD, APPLE_ID, APPLE_TEAM_ID
+      # and APPLE_APP_PASSWORD (an app-specific password). Without them the app stays signed
+      # ad hoc, and Gatekeeper asks before the first start.
+      - name: Sign and notarize the app
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          name=nexus-macos-universal
+          app="dist/$name/Nexus.app"
+          if [ -z "$MACOS_CERT_P12" ]; then
+            echo "::warning::no MACOS_CERT_P12: the macOS app is signed ad hoc only"
+          else
+            keychain="$RUNNER_TEMP/signing.keychain-db"
+            security create-keychain -p "" "$keychain"
+            security set-keychain-settings "$keychain"
+            security unlock-keychain -p "" "$keychain"
+            echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+            security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+            security set-key-partition-list -S apple-tool:,apple: -s -k "" "$keychain" > /dev/null
+            security list-keychains -d user -s "$keychain"
+            # Libraries first, then the bundle: the hardened runtime and a timestamp, as
+            # notarization asks.
+            find "$app/Contents/Frameworks" -name '*.dylib' -exec codesign --force --timestamp --options runtime --sign "Developer ID Application" {} +
+            codesign --force --timestamp --options runtime --sign "Developer ID Application" "$app"
+            (cd dist && ditto -c -k --keepParent "$name" "$name.zip")
+            xcrun notarytool submit "dist/$name.zip" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+            xcrun stapler staple "$app"
+          fi
+          (cd dist && rm -f "$name.zip" && ditto -c -k --keepParent "$name" "$name.zip")
+      - name: Disk image
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          packaging/macos/make-dmg.sh dist/nexus-macos-universal/Nexus.app dist/nexus-macos-universal.dmg
+          if [ -n "$MACOS_CERT_P12" ]; then
+            codesign --force --timestamp --sign "Developer ID Application" dist/nexus-macos-universal.dmg
+            xcrun notarytool submit dist/nexus-macos-universal.dmg --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+            xcrun stapler staple dist/nexus-macos-universal.dmg
+          fi
+          hdiutil verify dist/nexus-macos-universal.dmg
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: build-macos-universal
+          path: |
+            dist/nexus-macos-universal.zip
+            dist/nexus-macos-universal.dmg
+            dist/*.tar
+          if-no-files-found: error
+          retention-days: 7
+
+  attach:
+    name: attach to the release
+    needs: [build, macos-universal]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    permissions:
+      # To upload to the release.
+      contents: write
+      # For the build provenance.
+      id-token: write
+      attestations: write
+    steps:
+      # For scripts/update-manifest.sh.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: build-*
+          path: dist
+          merge-multiple: true
+      # Each Mac processor's own zip was only the universal app's input.
+      - run: rm -f dist/nexus-macos-aarch64.zip dist/nexus-macos-x86_64.zip
+      - name: Checksums and latest.json
+        working-directory: dist
+        env:
+          GH_REPO: ${{ github.repository }}
+        run: |
+          for file in *.tar.gz *.zip *.tar *.AppImage *.deb *.rpm *.pkg.tar.zst *.exe *.dmg; do
+            [ -e "$file" ] || continue
+            sha256sum "$file" > "$file.sha256"
+          done
+          # What the launcher reads to update itself.
+          ../scripts/update-manifest.sh . "$TAG" "$GH_REPO" > latest.json
+          ls -l
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.tar
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.rpm
+            dist/*.pkg.tar.zst
+            dist/*.exe
+            dist/*.dmg
+      - name: Attach to the draft
+        working-directory: dist
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release upload "$TAG" ./* --clobber

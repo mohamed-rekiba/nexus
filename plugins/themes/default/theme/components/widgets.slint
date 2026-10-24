@@ -1,0 +1,343 @@
+import { Tokens } from "../tokens.slint";
+import { Look } from "look.slint";
+import { Icon } from "icon.slint";
+
+// The old launcher's widgets (ui/widgets.slint), at the 1080p sizes, scaled by `Look.k`.
+
+// White focus ring with a soft blue halo, drawn around its parent.
+export component FocusRing inherits Rectangle {
+    in property <length> radius: 16 * Look.px;
+    in property <bool> on;
+    in property <length> w;
+    in property <length> h;
+    x: -4 * Look.px;
+    y: -4 * Look.px;
+    width: root.w + 8 * Look.px;
+    height: root.h + 8 * Look.px;
+    border-radius: root.radius + 4 * Look.px;
+    border-width: 4 * Look.px;
+    border-color: Look.ring;
+    opacity: root.on ? 1 : 0;
+    drop-shadow-blur: root.on ? 18 * Look.px : 0;
+    drop-shadow-color: Look.glow;
+    animate opacity { duration: Tokens.motion-fast; }
+}
+
+export component KeyCap inherits Rectangle {
+    in property <string> text;
+    in property <bool> round;
+    in property <color> fg: #ffffff;
+    in property <color> bg: #ffffff24;
+    height: 30 * Look.px;
+    width: root.round ? 30 * Look.px : Math.max(30 * Look.px, t.preferred-width + 16 * Look.px);
+    border-radius: root.round ? 15 * Look.px : 8 * Look.px;
+    background: root.bg;
+    border-width: 1px;
+    border-color: #ffffff1f;
+    t := Text { text: root.text; font-size: 14 * Look.px; font-weight: 700; color: root.fg; }
+}
+
+// Quiet navigation, not another primary action. The shortcut shows on hover.
+export component BackButton inherits Rectangle {
+    in property <bool> pad;
+    callback clicked();
+    width: 154 * Look.px;
+    height: 48 * Look.px;
+    border-radius: 12 * Look.px;
+    background: ta.has-hover ? #ffffff16 : transparent;
+    accessible-role: button;
+    accessible-label: "Back";
+    accessible-action-default => { root.clicked(); }
+    animate background { duration: Look.timed(120ms); }
+    HorizontalLayout {
+        padding-left: 6 * Look.px;
+        padding-right: 8 * Look.px;
+        spacing: 12 * Look.px;
+        alignment: center;
+        Rectangle {
+            width: 36 * Look.px;
+            height: 36 * Look.px;
+            y: 6 * Look.px;
+            border-radius: 18 * Look.px;
+            background: ta.has-hover ? #ffffff24 : #ffffff12;
+            Icon {
+                name: Look.rtl ? "chevr" : "chevl";
+                color: Tokens.color-text;
+                width: 22 * Look.px;
+                height: 22 * Look.px;
+            }
+        }
+        Text { text: "Back"; font-size: 18 * Look.px; font-weight: 500; color: Tokens.color-text; vertical-alignment: center; }
+        Text {
+            text: root.pad ? "○" : "Esc";
+            font-size: 13 * Look.px;
+            color: root.pad ? #ff8f9c : Look.text3;
+            vertical-alignment: center;
+            opacity: root.pad || ta.has-hover ? 1 : 0;
+            animate opacity { duration: Look.timed(120ms); }
+        }
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// A pill with an optional dot or icon: a fact about a game ("● In-game", "Adventure").
+// Five stars, the last ones filled in part: `score` out of 5, as the old launcher drew them.
+export component Stars inherits HorizontalLayout {
+    in property <float> score;
+    in property <length> size: 17 * Look.px;
+    spacing: 2 * Look.px;
+    for i in [0, 1, 2, 3, 4] : Rectangle {
+        width: root.size;
+        height: root.size;
+        Icon { name: "star"; color: #ffffff33; width: root.size; height: root.size; }
+        Rectangle {
+            x: 0;
+            width: root.size * Math.clamp(root.score - i, 0, 1);
+            height: root.size;
+            clip: true;
+            Icon { x: 0; name: "star"; color: #ffc940; width: root.size; height: root.size; }
+        }
+    }
+}
+
+export component Chip inherits Rectangle {
+    in property <string> text;
+    in property <string> icon;
+    // A colored dot before the text; transparent for none.
+    in property <color> dot: transparent;
+    // Stars before the text, out of 5; 0 for none.
+    in property <float> stars;
+    height: 40 * Look.px;
+    border-radius: 20 * Look.px;
+    background: #ffffff17;
+    border-width: 1px;
+    border-color: #ffffff12;
+    HorizontalLayout {
+        padding-left: 16 * Look.px;
+        padding-right: 16 * Look.px;
+        spacing: 8 * Look.px;
+        if root.stars > 0 : Stars {
+            score: root.stars;
+            y: (parent.height - self.preferred-height) / 2;
+        }
+        if root.dot != transparent : Rectangle {
+            width: 10 * Look.px;
+            height: 10 * Look.px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 5 * Look.px;
+            background: root.dot;
+        }
+        if root.icon != "" : Icon {
+            name: root.icon;
+            color: Tokens.color-text-muted;
+            width: 18 * Look.px;
+            height: 18 * Look.px;
+            y: (parent.height - self.height) / 2;
+        }
+        Text {
+            text: root.text;
+            color: Tokens.color-text;
+            font-size: 17 * Look.px;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// The old launcher's big round button. The focused one turns white, grows and glows; a round
+// button shows only its icon until it is focused or hovered.
+export component Pill inherits Rectangle {
+    in property <string> text;
+    in property <string> icon;
+    in property <bool> primary;
+    in property <bool> danger;
+    in property <bool> round;
+    in property <bool> focused;
+    // Another button in the same row is focused: the primary one steps back.
+    in property <bool> dim;
+    in property <bool> enabled: true;
+    in property <length> h: 68 * Look.px;
+    callback clicked();
+
+    property <bool> solid: root.focused || (root.primary && !root.dim);
+    property <bool> open: !root.round || root.focused || ta.has-hover;
+    property <color> fg: root.solid && !(root.focused && root.danger) ? Look.ink : #ffffff;
+    height: root.h;
+    width: !root.open ? root.h : Math.max(root.primary ? 240 * Look.px : 0px, row.preferred-width);
+    clip: true;
+    opacity: root.enabled ? 1 : 0.45;
+    transform-scale: root.focused ? 1.05 : 1.0;
+    border-radius: root.h / 2;
+    background: root.focused ? (root.danger ? Tokens.color-danger : #ffffff)
+        : root.primary && !root.dim ? #ffffffeb
+        : root.danger ? #ff5a6a2e
+        : root.primary ? #ffffff38
+        : ta.has-hover ? #ffffff38 : #ffffff24;
+    border-width: 1px;
+    border-color: root.danger && !root.focused ? #ff5a6a5a : #ffffff1a;
+    drop-shadow-blur: root.focused ? 28 * Look.px : 0;
+    drop-shadow-color: root.focused ? #8cb9ffaa : transparent;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-item-selected: root.focused;
+    accessible-action-default => { root.clicked(); }
+    animate width { duration: Look.timed(Tokens.motion-normal + 40ms); easing: ease-out-expo; }
+    animate transform-scale { duration: Look.timed(Tokens.motion-normal - 40ms); easing: ease-out-back; }
+    animate background, drop-shadow-blur { duration: Tokens.motion-fast; }
+
+    row := HorizontalLayout {
+        alignment: center;
+        padding-left: !root.open ? 0 : root.round ? 22 * Look.px : 36 * Look.px;
+        padding-right: !root.open ? 0 : root.round ? 26 * Look.px : 36 * Look.px;
+        spacing: 12 * Look.px;
+        if root.icon != "" : Icon {
+            name: root.icon;
+            color: root.fg;
+            width: 26 * Look.px;
+            height: 26 * Look.px;
+            y: (parent.height - self.height) / 2;
+        }
+        if root.open : Text {
+            text: root.text;
+            font-size: 22 * Look.px;
+            font-weight: 600;
+            color: root.fg;
+            vertical-alignment: center;
+        }
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// Small caps line above a title: "● RUNNING", "PS5 · 2021".
+export component Kicker inherits HorizontalLayout {
+    in property <string> text;
+    in property <string> accent;
+    in property <string> tag;
+    spacing: 12 * Look.px;
+    alignment: start;
+    height: 30 * Look.px;
+    if root.tag != "" : Rectangle {
+        width: tag-t.preferred-width + 16 * Look.px;
+        border-radius: 6 * Look.px;
+        background: #ffffff24;
+        tag-t := Text { text: root.tag; font-size: 15 * Look.px; font-weight: 700; color: Tokens.color-text; }
+    }
+    if root.accent != "" : Text {
+        text: root.accent;
+        font-size: 18 * Look.px;
+        font-weight: 600;
+        letter-spacing: 2 * Look.px;
+        color: Tokens.color-success;
+        vertical-alignment: center;
+    }
+    Text {
+        text: root.text;
+        font-size: 18 * Look.px;
+        font-weight: 600;
+        letter-spacing: 2 * Look.px;
+        color: Tokens.color-text-muted;
+        vertical-alignment: center;
+    }
+}
+
+export component Switch inherits Rectangle {
+    in property <bool> on;
+    width: 58 * Look.px;
+    height: 32 * Look.px;
+    border-radius: 16 * Look.px;
+    background: root.on ? Tokens.color-accent : #ffffff33;
+    animate background { duration: Tokens.motion-fast; }
+    Rectangle {
+        x: root.on ? 30 * Look.px : 4 * Look.px;
+        y: 4 * Look.px;
+        width: 24 * Look.px;
+        height: 24 * Look.px;
+        border-radius: 12 * Look.px;
+        background: #ffffff;
+        animate x { duration: Look.move; easing: cubic-bezier(0.2, 0.8, 0.2, 1); }
+    }
+}
+
+// A soft light sweeping across: a loading placeholder. It reads the clock only while shown.
+export component Shimmer inherits Rectangle {
+    in property <bool> active;
+    clip: true;
+    visible: root.active;
+    property <float> t: root.active && Tokens.motion-normal > 0 ? animation-tick() / 1ms / 1000 : 0;
+    // The light rises, then falls: two halves of two colors each. Slint's software renderer
+    // draws a gradient's middle stop as a thin line down the card.
+    Rectangle {
+        x: (Math.mod(root.t * 0.8, 1.6) - 0.3) * parent.width - self.width / 2;
+        width: parent.width * 0.6;
+        Rectangle {
+            x: 0;
+            width: parent.width / 2;
+            background: @linear-gradient(90deg, #ffffff00 0%, #ffffff12 100%);
+        }
+        Rectangle {
+            x: parent.width / 2;
+            width: parent.width / 2;
+            background: @linear-gradient(90deg, #ffffff12 0%, #ffffff00 100%);
+        }
+    }
+}
+
+// Cover art; the console's colors with a soft light while it loads; the console's colors and
+// the game's name when there is none.
+export component Cover inherits Rectangle {
+    in property <image> source;
+    // `GameCard.cover-state`: "loading", "ready" or "none". Empty where the view has none
+    // (the Game Hub): the name shows until the art is in.
+    in property <string> state;
+    in property <string> title;
+    in property <string> platform;
+    in property <length> name-size: 20 * Look.px;
+    // The corners' radius. The art is clipped to it, as in the old theme's tiles.
+    in property <length> radius;
+    property <bool> loaded: root.source.width > 0;
+    property <bool> loading: !root.loaded && root.state == "loading";
+    border-radius: root.radius;
+    background: Tokens.color-surface;
+    // The clip is on a child with its own radius: a `clip` on the component's root keeps
+    // the corners square when the radius is set where the component is used.
+    Rectangle {
+        border-radius: root.radius;
+        clip: true;
+        if !root.loaded : Rectangle {
+            // Its own radius too: a renderer that clips square still draws it round.
+            border-radius: root.radius;
+            background: Look.console-art(root.platform);
+            Shimmer { active: root.loading; accessible-role: text; accessible-label: root.loading ? "cover-loading" : ""; }
+            if !root.loading : Text {
+                accessible-role: text;
+                accessible-label: "cover-name";
+                accessible-value: self.text;
+                x: parent.width * 0.1;
+                width: parent.width * 0.8;
+                text: root.title;
+                font-size: root.name-size;
+                font-weight: 700;
+                color: #e8ecf6;
+                wrap: word-wrap;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+        // Art of any shape fills the frame, cropped at its edges, so every game's cover looks
+        // the same.
+        Image {
+            source: root.source;
+            width: parent.width;
+            height: parent.height;
+            image-fit: cover;
+            opacity: root.loaded ? 1 : 0;
+            animate opacity { duration: Tokens.motion-normal; }
+        }
+    }
+}

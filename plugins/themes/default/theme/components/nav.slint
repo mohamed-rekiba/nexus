@@ -1,0 +1,416 @@
+import { Vm, Host, GameCard, Library } from "../types.slint";
+import { Look } from "look.slint";
+import { GameMenu } from "game-menu.slint";
+import { Sys } from "system-panel.slint";
+
+// The card the Game Hub opens from, for its cover to grow out of it. `from` is "row" for Home's
+// selected tile, "grid" for the Library's or the Catalog's card at `x`, `y` (on screen),
+// `width` and `height`, or "" when the place isn't known: the cover then fades in. The Game
+// Hub reads it as it opens, and sets `from` back to "".
+export global Origin {
+    in-out property <string> from;
+    in-out property <length> x;
+    in-out property <length> y;
+    in-out property <length> width;
+    in-out property <length> height;
+    // The selected grid card's place, kept by the grid on screen.
+    in-out property <length> card-x;
+    in-out property <length> card-y;
+    in-out property <length> card-width;
+    in-out property <length> card-height;
+    // The Game Hub opens from the selected grid card.
+    public function from-grid() {
+        root.from = "grid";
+        root.x = root.card-x;
+        root.y = root.card-y;
+        root.width = root.card-width;
+        root.height = root.card-height;
+    }
+}
+
+// Where the player is on the home screen, and what each key does there. As in the PS5
+// Launcher, the keys act on one zone at a time: the top bar (`tabs`), the tile row (`row`),
+// the buttons under the game (`actions`), and in the Library its bar (`bar`: search, sort,
+// Comfortable, Compact, and in the Catalog the catalog plugin's button), its systems
+// (`filters`), its genres (`genres`) and its grid (`grid`).
+//
+// The top bar has two tabs, Home (0) and Library (1), then the five screen buttons (2 to 6),
+// then, when Nexus is the whole screen, the network, sound and Bluetooth icons (7 to 9).
+// Home's row has every game; the Library's games are searched, filtered and sorted by the
+// core (`Vm.home.library`). The Catalog screen is the same view on the catalogs' games
+// (`Vm.catalog`), with the same zones but the top bar's.
+export global Nav {
+    // home | library
+    in-out property <string> view: "home";
+    in-out property <string> zone: "row";
+    in-out property <int> tab;
+    in-out property <int> action;
+    // The focus is on the Library tile at the end of the row.
+    in-out property <bool> extra;
+    // The Library grid's columns, set by the grid.
+    in-out property <int> columns: 1;
+    // The focused item of the Library's bar, systems and genres.
+    in-out property <int> bar;
+    in-out property <int> filter;
+    in-out property <int> genre;
+    // The Library's smaller cards.
+    in-out property <bool> compact;
+    // The search box has the keys, for typing; the shell takes them back when it's false.
+    in-out property <bool> typing;
+    // A letter typed in the Library grid, for the search box to start with.
+    in-out property <string> first-letter;
+    // The list of sorts is open, with the keys on `sort-focus`.
+    in-out property <bool> sort-open;
+    in-out property <int> sort-focus;
+    // How far each grid is scrolled. A screen's grid goes when a game's details open; the next
+    // one starts where it was.
+    in-out property <length> catalog-scroll;
+    in-out property <length> library-scroll;
+    // A card's Download opened the game's Hub: the keys go to its releases there.
+    in-out property <bool> to-releases;
+
+    out property <int> tabs: 2;
+    // The screen buttons, then the network, sound and Bluetooth icons when Nexus is the whole
+    // screen (`Sys`).
+    out property <int> buttons: 5 + root.statuses;
+    out property <int> statuses: Vm.system.whole-screen ? 3 : 0;
+    out property <bool> library: root.view == "library";
+    // The Catalog screen is open: the keys are on its view.
+    out property <bool> catalog: Vm.screen == "catalog";
+    // The Library's view, or the Catalog's.
+    out property <Library> lib: root.catalog ? Vm.catalog : Vm.home.library;
+    // The sorts of the view on screen. The Catalog starts with Recently added.
+    out property <[string]> sorts: root.catalog ? ["added", "title", "size", "smallest", "rating", "release", "compat"]
+        : ["title", "played", "size", "rating", "release", "compat"];
+    out property <[GameCard]> games: root.catalog || root.library ? root.lib.games : Vm.home.games;
+    // The core's selection: an index into `games`, or -1 when the selected game isn't in them.
+    out property <int> core-selected: root.catalog || root.library ? root.lib.selected : Vm.home.selected;
+    out property <string> core-key: root.core-selected >= 0 && root.core-selected < root.games.length
+        ? root.games[root.core-selected].key : "";
+    // The theme's own selection. A key move shows at once: the focus ring, the card's scale
+    // and the hero follow `cursor`, and the core hears of it `Look.select-after` after the last
+    // move (the shell's timer calls `send`). `moving` is true from the move until the core has
+    // the same game; when the core's selection changes for another reason, the cursor follows
+    // the core again (`core-moved`).
+    in-out property <int> cursor: -1;
+    in-out property <string> cursor-key;
+    in-out property <bool> moving;
+    // The cursor went to the core, and the core hasn't answered yet; `sent-from` is the
+    // core's game at that time.
+    in-out property <bool> sent;
+    in-out property <string> sent-from;
+    // Counts the moves: the shell's timer starts again on each.
+    in-out property <int> moves;
+    // The cursor still points at its game: a new list of games makes it stale.
+    out property <bool> cursor-valid: root.moving && root.cursor >= 0 && root.cursor < root.games.length
+        && root.games[root.cursor].key == root.cursor-key;
+    // Index into `games`, or -1 when the selected game isn't in them.
+    out property <int> selected: root.cursor-valid ? root.cursor : root.core-selected;
+    // The selected game's key, or "" when none is.
+    out property <string> selected-key: root.selected >= 0 && root.selected < root.games.length
+        ? root.games[root.selected].key : "";
+    // The game the screen shows: the selected one, or the first.
+    out property <int> shown: Math.max(root.selected, 0);
+    out property <bool> has-game: root.games.length > 0;
+    // The shown game's details are loaded.
+    out property <bool> has-detail: root.has-game && Vm.has-detail && Vm.detail.key == root.games[root.shown].key;
+    // The shown game is the one running.
+    out property <bool> playing: root.has-game && Vm.has-running && Vm.running.key == root.games[root.shown].key;
+    // The buttons under the game: Resume, Stop and Game Hub while it runs; Play (when it can
+    // start) and Game Hub otherwise; then the store page when there is one, and the game's
+    // menu ("⋯") once its details are in.
+    out property <bool> store: root.has-detail && Vm.detail.store-url != "";
+    out property <int> hub-action: root.playing ? 2 : root.has-detail && Vm.detail.can-launch ? 1 : 0;
+    out property <int> store-action: root.hub-action + 1;
+    out property <int> actions: root.hub-action + 1 + (root.store ? 1 : 0) + (root.has-detail ? 1 : 0);
+
+    public pure function platform(entry: int) -> string {
+        entry < 0 || entry >= Vm.home.groups.length ? "" : Vm.home.groups[entry].platform
+    }
+    public pure function count(entry: int) -> int {
+        entry < 0 || entry >= Vm.home.groups.length ? Vm.home.games.length : Vm.home.groups[entry].count
+    }
+
+    // Opens the Library.
+    public function open-library() {
+        root.sort-open = false;
+        root.view = "library";
+        root.zone = "grid";
+        root.extra = false;
+        root.tab = 1;
+        Host.play-sound("select");
+    }
+    public function go-home() {
+        root.sort-open = false;
+        root.view = "home";
+        root.zone = "row";
+        root.tab = 0;
+    }
+    public function activate-tab(index: int) {
+        if (index >= root.tabs + 5) {
+            Sys.show(index - root.tabs - 5);
+        } else if (index == 0) {
+            root.go-home();
+        } else if (index == 1) {
+            root.open-library();
+        } else {
+            Host.play-sound("select");
+            Host.navigate(index == 2 ? "catalog"
+                : index == 3 ? "downloads"
+                : index == 4 ? "emulators"
+                : index == 5 ? "themes"
+                : "settings");
+        }
+    }
+    // The search, filters, sort and next page of the view on screen: the Catalog's or the
+    // Library's.
+    public function search(text: string) {
+        if (root.catalog) { Host.catalog-search(text); } else { Host.library-search(text); }
+    }
+    public function system(id: string) {
+        if (root.catalog) { Host.catalog-system(id); } else { Host.library-system(id); }
+    }
+    public function genre-filter(id: string) {
+        if (root.catalog) { Host.catalog-genre(id); } else { Host.library-genre(id); }
+    }
+    public function more() {
+        if (root.catalog) { Host.catalog-more(); } else { Host.library-more(); }
+    }
+    // The Catalog's bar has the catalog plugin's first button (`Vm.catalog-actions`), such as
+    // Refresh, after the card sizes.
+    out property <bool> bar-button: root.catalog && Vm.catalog-actions.length > 0;
+    // The Library's bar: search, sort, Comfortable, Compact, then the Catalog's button.
+    public function activate-bar(index: int) {
+        if (index == 0) {
+            root.typing = true;
+        } else if (index == 1) {
+            // The list of sorts, with the keys on the one in use.
+            root.sort-open = true;
+            root.sort-focus = root.sort-index(root.lib.sort);
+        } else if (index == 4) {
+            if (root.bar-button) {
+                let button = Vm.catalog-actions[0];
+                Host.run-action(button.plugin, button.action, "", button.args);
+            }
+        } else {
+            root.compact = index == 3;
+        }
+        Host.play-sound("select");
+    }
+    // Where `sort` is in `sorts`.
+    pure function sort-index(sort: string) -> int {
+        root.catalog
+            ? (sort == "title" ? 1 : sort == "size" ? 2 : sort == "smallest" ? 3 : sort == "rating" ? 4 : sort == "release" ? 5 : sort == "compat" ? 6 : 0)
+            : (sort == "played" ? 1 : sort == "size" ? 2 : sort == "rating" ? 3 : sort == "release" ? 4 : sort == "compat" ? 5 : 0)
+    }
+    // The sort at `index` of `sorts`: the core sorts by it, and the list closes.
+    public function pick-sort(index: int) {
+        root.sort-open = false;
+        if (root.catalog) { Host.catalog-sort(root.sorts[index]); } else { Host.library-sort(root.sorts[index]); }
+        Host.play-sound("select");
+    }
+    // The keys while the list of sorts is open: Up and Down move round it, Enter picks, Back
+    // closes it. It takes every key.
+    public function sort-key(text: string) {
+        if (text == Key.UpArrow || text == Key.DownArrow) {
+            let count = root.sorts.length;
+            root.sort-focus = Math.mod(root.sort-focus + (text == Key.DownArrow ? 1 : -1) + count, count);
+            Host.play-sound("move");
+        } else if (text == Key.Return) {
+            root.pick-sort(root.sort-focus);
+        } else if (text == Key.Escape || text == Key.Backspace) {
+            root.sort-open = false;
+            Host.play-sound("back");
+        }
+    }
+    // A key move to the game at `index`: the cursor moves now, the core hears of it later.
+    public function select(index: int) {
+        if (root.games.length == 0) { return; }
+        let at = Math.clamp(index, 0, root.games.length - 1);
+        root.cursor = at;
+        root.cursor-key = root.games[at].key;
+        root.moving = true;
+        root.sent = false;
+        root.moves += 1;
+        Host.play-sound("move");
+    }
+    // The cursor goes to the core now. The shell's timer calls it once the moves stop, and the
+    // keys that act on the game call it first, so the core acts on the game on screen.
+    public function send() {
+        if (!root.moving || root.sent) { return; }
+        if (!root.cursor-valid || root.cursor-key == root.core-key) {
+            root.moving = false;
+            return;
+        }
+        root.sent = true;
+        root.sent-from = root.core-key;
+        Host.select(root.cursor-key);
+    }
+    // A click or the app selects `key`: at once, and a waiting key move is dropped.
+    public function select-now(key: string) {
+        root.moving = false;
+        root.sent = false;
+        Host.select(key);
+    }
+    // The core's selection changed. It has the cursor's game, or it chose another after it
+    // heard of the cursor (a refresh, a new list): either way the cursor follows the core. A
+    // change from before the cursor went to the core doesn't count, and a move the core hasn't
+    // heard of yet still goes to it.
+    public function core-moved() {
+        if (root.core-key == root.cursor-key || (root.sent && root.core-key != root.sent-from)) {
+            root.moving = false;
+            root.sent = false;
+        }
+    }
+    // Along the row: past the last game is the Library tile.
+    public function step-row(delta: int) {
+        if (root.extra) {
+            if (delta < 0) { root.extra = false; Host.play-sound("move"); }
+        } else if (root.selected + delta >= root.games.length && root.games.length > 0) {
+            root.extra = true;
+            Host.play-sound("move");
+        } else {
+            root.select(root.selected < 0 ? 0 : root.selected + delta);
+        }
+    }
+    public function step-tab(delta: int) {
+        let next = root.tab + delta;
+        // Search's place, with no Catalog: the next one on.
+        let skipped = next == root.tabs && !Vm.catalog-available ? next + delta : next;
+        root.tab = Math.clamp(skipped, 0, root.tabs + root.buttons - 1);
+        Host.play-sound("move");
+    }
+    // The button under the game at `action`.
+    public function activate() {
+        if (!root.has-game) { return; }
+        let key = root.games[root.shown].key;
+        if (root.has-detail && root.action == root.actions - 1) {
+            GameMenu.show();
+        } else if (root.store && root.action == root.store-action) {
+            Host.open-url(Vm.detail.store-url);
+        } else if (root.action == root.hub-action) {
+            Host.play-sound("select");
+            Origin.from = "row";
+            Host.open-game(key);
+        } else if (root.playing) {
+            if (root.action == 0) {
+                Host.play-sound("select");
+                Host.show-game(Vm.running.session);
+            } else {
+                Host.play-sound("back");
+                Host.stop(Vm.running.session);
+            }
+        } else if (root.has-detail && Vm.detail.can-launch) {
+            Host.launch(Vm.detail.key);
+        }
+    }
+
+    // Handles a key on the home screen. Returns whether it did anything.
+    public function key(text: string) -> bool {
+        // A key that isn't a move acts on the game on screen: the core hears of it first.
+        if (!(text == Key.LeftArrow || text == Key.RightArrow || text == Key.UpArrow || text == Key.DownArrow
+            || text == Key.PageUp || text == Key.PageDown)) {
+            root.send();
+        }
+        // Left and right follow the reading direction.
+        if (text == Key.LeftArrow || text == Key.RightArrow) {
+            if ((text == Key.RightArrow) == !Look.rtl) { return root.horizontal(1); }
+            return root.horizontal(-1);
+        }
+        if (root.zone == "tabs") {
+            if (text == Key.DownArrow) { root.go(root.library ? "bar" : "row"); return true; }
+            if (text == Key.Return) { root.activate-tab(root.tab); return true; }
+            if (text == Key.Escape || text == Key.Backspace) { root.go(root.view == "library" ? "grid" : "row"); return true; }
+        } else if (root.zone == "row") {
+            if (text == Key.UpArrow) { root.go("tabs"); root.tab = 0; return true; }
+            if (text == Key.DownArrow && !root.extra && root.has-game) { root.go("actions"); root.action = 0; return true; }
+            if (text == Key.Return) {
+                if (root.extra) {
+                    root.open-library();
+                } else if (root.has-game) {
+                    Host.play-sound("select");
+                    Origin.from = "row";
+                    Host.open-game(root.games[root.shown].key);
+                }
+                return true;
+            }
+        } else if (root.zone == "actions") {
+            if (text == Key.UpArrow || text == Key.Escape || text == Key.Backspace) { root.go("row"); return true; }
+            if (text == Key.Return) { root.activate(); return true; }
+        } else if (root.catalog && (text == Key.Escape || text == Key.Backspace)) {
+            // The Catalog is a screen of its own: back to where it opened from.
+            Host.play-sound("back");
+            Host.back();
+            return true;
+        } else if (root.zone == "bar") {
+            if (text == Key.UpArrow) { if (!root.catalog) { root.go("tabs"); root.tab = 1; } return true; }
+            if (text == Key.DownArrow) { root.go("filters"); return true; }
+            if (text == Key.Return) { root.activate-bar(root.bar); return true; }
+            if (text == Key.Escape || text == Key.Backspace) { root.leave(); return true; }
+        } else if (root.zone == "filters") {
+            if (text == Key.UpArrow) { root.go("bar"); return true; }
+            if (text == Key.DownArrow) { root.go(root.lib.genres.length > 1 ? "genres" : "grid"); return true; }
+            if (text == Key.Return) { root.system(root.lib.systems[root.filter].id); Host.play-sound("select"); return true; }
+            if (text == Key.Escape || text == Key.Backspace) { root.leave(); return true; }
+        } else if (root.zone == "genres") {
+            if (text == Key.UpArrow) { root.go("filters"); return true; }
+            if (text == Key.DownArrow) { root.go("grid"); return true; }
+            if (text == Key.Return) { root.genre-filter(root.lib.genres[root.genre].id); Host.play-sound("select"); return true; }
+            if (text == Key.Escape || text == Key.Backspace) { root.leave(); return true; }
+        } else if (root.zone == "grid") {
+            if (text == Key.UpArrow) {
+                if (root.selected < root.columns) { root.go(root.lib.genres.length > 1 ? "genres" : "filters"); } else { root.select(root.selected - root.columns); }
+                return true;
+            }
+            if (text == Key.DownArrow) {
+                if (root.selected + root.columns < root.games.length) { root.select(root.selected < 0 ? 0 : root.selected + root.columns); }
+                return true;
+            }
+            if (text == Key.Return) {
+                if (root.has-game) {
+                    Host.play-sound("select");
+                    Origin.from-grid();
+                    Host.open-game(root.games[root.shown].key);
+                }
+                return true;
+            }
+            if (text == Key.Escape || text == Key.Backspace) { root.leave(); return true; }
+            // L2 and R2, Page Up and Page Down: three lines at a time.
+            if (text == Key.PageUp || text == Key.PageDown) {
+                let step = root.columns * 3 * (text == Key.PageDown ? 1 : -1);
+                root.select(Math.clamp(Math.max(root.selected, 0) + step, 0, root.games.length - 1));
+                return true;
+            }
+            // Typing a letter or a digit searches.
+            if (text.character-count == 1 && ((text >= "a" && text <= "z") || (text >= "A" && text <= "Z") || (text >= "0" && text <= "9"))) {
+                root.first-letter = text;
+                root.zone = "bar";
+                root.bar = 0;
+                root.typing = true;
+                return true;
+            }
+        }
+        false
+    }
+    // Back from the Library to Home's row, with the back sound.
+    function leave() {
+        root.go-home();
+        Host.play-sound("back");
+    }
+    // Moves the keys to another zone, with the move sound.
+    function go(zone: string) {
+        root.send();
+        root.zone = zone;
+        Host.play-sound("move");
+    }
+    function horizontal(delta: int) -> bool {
+        if (root.zone == "tabs") { root.step-tab(delta); }
+        if (root.zone == "row") { root.step-row(delta); }
+        if (root.zone == "actions") { root.action = Math.clamp(root.action + delta, 0, root.actions - 1); Host.play-sound("move"); }
+        if (root.zone == "bar") { root.bar = Math.clamp(root.bar + delta, 0, root.bar-button ? 4 : 3); Host.play-sound("move"); }
+        if (root.zone == "filters") { root.filter = Math.clamp(root.filter + delta, 0, root.lib.systems.length - 1); Host.play-sound("move"); }
+        if (root.zone == "genres") { root.genre = Math.clamp(root.genre + delta, 0, root.lib.genres.length - 1); Host.play-sound("move"); }
+        if (root.zone == "grid") { root.select(root.selected < 0 ? 0 : root.selected + delta); }
+        true
+    }
+}

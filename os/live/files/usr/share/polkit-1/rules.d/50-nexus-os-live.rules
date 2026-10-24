@@ -1,0 +1,13 @@
+// On the USB stick only: "player", sitting at the PC, may run the stick's installer as root
+// through pkexec, with no password to ask for: "Install on this PC" (nexus-os-install DISK) and
+// "Choose partitions instead" (nexus-os-install --choose-partitions). Nexus runs it as
+// /usr/bin/nexus-os-install, a link to /usr/libexec/nexus-os/install. Current pkexec reports the
+// resolved path as "program", older ones the path they were given, so both are allowed.
+polkit.addRule(function (action, subject) {
+    if (action.id === "org.freedesktop.policykit.exec" &&
+        (action.lookup("program") === "/usr/bin/nexus-os-install" ||
+         action.lookup("program") === "/usr/libexec/nexus-os/install") &&
+        subject.user === "player" && subject.local && subject.active) {
+        return polkit.Result.YES;
+    }
+});

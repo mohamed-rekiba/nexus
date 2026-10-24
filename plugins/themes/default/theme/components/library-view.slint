@@ -1,0 +1,655 @@
+import { Vm, Host } from "../types.slint";
+import { Tokens } from "../tokens.slint";
+import { Look } from "look.slint";
+import { Nav, Origin } from "nav.slint";
+import { Icon } from "icon.slint";
+import { Card } from "card.slint";
+import { FocusRing } from "widgets.slint";
+import { Osk, TextField } from "keyboard.slint";
+
+// A Library filter: a system or a genre with its count. It is white when it is on, and ringed
+// under the keys. Right to left, the count is on the left of the name.
+component FilterChip inherits Rectangle {
+    in property <string> text;
+    in property <int> count: -1;
+    in property <bool> active;
+    in property <bool> focused;
+    callback clicked();
+    height: 44 * Look.px;
+    width: row.preferred-width;
+    border-radius: 22 * Look.px;
+    background: root.active ? #ffffff : ta.has-hover ? #ffffff26 : #ffffff14;
+    border-width: 1px;
+    border-color: #ffffff14;
+    // Under the keys: the ring the cards have; white is the chip that is on. It doesn't grow: a
+    // row that scrolls to keep it in view counts its own size.
+    transform-scale: ta.pressed ? 0.95 : 1.0;
+    animate background, border-color { duration: Tokens.motion-fast; }
+    animate transform-scale { duration: Tokens.motion-fast; easing: ease-out-back; }
+    accessible-role: button;
+    accessible-label: "filter:" + root.text;
+    accessible-value: root.active ? "on" : "off";
+    accessible-action-default => { root.clicked(); }
+    row := HorizontalLayout {
+        padding-left: 18 * Look.px;
+        padding-right: 18 * Look.px;
+        spacing: 8 * Look.px;
+        if Look.rtl && root.count >= 0 : Text { text: root.count; font-size: 16 * Look.px; color: root.active ? #3a4560 : Look.text3; vertical-alignment: center; }
+        Text { text: root.text; font-size: 19 * Look.px; font-weight: root.active ? 600 : 500; color: root.active ? Look.ink : Tokens.color-text; vertical-alignment: center; }
+        if !Look.rtl && root.count >= 0 : Text { text: root.count; font-size: 16 * Look.px; color: root.active ? #3a4560 : Look.text3; vertical-alignment: center; }
+    }
+    ta := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+    FocusRing { w: root.width; h: root.height; on: root.focused; radius: root.border-radius; }
+}
+
+// The old launcher's Library, for the Library and the Catalog: a header band with search, sort
+// and card size, the systems with the count on the far side, the genres, and the grid of cards
+// under it. The core searches, filters and sorts (`Nav.lib`) and sends a page at a time; the
+// grid asks for the next page as it nears the end, and scrolls to keep the selected card in
+// view.
+export component LibraryView inherits Rectangle {
+    // The keys and the paging are this view's: it is the one on screen.
+    in property <bool> active;
+    // The header band ends under the genres, or under the systems when there are none.
+    property <length> top: (Nav.lib.genres.length > 1 ? 324 : 254) * Look.px;
+    property <length> card: Nav.compact ? 190 * Look.px : 240 * Look.px;
+    property <length> gap: Nav.compact ? 22 * Look.px : 26 * Look.px;
+    property <bool> keys: root.active;
+
+    // Tells the host which cards are on screen.
+    function report() {
+        if (root.active) {
+            Host.grid-window(Nav.catalog ? "catalog" : "library", grid.first-row * grid.columns,
+                (grid.first-row + grid.screen-rows) * grid.columns - 1);
+        }
+    }
+    changed active => { root.report(); root.tell-columns(); root.keep-origin(); }
+    // The selected card's place on screen, for the Game Hub's cover to grow from.
+    property <length> card-x: root.absolute-position.x
+        + root.at(96 * Look.px + Math.mod(Nav.shown, grid.columns) * (root.card + root.gap), root.card);
+    property <length> card-y: root.absolute-position.y + flick.y + flick.viewport-y + grid.y
+        + Math.floor(Nav.shown / grid.columns) * grid.pitch;
+    changed card-x => { root.keep-origin(); }
+    changed card-y => { root.keep-origin(); }
+    function keep-origin() {
+        if (root.active) {
+            Origin.card-x = root.card-x;
+            Origin.card-y = root.card-y;
+            Origin.card-width = root.card;
+            Origin.card-height = root.card * 1.5;
+        }
+    }
+    // Tells the core how many columns the grid has.
+    function tell-columns() {
+        if (root.active) { Host.grid-columns(Nav.catalog ? "catalog" : "library", grid.columns); }
+    }
+
+    // How many games there were when the next page was asked for: one ask a page.
+    property <int> asked-at: -1;
+    function more() {
+        if (root.active && Nav.games.length < Nav.lib.total && Nav.games.length != root.asked-at) {
+            root.asked-at = Nav.games.length;
+            Nav.more();
+        }
+    }
+    // A short grid asks for the next page at once.
+    property <int> count: Nav.games.length;
+    changed count => { if (flick.near-end) { root.more(); } }
+    init => { if (flick.near-end) { root.more(); } }
+
+    pure function at(x: length, w: length) -> length {
+        Look.rtl ? root.width - x - w : x
+    }
+    // `x` from the start of a row `span` wide, from its left: right to left, the row is mirrored.
+    pure function within(x: length, w: length, span: length) -> length {
+        Look.rtl ? span - x - w : x
+    }
+
+    flick := Flickable {
+
+        // Up and down only: nothing drags sideways.
+
+        viewport-width: self.width;
+        y: root.top;
+        height: root.height - self.y;
+        viewport-height: grid.height + 140 * Look.px;
+        // A key move glides; the wheel and a drag set the place at once, without this. The place
+        // a new grid starts at doesn't glide.
+        animate viewport-y { duration: self.placed ? Tokens.motion-normal : 0ms; easing: ease-out-quart; }
+        property <bool> placed;
+        init => {
+            // Within the grid as it is now: it may have got shorter meanwhile.
+            let saved = Math.min(0, Math.max(Nav.catalog ? Nav.catalog-scroll : Nav.library-scroll,
+                self.height - self.viewport-height));
+            self.viewport-y = saved;
+            self.aim = -saved;
+            self.keyed = saved != 0;
+            self.placed = true;
+        }
+        changed viewport-y => {
+            if (Nav.catalog) { Nav.catalog-scroll = self.viewport-y; } else { Nav.library-scroll = self.viewport-y; }
+        }
+        // Where the last key move scrolls to, while no wheel or drag moved the grid after it:
+        // the next key move counts from there, not from the middle of the glide.
+        property <length> aim;
+        property <bool> keyed;
+        flicked => { self.keyed = false; }
+        // Near the end of the shown pages, the next one: once for each page.
+        property <bool> near-end: self.viewport-height + self.viewport-y - self.height < 2 * self.height;
+        changed near-end => { root.more(); }
+        grid := Rectangle {
+            property <int> columns: Math.max(1, Math.floor((root.width - 192 * Look.px + root.gap) / (root.card + root.gap)));
+            property <int> rows: Math.ceil(Nav.games.length / self.columns);
+            // The Catalog's cards have a line more: how easy the game is to download.
+            property <length> pitch: root.card * 1.5 + (Nav.compact ? 96 : 130) * Look.px + (Nav.catalog ? 28 * Look.px : 0);
+            property <int> sel-row: Math.floor(Nav.shown / self.columns);
+            changed columns => { Nav.columns = self.columns; root.report(); root.tell-columns(); }
+            init => { Nav.columns = self.columns; root.report(); root.tell-columns(); }
+            // The rows on screen: the host loads the covers near them, and no others.
+            property <int> first-row: Math.max(0, Math.floor(-flick.viewport-y / self.pitch));
+            property <int> screen-rows: Math.ceil(flick.height / self.pitch) + 1;
+            changed first-row => { root.report(); }
+            changed screen-rows => { root.report(); }
+            // The grid scrolls only when the selected row leaves the view, and by whole rows,
+            // so no part of the row above shows under the header.
+            changed sel-row => {
+                if (self.sel-row >= self.rows - 2) { root.more(); }
+                let shown = flick.keyed ? flick.aim : -flick.viewport-y;
+                let top = self.sel-row * self.pitch;
+                let low = self.y + top + self.pitch - flick.height;
+                let snapped = Math.ceil(low / self.pitch) * self.pitch;
+                let wanted = top < shown ? top : low <= shown ? shown : snapped <= top ? snapped : top;
+                let target = Math.max(0, Math.min(wanted, self.height + 140 * Look.px - flick.height));
+                if (target != shown) {
+                    flick.aim = target;
+                    flick.keyed = true;
+                    flick.viewport-y = -target;
+                }
+            }
+            y: 26 * Look.px;
+            height: self.rows * self.pitch;
+            for game[i] in Nav.games : slot := Rectangle {
+                property <length> lx: 96 * Look.px + Math.mod(i, grid.columns) * (root.card + root.gap);
+                property <int> line: Math.floor(i / grid.columns);
+                // The cards come in as a wave, row by row and across each row. The wave is
+                // here, not in the card: a theme's own Card keeps the contract's interface.
+                property <bool> shown;
+                // After the first frame, so the entry animates from its start.
+                Timer { interval: 16ms; running: !parent.shown; triggered => { parent.shown = true; } }
+                x: root.at(self.lx, self.width);
+                y: self.line * grid.pitch + (self.shown ? 0 : 30 * Look.px);
+                width: root.card;
+                height: grid.pitch;
+                // Only the rows on screen and a screen around them build their card: a long
+                // grid keeps its places, but not hundreds of cards to lay out and draw.
+                property <bool> near: self.line >= grid.first-row - grid.screen-rows
+                    && self.line < grid.first-row + 2 * grid.screen-rows;
+                function open() {
+                    Origin.from = "grid";
+                    Origin.x = slot.absolute-position.x;
+                    Origin.y = slot.absolute-position.y;
+                    Origin.width = slot.width;
+                    Origin.height = slot.width * 1.5;
+                    Nav.select-now(game.key);
+                    Host.open-game(game.key);
+                    Nav.zone = "grid";
+                }
+                opacity: self.shown ? 1 : 0;
+                animate y { duration: Tokens.motion-slow; delay: self.line < 4 ? Look.timed((self.line * 70 + Math.mod(i, grid.columns) * 30) * 1ms) : 0ms; easing: ease-out-expo; }
+                animate opacity { duration: Tokens.motion-normal; delay: self.line < 4 ? Look.timed((self.line * 70 + Math.mod(i, grid.columns) * 30) * 1ms) : 0ms; easing: ease-out-quad; }
+                // The grid's place for the game, for tests and screen readers; a theme's own Card
+                // keeps its own label inside it.
+                accessible-role: button;
+                accessible-label: "default-game";
+                accessible-value: game.title;
+                accessible-item-selected: i == Nav.selected;
+                accessible-action-default => { slot.open(); }
+                if slot.near : Card {
+                    width: parent.width;
+                    game: game;
+                    // One click opens the game, as a mouse expects.
+                    activated => { slot.open(); }
+                }
+            }
+        }
+    }
+    if Nav.games.length == 0 : Text {
+        y: 420 * Look.px;
+        width: root.width;
+        horizontal-alignment: center;
+        text: Nav.catalog && Vm.catalog-loading ? "Loading catalog…"
+            : Nav.lib.query != "" ? "No game matches \"" + Nav.lib.query + "\""
+            : Nav.catalog ? "No catalog lists any game yet" : "No games here";
+        font-size: 24 * Look.px;
+        color: Look.text3;
+        accessible-role: text;
+        accessible-label: "grid-empty";
+        accessible-value: self.text;
+    }
+
+    // The header band: the grid scrolls under it.
+    band := Rectangle {
+        y: 0;
+        height: root.top;
+        background: @linear-gradient(180deg, Look.band 0%, Look.band 88%, Look.band-clear 100%);
+
+        // How far down all the grid's games the screen goes: against every game the search and
+        // filters leave, not only the pages loaded, so it doesn't jump back as a page comes in.
+        // Only for a grid longer than the screen.
+        property <length> all-height: Math.ceil(Nav.lib.total / grid.columns) * grid.pitch;
+        property <float> progress: Math.min(1, (flick.height - flick.viewport-y) / Math.max(1px, self.all-height));
+        if self.all-height > flick.height : Rectangle {
+            x: 96 * Look.px;
+            y: parent.height - self.height;
+            width: root.width - 192 * Look.px;
+            height: 3 * Look.px;
+            border-radius: self.height / 2;
+            background: #ffffff14;
+            accessible-role: progress-indicator;
+            accessible-label: "grid-progress";
+            accessible-value: Math.round(band.progress * 100) + "%";
+            Rectangle {
+                x: Look.rtl ? parent.width - self.width : 0;
+                width: parent.width * band.progress;
+                border-radius: parent.border-radius;
+                background: Tokens.color-accent;
+                animate width { duration: Tokens.motion-fast; }
+            }
+        }
+
+        // Search, sort, and the cards' size at the far end.
+        bar := Rectangle {
+            x: 96 * Look.px;
+            y: 112 * Look.px;
+            width: root.width - 192 * Look.px;
+            height: 62 * Look.px;
+            property <bool> on-bar: root.keys && Nav.zone == "bar";
+            // While typing, the box has the keys.
+            property <bool> typing: Nav.typing;
+            changed typing => {
+                if (!self.typing) { return; }
+                input.focus();
+                // A letter typed in the grid starts the search with it.
+                if (Nav.first-letter != "") {
+                    input.text = Nav.lib.query + Nav.first-letter;
+                    Nav.first-letter = "";
+                    Nav.search(input.text);
+                }
+                input.to-end();
+            }
+            // The core's search text, when it changes from elsewhere (a cleared search).
+            property <string> query: Nav.lib.query;
+            // Room for the Catalog's button at the far end.
+            property <length> button-room: Nav.bar-button ? catalog-button.width + 18 * Look.px : 0;
+            // Where the card sizes start, from the start side.
+            property <length> density-at: Math.max(bar.width - density.width - self.button-room, sort.width + search.width + 36 * Look.px);
+            changed query => { if (input.text != self.query) { input.text = self.query; } }
+            search := Rectangle {
+                property <bool> focused: bar.on-bar && Nav.bar == 0;
+                FocusRing { w: parent.width; h: parent.height; on: parent.focused; radius: 31 * Look.px; }
+                property <bool> lit: self.focused || Nav.typing;
+                x: root.within(0, self.width, bar.width);
+                height: parent.height;
+                width: Math.min(600 * Look.px, Math.max(180 * Look.px, bar.width - sort.width - density.width - bar.button-room - 54 * Look.px));
+                border-radius: 31 * Look.px;
+                background: self.lit ? #232c47 : #ffffff14;
+                border-width: self.lit ? 3 * Look.px : 1px;
+                border-color: self.lit ? #ffffff : Look.line;
+                drop-shadow-blur: self.lit ? 18 * Look.px : 0;
+                drop-shadow-color: #3d8bff66;
+                Icon { x: root.within(24 * Look.px, self.width, parent.width); name: "search"; color: Tokens.color-text-muted; width: 24 * Look.px; height: 24 * Look.px; }
+                // The on-screen keyboard types here too, when the controller focused it.
+                input := TextField {
+                    x: root.within(62 * Look.px, self.width, parent.width);
+                    width: parent.width - 86 * Look.px;
+                    height: parent.height;
+                    name: "library-search";
+                    title: Nav.catalog ? "Search the catalog" : "Search games";
+                    horizontal-alignment: Look.rtl ? right : left;
+                    font-size: 22 * Look.px;
+                    text-color: Tokens.color-text;
+                    init => { self.text = Nav.lib.query; }
+                    // The search runs once typing stops for a moment.
+                    // Each key starts the wait again.
+                    edited => { if (debounce.running) { debounce.restart(); } else { debounce.start(); } }
+                    debounce := Timer {
+                        interval: 300ms;
+                        running: false;
+                        triggered => { self.stop(); Nav.search(input.text); }
+                    }
+                    // Enter, or Done on the keyboard: the search runs now.
+                    accepted => {
+                        debounce.stop();
+                        if (input.text != Nav.lib.query) { Nav.search(input.text); }
+                        Nav.typing = false;
+                        Nav.zone = "grid";
+                    }
+                    key-pressed(event) => {
+                        if (event.text == Key.Escape || event.text == Key.DownArrow) { Nav.typing = false; Nav.zone = "bar"; return accept; }
+                        reject
+                    }
+                }
+                if Nav.lib.query == "" && input.text == "" : Text {
+                    x: root.within(62 * Look.px, parent.width - 86 * Look.px, parent.width);
+                    width: parent.width - 86 * Look.px;
+                    horizontal-alignment: Look.rtl ? right : left;
+                    text: "Search games";
+                    font-size: 22 * Look.px;
+                    color: Look.text3;
+                    vertical-alignment: center;
+                }
+                // A click is not the controller: the on-screen keyboard stays shut.
+                TouchArea { mouse-cursor: text; clicked => { Osk.pad = false; Nav.zone = "bar"; Nav.bar = 0; Nav.typing = true; } }
+            }
+            sort := Rectangle {
+                property <bool> focused: bar.on-bar && Nav.bar == 1;
+                FocusRing { w: parent.width; h: parent.height; on: parent.focused; radius: 31 * Look.px; }
+                x: root.within(search.width + 18 * Look.px, self.width, bar.width);
+                height: parent.height;
+                width: sort-row.preferred-width + 40 * Look.px;
+                border-radius: 31 * Look.px;
+                background: self.focused ? #ffffff26 : #ffffff14;
+                border-width: self.focused ? 3 * Look.px : 1px;
+                border-color: self.focused ? #ffffff : Look.line;
+                accessible-role: button;
+                accessible-label: "library-sort";
+                accessible-value: Nav.lib.sort;
+                accessible-action-default => { Nav.activate-bar(1); }
+                sort-row := HorizontalLayout {
+                    spacing: 10 * Look.px;
+                    alignment: center;
+                    if Look.rtl : Icon { name: "chevd"; color: Look.text3; width: 20 * Look.px; height: 20 * Look.px; y: (parent.height - 20 * Look.px) / 2; }
+                    Text {
+                        text: Look.sort-label(Nav.lib.sort);
+                        font-size: 20 * Look.px;
+                        color: Tokens.color-text;
+                        vertical-alignment: center;
+                    }
+                    if !Look.rtl : Icon { name: "chevd"; color: Look.text3; width: 20 * Look.px; height: 20 * Look.px; y: (parent.height - 20 * Look.px) / 2; }
+                }
+                TouchArea { mouse-cursor: pointer; clicked => { Nav.zone = "bar"; Nav.bar = 1; Nav.activate-bar(1); } }
+            }
+            density := Rectangle {
+                // At the far end, before the Catalog's button, or after the sort when the bar is
+                // too narrow for both.
+                x: root.within(bar.density-at, self.width, bar.width);
+                height: parent.height;
+                width: density-row.preferred-width;
+                border-radius: 31 * Look.px;
+                background: #ffffff0b;
+                border-width: 1px;
+                border-color: Look.line;
+                accessible-role: button;
+                accessible-label: "density";
+                accessible-value: Nav.compact ? "compact" : "comfortable";
+                accessible-action-default => { Nav.compact = !Nav.compact; }
+                density-row := HorizontalLayout {
+                    padding: 5 * Look.px;
+                    spacing: 4 * Look.px;
+                    // Right to left, the first choice is on the right.
+                    for j in 2 : choice := Rectangle {
+                        property <int> i: Look.rtl ? 1 - j : j;
+                        property <bool> chosen: Nav.compact == (self.i == 1);
+                        width: dt.preferred-width + 28 * Look.px;
+                        border-radius: 26 * Look.px;
+                        background: self.chosen ? #ffffff20 : transparent;
+                        FocusRing { w: parent.width; h: parent.height; on: root.keys && Nav.zone == "bar" && Nav.bar == choice.i + 2; radius: 26 * Look.px; }
+                        animate background { duration: Tokens.motion-fast; }
+                        dt := Text { text: [root.width < 1000px ? "Roomy" : "Comfortable", "Compact"][choice.i]; font-size: 17 * Look.px; color: choice.chosen ? Tokens.color-text : Look.text3; vertical-alignment: center; }
+                        TouchArea { mouse-cursor: pointer; clicked => { Nav.zone = "bar"; Nav.bar = choice.i + 2; Nav.compact = choice.i == 1; } }
+                    }
+                }
+            }
+            // What the catalog plugin says of its button, such as when the catalog was last
+            // refreshed, between the sort and the card sizes, on the side of the button.
+            if Nav.catalog && Vm.catalog-status.length > 0 : Text {
+                property <length> start: search.width + sort.width + 36 * Look.px;
+                width: Math.max(0, bar.density-at - 18 * Look.px - self.start);
+                x: root.within(self.start, self.width, bar.width);
+                height: parent.height;
+                text: Vm.catalog-status[0].text;
+                font-size: 17 * Look.px;
+                color: Look.tone(Vm.catalog-status[0].tone);
+                overflow: elide;
+                horizontal-alignment: Look.rtl ? left : right;
+                vertical-alignment: center;
+                accessible-role: text;
+                accessible-label: Vm.catalog-status[0].label;
+                accessible-value: self.text;
+            }
+            // The catalog plugin's first button, such as Refresh, at the far end.
+            catalog-button := Rectangle {
+                property <bool> focused: bar.on-bar && Nav.bar == 4;
+                FocusRing { w: parent.width; h: parent.height; on: parent.focused; radius: 31 * Look.px; }
+                visible: Nav.bar-button;
+                x: root.within(bar.width - self.width, self.width, bar.width);
+                height: parent.height;
+                width: Nav.bar-button ? catalog-button-row.preferred-width + 40 * Look.px : 0;
+                border-radius: 31 * Look.px;
+                background: self.focused ? Look.fill-lit : Look.fill;
+                border-width: self.focused ? 3 * Look.px : 1px;
+                border-color: self.focused ? Look.ring : Look.line;
+                accessible-role: button;
+                accessible-label: Nav.bar-button ? Vm.catalog-actions[0].label : "";
+                accessible-value: Vm.catalog-actions[0].text;
+                accessible-action-default => { Nav.zone = "bar"; Nav.bar = 4; Nav.activate-bar(4); }
+                catalog-button-row := HorizontalLayout {
+                    alignment: center;
+                    Text {
+                        text: Vm.catalog-actions[0].text;
+                        font-size: 20 * Look.px;
+                        color: Tokens.color-text;
+                        vertical-alignment: center;
+                    }
+                }
+                TouchArea { mouse-cursor: pointer; clicked => { Nav.zone = "bar"; Nav.bar = 4; Nav.activate-bar(4); } }
+            }
+        }
+
+        // The systems, and the count on the far side: in the Catalog, with its releases and,
+        // under it, when the list was updated. Right to left, the first system is on the right.
+        system-row := Rectangle {
+            x: 96 * Look.px;
+            y: 192 * Look.px;
+            width: root.width - 192 * Look.px;
+            height: 52 * Look.px;
+            HorizontalLayout {
+                y: 4 * Look.px;
+                height: 44 * Look.px;
+                spacing: 12 * Look.px;
+                alignment: Look.rtl ? end : start;
+                for j in Nav.lib.systems.length : system := FilterChip {
+                    property <int> i: Look.rtl ? Nav.lib.systems.length - 1 - j : j;
+                    text: Nav.lib.systems[self.i].label;
+                    count: Nav.lib.systems[self.i].count;
+                    active: Nav.lib.systems[self.i].on;
+                    focused: root.keys && Nav.zone == "filters" && Nav.filter == self.i;
+                    clicked => { Nav.zone = "filters"; Nav.filter = system.i; Nav.system(Nav.lib.systems[system.i].id); }
+                }
+            }
+            property <bool> dated: Nav.catalog && Vm.catalog-updated != "";
+            Text {
+                x: Look.rtl ? 0 : parent.width - self.width;
+                y: system-row.dated ? 1 * Look.px : 0;
+                height: system-row.dated ? 24 * Look.px : parent.height;
+                text: !Nav.catalog ? Look.games(Nav.lib.total)
+                    : (Nav.lib.total == Nav.lib.all ? Look.games(Nav.lib.total) : Nav.lib.total + " of " + Look.games(Nav.lib.all))
+                        + " · " + Look.releases(Vm.catalog-releases);
+                font-size: 18 * Look.px;
+                color: Tokens.color-text-muted;
+                horizontal-alignment: Look.rtl ? left : right;
+                vertical-alignment: center;
+                accessible-role: text;
+                accessible-label: "default-count";
+                accessible-value: self.text;
+            }
+            if system-row.dated : Text {
+                x: Look.rtl ? 0 : parent.width - self.width;
+                y: 29 * Look.px;
+                height: 22 * Look.px;
+                text: "List updated " + Vm.catalog-updated;
+                font-size: 16 * Look.px;
+                color: Look.text3;
+                horizontal-alignment: Look.rtl ? left : right;
+                vertical-alignment: center;
+                accessible-role: text;
+                accessible-label: "catalog-updated";
+                accessible-value: self.text;
+            }
+        }
+
+        // The genres, from the store's catalog. The row scrolls to keep the focused chip in
+        // view, and fades at an edge where more chips are hidden. Right to left, the row is
+        // mirrored: the first chip is on the right, and the row scrolls to the left.
+        if Nav.lib.genres.length > 1 : genres := Rectangle {
+            x: 96 * Look.px;
+            y: 254 * Look.px;
+            width: root.width - 192 * Look.px;
+            height: 52 * Look.px;
+            clip: true;
+            accessible-role: list;
+            accessible-label: "genres";
+            // Where the chips start, and how far they are moved from the start side.
+            property <length> lead: 96 * Look.px;
+            property <length> view: self.width - self.lead;
+            property <length> fade: 48 * Look.px;
+            property <length> scroll;
+            property <length> length: chips.preferred-width;
+            // Moves the chips so the one `x` from the start side, `w` wide, is in view, clear of
+            // the fades.
+            function reveal(x: length, w: length) {
+                let most = Math.max(0, self.length - self.view);
+                if (x - self.scroll < self.fade) {
+                    self.scroll = Math.max(0, x - self.fade);
+                } else if (x + w - self.scroll > self.view - self.fade) {
+                    self.scroll = Math.min(most, x + w - self.view + self.fade);
+                }
+            }
+            Text {
+                x: root.within(0, self.width, parent.width);
+                height: parent.height;
+                width: 76 * Look.px;
+                text: "GENRE";
+                font-size: 14 * Look.px;
+                font-weight: 600;
+                color: Look.text3;
+                horizontal-alignment: Look.rtl ? right : left;
+                vertical-alignment: center;
+            }
+            Rectangle {
+                x: root.within(genres.lead, genres.view, genres.width);
+                width: genres.view;
+                clip: true;
+                chips := HorizontalLayout {
+                    x: Look.rtl ? genres.view - genres.length + genres.scroll : -genres.scroll;
+                    y: 4 * Look.px;
+                    width: self.preferred-width;
+                    height: 44 * Look.px;
+                    spacing: 12 * Look.px;
+                    alignment: start;
+                    animate x { duration: Tokens.motion-normal; easing: ease-out-expo; }
+                    for j in Nav.lib.genres.length : genre := FilterChip {
+                        property <int> i: Look.rtl ? Nav.lib.genres.length - 1 - j : j;
+                        text: Nav.lib.genres[self.i].label;
+                        count: Nav.lib.genres[self.i].count;
+                        active: Nav.lib.genres[self.i].on;
+                        focused: root.keys && Nav.zone == "genres" && Nav.genre == self.i;
+                        changed focused => {
+                            if (self.focused) { genres.reveal(root.within(self.x, self.width, genres.length), self.width); }
+                        }
+                        clicked => { Nav.zone = "genres"; Nav.genre = genre.i; Nav.genre-filter(Nav.lib.genres[genre.i].id); }
+                    }
+                }
+                if genres.scroll > 0 : Rectangle {
+                    x: root.within(0, self.width, parent.width);
+                    width: genres.fade;
+                    background: Look.rtl ? @linear-gradient(90deg, Look.band-clear 0%, Look.band 100%)
+                        : @linear-gradient(90deg, Look.band 0%, Look.band-clear 100%);
+                    accessible-role: text;
+                    accessible-label: "genres-more-start";
+                }
+                if genres.length - genres.scroll > genres.view + 1px : Rectangle {
+                    x: root.within(parent.width - self.width, self.width, parent.width);
+                    width: genres.fade;
+                    background: Look.rtl ? @linear-gradient(90deg, Look.band 0%, Look.band-clear 100%)
+                        : @linear-gradient(90deg, Look.band-clear 0%, Look.band 100%);
+                    accessible-role: text;
+                    accessible-label: "genres-more-end";
+                }
+            }
+        }
+    }
+
+    // The list of sorts, under the Sort button, on the same side as its start. A click outside
+    // it closes it.
+    if root.active && Nav.sort-open : Rectangle {
+        TouchArea { clicked => { Nav.sort-open = false; } }
+        property <bool> shown;
+        // After the first frame, so the entry animates from its start.
+        Timer { interval: 16ms; running: !parent.shown; triggered => { parent.shown = true; } }
+        picker := Rectangle {
+            x: Look.rtl ? Math.max(bar.x + sort.x + sort.width - self.width, 96 * Look.px)
+                : Math.min(bar.x + sort.x, root.width - self.width - 96 * Look.px);
+            y: bar.y + bar.height + (parent.shown ? 10 : 0) * Look.px;
+            width: 360 * Look.px;
+            height: list.preferred-height;
+            opacity: parent.shown ? 1 : 0;
+            animate y, opacity { duration: Tokens.motion-fast; easing: ease-out-quad; }
+            border-radius: 18 * Look.px;
+            background: #121b30fc;
+            border-width: 1px;
+            border-color: #ffffff28;
+            drop-shadow-blur: 36 * Look.px;
+            drop-shadow-color: #00000088;
+            // Clicks on the list don't close it.
+            TouchArea { }
+            list := VerticalLayout {
+                padding: 12 * Look.px;
+                spacing: 4 * Look.px;
+                Text {
+                    text: "SORT BY";
+                    height: 30 * Look.px;
+                    font-size: 13 * Look.px;
+                    font-weight: 600;
+                    color: Look.text3;
+                    horizontal-alignment: Look.rtl ? right : left;
+                    vertical-alignment: center;
+                }
+                for id[i] in Nav.sorts : option := Rectangle {
+                    property <bool> focused: Nav.sort-focus == i;
+                    property <bool> current: Nav.lib.sort == id;
+                    height: 50 * Look.px;
+                    border-radius: 10 * Look.px;
+                    background: self.focused ? #ffffff : ta.has-hover ? #ffffff14 : transparent;
+                    animate background { duration: Tokens.motion-fast; }
+                    accessible-role: button;
+                    accessible-label: "sort-option";
+                    accessible-value: id;
+                    accessible-item-selected: self.focused;
+                    accessible-action-default => { Nav.pick-sort(i); }
+                    Text {
+                        x: Look.rtl ? parent.width - self.width - 14 * Look.px : 14 * Look.px;
+                        height: parent.height;
+                        text: Look.sort-label(id);
+                        font-size: 19 * Look.px;
+                        color: option.focused ? Look.ink : Tokens.color-text-muted;
+                        vertical-alignment: center;
+                    }
+                    // The sort in use.
+                    if option.current : Icon {
+                        x: Look.rtl ? 14 * Look.px : parent.width - self.width - 14 * Look.px;
+                        y: (parent.height - self.height) / 2;
+                        width: 20 * Look.px;
+                        height: 20 * Look.px;
+                        name: "check";
+                        color: option.focused ? Tokens.color-accent : Tokens.color-success;
+                        accessible-role: text;
+                        accessible-label: "sort-current";
+                        accessible-value: id;
+                    }
+                    ta := TouchArea { mouse-cursor: pointer; clicked => { Nav.pick-sort(i); } }
+                }
+            }
+        }
+    }
+}

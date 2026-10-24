@@ -1,0 +1,12 @@
+# Log "player" straight into the Nexus session at boot, and again if it ever ends. The session
+# (/usr/bin/nexus-session) comes with the nexus package.
+[terminal]
+vt = 1
+
+[initial_session]
+command = "/usr/bin/nexus-session"
+user = "player"
+
+[default_session]
+command = "/usr/bin/nexus-session"
+user = "player"
