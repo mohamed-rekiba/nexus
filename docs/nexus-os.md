@@ -37,7 +37,7 @@ Other files Nexus may read:
 | Nexus's own updates | nothing: "Comes with the next system update" | The image installs the nexus rpm from the latest Nexus release, and is rebuilt after each Nexus release |
 | Restart, shut down | `systemctl reboot` / `poweroff` | logind (the active local session may) |
 | This PC | `lspci` | pciutils |
-| The session | Prints `window shown` on standard output as soon as its window is up | greetd logs `player` in and runs `/usr/bin/nexus-session`, from the nexus package. It sets `NEXUS_SESSION=1` (nothing is behind Nexus: it shows the system's settings, Restart and Shut down), starts Nexus in gamescope, or in cage when gamescope can't run, and appends all output to `~/.cache/nexus-session.log`. If no `window shown` line comes within the watchdog time (90 s by default, `NEXUS_WATCHDOG`), it starts Nexus again. |
+| The session | Prints `window shown` on standard output as soon as its window is up | greetd logs `player` in and runs `/usr/bin/nexus-session`, from the nexus package. It sets `NEXUS_SESSION=1` (nothing is behind Nexus: it shows the system's settings, Restart and Shut down), starts Nexus in gamescope, or in cage when gamescope can't run, and appends all output to `~/.cache/nexus-session.log`. Before each start, a log over 10 MB (`NEXUS_LOG_MAX_MB`) becomes `nexus-session.previous.log`, so the log never fills the disk; no logrotate is needed. If no `window shown` line comes within the watchdog time (90 s by default, `NEXUS_WATCHDOG`), it starts Nexus again. |
 
 The polkit rules are `os/files/usr/share/polkit-1/rules.d/50-nexus-os.rules` (installed PC and
 stick) and `os/live/files/usr/share/polkit-1/rules.d/50-nexus-os-live.rules` (stick only). Each

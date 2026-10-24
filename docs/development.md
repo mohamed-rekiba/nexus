@@ -287,7 +287,9 @@ gamescope in its Steam mode with Nexus inside, starts Nexus again when it ends o
 `window shown` line within the watchdog time, and runs it in cage when gamescope can't drive
 the graphics card. It sets `NEXUS_SESSION=1`, which tells Nexus nothing is behind it. Its
 settings are in `/usr/share/nexus/session.conf` (`packaging/linux/session.conf`), and
-`/etc/nexus/session.conf` overrides them. Output goes to `~/.cache/nexus-session.log`.
+`/etc/nexus/session.conf` overrides them. Output goes to `~/.cache/nexus-session.log`. Before each start of Nexus,
+a log over `NEXUS_LOG_MAX_MB` (10 by default) becomes `nexus-session.previous.log`, in place of
+the one before.
 
 What goes into `licenses/`:
 
