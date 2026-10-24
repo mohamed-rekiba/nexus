@@ -150,12 +150,13 @@ impl Storage for DirStorage {
 mod tests {
     use super::*;
 
+    // Unix only: making a symlink on Windows needs Developer Mode or an administrator.
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_symlink_out_of_the_folder_is_refused() {
         let outside = tempfile::tempdir().unwrap();
         std::fs::write(outside.path().join("secret"), b"x").unwrap();
         let root = tempfile::tempdir().unwrap();
-        #[cfg(unix)]
         std::os::unix::fs::symlink(outside.path(), root.path().join("link")).unwrap();
         let storage = DirStorage::new(root.path().to_path_buf());
 
