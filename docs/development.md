@@ -167,6 +167,24 @@ The default data folder is `$XDG_DATA_HOME/nexus` (`~/.local/share/nexus`) on Li
 `NEXUS_SCALE=<n>` draws everything at that size for this run, from 0.8 to 1.4, in place of "Size
 of everything" in Settings: `NEXUS_SCALE=1.4 make run-windowed`.
 
+Three switches make Nexus behave as it does on Nexus OS, for this run, on any Linux desktop:
+
+| Switch | What shows |
+|---|---|
+| `NEXUS_SESSION=1` | Nexus as the whole screen, as the Nexus session sets it: the network, sound and Bluetooth controls in the top bar, the on-screen keyboard for text fields, and Restart and Shut down |
+| `NEXUS_OS=1` | Also Nexus OS: the launcher updates with the system, and Settings has System updates |
+| `NEXUS_USB=1` | Also Nexus OS's USB stick: "Install Nexus OS" |
+
+```bash
+NEXUS_SESSION=1 make run-windowed
+```
+
+The controls act on this computer through `nmcli`, `bluetoothctl` and `pactl`, so joining a
+Wi-Fi network, pairing and the volume are real, and Restart and Shut down are too. System updates
+and the install need `rpm-ostree` and the stick's installer: elsewhere they fail and show their
+error. The install and its first start are tested on the OS itself, in a VM
+([os/README.md](../os/README.md)).
+
 Ctrl-C, SIGTERM and SIGHUP quit the way the Quit button does: the torrents stop first.
 
 Theme work is in [themes.md](themes.md) and
