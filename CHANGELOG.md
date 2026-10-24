@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.4](https://github.com/mohamed-rekiba/nexus/compare/v0.2.3...v0.2.4) (2026-10-24)
+
+
+### Bug Fixes
+
+* add nexus --version, which the AppImage check and Nexus OS need ([a42c8f8](https://github.com/mohamed-rekiba/nexus/commit/a42c8f8c2c001032c735c1b5d69fbfc9df25a3c0))
+
 ## [0.2.3](https://github.com/mohamed-rekiba/nexus/compare/v0.2.2...v0.2.3) (2026-10-24)
 
 
