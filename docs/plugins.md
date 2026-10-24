@@ -194,7 +194,7 @@ network = ["m.np.playstation.com", "image.api.playstation.com"]
 | `name` | What the player sees. An emulator names its console: `"PS5"`. |
 | `emulator` | The program the emulator runs, such as `"KytyPS5"`. Sentences about the program use it. Empty for PC. `emulator_name()` falls back to `name`. |
 | `version` | The plugin's semver version. |
-| `host_api` | The `nexus-api` versions it works with, as a semver range. The host refuses a plugin whose range doesn't include `API_VERSION` (`LoadError::HostApi`). |
+| `host_api` | The `nexus-api` versions it works with, as a semver range. The host refuses a plugin whose range doesn't include `API_VERSION` (`LoadError::HostApi`). `API_VERSION` changes by hand with the API, not with Nexus's releases. |
 | `platforms` | `linux`, `macos`, `windows`. Empty means all. An emulator made for other systems still loads, turned off, so the player can use their own build; a theme for another system is refused. |
 | `console` | `Console`: the console an emulator plays (`PS5`, `PS4`, `PC`), stored in uppercase. A `releases` service gives the emulator that console's catalog. |
 | `capabilities` | The set of `Capability` values the plugin provides (snake case: `game_installer`, `launch_middleware`). `init` must provide exactly this set. |

@@ -140,7 +140,7 @@ and a `[theme]` section. The section parses into `ThemeSection`
 
 | Key | Meaning |
 |---|---|
-| `ui_api` | The `nexus-ui-api` versions the theme works with, a semver range. Every theme in the chain must match `UI_API_VERSION`. |
+| `ui_api` | The `nexus-ui-api` versions the theme works with, a semver range. Every theme in the chain must match `UI_API_VERSION`, which changes by hand with the contract, not with Nexus's releases. |
 | `extends` | The parent theme's id. What the theme leaves out comes from the parent. |
 | `screens` | The `ScreenId`s this theme defines itself, as kebab-case names. Each needs `screens/<name>.slint`. |
 | `components` | The `ComponentId`s this theme defines itself. Each needs `components/<name>.slint`. |

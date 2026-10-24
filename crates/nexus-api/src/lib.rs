@@ -54,9 +54,12 @@ pub use slots::*;
 pub use system::*;
 pub use theme::*;
 
-/// The version of this API.
-pub const API_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// The version of this API, which plugins' `host_api` ranges name. It is not the crate's version:
+/// that is Nexus's, which every release raises. This one changes by hand, with the API: a new
+/// minor for an addition before 1.0 breaks no plugin only if their ranges allow it, so raise it
+/// together with the built-in plugins' `host_api`.
+pub const API_VERSION: &str = "0.1.0";
 
 pub fn api_version() -> semver::Version {
-    semver::Version::parse(API_VERSION).expect("the crate version is valid semver")
+    semver::Version::parse(API_VERSION).expect("API_VERSION is valid semver")
 }

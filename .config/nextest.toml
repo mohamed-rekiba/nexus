@@ -3,5 +3,6 @@
 # nexus-app's desktop tests have their own harness, which shows real windows: CI's desktop job
 # runs them with `cargo test -p nexus-app --test desktop`.
 default-filter = "not binary_id(nexus-app::desktop)"
-# A test still running after a minute is reported as slow.
-slow-timeout = "60s"
+# A test still running after a minute is reported as slow, and one still running after five is
+# stopped and fails, so a test that hangs fails the job instead of holding it until its timeout.
+slow-timeout = { period = "60s", terminate-after = 5 }

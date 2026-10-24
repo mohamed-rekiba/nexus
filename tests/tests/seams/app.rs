@@ -377,8 +377,10 @@ async fn an_install_a_crash_interrupted_resumes_at_the_next_start() {
     let _core = Core::start(kernel).await;
 
     loop {
-        if let Some(Event::InstallChanged { state: InstallPhase::Installed, .. }) = events.next().await {
-            break;
+        match events.next().await {
+            Some(Event::InstallChanged { state: InstallPhase::Installed, .. }) => break,
+            Some(_) => {}
+            None => panic!("the events ended before the install did"),
         }
     }
     assert_eq!(http.requests(), [(emu.build_url.clone(), 5_000)], "it continued the part file");
@@ -410,7 +412,8 @@ async fn a_download_a_crash_interrupted_resumes_at_the_next_start() {
             match events.next().await {
                 Some(Event::DownloadFinished { .. }) => return,
                 Some(Event::DownloadFailed { error, .. }) => panic!("{error}"),
-                _ => {}
+                Some(_) => {}
+                None => panic!("the events ended before the download did"),
             }
         }
     });
@@ -586,7 +589,7 @@ async fn launching_spawns_the_program_from_the_plugin_folder_and_tracks_the_proc
 
     process.exit(0);
     loop {
-        if let Some(Event::ProcessExited { exit, .. }) = events.next().await {
+        if let Event::ProcessExited { exit, .. } = events.next().await.expect("the events ended first") {
             assert!(exit.success);
             break;
         }
@@ -602,7 +605,7 @@ async fn stop_kills_a_running_game() {
     let mut events = t.core.events();
     t.core.dispatch(Command::Launch(key("emu-a:G0"))).await.unwrap();
     let session = loop {
-        if let Some(Event::ProcessStarted { session, .. }) = events.next().await {
+        if let Event::ProcessStarted { session, .. } = events.next().await.expect("the events ended first") {
             break session;
         }
     };
@@ -610,7 +613,7 @@ async fn stop_kills_a_running_game() {
     t.core.dispatch(Command::Stop(session)).await.unwrap();
 
     loop {
-        if let Some(Event::ProcessExited { session: s, exit, .. }) = events.next().await {
+        if let Event::ProcessExited { session: s, exit, .. } = events.next().await.expect("the events ended first") {
             assert_eq!(s, session);
             assert!(!exit.success);
             break;
@@ -640,7 +643,7 @@ async fn until(what: &str, done: impl Fn() -> bool) {
 
 async fn closed(events: &mut futures::stream::BoxStream<'static, Event>) -> ExitInfo {
     loop {
-        if let Some(Event::ProcessExited { exit, .. }) = events.next().await {
+        if let Event::ProcessExited { exit, .. } = events.next().await.expect("the events ended first") {
             return exit;
         }
     }
