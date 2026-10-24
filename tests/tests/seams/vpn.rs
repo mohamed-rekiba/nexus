@@ -7,7 +7,7 @@ use nexus_api::*;
 use nexus_core::{Command, TorrentAction};
 use nexus_testkit::{FakeHost, StubPlugin, TestCore};
 
-use crate::common::catalogs_fetched;
+use crate::common::{catalogs_fetched, full_path};
 
 const ASTRO: &str = "c12fe1c06bba254a9dc9f519b335aa7c1367a88a";
 const BOLT: &str = "d23fe1c06bba254a9dc9f519b335aa7c1367a88b";
@@ -268,8 +268,9 @@ async fn the_setting_lists_the_vpns_and_connects_disconnects_and_adds_them() {
 
     t.core.dispatch(Command::ConnectVpn("work".into())).await.unwrap();
     t.core.dispatch(Command::DisconnectVpn("wg0".into())).await.unwrap();
-    t.core.dispatch(Command::ImportVpn("/home/me/se-1.conf".into())).await.unwrap();
-    assert_eq!(t.network.calls(), ["connect work", "disconnect wg0", "import /home/me/se-1.conf"]);
+    let file = full_path("/home/me/se-1.conf");
+    t.core.dispatch(Command::ImportVpn(file.clone().into())).await.unwrap();
+    assert_eq!(t.network.calls(), ["connect work".to_owned(), "disconnect wg0".into(), format!("import {file}")]);
     let connected: Vec<String> =
         t.core.view().settings.vpn.vpns.into_iter().filter(|v| v.connected).map(|v| v.name).collect();
     assert_eq!(connected, ["work", "se-1"]);

@@ -8,7 +8,7 @@ use nexus_api::*;
 use nexus_core::{Command, TorrentAction};
 use nexus_testkit::{FakeHost, StubPlugin, TestCore};
 
-use crate::common::catalogs_fetched;
+use crate::common::{catalogs_fetched, native};
 
 const HASH: &str = "c12fe1c06bba254a9dc9f519b335aa7c1367a88a";
 const URL: &str = "https://xyz.dev/c/ps5.json";
@@ -153,7 +153,7 @@ async fn a_release_lists_its_files_and_downloads_only_when_the_player_starts_it(
     assert_eq!((ready.file_count, ready.total), (1, PACKAGE.len() as u64));
     assert_eq!(ready.actions, ["start", "cancel"]);
     assert!(t.torrents.started().is_empty(), "nothing downloads before Start");
-    assert_eq!(ready.folder, format!("~/Downloads/PS5/torrent-{HASH}"), "the home folder as ~");
+    assert_eq!(ready.folder, native(&format!("~/Downloads/PS5/torrent-{HASH}")), "the home folder as ~");
 
     act(t, TorrentAction::Start).await;
     t.torrents.progress(HASH, 4);
@@ -432,7 +432,7 @@ async fn a_download_goes_to_the_folder_the_player_picks_inside_a_packages_folder
     let picked = Command::DownloadRelease { offer: offer(), release: HASH.into(), folder: Some("~/Other/PS5".into()) };
     t.core.dispatch(picked).await.unwrap();
     let ready = until(t, "ready").await;
-    assert_eq!(ready.folder, format!("~/Other/PS5/torrent-{HASH}"));
+    assert_eq!(ready.folder, native(&format!("~/Other/PS5/torrent-{HASH}")));
     let saved = t.kernel.config().get(&["app", "download_folder", "PS5"]);
     assert_eq!(saved.as_str(), home.join("Other/PS5").to_str(), "the last folder, for this console");
 
@@ -588,7 +588,7 @@ async fn a_download_installs_into_the_game_folder_the_player_picks_and_the_next_
     let home = home.path();
     let paths = vec![home.join("Games"), home.join("Other")];
     t.core.dispatch(Command::SetFolders { name: "games".into(), paths }).await.unwrap();
-    assert_eq!(row(&t).install_folder, "~/Games/PC", "the console's folder in the first game folder");
+    assert_eq!(row(&t).install_folder, native("~/Games/PC"), "the console's folder in the first game folder");
 
     // A folder outside every game folder is refused, and the sheet hears why.
     let outside = Command::InstallDownload { id: HASH.into(), folder: Some(home.join("Elsewhere")) };

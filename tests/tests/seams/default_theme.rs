@@ -2565,7 +2565,7 @@ fn the_download_sheet_shows_the_folder_and_the_player_types_another() {
     let paths = vec![home.path().join("Downloads"), home.path().join("Other")];
     host.dispatch(Command::SetFolders { name: "packages".into(), paths });
     press(&mut host, "release-download", ASTRO_HASH);
-    assert_eq!(values(&host, "download-folder"), ["~/Downloads/PS5"]);
+    assert_eq!(values(&host, "download-folder"), [native("~/Downloads/PS5")]);
 
     // Up to the folder row; Enter opens it for typing, Enter again keeps the text.
     use slint::platform::Key;
@@ -3115,7 +3115,8 @@ fn settings_add_a_vpn_from_the_file_the_player_types() {
     assert_eq!(host.count("vpn-none"), 1);
     host.first("vpn-import").invoke_accessible_default_action();
     settle(&mut host);
-    for c in "/vpn/se-1.conf".chars() {
+    let file = full_path("/vpn/se-1.conf");
+    for c in file.chars() {
         let text: slint::SharedString = c.to_string().into();
         host.instance().window().dispatch_event(slint::platform::WindowEvent::KeyPressed { text: text.clone() });
         host.instance().window().dispatch_event(slint::platform::WindowEvent::KeyReleased { text });
@@ -3123,7 +3124,7 @@ fn settings_add_a_vpn_from_the_file_the_player_types() {
     key(&mut host, slint::platform::Key::Return);
     let calls = host.test.network.calls();
     assert_eq!(calls.len(), 1);
-    assert_eq!(calls, ["import /vpn/se-1.conf"]);
+    assert_eq!(calls, [format!("import {file}")]);
     assert_eq!(values(&host, "vpn"), ["se-1"]);
 }
 
@@ -3268,7 +3269,7 @@ fn install_asks_first_with_the_game_folder_and_what_the_emulator_installs_from()
     // Install asks first; Not now installs nothing.
     press(&mut host, "torrent-action:install", ASTRO_HASH);
     assert_eq!(values(&host, "install-title"), ["Install game"]);
-    assert_eq!(values(&host, "install-folder"), ["~/Games/PC"]);
+    assert_eq!(values(&host, "install-folder"), [native("~/Games/PC")]);
     let note = values(&host, "install-note");
     assert!(note[0].starts_with("Installs a PC game from its folder"), "{note:?}");
     host.first("install-not-now").invoke_accessible_default_action();
@@ -4276,12 +4277,13 @@ fn a_settings_text_box_opened_with_the_controller_types_on_the_keyboard_too() {
     pad(&mut host, PadButton::South);
     assert_eq!(host.count("osk"), 1, "the text box opened the keyboard");
     let before = values(&host, "osk-text")[0].clone();
-    osk_type(&mut host, "/x");
-    assert_eq!(values(&host, "editor"), [format!("{before}/x")]);
+    let typed = full_path("/x");
+    osk_type(&mut host, &typed);
+    assert_eq!(values(&host, "editor"), [format!("{before}{typed}")]);
 
     // R2: Done sets the folders.
     pad(&mut host, PadButton::RightTrigger);
-    assert_eq!(values(&host, "folder:games"), [format!("{before}/x")]);
+    assert_eq!(values(&host, "folder:games"), [format!("{before}{typed}")]);
     assert_eq!(host.count("osk"), 0);
     assert_eq!(host.count("editor"), 0, "the row is closed");
 }

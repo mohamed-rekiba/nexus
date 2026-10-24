@@ -6,6 +6,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use crate::common::native;
 use nexus_api::*;
 use nexus_testkit::{FakeHost, StubPlugin, TestCore};
 
@@ -42,7 +43,7 @@ async fn a_program_in_a_granted_folder_is_found_and_its_output_read() {
     std::fs::create_dir_all(builds.path().join("bin")).unwrap();
     std::fs::write(builds.path().join("bin/emu"), b"#!/bin/sh\n").unwrap();
     map(&t, "builds", builds.path());
-    let real = builds.path().join("bin/emu");
+    let real = builds.path().join(native("bin/emu"));
     t.spawner.prints(&real, b"emu git = 6799ecb, date = 2026.09.29\n");
 
     let program = in_folder("builds", "bin/emu");

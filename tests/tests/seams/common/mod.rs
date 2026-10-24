@@ -15,6 +15,16 @@ use nexus_testkit::{FakeHost, StubPlugin, TestCore};
 use nexus_ui_host::{ThemeHost, UiRequest};
 use slint_interpreter::ComponentHandle;
 
+/// `path` with this system's separator: `~/Games` is `~\Games` on Windows, as the app shows it.
+pub fn native(path: &str) -> String {
+    path.replace('/', std::path::MAIN_SEPARATOR_STR)
+}
+
+/// A full path on this system for a Unix one: `/x` stays `/x`, and is `C:\x` on Windows.
+pub fn full_path(unix: &str) -> String {
+    if cfg!(windows) { format!("C:{}", native(unix)) } else { unix.to_owned() }
+}
+
 pub fn id(s: &str) -> PluginId {
     PluginId::new(s).unwrap()
 }
