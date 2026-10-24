@@ -22,6 +22,11 @@ impl Platform for Offscreen {
     fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
         Ok(self.0.clone())
     }
+    fn debug_log(&self, arguments: std::fmt::Arguments) {
+        if keeps_log_line(&arguments) {
+            eprintln!("{arguments}");
+        }
+    }
 }
 
 const WIDTH: u32 = 1600;
