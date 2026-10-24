@@ -33,5 +33,7 @@ jobs:
           curl -fsSL --retry 3 -o "$file" "$upstream/$file"
           echo "$sha  $file" | sha256sum -c -
           gh release view deps > /dev/null 2>&1 \
-            || gh release create deps --title "Build dependencies" --notes "Pinned files the packages are built with, kept here so the builds keep working."
+            || gh release create deps --latest=false --title "Build dependencies" --notes "Pinned files the packages are built with, kept here so the builds keep working."
+          # Never the latest release: Nexus's updater and the OS build read the latest one.
+          gh release edit deps --latest=false
           gh release upload deps "$file" --clobber
