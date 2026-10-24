@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/mohamed-rekiba/nexus/compare/v0.1.0...v0.2.0) (2026-10-24)
+
+
+### Features
+
+* **session:** keep the session log under a size limit ([09895e5](https://github.com/mohamed-rekiba/nexus/commit/09895e5f06469b5f106441ff4078d15a5488a678))
+
 ## [0.1.0](https://github.com/mohamed-rekiba/nexus/compare/v0.1.0...v0.1.0) (2026-10-24)
 
 
