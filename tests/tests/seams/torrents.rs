@@ -8,8 +8,7 @@ use nexus_api::*;
 use nexus_core::{Command, TorrentAction};
 use nexus_testkit::{FakeHost, StubPlugin, TestCore};
 
-mod common;
-use common::catalogs_fetched;
+use crate::common::catalogs_fetched;
 
 const HASH: &str = "c12fe1c06bba254a9dc9f519b335aa7c1367a88a";
 const URL: &str = "https://xyz.dev/c/ps5.json";
@@ -686,7 +685,7 @@ async fn downloads_count_what_downloads_and_what_shares() {
 
 #[tokio::test]
 async fn an_install_shows_on_its_download_s_card_which_cancels_it() {
-    let s = setup_plugin(HASH, common::slow_installer(), Default::default(), |h| h).await;
+    let s = setup_plugin(HASH, crate::common::slow_installer(), Default::default(), |h| h).await;
     let t = &s.t;
     t.core.dispatch(Command::DownloadRelease { offer: offer(), release: HASH.into(), folder: None }).await.unwrap();
     until(t, "ready").await;

@@ -2,13 +2,11 @@
 //! Slint's software renderer and no window. Its own test binary: it installs its own Slint
 //! platform.
 
-mod common;
-
 use std::path::Path;
 use std::rc::Rc;
 use std::time::Duration;
 
-use common::*;
+use crate::common::*;
 use nexus_core::{Command, Route};
 use slint::platform::software_renderer::{MinimalSoftwareWindow, PremultipliedRgbaColor, RepaintBufferType};
 use slint::platform::{Platform, WindowAdapter};
@@ -835,16 +833,45 @@ fn assert_served(host: &Composed, missing: &[String]) {
     assert_eq!(unserved, missing, "the screenshot host asked for URLs it doesn't serve");
 }
 
-#[test]
-fn every_default_screen_and_a_child_theme_render_the_same_library() {
+/// This test thread's offscreen window (Slint's platform is per thread, so each test has its
+/// own), and the folder the pictures go to.
+fn offscreen() -> (Rc<MinimalSoftwareWindow>, std::path::PathBuf) {
     let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
     slint::platform::set_platform(Box::new(Offscreen(window.clone()))).unwrap();
     window.set_size(slint::PhysicalSize::new(WIDTH, HEIGHT));
+    let out = Path::new(env!("CARGO_TARGET_TMPDIR")).join("screenshots");
+    std::fs::create_dir_all(&out).unwrap();
+    (window, out)
+}
 
-    // A home folder, for the packages folder downloads go to.
-    let home = tempfile::tempdir().unwrap();
+// Each part that builds its own library is its own test, so they render at the same time.
+macro_rules! shots {
+    ($($test:ident => $shoot:ident),* $(,)?) => {$(
+        #[test]
+        fn $test() {
+            let (window, out) = offscreen();
+            $shoot(&window, &out);
+        }
+    )*};
+}
+
+shots! {
+    this_pc_screens => shoot_this_pc,
+    a_ps4_cover => shoot_ps4_cover,
+    genres => shoot_genres,
+    the_trailer => shoot_trailer,
+    the_splash => shoot_splash,
+    console_names => shoot_console_names,
+    the_keyboard => shoot_keyboard,
+    the_system_controls => shoot_system,
+}
+
+/// The library the default screens show: a home folder (for the packages folder downloads go
+/// to), emulators on each console, the real KytyPS5 plugin and game catalog with the sample
+/// catalogs, a game selected and a search typed.
+fn library(home: &Path) -> Composed {
     let mut host = composed_on_current_platform(|h| {
-        h.home(home.path())
+        h.home(home)
             .hardware(this_pc((1, 3)))
             .discover(&fixture_themes())
             .plugin(games_on("emu-a", "PS5", vec!["Astro Drift", "Deep Lantern", "Ember Peaks", "Neon Harbor"]))
@@ -878,9 +905,23 @@ fn every_default_screen_and_a_child_theme_render_the_same_library() {
     host.dispatch(Command::RefreshLibrary);
     host.dispatch(Command::Select("emu-a:G1".parse().unwrap()));
     host.dispatch(Command::Search("a".into()));
+    host
+}
 
-    let out = Path::new(env!("CARGO_TARGET_TMPDIR")).join("screenshots");
-    std::fs::create_dir_all(&out).unwrap();
+/// Fails unless each named picture in `out` has more than one colour.
+fn not_blank(out: &Path, names: &[&str]) {
+    for name in names {
+        let png = image::open(out.join(format!("{name}.png"))).unwrap().to_rgba8();
+        let first = png.get_pixel(0, 0);
+        assert!(png.pixels().any(|p| p != first), "{name}: the screenshot is not blank");
+    }
+}
+
+#[test]
+fn every_default_screen_renders_the_library() {
+    let (window, out) = offscreen();
+    let home = tempfile::tempdir().unwrap();
+    let mut host = library(home.path());
     shoot_default(&mut host, &window, &out, "default");
     shoot_sizes(&mut host, &window, &out);
     shoot_steam_offers(&mut host, &window, &out);
@@ -902,44 +943,29 @@ fn every_default_screen_and_a_child_theme_render_the_same_library() {
     host.pump();
     host.load_images();
     shoot(&window, &out.join("default-running.png"));
-    let session = nexus_api::SessionId(host.core().view().running.unwrap().session);
-    host.dispatch(Command::Stop(session));
-    host.rt.block_on(async {
-        while core.game_running() {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    });
+    // The other stub emulators name no console, so no catalog is asked for them.
+    assert_served(&host, &[]);
+    println!("screenshots in {}", out.display());
+    not_blank(&out, &["default-home", "default-library", "default-detail", "default-settings", "default-running"]);
+}
+
+#[test]
+fn the_default_screens_render_right_to_left() {
+    let (window, out) = offscreen();
+    let home = tempfile::tempdir().unwrap();
+    let mut host = library(home.path());
     host.dispatch(Command::SetThemeOption { key: "direction".into(), value: "rtl".into() });
     shoot_default(&mut host, &window, &out, "default-rtl");
-    host.dispatch(Command::SetThemeOption { key: "direction".into(), value: "ltr".into() });
+    not_blank(&out, &["default-rtl-home"]);
+}
 
+#[test]
+fn a_child_theme_renders_the_same_library() {
+    let (window, out) = offscreen();
+    let home = tempfile::tempdir().unwrap();
+    let mut host = library(home.path());
     host.ui.switch(&id("fixture-grid")).unwrap();
     host.load_images();
     shoot(&window, &out.join("fixture-grid-home.png"));
-    // The other stub emulators name no console, so no catalog is asked for them.
-    assert_served(&host, &[]);
-    drop(host);
-    shoot_this_pc(&window, &out);
-    shoot_ps4_cover(&window, &out);
-    shoot_genres(&window, &out);
-    shoot_trailer(&window, &out);
-    shoot_splash(&window, &out);
-    shoot_console_names(&window, &out);
-    shoot_keyboard(&window, &out);
-    shoot_system(&window, &out);
-    println!("screenshots in {}", out.display());
-
-    for name in [
-        "default-home",
-        "default-library",
-        "default-detail",
-        "default-settings",
-        "default-running",
-        "default-rtl-home",
-        "fixture-grid-home",
-    ] {
-        let png = image::open(out.join(format!("{name}.png"))).unwrap().to_rgba8();
-        let first = png.get_pixel(0, 0);
-        assert!(png.pixels().any(|p| p != first), "{name}: the screenshot is not blank");
-    }
+    not_blank(&out, &["fixture-grid-home"]);
 }

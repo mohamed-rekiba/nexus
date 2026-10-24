@@ -1,10 +1,8 @@
 //! Seam 1, core app API: a store plugin describes the games other plugins find.
 
-mod common;
-
 use std::time::Duration;
 
-use common::*;
+use crate::common::*;
 use nexus_core::Command;
 use nexus_testkit::FakeHost;
 use nexus_ui_api::ImageRef;

@@ -1,9 +1,7 @@
 //! Seam 3: the default theme's home: Home and Library in the top bar, the tile row and hero,
 //! the Library's filters and grid, and the theme's options.
 
-mod common;
-
-use common::*;
+use crate::common::*;
 use nexus_core::Command;
 use slint_interpreter::ComponentHandle;
 
@@ -2005,9 +2003,9 @@ fn the_game_catalog_page_shows_its_sources_its_refresh_and_refresh_now() {
     let sources = serde_json::json!({ "ps5": { "platform": "PS5",
         "forums": [{ "key": "ps5", "url": "https://xyz.net/forum/viewforum.php?f=546", "tag": "PS5" }] } });
     host.test.http.serve("https://xyz.dev/catalog-sources.json", sources.to_string());
-    let feed = include_str!("../../plugins/services/release-catalog/fixtures/forum-546.atom");
+    let feed = include_str!("../../../plugins/services/release-catalog/fixtures/forum-546.atom");
     host.test.http.serve(&release_catalog::refresh::feed_url("546"), feed);
-    let list = include_str!("../../plugins/services/release-catalog/fixtures/pvc-546.json");
+    let list = include_str!("../../../plugins/services/release-catalog/fixtures/pvc-546.json");
     host.test.http.serve(&release_catalog::refresh::list_url("546"), list);
     host.dispatch(Command::SetConfig {
         plugin: id("release-catalog"),

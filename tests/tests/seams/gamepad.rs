@@ -1,8 +1,6 @@
 //! Seam 3, composed host: a gamepad drives the default theme through the keys it already handles.
 
-mod common;
-
-use common::*;
+use crate::common::*;
 use nexus_core::{Command, Route};
 use nexus_ui_api::ScreenId;
 use nexus_ui_host::{PadButton, vm_text};

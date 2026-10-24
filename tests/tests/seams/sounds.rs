@@ -1,9 +1,7 @@
 //! Seam 3, composed host: theme sounds. A theme asks for a sound by name; the host finds the
 //! file the theme declared and gives it to the app to play, unless the player turned sounds off.
 
-mod common;
-
-use common::*;
+use crate::common::*;
 use nexus_core::Command;
 use nexus_ui_host::{PadButton, UiRequest};
 

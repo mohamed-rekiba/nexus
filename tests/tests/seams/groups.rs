@@ -1,9 +1,7 @@
 //! Seam 3: `Vm.home.groups` splits the library by platform, and selecting a game loads its
 //! details while the player stays on the home screen.
 
-mod common;
-
-use common::*;
+use crate::common::*;
 use nexus_core::Command;
 use slint::Model;
 use slint_interpreter::Value;

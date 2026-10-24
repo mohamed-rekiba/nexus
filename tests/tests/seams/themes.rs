@@ -1,8 +1,6 @@
 //! Seam 3, composed host: theme loading, inheritance and the theme rules.
 
-mod common;
-
-use common::*;
+use crate::common::*;
 use nexus_api::{Files, RelPath};
 use nexus_core::Command;
 use nexus_ui_api::{ComponentId, ScreenId, ThemeError, TokenValue};

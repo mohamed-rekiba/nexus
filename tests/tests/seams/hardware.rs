@@ -1,11 +1,9 @@
 //! Seam 1, core app API: "This PC". Each emulator's manifest says what its games need; the
 //! core compares it with what the computer has.
 
-mod common;
-
 use std::time::Duration;
 
-use common::{catalogs_fetched, games_needing, offering_emulator};
+use crate::common::{catalogs_fetched, games_needing, offering_emulator};
 use nexus_core::{Command, Core, Gpu, Specs};
 use nexus_testkit::{FakeHost, StubPlugin, TestCore};
 use nexus_ui_api::VerdictVm;

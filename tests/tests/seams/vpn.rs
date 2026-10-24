@@ -7,8 +7,7 @@ use nexus_api::*;
 use nexus_core::{Command, TorrentAction};
 use nexus_testkit::{FakeHost, StubPlugin, TestCore};
 
-mod common;
-use common::catalogs_fetched;
+use crate::common::catalogs_fetched;
 
 const ASTRO: &str = "c12fe1c06bba254a9dc9f519b335aa7c1367a88a";
 const BOLT: &str = "d23fe1c06bba254a9dc9f519b335aa7c1367a88b";

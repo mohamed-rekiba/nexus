@@ -4,13 +4,11 @@
 //! `NEXUS_COMPARE_BUILDS` (an `emu-kyty` plugin folder, cloned). Its own test binary: it
 //! installs its own Slint platform.
 
-mod common;
-
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Duration;
 
-use common::*;
+use crate::common::*;
 use nexus_core::{Command, Route};
 use slint::platform::software_renderer::{MinimalSoftwareWindow, PremultipliedRgbaColor, RepaintBufferType};
 use slint::platform::{Platform, WindowAdapter};
