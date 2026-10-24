@@ -23,5 +23,9 @@ updates:
       - dependency-name: "slint*"
       - dependency-name: "i-slint-*"
     groups:
+      # RustCrypto's crates share their trait crates (cipher, digest, crypto-common): one bumped
+      # alone doesn't build with the others, so they move together, in one pull request.
+      rustcrypto:
+        patterns: [aes, cbc, cipher, ctr, digest, hmac, sha1, sha2, rsa, ed25519-dalek]
       cargo-minor-patch:
         update-types: [minor, patch]
