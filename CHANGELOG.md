@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/mohamed-rekiba/nexus/compare/v0.2.0...v0.2.1) (2026-10-24)
+
+
+### Bug Fixes
+
+* keep the plugin API's version apart from Nexus's version ([91df87a](https://github.com/mohamed-rekiba/nexus/commit/91df87a5242e3caae4ea8431e7f15fc8e1eb6857))
+
 ## [0.2.0](https://github.com/mohamed-rekiba/nexus/compare/v0.1.0...v0.2.0) (2026-10-24)
 
 
