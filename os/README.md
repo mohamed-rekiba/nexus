@@ -149,10 +149,26 @@ sudo podman run --rm --privileged -v /var/lib/containers:/var/lib/containers -v 
 
 Add `-e METHOD=xorriso` to the last command for the hand-made ISO.
 
-Boot the ISO in a UEFI VM as a USB stick: QEMU with `-device usb-storage`, OVMF with Secure Boot,
-6 GB of memory, and a disk to install on. To check the partitioning install, give that disk an
-NTFS partition first and keep it in Anaconda's disk screen. A VM has no GPU Vulkan, so Nexus
-shows in cage there, and draws slowly.
+Boot the ISO in a UEFI VM as a USB stick, with Secure Boot, 6 GB of memory, and a disk to install
+on. With QEMU and Fedora's `edk2-ovmf`:
+
+```bash
+qemu-img create -f qcow2 disk.qcow2 64G
+cp /usr/share/edk2/ovmf/OVMF_VARS.secboot.fd vars.fd
+qemu-system-x86_64 -enable-kvm -machine q35,smm=on -m 6G -smp 4 \
+  -global driver=cfi.pflash01,property=secure,value=on \
+  -drive if=pflash,format=raw,readonly=on,file=/usr/share/edk2/ovmf/OVMF_CODE.secboot.fd \
+  -drive if=pflash,format=raw,file=vars.fd \
+  -device qemu-xhci -drive if=none,id=stick,format=raw,file=nexus-os-x86_64.iso \
+  -device usb-storage,drive=stick,bootindex=1 \
+  -drive file=disk.qcow2,if=virtio -nic user,model=virtio
+```
+
+The ISO from a test run of `os.yml` works too: its `nexus-os-iso` artifact. To check the
+partitioning install, give that disk an NTFS partition first and keep it in Anaconda's disk
+screen. A VM has no GPU Vulkan, so Nexus shows in cage there, and draws slowly; nor has it Wi-Fi
+or Bluetooth. Those controls are tested on a PC from the stick, or on a desktop with
+`NEXUS_SESSION=1` ([development.md](../docs/development.md)).
 
 What to check before a release:
 
