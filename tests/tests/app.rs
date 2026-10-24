@@ -948,7 +948,9 @@ async fn a_game_that_closes_right_after_it_starts_leaves_a_notice_with_its_log()
     t.core.dispatch(Command::RefreshLibrary).await.unwrap();
     let mut events = t.core.events();
     let (_, process) = play(&t).await;
-    let log = t.data_dir().join("logs/emu-a/G0.log");
+    // Joined a part at a time, as the core does: the notice shows its text, and on Windows a
+    // joined "logs/emu-a/G0.log" keeps its forward slashes.
+    let log = t.data_dir().join("logs").join("emu-a").join("G0.log");
     assert_eq!(process.command.log.as_deref(), Some(log.as_path()), "its output goes to its log");
 
     process.exit(3);
