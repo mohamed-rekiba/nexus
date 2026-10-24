@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.3](https://github.com/mohamed-rekiba/nexus/compare/v0.2.2...v0.2.3) (2026-10-24)
+
+
+### Bug Fixes
+
+* fetch mpv's licences by its tag on Linux ([69924aa](https://github.com/mohamed-rekiba/nexus/commit/69924aadf5308017c577ea0ab5c386e91c8ece51))
+
 ## [0.2.2](https://github.com/mohamed-rekiba/nexus/compare/v0.2.1...v0.2.2) (2026-10-24)
 
 
