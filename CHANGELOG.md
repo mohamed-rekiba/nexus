@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/mohamed-rekiba/nexus/compare/v0.2.1...v0.2.2) (2026-10-24)
+
+
+### Bug Fixes
+
+* theme fonts on Windows, and the tests that assumed Unix paths ([95958a7](https://github.com/mohamed-rekiba/nexus/commit/95958a70161de854b6a666860c9b06f59c7a816c))
+
 ## [0.2.1](https://github.com/mohamed-rekiba/nexus/compare/v0.2.0...v0.2.1) (2026-10-24)
 
 
