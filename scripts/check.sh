@@ -1,8 +1,27 @@
 #!/usr/bin/env bash
 # The check for nexus/: format, lint and test everything.
+#   scripts/check.sh        all of it
+#   scripts/check.sh lint   the format check and clippy
+#   scripts/check.sh test   the tests
+# CI runs lint and test as separate jobs, side by side.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace --no-fail-fast
+part=${1:-all}
+case "$part" in all | lint | test) ;; *) echo "usage: $0 [lint|test]" >&2; exit 2 ;; esac
+
+if [ "$part" != test ]; then
+    cargo fmt --all --check
+    cargo clippy --workspace --all-targets -- -D warnings
+fi
+
+if [ "$part" != lint ]; then
+    # A failing test binary doesn't hide the failures of the ones after it.
+    if cargo nextest --version >/dev/null 2>&1; then
+        # Every test in its own process, all of them at once. nextest leaves out doc tests.
+        cargo nextest run --workspace --no-fail-fast
+        cargo test --workspace --doc
+    else
+        cargo test --workspace --no-fail-fast
+    fi
+fi

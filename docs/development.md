@@ -208,13 +208,19 @@ RUST_LOG=info,nexus_core::facades=debug make run        # the plugins' own debug
 
 ```sh
 cargo test --workspace                       # every test, as `make test`
-cargo test -p nexus-tests --test themes      # one test file in tests/tests/
+cargo test -p nexus-tests --test seams themes::    # one area: a module of tests/tests/seams/
+cargo nextest run --workspace                # every test, each in its own process, all at once
 cd scripts/catalog && npm test               # the catalog collector's tests (Node 20+)
 ```
 
+`scripts/check.sh test` runs the tests with [cargo-nextest](https://nexte.st) when it's installed
+(`cargo install cargo-nextest`), as CI does, and with `cargo test` otherwise. Its settings are in
+`.config/nextest.toml`. The seam tests are one test binary, `seams` (`tests/tests/seams/main.rs`,
+one module per area), so their shared code builds and links once; `spans.rs` is its own binary.
+
 The tests need no window, GPU, controller or sound device: they use Slint's testing backend and
 fakes. `tests/` (the `nexus-tests` crate) holds the seam tests: the core's API, the plugin
-contracts and the composed host. `cargo test -p nexus-tests --test screenshots` renders each
+contracts and the composed host. `cargo test -p nexus-tests --test seams screenshots::` renders each
 default theme screen to PNG files in `target/tmp/screenshots/`.
 
 Some tests touch the real system, the network or files you supply. Each one skips, or returns at
@@ -229,10 +235,10 @@ once, unless its variable is set:
 | `NEXUS_TORRENT_TESTS=1` | `cargo test -p nexus-app a_torrent_downloads`: a real BitTorrent transfer between two sessions on this computer, with no DHT, tracker or network | |
 | `NEXUS_VPN_TESTS=1` | `cargo test -p nexus-app lists_this_computer_s_networks`: lists this computer's networks; it connects nothing | |
 | `NEXUS_REAL_RELEASES=1` | `cargo test -p nexus-app real -- --nocapture`: downloads and installs the newest real KytyPS5 and shadPS4 releases | The network, and some hundreds of megabytes. Anonymous GitHub API calls can hit the rate limit. |
-| `NEXUS_REAL_ARCHIVES=<folder>` | `cargo test -p nexus-tests --test real_archives`: installs real release archives through the plugins on a fake web | The archives, named as GitHub has them (`KytyPS5-*-Linux-x86_64.tar.gz`, `shadps4-linux*.zip` and so on). A missing one is skipped. |
+| `NEXUS_REAL_ARCHIVES=<folder>` | `cargo test -p nexus-tests --test seams real_archives::`: installs real release archives through the plugins on a fake web | The archives, named as GitHub has them (`KytyPS5-*-Linux-x86_64.tar.gz`, `shadps4-linux*.zip` and so on). A missing one is skipped. |
 | `NEXUS_CATALOG_FILES=<file>[:<file>…]` | `cargo test -p release-catalog catalog_files -- --nocapture`: reads catalog files through the plugin's reader and prints what each holds | Catalog files, such as the collector's |
-| `NEXUS_TIMING=1` | `cargo test -p nexus-tests --test timing -- --nocapture`: times the Catalog view with the bundled catalogs | |
-| `NEXUS_COMPARE_OUT=<folder>` | `cargo test -p nexus-tests --test compare`: renders the default theme's screens on a real library into that folder | A KytyPS5 game library in `NEXUS_COMPARE_GAMES` (default `~/Games`); optionally `NEXUS_COMPARE_BUILDS` (an `emu-kyty` plugin folder) and `NEXUS_COMPARE_WEB` (a folder with a `manifest.json` of saved web answers) |
+| `NEXUS_TIMING=1` | `cargo test -p nexus-tests --test seams timing:: -- --nocapture`: times the Catalog view with the bundled catalogs | |
+| `NEXUS_COMPARE_OUT=<folder>` | `cargo test -p nexus-tests --test seams compare::`: renders the default theme's screens on a real library into that folder | A KytyPS5 game library in `NEXUS_COMPARE_GAMES` (default `~/Games`); optionally `NEXUS_COMPARE_BUILDS` (an `emu-kyty` plugin folder) and `NEXUS_COMPARE_WEB` (a folder with a `manifest.json` of saved web answers) |
 | `PS4_TEST_PKG=<file>` | `cargo test --release -p emu-shadps4 real_ps4_package -- --ignored --nocapture`: lists a real PS4 package and copies `param.sfo` | A PS4 fake package |
 | `PS5_TEST_PKG=<file>` | `cargo test -p emulator-kit real_package -- --ignored`: lists a real PS5 debug package and decodes its largest file; `PS5_TEST_FULL=1` decodes every file | A PS5 debug package |
 
@@ -340,7 +346,8 @@ says otherwise.
 
 | Job | What it does |
 |---|---|
-| `check` | `scripts/check.sh`. On failure the log is an artifact for 7 days. |
+| `lint` | `scripts/check.sh lint`: the format check and clippy. |
+| `test` | `scripts/check.sh test`, with cargo-nextest. On failure the log is an artifact for 7 days. It runs beside `lint`: each builds what it needs, so the split adds a job's setup, not a second build. |
 | `desktop` | `NEXUS_DESKTOP_TESTS=1 cargo test --locked -p nexus-app --test desktop`. On Linux it runs under Xvfb with openbox, with `NEXUS_DESKTOP_REQUIRE=1`. A macOS runner has no Accessibility permission, so its tests skip and say why. |
 | `cargo-deny` | `cargo deny check`, on Linux only |
 | `real releases` | `NEXUS_REAL_RELEASES=1 cargo test --locked -p nexus-app real`, on the weekly run and by hand only |

@@ -470,12 +470,12 @@ sibling `.unpacking` folder first, so a failure leaves the old build.
 
 ## Tests
 
-- `tests/tests/torrents.rs`, `unpack.rs`, `release_archives.rs`, `game_installs.rs`, `kyty.rs`,
+- `tests/tests/seams/torrents.rs`, `unpack.rs`, `release_archives.rs`, `game_installs.rs`, `kyty.rs`,
   `shadps4.rs`, `pc.rs` and `vpn.rs` drive the core with fakes, as a player or a plugin does.
 - The tests in `crates/nexus-app/src/archives.rs` unpack real zip, tar.gz, GOG and RAR files,
   and check the refusals and cancel. The RAR files in `crates/nexus-app/testdata/` come from the
   `unrar` crate's test data.
-- `tests/tests/real_archives.rs` installs the real KytyPS5 and shadPS4 release archives, with
+- `tests/tests/seams/real_archives.rs` installs the real KytyPS5 and shadPS4 release archives, with
   `NEXUS_REAL_ARCHIVES` set to a folder of them.
 - A real transfer between two local librqbit sessions runs with `NEXUS_TORRENT_TESTS=1`.
 

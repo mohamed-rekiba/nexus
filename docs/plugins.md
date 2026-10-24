@@ -737,23 +737,23 @@ let test = FakeHost::new()
     .await;
 ```
 
-`tests/tests/contracts.rs` shows the suite catching a stub catalog that lists one game twice.
+`tests/tests/seams/contracts.rs` shows the suite catching a stub catalog that lists one game twice.
 
 ### The tests crate
 
-`tests/` (package `nexus-tests`) holds the seam tests: one file per area in `tests/tests/`, with
-shared helpers in `tests/tests/common/mod.rs`. Each plugin has its own file: `kyty.rs`,
+`tests/` (package `nexus-tests`) holds the seam tests: one module per area in `tests/tests/seams/` (one test binary), with
+shared helpers in `tests/tests/seams/common/mod.rs`. Each plugin has its own file: `kyty.rs`,
 `shadps4.rs`, `pc.rs`, `releases.rs`, `metadata.rs`, `catalog_refresh.rs`, `slots.rs` and
-more. A new plugin adds its crate to `[dev-dependencies]` in `tests/Cargo.toml` and a file
-here.
+more. A new plugin adds its crate to `[dev-dependencies]` in `tests/Cargo.toml`, a file
+here, and its `mod` line in `main.rs`.
 
 ```sh
-cargo test -p nexus-tests --test shadps4    # one file
+cargo test -p nexus-tests --test seams shadps4::  # one area
 cargo test -p nexus-tests                   # every seam test
 scripts/check.sh                            # format, clippy, every test (as CI)
 ```
 
-`tests/tests/real_archives.rs` installs real release archives when `NEXUS_REAL_ARCHIVES` names
+`tests/tests/seams/real_archives.rs` installs real release archives when `NEXUS_REAL_ARCHIVES` names
 a folder of them, and `NEXUS_REAL_RELEASES=1 cargo test -p nexus-app real` downloads real
 emulator releases; see [docs/development.md](development.md).
 
@@ -770,8 +770,8 @@ emulator releases; see [docs/development.md](development.md).
 5. Add it to the workspace `members` and `[workspace.dependencies]` in the root `Cargo.toml`,
    to `crates/nexus-app/Cargo.toml`, and as `use my_plugin as _;` in
    `crates/nexus-app/src/main.rs`.
-6. Test it: unit tests in the crate, and a file in `tests/tests/` that runs
-   `contract::emulator` on it.
+6. Test it: unit tests in the crate, and a module in `tests/tests/seams/` (and its `mod`
+   line in `main.rs`) that runs `contract::emulator` on it.
 7. Run `scripts/check.sh`.
 
 To see it in the app, `cargo run -p nexus-app -- --windowed`; the plugin shows under Emulators.

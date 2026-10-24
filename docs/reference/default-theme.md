@@ -591,15 +591,15 @@ Durations are the `motion-*` tokens. Easings are written in the `.slint` files.
 
 Every element a test or a screen reader needs has an `accessible-label`, and some an
 `accessible-value`. The labels quoted on this page are those. The theme tests find elements by
-label (`ElementHandle::find_by_accessible_label`, in `tests/tests/common/mod.rs`) and check what
+label (`ElementHandle::find_by_accessible_label`, in `tests/tests/seams/common/mod.rs`) and check what
 the player sees: a value, a count, whether a screen shows. They never check layout numbers.
 
 The tests run on the composed core and theme host on Slint's testing backend:
 
-- `tests/tests/default_theme.rs`: the screens, sheets, notices, keys and Downloads;
-- `tests/tests/gamepad.rs`: the pad and its focus rule;
-- `tests/tests/sounds.rs`: which sounds play;
-- `tests/tests/screenshots.rs`: PNGs of the main screens on the fake library, for a person to
+- `tests/tests/seams/default_theme.rs`: the screens, sheets, notices, keys and Downloads;
+- `tests/tests/seams/gamepad.rs`: the pad and its focus rule;
+- `tests/tests/seams/sounds.rs`: which sounds play;
+- `tests/tests/seams/screenshots.rs`: PNGs of the main screens on the fake library, for a person to
   look at.
 
 ## Limits

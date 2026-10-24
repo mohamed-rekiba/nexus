@@ -190,7 +190,7 @@ the theme. The chain is resolved once, at load:
 - **Files.** Every `.slint` import goes through the interpreter's file loader, which serves one
   virtual folder. Each path is looked up in the theme first, then in each parent. So a theme that
   ships only `components/card.slint` gets its card on every screen of `default` that draws a
-  `Card`. `tests/tests/themes.rs` (`a_child_theme_falls_back_to_its_parent_for_what_it_leaves_out`)
+  `Card`. `tests/tests/seams/themes.rs` (`a_child_theme_falls_back_to_its_parent_for_what_it_leaves_out`)
   checks exactly that.
 - **Tokens, images, fonts, sounds and options** merge, the child winning. Every token must have
   a value somewhere in the chain.
@@ -541,7 +541,7 @@ a look quickly, make a child theme in an extensions folder and run it with `--de
 ## Testing a theme
 
 The theme tests run the core and the theme host together on Slint's testing backend, with no
-window (`tests/tests/common/mod.rs`):
+window (`tests/tests/seams/common/mod.rs`):
 
 - `composed(|host| ...)` boots a `FakeHost` with the default theme and what the closure adds
   (stub plugins, `discover(dir)` for theme folders), and a `ThemeHost` on it.
@@ -555,7 +555,7 @@ window (`tests/tests/common/mod.rs`):
 Accessible labels are the test seam. Give the elements a test needs to find an
 `accessible-label`, and an `accessible-value` for what it shows, and an
 `accessible-action-default` for what a click does. Slot items carry `<plugin-id>:<item-id>`. The
-default theme's tests in `tests/tests/default_theme.rs` find, for example, the top bar's tabs:
+default theme's tests in `tests/tests/seams/default_theme.rs` find, for example, the top bar's tabs:
 
 ```rust
 fn press(host: &mut Composed, label: &str, value: &str) {
@@ -578,14 +578,14 @@ The theme test files:
 
 | File | What it checks |
 |---|---|
-| `tests/tests/themes.rs` | The default theme compiles and renders every screen; inheritance; the rules above; options |
-| `tests/tests/switching.rs` | Switching, rollback on a broken theme, dev-mode reload |
-| `tests/tests/slots.rs` | Slot items in the default theme and in `fixture-grid` |
-| `tests/tests/default_theme.rs` | The default theme's Home, Library, filters and options |
-| `tests/tests/screenshots.rs` | The README's screenshots, rendered offscreen |
+| `tests/tests/seams/themes.rs` | The default theme compiles and renders every screen; inheritance; the rules above; options |
+| `tests/tests/seams/switching.rs` | Switching, rollback on a broken theme, dev-mode reload |
+| `tests/tests/seams/slots.rs` | Slot items in the default theme and in `fixture-grid` |
+| `tests/tests/seams/default_theme.rs` | The default theme's Home, Library, filters and options |
+| `tests/tests/seams/screenshots.rs` | The README's screenshots, rendered offscreen |
 
 ```sh
-cargo test -p nexus-tests --test themes
-cargo test -p nexus-tests --test default_theme
+cargo test -p nexus-tests --test seams themes::
+cargo test -p nexus-tests --test seams default_theme::
 scripts/check.sh    # everything, as CI runs it
 ```

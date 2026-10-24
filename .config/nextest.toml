@@ -1,0 +1,7 @@
+# cargo-nextest's settings (scripts/check.sh runs the tests with it when it's installed).
+[profile.default]
+# nexus-app's desktop tests have their own harness, which shows real windows: CI's desktop job
+# runs them with `cargo test -p nexus-app --test desktop`.
+default-filter = "not binary_id(nexus-app::desktop)"
+# A test still running after a minute is reported as slow.
+slow-timeout = "60s"

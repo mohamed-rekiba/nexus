@@ -16,7 +16,7 @@ that changes the whole layout, not just the colors.
 
 The screenshots are the built-in theme, `default`, on Linux, with a real library of PS5 and PC
 games. The tests also render every screen offscreen with made-up games
-(`tests/tests/screenshots.rs`, into `target/tmp/screenshots`).
+(`tests/tests/seams/screenshots.rs`, into `target/tmp/screenshots`).
 
 ## What it does
 

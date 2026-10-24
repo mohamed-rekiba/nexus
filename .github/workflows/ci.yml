@@ -41,8 +41,33 @@ defaults:
     shell: bash
 
 jobs:
-  check:
-    name: check (${{ matrix.os }})
+  # The format check and clippy, and the tests, side by side: each builds what it needs (a
+  # check build, a test build), so splitting them adds a job's setup, not a second build.
+  lint:
+    name: lint (${{ matrix.os }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: linux, runner: ubuntu-22.04 }
+          - { os: macos, runner: macos-14 }
+          - { os: windows, runner: windows-2022 }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          components: rustfmt, clippy
+          cache-key: lint-${{ matrix.os }}
+          # Only main's cache is kept: a pull request can't fill it for everyone else.
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+      - run: scripts/check.sh lint
+
+  test:
+    name: test (${{ matrix.os }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     strategy:
@@ -58,16 +83,18 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
         with:
-          components: rustfmt, clippy
           cache-key: ${{ matrix.os }}
-          # Only main's cache is kept: a pull request can't fill it for everyone else.
           save-cache: ${{ github.ref == 'refs/heads/main' }}
-      - run: scripts/check.sh 2>&1 | tee check.log
+      # Every test in its own process, all at once (.config/nextest.toml).
+      - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+        with:
+          tool: cargo-nextest@0.9.149
+      - run: scripts/check.sh test 2>&1 | tee test.log
       - if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: check-log-${{ matrix.os }}
-          path: check.log
+          name: test-log-${{ matrix.os }}
+          path: test.log
           retention-days: 7
 
   # The desktop adapter against real windows: show a window, read which one is in front, see
@@ -76,7 +103,7 @@ jobs:
   # runner that can't do it (macOS has no Accessibility permission here) skips and says why.
   desktop:
     name: desktop (${{ matrix.os }})
-    needs: check
+    needs: [lint, test]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
@@ -156,7 +183,7 @@ jobs:
   # four runners. Main's run still catches what a pull request skipped.
   package:
     name: package (${{ matrix.os }})
-    needs: check
+    needs: [lint, test]
     if: >-
       github.event_name == 'push' || github.event_name == 'workflow_dispatch'
       || (github.event_name == 'pull_request' && (startsWith(github.head_ref, 'release-please--')
@@ -279,7 +306,7 @@ jobs:
   ci-ok:
     name: ci ok
     if: always()
-    needs: [check, desktop, deny, package, package-macos]
+    needs: [lint, test, desktop, deny, package, package-macos]
     runs-on: ubuntu-22.04
     timeout-minutes: 5
     steps:
