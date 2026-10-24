@@ -379,6 +379,7 @@ Conventional Commit messages: `feat:` raises the minor version, `fix:` the patch
 1.0, a breaking change raises the minor version). Other prefixes (`docs:`, `ci:`, `refactor:`,
 `test:`, `chore:`) don't make a release.
 
+Three workflows make a release, each with its own runs in the Actions tab.
 `.github/workflows/release.yml` runs on every push to `main`:
 
 1. `release-please` keeps a release pull request open for Nexus with the next version: it bumps
@@ -387,22 +388,31 @@ Conventional Commit messages: `feat:` raises the minor version, `fix:` the patch
    `.github/release-please-manifest.json`). Changes under `os/` are left out. A pull request
    opened with the default token doesn't start CI; set a token as the `RELEASE_PLEASE_TOKEN`
    secret to get checks on it.
-2. Merging that pull request makes a draft release and its tag `v<version>`, and calls
-   `.github/workflows/package.yml` with them:
-   - `version` fails when the tag isn't `v` and the workspace version.
-   - `build`, on Linux, both Mac processors and Windows, without the cache: `scripts/check.sh`,
-     the libmpv and libarchive actions, cargo-about, `scripts/package.sh`; on Linux the AppImage
-     and the deb, rpm and Arch packages; on Windows the signatures when their secrets are set
-     ([signing.md](signing.md)), the zip and the installer; the third-party sources tars.
-   - `macos-universal` joins the two Mac apps, signs and notarizes the app when the secrets are
-     set, and makes the zip and the disk image (signed and notarized too).
-   - `attach` writes a `.sha256` file for each file and `latest.json`
-     (`scripts/update-manifest.sh`), signs the build provenance
-     (`gh attestation verify <file> --repo <owner>/<repo>` checks it), and attaches them all to
-     the draft.
-3. `publish` publishes the release as the latest.
+2. Merging that pull request makes a draft release and its tag `v<version>`, and starts
+   `.github/workflows/package.yml` for the tag (`gh workflow run`: GitHub doesn't start workflows
+   from a tag made with the workflow's own token). Release Please makes the tag with the draft
+   (`force-tag-creation`), so it finds the release on the next push.
+3. Merging Nexus OS's release pull request does the same with its tag `nexus-os-v<version>`,
+   and starts `.github/workflows/os.yml` ([os/README.md](../os/README.md#releases)).
 
-`package.yml` can also run by hand with a tag and a commit, to rebuild the files of a draft.
+`package.yml` builds and publishes the release:
+
+- `version` fails when the tag isn't `v` and the workspace version.
+- `build`, on Linux, both Mac processors and Windows, without the cache: `scripts/check.sh`,
+  the libmpv and libarchive actions, cargo-about, `scripts/package.sh`; on Linux the AppImage
+  and the deb, rpm and Arch packages; on Windows the signatures when their secrets are set
+  ([signing.md](signing.md)), the zip and the installer; the third-party sources tars.
+- `macos-universal` joins the two Mac apps, signs and notarizes the app when the secrets are
+  set, and makes the zip and the disk image (signed and notarized too).
+- `attach` writes a `.sha256` file for each file and `latest.json`
+  (`scripts/update-manifest.sh`), signs the build provenance
+  (`gh attestation verify <file> --repo <owner>/<repo>` checks it), and attaches them all to
+  the draft.
+- `publish` publishes the release as the latest, then starts `os.yml` to rebuild the Nexus OS
+  images with it ([os/README.md](../os/README.md#releases)).
+
+When `package.yml` fails, run it again for the same tag: Actions → package → Run workflow, with
+the tag (and a commit, when it isn't the tag's). Don't make a new release.
 
 ## The launcher's own update
 

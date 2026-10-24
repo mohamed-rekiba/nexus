@@ -4,19 +4,17 @@ name: release
 # Conventional Commit messages since the last release (feat: raises the minor version, fix: the
 # patch; before 1.0 a breaking change raises the minor), bumps the version in Cargo.toml and
 # Cargo.lock, and writes CHANGELOG.md. Merging that pull request makes a draft release and its
-# tag; package.yml builds every system's files and attaches them, and only then is the release
-# published, as the latest. The launcher's updater reads the latest release, so it never sees
-# one without its files. The tag is made with the draft (force-tag-creation): GitHub tags a draft
-# only when it is published, and without the tag Release Please can't find the release and opens
-# the same release pull request again.
+# tag (force-tag-creation: GitHub tags a draft only when it is published, and without the tag
+# Release Please can't find the release and opens the same release pull request again).
 #
 # Nexus OS (os/) is a second package with its own release pull request, version, changelog and
-# tags (nexus-os-v<version>). Merging it builds the OS images and the USB stick (os.yml), attaches
-# the stick to the draft and publishes it, never as the latest. A published Nexus release also
-# rebuilds the OS images, with the new rpm.
+# tags (nexus-os-v<version>).
 #
-# package.yml is called, not started by the tag: GitHub doesn't start workflows from events its
-# own workflow token causes.
+# This workflow only makes the releases. It then starts the workflow that builds each one:
+# package.yml for Nexus (it attaches the files and publishes the release as the latest), os.yml
+# for Nexus OS (it builds the images and the stick, attaches the stick and publishes the release,
+# never as the latest). GitHub doesn't start workflows from a tag or a release made with the
+# workflow's own token, but it does start them when asked by name (workflow_dispatch).
 on:
   push:
     branches: [main]
@@ -37,12 +35,9 @@ jobs:
     outputs:
       created: ${{ steps.rp.outputs.release_created }}
       tag: ${{ steps.rp.outputs.tag_name }}
-      sha: ${{ steps.rp.outputs.sha }}
       # Nexus OS (the os/ package): Release Please prefixes a package's outputs with its path.
       os-created: ${{ steps.rp.outputs['os--release_created'] }}
       os-tag: ${{ steps.rp.outputs['os--tag_name'] }}
-      os-sha: ${{ steps.rp.outputs['os--sha'] }}
-      os-version: ${{ steps.rp.outputs['os--version'] }}
     steps:
       - id: rp
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
@@ -54,81 +49,28 @@ jobs:
           config-file: .github/release-please-config.json
           manifest-file: .github/release-please-manifest.json
 
-  package:
+  build:
+    name: start the builds
     needs: release-please
-    if: needs.release-please.outputs.created == 'true'
-    permissions:
-      contents: write
-      id-token: write
-      attestations: write
-    uses: ./.github/workflows/package.yml
-    with:
-      tag: ${{ needs.release-please.outputs.tag }}
-      ref: ${{ needs.release-please.outputs.sha }}
-    secrets: inherit
-
-  publish:
-    needs: [release-please, package]
+    if: needs.release-please.outputs.created == 'true' || needs.release-please.outputs.os-created == 'true'
     runs-on: ubuntu-22.04
-    timeout-minutes: 10
+    timeout-minutes: 5
     permissions:
-      contents: write
+      # To start package.yml and os.yml.
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
     steps:
-      - name: Publish the release as the latest
+      - name: Nexus
+        if: needs.release-please.outputs.created == 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: gh release edit "${{ needs.release-please.outputs.tag }}" --draft=false --latest
-
-  # A published Nexus release: the Nexus OS images are rebuilt with its rpm, so installed PCs get
-  # it with their next system update. No new stick: installed PCs update themselves.
-  os-images:
-    needs: publish
-    permissions:
-      contents: read
-      packages: write
-    uses: ./.github/workflows/os.yml
-
-  # A Nexus OS release (its own release pull request, tags nexus-os-v<version>): the images are
-  # built, checked and tagged with the version, then the stick is built and attached to the draft.
-  # The images bundle the latest published Nexus, so when both are released by one push, the OS
-  # waits for Nexus's release to be published, and isn't built if that failed.
-  os-release:
-    needs: [release-please, publish]
-    if: >-
-      always() && needs.release-please.outputs.os-created == 'true'
-      && needs.publish.result != 'failure' && needs.publish.result != 'cancelled'
-    permissions:
-      contents: read
-      packages: write
-    uses: ./.github/workflows/os.yml
-    with:
-      ref: ${{ needs.release-please.outputs.os-sha }}
-      version: ${{ needs.release-please.outputs.os-version }}
-      iso: true
-
-  # The ISO (or its parts) and the checksums go on the draft, which is then published, but not as
-  # the latest release: Nexus's updater reads the latest release, which stays a Nexus one.
-  os-publish:
-    needs: [release-please, os-release]
-    runs-on: ubuntu-22.04
-    timeout-minutes: 30
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: nexus-os-iso
-          path: iso
-      - name: Attach the stick and publish, not as the latest
-        working-directory: iso
+          TAG: ${{ needs.release-please.outputs.tag }}
+        run: gh workflow run package.yml --ref main -f tag="$TAG"
+      # The images bundle the latest published Nexus release: when one push released both, the
+      # OS run stops with "release Nexus first"; run it again once Nexus's release is published.
+      - name: Nexus OS
+        if: needs.release-please.outputs.os-created == 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.release-please.outputs.os-tag }}
-        run: |
-          ls -l
-          # The whole ISO's checksum stays when it was split into parts; each part has its own.
-          for sum in ./*.sha256; do [ ! -e "${sum%.sha256}" ] || sha256sum -c "$sum"; done
-          gh release upload "$TAG" ./* --clobber
-          gh release edit "$TAG" --draft=false --latest=false
+        run: gh workflow run os.yml --ref main -f release="$TAG" -f test=false

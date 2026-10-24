@@ -107,9 +107,10 @@ image-builder's `iso.yaml` has no hidden-menu setting, so its menu shows for 5 s
 
 The OS is its own Release Please package (`os/`, component `nexus-os`): its own release pull
 request, `version.txt`, `CHANGELOG.md` and tags `nexus-os-v<version>`. Nexus's releases leave
-`os/` out. Merging the OS release pull request (`.github/workflows/release.yml`):
+`os/` out. Merging the OS release pull request makes a draft release and its tag
+(`.github/workflows/release.yml`), and starts `.github/workflows/os.yml` with the tag, which:
 
-1. builds, checks and pushes both images, tagged with the version too (`os.yml`);
+1. builds, checks and pushes both images from the tag, tagged with the version too;
 2. builds the ISO from the minimal image just pushed;
 3. splits it into 1500 MB parts when it's over 2 GiB, with a `.sha256` for the whole ISO and for
    each part;
@@ -119,11 +120,13 @@ request, `version.txt`, `CHANGELOG.md` and tags `nexus-os-v<version>`. Nexus's r
 The release pull request also bumps the version in the README's "Download Nexus OS".
 
 The images bundle the latest published Nexus release, so the first OS release needs one: merge
-Nexus's release pull request first. When one push releases both, the OS waits for Nexus's release
-to be published. If an OS build fails, its draft and tag stay; run the failed jobs again rather
-than making a new release.
+Nexus's release pull request first, and merge the OS one once Nexus's release is published. When
+no Nexus release is published, the OS run stops at its start with "release Nexus first". If an OS
+run fails, its draft and tag stay: run the failed jobs again (or Actions → os → Run workflow, with
+the tag as `release`) rather than making a new release.
 
-`os.yml` also runs daily and after each published Nexus release, for the images only. By hand
+`os.yml` also runs daily, and after each published Nexus release (`package.yml` starts it), for
+the images only. By hand
 (Actions → os → Run workflow) it runs in test mode by default: images under `-test` tags no PC
 follows, and the ISO kept as the run's `nexus-os-iso` artifact for 3 days.
 

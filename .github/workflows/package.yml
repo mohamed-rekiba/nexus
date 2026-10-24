@@ -1,8 +1,9 @@
 name: package
 
-# Builds a Nexus release's files for a tag and attaches them to its draft release. release.yml
-# calls it when Release Please makes a release; it can also run by hand for a tag whose draft
-# exists (for example after a failed run).
+# Builds a Nexus release's files for a tag, attaches them to its draft release, and publishes it
+# as the latest. release.yml starts it when Release Please makes a release; it can also run by
+# hand for a tag whose draft exists (for example after a failed run). Once published, it starts
+# os.yml so the Nexus OS images bundle the new release.
 #
 #   Linux    the tar.gz, the AppImage, and the deb, rpm and Arch packages
 #   macOS    one universal Nexus.app (Apple Silicon and Intel), as a .zip and a .dmg, signed with
@@ -11,16 +12,8 @@ name: package
 #
 # Each file gets a SHA-256 file and signed build provenance (`gh attestation verify <file> --repo
 # <owner>/<repo>` checks it). latest.json, which the launcher reads to update itself, lists them.
+# The launcher's updater reads the latest release, so it never sees one without its files.
 on:
-  workflow_call:
-    inputs:
-      tag:
-        required: true
-        type: string
-      ref:
-        description: The commit to build
-        required: true
-        type: string
   workflow_dispatch:
     inputs:
       tag:
@@ -28,12 +21,16 @@ on:
         required: true
         type: string
       ref:
-        description: The commit or tag to build
-        required: true
+        description: The commit to build (default the tag)
         type: string
+        default: ""
 
 # Each job asks for what it needs.
 permissions: {}
+
+concurrency:
+  group: package-${{ inputs.tag }}
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -63,7 +60,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ inputs.ref }}
+          ref: ${{ inputs.ref || inputs.tag }}
       - id: version
         run: |
           version=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
@@ -93,7 +90,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ inputs.ref }}
+          ref: ${{ inputs.ref || inputs.tag }}
       # Setup without the cache: a release builds from nothing, so a poisoned cache can't
       # reach it.
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
@@ -203,7 +200,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ inputs.ref }}
+          ref: ${{ inputs.ref || inputs.tag }}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: build-macos-*
@@ -295,7 +292,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ inputs.ref }}
+          ref: ${{ inputs.ref || inputs.tag }}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: build-*
@@ -333,3 +330,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: gh release upload "$TAG" ./* --clobber
+
+  publish:
+    name: publish as the latest
+    needs: attach
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      # To start os.yml.
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Publish the release as the latest
+        run: gh release edit "$TAG" --draft=false --latest
+      # Installed Nexus OS PCs get the new release with their next system update.
+      - name: Rebuild the Nexus OS images with it
+        run: gh workflow run os.yml --ref main -f test=false -f iso=false

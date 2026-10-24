@@ -1,6 +1,6 @@
 # Signing the release
 
-`.github/workflows/release.yml` signs the macOS and Windows packages when their secrets are set.
+`.github/workflows/package.yml` signs the macOS and Windows packages when their secrets are set.
 Without them it writes a warning in the run and goes on. The secrets go in the GitHub repo under
 Settings, Secrets and variables, Actions. How a release runs is in
 [development.md](development.md#releases).
