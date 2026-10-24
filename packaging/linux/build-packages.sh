@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds the deb, rpm and Arch packages from the Linux folder scripts/package.sh made, with nfpm
 # (NFPM, default `nfpm` on PATH), into a folder:
-#   packaging/linux/build-packages.sh dist/nexus-linux-x86_64 0.2.0 dist/packages [deb rpm archlinux]
+#   packaging/linux/build-packages.sh dist/nexus-linux-x86_64 0.1.0 dist/packages [deb rpm archlinux]
 # Run it from the repository root.
 set -euo pipefail
 folder="${1:?usage: $0 <release folder> <version> <output folder> [formats…]}"

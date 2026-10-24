@@ -1,6 +1,6 @@
 ; Nexus's Windows installer, with Inno Setup 6 (https://jrsoftware.org/isinfo.php), from the
 ; Windows folder scripts/package.sh made. Run from the repository root:
-;   iscc /DAppVersion=0.2.0 /DFolder=dist\nexus-windows-x86_64 /DOutputDir=dist packaging\windows\nexus.iss
+;   iscc /DAppVersion=0.1.0 /DFolder=dist\nexus-windows-x86_64 /DOutputDir=dist packaging\windows\nexus.iss
 ; It installs for the current user only, into their local programs folder, so neither installing
 ; nor updating needs an administrator. It adds a Start menu entry, an optional desktop shortcut,
 ; and an uninstaller in Windows' installed apps. The uninstaller removes the program folder only:
@@ -10,7 +10,7 @@
 ; the next release's installer silently (/VERYSILENT), and the [Run] entry starts the new version.
 
 #ifndef AppVersion
-  #error Pass the version: /DAppVersion=0.2.0
+  #error Pass the version: /DAppVersion=0.1.0
 #endif
 #ifndef Folder
   #define Folder "dist\nexus-windows-x86_64"
