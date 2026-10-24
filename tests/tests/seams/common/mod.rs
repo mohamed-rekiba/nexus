@@ -175,17 +175,19 @@ impl Composed {
     }
 }
 
-/// Waits until each catalog the core has is the copy fetched from the catalog address, or a
-/// second passes: the Game Catalog fetches in the background, and the first read gets the
-/// bundled copy.
+/// Waits until each catalog the core has is the copy fetched from the catalog address: the Game
+/// Catalog fetches in the background, and the first read gets the bundled copy. A busy runner
+/// can take seconds; after ten it fails, rather than letting the test go on with the bundled
+/// copy and fail somewhere that doesn't say why.
 pub async fn catalogs_fetched(core: &Core) {
-    for _ in 0..100 {
+    for _ in 0..1000 {
         let sources = core.view().catalog.sources;
         if !sources.is_empty() && sources.iter().all(|s| s.contains(": fetched from ")) {
             return;
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
+    panic!("the catalogs weren't fetched in 10 s: {:?}", core.view().catalog.sources);
 }
 
 /// Lets the theme's moves reach the core, as the app would: a move in the Home row or a grid
