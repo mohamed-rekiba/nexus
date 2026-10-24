@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.6](https://github.com/mohamed-rekiba/nexus/compare/v0.2.5...v0.2.6) (2026-10-24)
+
+
+### Bug Fixes
+
+* collect a release's files in release/, not dist/ ([37d8f8a](https://github.com/mohamed-rekiba/nexus/commit/37d8f8a46698a8e40d53aa66e89e8ac5f1413155))
+
 ## [0.2.5](https://github.com/mohamed-rekiba/nexus/compare/v0.2.4...v0.2.5) (2026-10-24)
 
 
