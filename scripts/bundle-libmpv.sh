@@ -15,8 +15,10 @@ licences="$3/libmpv"
 mkdir -p "$lib_dir" "$licences"
 
 # mpv's licence texts, from its source at the version shipped, and where that source is.
+# A version is a tag (v0.34.1): newer mpv prints it with its v, older mpv without.
 fetch_licences() {
     local ref="$1"
+    if [[ "$ref" =~ ^[0-9]+\.[0-9] ]]; then ref="v$ref"; fi
     for file in Copyright LICENSE.GPL LICENSE.LGPL; do
         curl -fsSL --retry 3 -o "$licences/$file" "https://raw.githubusercontent.com/mpv-player/mpv/$ref/$file"
     done
