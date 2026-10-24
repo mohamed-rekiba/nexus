@@ -32,7 +32,7 @@ runs:
         sudo apt-get update && sudo apt-get install -y --no-install-recommends
         libfontconfig1-dev libxkbcommon-dev libudev-dev libasound2-dev $EXTRA
     # The key includes Cargo.lock: changed dependencies rebuild, the rest is reused.
-    - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+    - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       with:
         key: ${{ inputs.cache-key }}
         save-if: ${{ inputs.save-cache == 'true' }}
