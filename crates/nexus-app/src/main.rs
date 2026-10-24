@@ -57,6 +57,7 @@ nexus [options]
                       for more folders under one name)
   --supports <feature>
                       Exit 0 when this launcher has the feature (gamescope), else 1
+  --version           Show the version, on one line
   --help              Show this help
 
 Environment:
@@ -100,6 +101,11 @@ fn bundled_extensions() -> PathBuf {
     if resources.is_dir() { resources } else { dir.join("extensions") }
 }
 
+/// What `--version` prints: one line, which Nexus OS keeps in its release marker.
+fn version_line() -> String {
+    format!("nexus {}", env!("CARGO_PKG_VERSION"))
+}
+
 /// Whether this launcher has `feature`, for `--supports`. `gamescope`: it runs in a Gamescope
 /// session and sets the window ids Gamescope shows. A launcher that doesn't know the option
 /// exits with an error, so a session can tell the two apart.
@@ -141,6 +147,10 @@ fn parse_args(mut it: impl Iterator<Item = String>) -> Result<Args, String> {
             }
             "--help" | "-h" => {
                 print!("{USAGE}");
+                std::process::exit(0);
+            }
+            "--version" | "-V" => {
+                println!("{}", version_line());
                 std::process::exit(0);
             }
             other => return Err(format!("unknown option {other}\n\n{USAGE}")),
@@ -908,6 +918,15 @@ mod tests {
         assert_eq!(super::size_override(Some("big")), None);
         assert_eq!(super::size_override(Some("NaN")), None);
         assert_eq!(super::size_override(None), None);
+    }
+
+    #[test]
+    fn version_is_one_line_with_the_release_version() {
+        let line = super::version_line();
+        assert!(!line.contains('\n'), "{line:?}");
+        let workspace = include_str!("../../../Cargo.toml");
+        let version = workspace.lines().find_map(|l| l.strip_prefix("version = \"")?.strip_suffix('"')).unwrap();
+        assert_eq!(line, format!("nexus {version}"));
     }
 
     #[test]

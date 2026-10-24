@@ -158,6 +158,7 @@ cargo run -p nexus-app -- --windowed --dev --extensions ~/nexus-themes
 | `--extensions <path>` | The folder of third-party plugins and themes. Default: `<data-dir>/extensions`. Nexus also reads `extensions/` beside the binary (`Contents/Resources/extensions` in `Nexus.app`). |
 | `--folder <name>=<path>` | Maps a named host folder, such as `games=/srv/games`. It is saved. Repeat it for more folders under one name. |
 | `--supports <feature>` | Exits 0 when this launcher has the feature (`gamescope`), else 1. |
+| `--version` | Prints `nexus <version>` on one line, which Nexus OS keeps in its release marker. |
 
 The default data folder is `$XDG_DATA_HOME/nexus` (`~/.local/share/nexus`) on Linux,
 `~/Library/Application Support/nexus` on macOS and `%APPDATA%\nexus` on Windows. It holds
