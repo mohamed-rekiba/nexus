@@ -287,12 +287,13 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: build-*
-          path: dist
+          # Not dist/: git tracks dist/catalog/, which isn't part of a release.
+          path: release
           merge-multiple: true
       # Each Mac processor's own zip was only the universal app's input.
-      - run: rm -f dist/nexus-macos-aarch64.zip dist/nexus-macos-x86_64.zip
+      - run: rm -f release/nexus-macos-aarch64.zip release/nexus-macos-x86_64.zip
       - name: Checksums and latest.json
-        working-directory: dist
+        working-directory: release
         env:
           GH_REPO: ${{ github.repository }}
         run: |
@@ -306,23 +307,23 @@ jobs:
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
-            dist/*.tar.gz
-            dist/*.zip
-            dist/*.tar
-            dist/*.AppImage
-            dist/*.deb
-            dist/*.rpm
-            dist/*.pkg.tar.zst
-            dist/*.exe
-            dist/*.dmg
+            release/*.tar.gz
+            release/*.zip
+            release/*.tar
+            release/*.AppImage
+            release/*.deb
+            release/*.rpm
+            release/*.pkg.tar.zst
+            release/*.exe
+            release/*.dmg
       # The launcher's updater reads the latest release, so it never sees one without its files.
       - name: Attach the files and publish as the latest
-        working-directory: dist
+        working-directory: release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          gh release upload "$TAG" ./* --clobber
+          find . -maxdepth 1 -type f -print0 | xargs -0 gh release upload "$TAG" --clobber
           gh release edit "$TAG" --draft=false --latest
 
   os:
