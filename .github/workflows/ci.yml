@@ -10,7 +10,7 @@ name: CI
 on:
   push:
     branches: [main]
-    paths-ignore: &skip
+    paths-ignore:
       - "**.md"
       - "docs/**"
       - "os/**"
@@ -23,8 +23,21 @@ on:
       - ".github/workflows/mirror-deps.yml"
       - ".github/release-please-*.json"
       - ".github/dependabot.yml"
+  # The same list as for push: keep the two the same.
   pull_request:
-    paths-ignore: *skip
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "os/**"
+      - "version.txt"
+      - "LICENSE"
+      - ".github/workflows/os.yml"
+      - ".github/workflows/package.yml"
+      - ".github/workflows/release.yml"
+      - ".github/workflows/weekly.yml"
+      - ".github/workflows/mirror-deps.yml"
+      - ".github/release-please-*.json"
+      - ".github/dependabot.yml"
   workflow_dispatch:
 
 permissions:
