@@ -6,12 +6,12 @@ in [architecture.md](architecture.md).
 
 ## Toolchain
 
-- **Rust 1.92 or newer** (`rust-version` in `Cargo.toml`), on the stable channel.
+- **Rust 1.99 or newer** (`rust-version` in `Cargo.toml`), on the stable channel.
   `rust-toolchain.toml` asks for `stable` with the `rustfmt` and `clippy` components, so
   [rustup](https://rustup.rs) installs both on the first `cargo` call in the repo. To add them
   by hand: `rustup component add rustfmt clippy`. With a distribution's Rust instead of rustup,
   install them as packages: `sudo dnf install rustfmt clippy` (Fedora) or
-  `sudo apt-get install rustfmt rust-clippy` (Debian), and check that `rustc --version` is 1.92
+  `sudo apt-get install rustfmt rust-clippy` (Debian), and check that `rustc --version` is 1.99
   or newer.
 - **Format**: `rustfmt.toml` sets `max_width = 120` and `use_small_heuristics = "Max"`.
 - **Lints**: the workspace denies `unsafe_code` and warns on `clippy::all`. `make lint` and CI

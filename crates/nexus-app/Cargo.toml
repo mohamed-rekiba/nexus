@@ -39,7 +39,7 @@ theme-default.workspace = true
 ash = "0.38"
 # libmpv at run time, for trailers in the window (src/trailer.rs). Already in the lock file
 # through ash.
-libloading = "0.8"
+libloading = "0.9"
 # BitTorrent, for the games a catalog offers (src/torrents.rs). Pinned: the adapter follows
 # its API as of this version.
 librqbit = { version = "=9.0.1", default-features = false, features = ["rust-tls"] }
@@ -47,7 +47,7 @@ librqbit = { version = "=9.0.1", default-features = false, features = ["rust-tls
 # and 7z, pinned like librqbit. RAR goes through the system's libarchive, loaded at run time
 # with libloading (src/libarchive.rs): UnRAR's licence adds terms the GPL doesn't allow.
 flate2.workspace = true
-sevenz-rust2 = { version = "=0.23.0", default-features = false, features = ["ppmd", "deflate"] }
+sevenz-rust2 = { version = "=0.24.1", default-features = false, features = ["ppmd", "deflate"] }
 tar.workspace = true
 zip.workspace = true
 
@@ -74,7 +74,7 @@ windows-sys = { version = "0.61", features = [
 
 [dev-dependencies]
 # Builds 7z archives for the archives adapter's tests.
-sevenz-rust2 = { version = "=0.23.0", default-features = false, features = ["compress"] }
+sevenz-rust2 = { version = "=0.24.1", default-features = false, features = ["compress"] }
 
 # The desktop adapter against the real windowing system. Its own main: a helper window must
 # run on a process's main thread. Opt in with NEXUS_DESKTOP_TESTS=1.

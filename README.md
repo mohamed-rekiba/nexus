@@ -88,7 +88,7 @@ mpv and FFmpeg builds it ships, as `nexus-<os>-<arch>-third-party-sources.tar`.
 
 ### From source
 
-You need [Rust](https://rustup.rs) 1.92 or newer and the build packages below. Then, in the
+You need [Rust](https://rustup.rs) 1.99 or newer and the build packages below. Then, in the
 repository:
 
 ```sh
