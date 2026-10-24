@@ -1,0 +1,38 @@
+# Git hooks, with https://pre-commit.com: `make hooks-install` installs them.
+# On each commit: file hygiene and the format check. Before each push: clippy and the tests.
+# pre-commit runs hooks from the git root; while Nexus sits in a parent repo's nexus/ folder,
+# each cargo hook moves there first (run it with `pre-commit run -c nexus/.pre-commit-config.yaml`).
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-toml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        exclude: \.md$
+      - id: check-added-large-files
+        args: [--maxkb=2048]
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt --check
+        entry: bash -c 'cd "$(git rev-parse --show-toplevel)" && if [ -f nexus/Cargo.toml ]; then cd nexus; fi && cargo fmt --all --check'
+        language: system
+        types: [rust]
+        pass_filenames: false
+      - id: cargo-clippy
+        name: cargo clippy
+        entry: bash -c 'cd "$(git rev-parse --show-toplevel)" && if [ -f nexus/Cargo.toml ]; then cd nexus; fi && cargo clippy --workspace --all-targets -- -D warnings'
+        language: system
+        types: [rust]
+        pass_filenames: false
+        stages: [pre-push]
+      - id: cargo-test
+        name: cargo test
+        entry: bash -c 'cd "$(git rev-parse --show-toplevel)" && if [ -f nexus/Cargo.toml ]; then cd nexus; fi && cargo test --workspace'
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
