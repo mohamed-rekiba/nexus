@@ -1,43 +1,40 @@
-name: package
+name: Package
 
-# Builds a Nexus release's files for a tag, attaches them to its draft release, and publishes it
-# as the latest. release.yml starts it when Release Please makes a release; it can also run by
-# hand for a tag whose draft exists (for example after a failed run). Once published, it starts
-# os.yml so the Nexus OS images bundle the new release.
-#
+# Builds Nexus's packages on each system:
 #   Linux    the tar.gz, the AppImage, and the deb, rpm and Arch packages
 #   macOS    one universal Nexus.app (Apple Silicon and Intel), as a .zip and a .dmg, signed with
-#            the Developer ID and notarized when the secrets are set
+#            the Developer ID and notarized when the secrets are set (docs/signing.md)
 #   Windows  the zip and the installer, signed when the certificate is set
 #
-# Each file gets a SHA-256 file and signed build provenance (`gh attestation verify <file> --repo
-# <owner>/<repo>` checks it). latest.json, which the launcher reads to update itself, lists them.
-# The launcher's updater reads the latest release, so it never sees one without its files.
+# With a tag (release.yml calls it so, or run it by hand for a release whose build failed) it
+# attaches the files to the tag's draft release, with a SHA-256 file and signed build
+# provenance for each and latest.json for the launcher's updater, then publishes the release as
+# the latest. Without a tag it only builds, and the files stay as this run's artifacts: run it
+# so to try a packaging change.
+#
+# It doesn't run the tests: CI did on the commit before it reached main.
 on:
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        default: ""
   workflow_dispatch:
     inputs:
       tag:
-        description: The release's tag (for example v0.2.0)
-        required: true
-        type: string
-      ref:
-        description: The commit to build (default the tag)
+        description: A release's tag to build and publish (for example v0.2.0); empty only builds
         type: string
         default: ""
 
-# Each job asks for what it needs.
 permissions: {}
 
+# Two runs for the same release never upload to it at once.
 concurrency:
-  group: package-${{ inputs.tag }}
+  group: package-${{ inputs.tag || github.run_id }}
   cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
-  # No debug info in CI builds: it made each test binary about 800 MB, and the build, the
-  # links and the cache (10 GB for the whole repo, shared by every job) several times bigger.
-  # A failing test still says its file and line.
-  CARGO_PROFILE_DEV_DEBUG: "0"
   # Homebrew updates itself before each install unless told not to: minutes per macOS job.
   HOMEBREW_NO_AUTO_UPDATE: "1"
   HOMEBREW_NO_INSTALL_CLEANUP: "1"
@@ -49,8 +46,8 @@ defaults:
 
 jobs:
   version:
-    name: tag matches the version
-    runs-on: ubuntu-22.04
+    name: Version
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read
@@ -60,29 +57,29 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ inputs.ref || inputs.tag }}
+          ref: ${{ inputs.tag || github.sha }}
       - id: version
         run: |
           version=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
-          if [ "$TAG" != "v$version" ]; then
+          if [ -n "$TAG" ] && [ "$TAG" != "v$version" ]; then
             echo "::error::the tag is $TAG, but Cargo.toml says version $version"
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
   build:
-    name: build (${{ matrix.name }})
+    name: Build (${{ matrix.name }})
     needs: version
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 90
+    timeout-minutes: 60
     permissions:
       contents: read
     strategy:
-      fail-fast: true
       matrix:
         include:
+          # 22.04: the Linux build runs on systems with glibc as old as its own.
           - { name: linux, runner: ubuntu-22.04 }
-          # Each Mac processor is built on a runner of its own kind; macos-universal joins them.
+          # Each Mac processor on a runner of its own kind; the macos job joins them.
           - { name: macos-arm64, runner: macos-14 }
           - { name: macos-x86_64, runner: macos-15-intel }
           - { name: windows, runner: windows-2022 }
@@ -90,67 +87,39 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ inputs.ref || inputs.tag }}
-      # Setup without the cache: a release builds from nothing, so a poisoned cache can't
-      # reach it.
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+          ref: ${{ inputs.tag || github.sha }}
+      - uses: ./.github/actions/setup
         with:
-          toolchain: stable
-          components: rustfmt, clippy
-      - name: Linux system packages
-        if: runner.os == 'Linux'
-        run: >-
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends
-          libfontconfig1-dev libxkbcommon-dev libudev-dev libasound2-dev
-      # The full check first: a release never ships what the check would refuse.
-      - run: scripts/check.sh
-      # libmpv for the trailer player, which the package ships with its licence.
+          cache-key: package-${{ matrix.name }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+      # libmpv for the trailer player and libarchive for RAR and other archives, which the
+      # package ships with their licences.
       - uses: ./.github/actions/libmpv
-      # libarchive for RAR and the other archives, which the package ships with its licences.
       - uses: ./.github/actions/libarchive
       # The crates' licences for the package (about.toml).
-      # A prebuilt binary: compiling it took minutes in each job.
       - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
         with:
           tool: cargo-about@0.9.2
       # Builds, runs `nexus --help` from the package, and packs it on Linux and macOS.
       - run: scripts/package.sh
-      - name: AppImage (Linux)
+
+      - name: AppImage, deb, rpm and Arch packages (Linux)
         if: runner.os == 'Linux'
-        run: scripts/appimage.sh
-      - name: deb, rpm and Arch packages (Linux)
-        if: runner.os == 'Linux'
+        run: |
+          scripts/appimage.sh
+          APPIMAGE_EXTRACT_AND_RUN=1 dist/Nexus-x86_64.AppImage --version
+      - if: runner.os == 'Linux'
         uses: ./.github/actions/linux-packages
         with:
           version: ${{ needs.version.outputs.version }}
-      # The source of the GPL code the package ships (mpv, FFmpeg), to publish beside it. The
-      # macOS sources go with the universal app.
-      - name: Third-party sources
-        if: runner.os != 'macOS'
-        run: |
-          for dir in dist/nexus-*/; do
-            scripts/fetch-sources.sh "${dir%/}"
-          done
-      # An Authenticode signature, when WINDOWS_CERT_PFX (the certificate, base64) and
-      # WINDOWS_CERT_PASSWORD are set. Without it SmartScreen warns on the first start.
+
       - name: Sign nexus.exe (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         env:
           WINDOWS_CERT_PFX: ${{ secrets.WINDOWS_CERT_PFX }}
           WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
-        run: |
-          if (-not $env:WINDOWS_CERT_PFX) {
-            Write-Output "::warning::no WINDOWS_CERT_PFX: nexus.exe is not signed"
-            exit 0
-          }
-          $pfx = Join-Path $env:RUNNER_TEMP "cert.pfx"
-          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX))
-          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1
-          Get-ChildItem dist\nexus-windows-*\*.exe, dist\nexus-windows-*\*.dll | ForEach-Object {
-            & $signtool.FullName sign /f $pfx /p $env:WINDOWS_CERT_PASSWORD /fd sha256 /tr http://timestamp.digicert.com /td sha256 $_.FullName
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
+        run: scripts/sign-windows.ps1 dist\nexus-windows-*\*.exe dist\nexus-windows-*\*.dll
       - name: Zip and installer (Windows)
         if: runner.os == 'Windows'
         env:
@@ -164,16 +133,30 @@ jobs:
         env:
           WINDOWS_CERT_PFX: ${{ secrets.WINDOWS_CERT_PFX }}
           WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: scripts/sign-windows.ps1 dist\nexus-windows-x86_64-setup.exe
+      # The installer installs silently, Nexus starts from where it put it, and the uninstaller
+      # takes it all away again.
+      - name: Try the installer (Windows)
+        if: runner.os == 'Windows'
         run: |
-          if (-not $env:WINDOWS_CERT_PFX) {
-            Write-Output "::warning::no WINDOWS_CERT_PFX: the installer is not signed"
-            exit 0
-          }
-          $pfx = Join-Path $env:RUNNER_TEMP "cert.pfx"
-          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX))
-          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1
-          & $signtool.FullName sign /f $pfx /p $env:WINDOWS_CERT_PASSWORD /fd sha256 /tr http://timestamp.digicert.com /td sha256 dist\nexus-windows-x86_64-setup.exe
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dist/nexus-windows-x86_64-setup.exe //VERYSILENT //SUPPRESSMSGBOXES //NORESTART //TASKS=""
+          # The installer's [Run] entry starts Nexus after a silent install: end it.
+          sleep 5; taskkill //IM nexus.exe //F 2> /dev/null || true
+          app="$LOCALAPPDATA/Programs/Nexus"
+          test -f "$app/installed-by-setup"
+          "$app/nexus.exe" --help > /dev/null
+          "$app/unins000.exe" //VERYSILENT //SUPPRESSMSGBOXES //NORESTART
+          for _ in $(seq 30); do [ ! -e "$app/nexus.exe" ] && break; sleep 1; done
+          test ! -e "$app/nexus.exe"
+
+      # The source of the GPL code the package ships (mpv, FFmpeg), to publish beside it. The
+      # macOS sources go with the universal app.
+      - name: Third-party sources
+        if: runner.os != 'macOS'
+        run: |
+          for dir in dist/nexus-*/; do
+            scripts/fetch-sources.sh "${dir%/}"
+          done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: build-${{ matrix.name }}
@@ -189,7 +172,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  macos-universal:
+  macos:
     name: macOS universal app
     needs: build
     runs-on: macos-14
@@ -200,7 +183,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ inputs.ref || inputs.tag }}
+          ref: ${{ inputs.tag || github.sha }}
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: build-macos-*
@@ -241,6 +224,7 @@ jobs:
             security unlock-keychain -p "" "$keychain"
             echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
             security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+            rm "$RUNNER_TEMP/cert.p12"
             security set-key-partition-list -S apple-tool:,apple: -s -k "" "$keychain" > /dev/null
             security list-keychains -d user -s "$keychain"
             # Libraries first, then the bundle: the hardened runtime and a timestamp, as
@@ -259,13 +243,18 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: |
-          packaging/macos/make-dmg.sh dist/nexus-macos-universal/Nexus.app dist/nexus-macos-universal.dmg
+          dmg=dist/nexus-macos-universal.dmg
+          packaging/macos/make-dmg.sh dist/nexus-macos-universal/Nexus.app "$dmg"
           if [ -n "$MACOS_CERT_P12" ]; then
-            codesign --force --timestamp --sign "Developer ID Application" dist/nexus-macos-universal.dmg
-            xcrun notarytool submit dist/nexus-macos-universal.dmg --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
-            xcrun stapler staple dist/nexus-macos-universal.dmg
+            codesign --force --timestamp --sign "Developer ID Application" "$dmg"
+            xcrun notarytool submit "$dmg" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+            xcrun stapler staple "$dmg"
           fi
-          hdiutil verify dist/nexus-macos-universal.dmg
+          hdiutil verify "$dmg"
+          mounted=$(hdiutil attach -nobrowse -readonly "$dmg" | awk -F'\t' '/Volumes/ {print $NF}')
+          test -x "$mounted/Nexus.app/Contents/MacOS/nexus"
+          test -L "$mounted/Applications"
+          hdiutil detach "$mounted"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: build-macos-universal
@@ -276,13 +265,14 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  attach:
-    name: attach to the release
-    needs: [build, macos-universal]
-    runs-on: ubuntu-22.04
+  publish:
+    name: Publish the release
+    needs: [build, macos]
+    if: inputs.tag != ''
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
-      # To upload to the release.
+      # To upload to the release and publish it.
       contents: write
       # For the build provenance.
       id-token: write
@@ -292,7 +282,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ inputs.ref || inputs.tag }}
+          ref: ${{ inputs.tag }}
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: build-*
@@ -324,28 +314,12 @@ jobs:
             dist/*.pkg.tar.zst
             dist/*.exe
             dist/*.dmg
-      - name: Attach to the draft
+      # The launcher's updater reads the latest release, so it never sees one without its files.
+      - name: Attach the files and publish as the latest
         working-directory: dist
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: gh release upload "$TAG" ./* --clobber
-
-  publish:
-    name: publish as the latest
-    needs: attach
-    runs-on: ubuntu-22.04
-    timeout-minutes: 10
-    permissions:
-      contents: write
-      # To start os.yml.
-      actions: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
-    steps:
-      - name: Publish the release as the latest
-        run: gh release edit "$TAG" --draft=false --latest
-      # Installed Nexus OS PCs get the new release with their next system update.
-      - name: Rebuild the Nexus OS images with it
-        run: gh workflow run os.yml --ref main -f test=false -f iso=false
+        run: |
+          gh release upload "$TAG" ./* --clobber
+          gh release edit "$TAG" --draft=false --latest

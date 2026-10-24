@@ -3,7 +3,7 @@
 #   scripts/check.sh        all of it
 #   scripts/check.sh lint   the format check and clippy
 #   scripts/check.sh test   the tests
-# CI runs lint and test as separate jobs, side by side.
+# CI runs the same commands as separate jobs (.github/workflows/ci.yml).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -18,9 +18,9 @@ fi
 if [ "$part" != lint ]; then
     # A failing test binary doesn't hide the failures of the ones after it.
     if cargo nextest --version >/dev/null 2>&1; then
-        # Every test in its own process, all of them at once. nextest leaves out doc tests.
+        # Every test in its own process, all of them at once. nextest leaves out doc tests;
+        # the code has none that run.
         cargo nextest run --workspace --no-fail-fast
-        cargo test --workspace --doc
     else
         cargo test --workspace --no-fail-fast
     fi

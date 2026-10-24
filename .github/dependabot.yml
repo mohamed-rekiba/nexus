@@ -1,11 +1,14 @@
 version: 2
+# One pull request per ecosystem, once a month: each pull request (and each rebase of it) runs
+# CI, so fewer of them saves Actions minutes. Security updates don't wait for this schedule:
+# Dependabot opens them as soon as an advisory is out.
 updates:
   # Actions are pinned to commit SHAs; Dependabot keeps the pins (and their version comments)
-  # current, in the workflows and in the local setup action.
+  # current, in the workflows and in the local actions.
   - package-ecosystem: github-actions
     directories: ["/", "/.github/actions/*"]
-    schedule: { interval: weekly }
-    cooldown: { default-days: 3 }
+    schedule: { interval: monthly }
+    cooldown: { default-days: 7 }
     commit-message: { prefix: "ci" }
     labels: [dependencies, ci]
     groups:
@@ -14,18 +17,15 @@ updates:
   # changelog read, since themes depend on its language.
   - package-ecosystem: cargo
     directory: /
-    schedule: { interval: weekly }
-    cooldown: { default-days: 3 }
-    open-pull-requests-limit: 5
+    schedule: { interval: monthly }
+    cooldown: { default-days: 7 }
     commit-message: { prefix: "chore(deps)" }
     labels: [dependencies, rust]
     ignore:
       - dependency-name: "slint*"
       - dependency-name: "i-slint-*"
     groups:
-      # RustCrypto's crates share their trait crates (cipher, digest, crypto-common): one bumped
-      # alone doesn't build with the others, so they move together, in one pull request.
-      rustcrypto:
-        patterns: [aes, cbc, cipher, ctr, digest, hmac, sha1, sha2, rsa, ed25519-dalek]
-      cargo-minor-patch:
-        update-types: [minor, patch]
+      # Everything in one pull request, majors too. RustCrypto's crates must move together
+      # anyway (they share cipher, digest and crypto-common). When a major breaks the build,
+      # fix it in that pull request.
+      cargo: { patterns: ["*"] }

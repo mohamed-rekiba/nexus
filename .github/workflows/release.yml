@@ -1,43 +1,39 @@
-name: release
+name: Release
 
-# Release Please keeps a release pull request open on main for Nexus. It collects the
-# Conventional Commit messages since the last release (feat: raises the minor version, fix: the
-# patch; before 1.0 a breaking change raises the minor), bumps the version in Cargo.toml and
-# Cargo.lock, and writes CHANGELOG.md. Merging that pull request makes a draft release and its
-# tag (force-tag-creation: GitHub tags a draft only when it is published, and without the tag
-# Release Please can't find the release and opens the same release pull request again).
+# Release Please keeps a release pull request open on main for each package: Nexus (the
+# workspace) and Nexus OS (os/, tags nexus-os-v<version>). It reads the Conventional Commit
+# messages since the last release, bumps the version and writes the changelog. Merging the pull
+# request makes a draft release and its tag (force-tag-creation: without the tag Release Please
+# can't find a draft and opens the same pull request again).
 #
-# Nexus OS (os/) is a second package with its own release pull request, version, changelog and
-# tags (nexus-os-v<version>).
-#
-# This workflow only makes the releases. It then starts the workflow that builds each one:
-# package.yml for Nexus (it attaches the files and publishes the release as the latest), os.yml
-# for Nexus OS (it builds the images and the stick, attaches the stick and publishes the release,
-# never as the latest). GitHub doesn't start workflows from a tag or a release made with the
-# workflow's own token, but it does start them when asked by name (workflow_dispatch).
+# The same run then builds what was released:
+# - Nexus: package.yml builds, attaches and publishes the release as the latest, then os.yml
+#   rebuilds the images with it.
+# - Nexus OS: os.yml builds the images and the stick from the tag and publishes the release,
+#   never as the latest. When one merge released both, it runs after Nexus's release is out,
+#   since the images bundle it.
 on:
   push:
     branches: [main]
 
 permissions: {}
 
-concurrency:
-  group: release
-  cancel-in-progress: false
-
 jobs:
   release-please:
-    runs-on: ubuntu-22.04
+    name: Release Please
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
+    # Two pushes close together never edit the release pull requests at once.
+    concurrency:
+      group: release-please
+      cancel-in-progress: false
     permissions:
       contents: write
       pull-requests: write
     outputs:
-      created: ${{ steps.rp.outputs.release_created }}
-      tag: ${{ steps.rp.outputs.tag_name }}
-      # Nexus OS (the os/ package): Release Please prefixes a package's outputs with its path.
-      os-created: ${{ steps.rp.outputs['os--release_created'] }}
-      os-tag: ${{ steps.rp.outputs['os--tag_name'] }}
+      nexus: ${{ steps.rp.outputs.release_created == 'true' && steps.rp.outputs.tag_name || '' }}
+      # Release Please prefixes a package's outputs with its path.
+      os: ${{ steps.rp.outputs['os--release_created'] == 'true' && steps.rp.outputs['os--tag_name'] || '' }}
     steps:
       - id: rp
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
@@ -49,28 +45,29 @@ jobs:
           config-file: .github/release-please-config.json
           manifest-file: .github/release-please-manifest.json
 
-  build:
-    name: start the builds
+  package:
+    name: Nexus
     needs: release-please
-    if: needs.release-please.outputs.created == 'true' || needs.release-please.outputs.os-created == 'true'
-    runs-on: ubuntu-22.04
-    timeout-minutes: 5
+    if: needs.release-please.outputs.nexus != ''
     permissions:
-      # To start package.yml and os.yml.
-      actions: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
-    steps:
-      - name: Nexus
-        if: needs.release-please.outputs.created == 'true'
-        env:
-          TAG: ${{ needs.release-please.outputs.tag }}
-        run: gh workflow run package.yml --ref main -f tag="$TAG"
-      # The images bundle the latest published Nexus release: when one push released both, the
-      # OS run stops with "release Nexus first"; run it again once Nexus's release is published.
-      - name: Nexus OS
-        if: needs.release-please.outputs.os-created == 'true'
-        env:
-          TAG: ${{ needs.release-please.outputs.os-tag }}
-        run: gh workflow run os.yml --ref main -f release="$TAG" -f test=false
+      contents: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/package.yml
+    with:
+      tag: ${{ needs.release-please.outputs.nexus }}
+    secrets: inherit
+
+  os:
+    name: Nexus OS
+    needs: [release-please, package]
+    # After a Nexus release (new images), or for an OS release; never after a failed Nexus one.
+    if: >-
+      !cancelled() && needs.package.result != 'failure'
+      && (needs.release-please.outputs.nexus != '' || needs.release-please.outputs.os != '')
+    permissions:
+      contents: write
+      packages: write
+    uses: ./.github/workflows/os.yml
+    with:
+      release: ${{ needs.release-please.outputs.os }}

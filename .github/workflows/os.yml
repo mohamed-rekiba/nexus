@@ -1,17 +1,16 @@
-name: os
+name: Nexus OS
 
 # Nexus OS: its images and its USB stick (os/README.md).
 #
 # - Images: ghcr.io/<owner>/nexus-os:minimal (os/Containerfile) and :minimal-nvidia (the same
-#   plus NVIDIA's driver, os/nvidia/). Built, checked and pushed every day, and when package.yml
-#   starts this after publishing a Nexus release, so installed PCs get Fedora's fixes and the
-#   newest Nexus (the image installs the latest Nexus release's rpm). They also get a dated tag,
-#   and on an OS release a version tag (minimal-0.2.0).
-# - An OS release: release.yml starts this with the release's tag (nexus-os-v<version>). The
+#   plus NVIDIA's driver, os/nvidia/). Built, checked and pushed every day, and after each Nexus
+#   release (release.yml calls this), so installed PCs get Fedora's fixes and the newest Nexus
+#   (the image installs the latest Nexus release's rpm). They also get a dated tag, and on an OS
+#   release a version tag (minimal-0.2.0).
+# - An OS release: release.yml calls this with the release's tag (nexus-os-v<version>). The
 #   images are built from the tag and tagged with the version, then the stick is built, attached
 #   to the draft release, and the release is published, never as the latest: Nexus's updater
-#   reads the latest release, which stays a Nexus one. Installed PCs update themselves, so the
-#   stick doesn't follow the daily images.
+#   reads the latest release, which stays a Nexus one.
 # - The stick is one file, or 1500 MB parts when it's over 2 GiB (GitHub's limit for a release
 #   file), each with a .sha256. It's also this run's `nexus-os-iso` artifact.
 # - Test mode (by hand, the default): the images go under -test tags (:minimal-test), which no PC
@@ -19,6 +18,11 @@ name: os
 on:
   schedule:
     - cron: "30 5 * * *"
+  workflow_call:
+    inputs:
+      release:
+        type: string
+        default: ""
   workflow_dispatch:
     inputs:
       test:
@@ -41,8 +45,9 @@ on:
 # Each job asks for what it needs.
 permissions: {}
 
+# One run per kind at a time, so two runs never push the same tags at once.
 concurrency:
-  group: nexus-os-${{ inputs.release || github.event_name }}${{ inputs.test && !inputs.release && '-test' || '' }}
+  group: nexus-os-${{ inputs.release || (inputs.test && 'test') || 'images' }}
   cancel-in-progress: false
 
 env:

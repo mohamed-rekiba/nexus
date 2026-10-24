@@ -3,8 +3,6 @@
 Status: ready for implementation.
 
 Related specs:
-- [releases-and-packaging.md](releases-and-packaging.md): the Linux package that recommends
-  the tools the Linux system plugin runs.
 - [nexus-os.md](nexus-os.md): Nexus OS, the main user of the capabilities described here. The
   stick's install screens and OS updates are specified there.
 

@@ -340,25 +340,30 @@ Other scripts:
 
 ## CI
 
-`.github/workflows/ci.yml` runs on pushes to `main`, on pull requests, by hand, and every Monday
-at 05:17 UTC. Each job runs on `ubuntu-22.04`, `macos-14` and `windows-2022`, unless the table
-says otherwise.
+The workflows are in `.github/workflows/`:
 
-| Job | What it does |
-|---|---|
-| `lint` | `scripts/check.sh lint`: the format check and clippy. |
-| `test` | `scripts/check.sh test`, with cargo-nextest. On failure the log is an artifact for 7 days. It runs beside `lint`: each builds what it needs, so the split adds a job's setup, not a second build. |
-| `desktop` | `NEXUS_DESKTOP_TESTS=1 cargo test --locked -p nexus-app --test desktop`. On Linux it runs under Xvfb with openbox, with `NEXUS_DESKTOP_REQUIRE=1`. A macOS runner has no Accessibility permission, so its tests skip and say why. |
-| `cargo-deny` | `cargo deny check`, on Linux only |
-| `real releases` | `NEXUS_REAL_RELEASES=1 cargo test --locked -p nexus-app real`, on the weekly run and by hand only |
-| `package` | On Linux, both Mac processors (`macos-14`, `macos-15-intel`) and Windows: the trailer test (`NEXUS_TRAILER_TESTS=1`, not on Windows), `scripts/package.sh`; on Linux the AppImage (run with `--version`) and the deb, rpm and Arch packages with their checks; on Windows the installer, installed silently, started, and uninstalled. The files are artifacts for 7 days. It doesn't run on the weekly run. |
-| `package-macos` | Joins the two Mac apps into the universal one, makes the disk image, and checks both |
-| `ci ok` | Passes when every job above that ran passed: the one check for branch protection |
+| Workflow | When | What it does |
+|---|---|---|
+| `ci.yml` | Pull requests, pushes to `main`, by hand | On Linux, side by side: `Format` (`cargo fmt --check`), `Clippy` (`-D warnings`), `Test` (cargo-nextest) and `cargo-deny` |
+| `weekly.yml` | Mondays at 05:17 UTC, by hand | The tests on Windows; on Linux: the real emulator releases install (`NEXUS_REAL_RELEASES=1`), the desktop adapter under Xvfb and openbox (`NEXUS_DESKTOP_TESTS=1`), the trailer player plays a real video (`NEXUS_TRAILER_TESTS=1`), and `cargo deny check advisories` |
+| `release.yml` | Pushes to `main` | Release Please, then `package.yml` and `os.yml` for what it released ([Releases](#releases)) |
+| `package.yml` | Called by `release.yml`, by hand | The packages on Linux, both Mac processors and Windows; with a tag, it publishes the release |
+| `os.yml` | Daily, called by `release.yml`, by hand | The Nexus OS images and USB stick ([os/README.md](../os/README.md#releases)) |
+| `mirror-deps.yml` | By hand | Copies the pinned Windows libmpv build into the `deps` release |
+
+`ci.yml` skips what can't change the build: pushes and pull requests that only touch docs,
+Markdown, `os/` or the other workflows, and Release Please's pull requests (a version and a
+changelog). A new push cancels the older run of the same branch.
+
+`ci.yml` runs on Linux only. macOS and Windows build in `package.yml`: run it by hand without a
+tag to try a change on them. Its files stay as the run's artifacts for 7 days.
+
+For branch protection, require `Format`, `Clippy`, `Test` and `cargo-deny`.
 
 The shared steps are in `.github/actions/`:
 
 - `setup`: the stable toolchain, the Linux build packages, and the
-  [rust-cache](https://github.com/Swatinem/rust-cache) cache. Only `main` saves the cache.
+  [rust-cache](https://github.com/Swatinem/rust-cache) cache.
 - `libmpv`: Homebrew's mpv and dylibbundler on macOS; apt's `libmpv-dev`, `mpv`, `patchelf` and a
   pinned linuxdeploy on Linux; a pinned shinchiro build on Windows, checked against its SHA-256.
   It sets `LINUXDEPLOY`, `LIBMPV_DIR` and `LIBMPV_SOURCE`.
@@ -372,14 +377,20 @@ shinchiro keeps about six weeks of builds, so the Windows build is mirrored in t
 release, and the `libmpv` action takes it from there first. After changing the pin (`FILE`,
 `UPSTREAM` and `SHA256` together), run the `mirror-deps` workflow by hand.
 
-Every third-party action is pinned to a commit.
+The rules every workflow follows:
 
-To keep CI quick: its builds have no debug info (`CARGO_PROFILE_DEV_DEBUG=0`; a failing test
-still says its file and line), which makes the test binaries and the cache about three times
-smaller; GitHub keeps 10 GB of cache for the whole repo, shared by every job. cargo-about comes
-prebuilt (`taiki-e/install-action`), Homebrew doesn't update itself before each install, and the
-`package` jobs run on pull requests only for Release Please's release pull requests or with the
-`package` label. Only `main` saves the cache, so a pull request starts from main's.
+- Every third-party action is pinned to a commit, with its version in a comment. Dependabot
+  updates the pins.
+- Permissions are `contents: read` or none at the top; a job that writes asks for what it needs.
+- Checkouts don't keep the token (`persist-credentials: false`).
+- Every job has a `timeout-minutes`.
+- Cargo runs with `--locked`, so CI fails when `Cargo.lock` is out of date.
+- A new push to a pull request cancels its older CI run.
+
+The cache: only `main` saves it, and a pull request restores `main`'s. So a pull request builds
+only what it changed, and pull requests don't fill GitHub's 10 GB cache for the repo. CI builds
+have no debug info (`CARGO_PROFILE_DEV_DEBUG=0`; a failing test still says its file and line),
+which makes the builds and the cache about three times smaller.
 
 ## Releases
 
@@ -388,40 +399,39 @@ Conventional Commit messages: `feat:` raises the minor version, `fix:` the patch
 1.0, a breaking change raises the minor version). Other prefixes (`docs:`, `ci:`, `refactor:`,
 `test:`, `chore:`) don't make a release.
 
-Three workflows make a release, each with its own runs in the Actions tab.
-`.github/workflows/release.yml` runs on every push to `main`:
+`.github/workflows/release.yml` runs on every push to `main`, all in one run:
 
-1. `release-please` keeps a release pull request open for Nexus with the next version: it bumps
+1. `Release Please` keeps a release pull request open for Nexus with the next version: it bumps
    `version` in `[workspace.package]` and the workspace's crates in `Cargo.lock`, `version.txt`,
    and writes `CHANGELOG.md` (`.github/release-please-config.json` and
-   `.github/release-please-manifest.json`). Changes under `os/` are left out. A pull request
-   opened with the default token doesn't start CI; set a token as the `RELEASE_PLEASE_TOKEN`
-   secret to get checks on it.
-2. Merging that pull request makes a draft release and its tag `v<version>`, and starts
-   `.github/workflows/package.yml` for the tag (`gh workflow run`: GitHub doesn't start workflows
-   from a tag made with the workflow's own token). Release Please makes the tag with the draft
-   (`force-tag-creation`), so it finds the release on the next push.
-3. Merging Nexus OS's release pull request does the same with its tag `nexus-os-v<version>`,
-   and starts `.github/workflows/os.yml` ([os/README.md](../os/README.md#releases)).
+   `.github/release-please-manifest.json`). Changes under `os/` are left out; Nexus OS has its own
+   release pull request. A pull request opened with the default token doesn't start CI; set a
+   token as the `RELEASE_PLEASE_TOKEN` secret to get checks on it.
+2. Merging that pull request makes a draft release and its tag `v<version>`
+   (`force-tag-creation`, so Release Please finds the release on the next push). The same run
+   then calls `package.yml` with the tag.
+3. `os.yml` runs after it: for a Nexus release it rebuilds the images with the new Nexus; for a
+   Nexus OS release (tag `nexus-os-v<version>`) it builds the images and the stick from the tag
+   and publishes the OS release.
 
-`package.yml` builds and publishes the release:
+`package.yml` doesn't run the tests: CI did, on the commit, before it reached `main`.
 
-- `version` fails when the tag isn't `v` and the workspace version.
-- `build`, on Linux, both Mac processors and Windows, without the cache: `scripts/check.sh`,
-  the libmpv and libarchive actions, cargo-about, `scripts/package.sh`; on Linux the AppImage
-  and the deb, rpm and Arch packages; on Windows the signatures when their secrets are set
-  ([signing.md](signing.md)), the zip and the installer; the third-party sources tars.
-- `macos-universal` joins the two Mac apps, signs and notarizes the app when the secrets are
-  set, and makes the zip and the disk image (signed and notarized too).
-- `attach` writes a `.sha256` file for each file and `latest.json`
-  (`scripts/update-manifest.sh`), signs the build provenance
-  (`gh attestation verify <file> --repo <owner>/<repo>` checks it), and attaches them all to
-  the draft.
-- `publish` publishes the release as the latest, then starts `os.yml` to rebuild the Nexus OS
-  images with it ([os/README.md](../os/README.md#releases)).
+- `Version` fails when the tag isn't `v` and the workspace version.
+- `Build`, on Linux, both Mac processors and Windows: the libmpv and libarchive actions,
+  cargo-about, `scripts/package.sh`; on Linux the AppImage (run with `--version`) and the deb,
+  rpm and Arch packages with their checks; on Windows the signatures when their secrets are set
+  ([signing.md](signing.md)), the zip, and the installer, installed silently, started, and
+  uninstalled; the third-party sources tars.
+- `macOS universal app` joins the two Mac apps, signs and notarizes the app when the secrets are
+  set, and makes the zip and the disk image (signed, notarized and checked).
+- `Publish the release` (with a tag only) writes a `.sha256` file for each file and
+  `latest.json` (`scripts/update-manifest.sh`), signs the build provenance
+  (`gh attestation verify <file> --repo <owner>/<repo>` checks it), attaches them all to the
+  draft, and publishes it as the latest.
 
-When `package.yml` fails, run it again for the same tag: Actions → package → Run workflow, with
-the tag (and a commit, when it isn't the tag's). Don't make a new release.
+When `package.yml` fails for a release, run it again for the same tag: Actions → Package → Run
+workflow, with the tag. Don't make a new release. Then run `os.yml` by hand with "test" off and
+"iso" off, so the images get the new Nexus.
 
 ## The launcher's own update
 
