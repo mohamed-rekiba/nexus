@@ -1,0 +1,27 @@
+version: 2
+updates:
+  # Actions are pinned to commit SHAs; Dependabot keeps the pins (and their version comments)
+  # current, in the workflows and in the local setup action.
+  - package-ecosystem: github-actions
+    directories: ["/", "/.github/actions/*"]
+    schedule: { interval: weekly }
+    cooldown: { default-days: 3 }
+    commit-message: { prefix: "ci" }
+    labels: [dependencies, ci]
+    groups:
+      actions: { patterns: ["*"] }
+  # Slint is pinned to an exact version (`=`) in Cargo.toml: it moves only by hand, with its
+  # changelog read, since themes depend on its language.
+  - package-ecosystem: cargo
+    directory: /
+    schedule: { interval: weekly }
+    cooldown: { default-days: 3 }
+    open-pull-requests-limit: 5
+    commit-message: { prefix: "chore(deps)" }
+    labels: [dependencies, rust]
+    ignore:
+      - dependency-name: "slint*"
+      - dependency-name: "i-slint-*"
+    groups:
+      cargo-minor-patch:
+        update-types: [minor, patch]

@@ -1,0 +1,1124 @@
+import { Vm, Host, Release } from "../types.slint";
+import { Tokens } from "../tokens.slint";
+import { Look } from "../components/look.slint";
+import { GameMenu } from "../components/game-menu.slint";
+import { Origin } from "../components/nav.slint";
+import { Viewer } from "../components/shot-viewer.slint";
+import { Trailers } from "../components/trailer-player.slint";
+import { Button } from "../components/button.slint";
+import { SlotActions } from "../components/slot-actions.slint";
+import { SlotSections } from "../components/slot-sections.slint";
+import { BackButton, Chip, Cover, Kicker, Pill, Shimmer } from "../components/widgets.slint";
+import { Editor, Prefs, Row, Value } from "../components/settings-rows.slint";
+
+// Which button of the Game Hub the keys are on. 0 is Play when the game can start (Resume,
+// then Stop, while it runs); the plugin actions follow.
+export global Hub {
+    in-out property <int> focus;
+    // The technical details are open.
+    in-out property <bool> details;
+    // The keys are on the screenshots, at `shot`: Down past the technical details.
+    in-out property <bool> shots;
+    in-out property <int> shot;
+    // The keys are below the screenshots, reading the sections and ABOUT: how many steps
+    // down, or -1. The page says when a step reaches its end (`read-end`).
+    in-out property <int> reading: -1;
+    in-out property <bool> read-end;
+    out property <bool> has-reading: Vm.detail.sections.length > 0 || Vm.detail.description != "";
+    // How many buttons come before the plugin's actions.
+    out property <int> play: !Vm.detail.can-launch ? 0 : Vm.detail.running ? 2 : 1;
+    out property <int> buttons: root.play + Vm.detail.actions.length;
+    // The store page's button, after the others; then the trailer's, then the game's menu.
+    out property <bool> store: Vm.detail.store-url != "";
+    out property <bool> trailer: Vm.detail.trailer-url != "";
+    out property <int> trailer-button: root.buttons + (root.store ? 1 : 0);
+    out property <int> menu: root.trailer-button + (root.trailer ? 1 : 0);
+    // The keys are on a release's row (a game a catalog offers): its index, or -1.
+    in-out property <int> release: -1;
+    // A release's download sheet is open, asking the player first: its index, or -1. The
+    // keys are on Download (0), Not now (1) or the folder row above them (2).
+    in-out property <int> consent: -1;
+    in-out property <int> consent-focus;
+    // The folder the player typed in the sheet; "" for the one the Game Hub offers.
+    in-out property <string> folder;
+    // The player pressed Download on this sheet: the core's reason shows only then.
+    in-out property <bool> asked;
+    out property <string> shown-folder: root.folder != "" ? root.folder : Vm.detail.download-folder;
+
+    // A release's row was picked: a release with no download asks first; one with a download
+    // opens Downloads.
+    public function pick-release(index: int) {
+        if (Vm.detail.releases[index].download == "") {
+            root.consent = index;
+            root.consent-focus = 0;
+            root.folder = "";
+            root.asked = false;
+        } else {
+            Host.navigate("downloads");
+        }
+        Host.play-sound("select");
+    }
+    // Opens the sheet's folder row for typing.
+    public function edit-folder() {
+        root.consent-focus = 2;
+        Prefs.edit-text = root.shown-folder;
+        Prefs.editing = true;
+    }
+    // The player agreed: the download starts. The sheet closes and Downloads opens once the
+    // download is there; when the core refuses, the sheet stays open and says why.
+    public function agree() {
+        root.asked = true;
+        Host.download-release(Vm.detail.key, Vm.detail.releases[root.consent].id, root.folder);
+    }
+    public function started() {
+        root.consent = -1;
+        Prefs.editing = false;
+        Host.navigate("downloads");
+    }
+
+    public function key(text: string) -> bool {
+        if (root.consent >= 0) {
+            // The folder is open for typing: the text box has the keys; Escape closes it.
+            if (Prefs.editing) {
+                if (text == Key.Escape) { Prefs.editing = false; }
+                return true;
+            }
+            if (text == Key.UpArrow && Vm.detail.download-folder != "") { root.consent-focus = 2; return true; }
+            if (text == Key.DownArrow) { root.consent-focus = 0; return true; }
+            // Look up metadata is on the start side: Left, or Right from right to left, goes to it.
+            if (text == Key.LeftArrow || text == Key.RightArrow) {
+                if (root.consent-focus < 2) { root.consent-focus = (text == Key.RightArrow) == Look.rtl ? 0 : 1; }
+                return true;
+            }
+            if (text == Key.Return) {
+                if (root.consent-focus == 2) { root.edit-folder(); }
+                else if (root.consent-focus == 0) { root.agree(); }
+                else { root.consent = -1; }
+                return true;
+            }
+            if (text == Key.Escape || text == Key.Backspace) { root.consent = -1; }
+            return true;
+        }
+        if (root.release >= 0) {
+            if (text == Key.UpArrow) { root.release -= 1; return true; }
+            if (text == Key.DownArrow) {
+                if (root.release + 1 < Vm.detail.releases.length) { root.release += 1; } else { root.release = -1; root.details = true; }
+                return true;
+            }
+            if (text == Key.Return) { root.pick-release(root.release); return true; }
+            if (text == Key.LeftArrow || text == Key.RightArrow) { return true; }
+        }
+        if (root.reading >= 0) {
+            // Each Down scrolls on, until the end of the page; Up goes back up, then to the
+            // screenshots.
+            if (text == Key.DownArrow) {
+                if (!root.read-end) { root.reading += 1; Host.play-sound("move"); }
+                return true;
+            }
+            if (text == Key.UpArrow) {
+                root.reading -= 1;
+                if (root.reading < 0 && Vm.detail.screenshots.length > 0) { root.shots = true; }
+                Host.play-sound("move");
+                return true;
+            }
+            return text == Key.LeftArrow || text == Key.RightArrow || text == Key.Return;
+        }
+        if (root.shots) {
+            if (text == Key.LeftArrow || text == Key.RightArrow) {
+                let forward = (text == Key.RightArrow) == !Look.rtl;
+                root.shot = Math.clamp(root.shot + (forward ? 1 : -1), 0, Vm.detail.screenshots.length - 1);
+                Host.play-sound("move");
+                return true;
+            }
+            if (text == Key.Return) { Viewer.show(root.shot); return true; }
+            if (text == Key.UpArrow) { root.shots = false; return true; }
+            if (text == Key.DownArrow && root.has-reading) {
+                root.reading = 0;
+                root.shots = false;
+                Host.play-sound("move");
+            }
+            return text == Key.DownArrow;
+        }
+        if (text == Key.LeftArrow || text == Key.RightArrow) {
+            let forward = (text == Key.RightArrow) == !Look.rtl;
+            root.focus = Math.clamp(root.focus + (forward ? 1 : -1), 0, root.menu);
+            return true;
+        }
+        if (text == Key.Return) {
+            if (root.focus == root.menu) {
+                GameMenu.show();
+            } else if (root.trailer && root.focus == root.trailer-button) {
+                Trailers.watch();
+            } else if (root.store && root.focus == root.buttons) {
+                Host.open-url(Vm.detail.store-url);
+            } else if (root.play > 0 && root.focus == 0) {
+                if (Vm.detail.running) { Host.show-game(Vm.running.session); } else { Host.launch(Vm.detail.key); }
+            } else if (root.play == 2 && root.focus == 1) {
+                Host.play-sound("back");
+                Host.stop(Vm.running.session);
+            } else if (root.focus - root.play < Vm.detail.actions.length) {
+                let action = Vm.detail.actions[root.focus - root.play];
+                Host.run-action(action.plugin, action.action, Vm.detail.key, action.args);
+            }
+            return true;
+        }
+        if (text == Key.DownArrow && !root.details && Vm.detail.releases.length > 0) {
+            // A game a catalog offers: down to its releases first.
+            root.release = 0;
+            return true;
+        }
+        if (text == Key.DownArrow) {
+            // Down opens the technical details, then moves to the screenshots, or to the
+            // reading below when there are none.
+            if (root.details && Vm.detail.screenshots.length > 0) {
+                root.shots = true;
+                root.shot = 0;
+            } else if (root.details && root.has-reading) {
+                root.reading = 0;
+            }
+            root.details = true;
+            return true;
+        }
+        if (text == Key.UpArrow) {
+            root.details = false;
+            return true;
+        }
+        false
+    }
+}
+
+// A fact about the game: a small-caps key over its value.
+component Fact inherits Rectangle {
+    in property <string> key;
+    in property <string> value;
+    in property <color> tint: Tokens.color-text;
+    height: 92 * Look.px;
+    border-radius: 16 * Look.px;
+    background: #0b1020b8;
+    border-width: 1px;
+    border-color: Look.line;
+    VerticalLayout {
+        padding-left: 22 * Look.px;
+        padding-right: 16 * Look.px;
+        alignment: center;
+        spacing: 6 * Look.px;
+        Text { text: root.key; font-size: 15 * Look.px; font-weight: 600; letter-spacing: 1.5 * Look.px; color: Look.text3; overflow: elide; horizontal-alignment: Look.rtl ? right : left; }
+        Text { text: root.value; font-size: 21 * Look.px; font-weight: 500; color: root.tint; overflow: elide; horizontal-alignment: Look.rtl ? right : left; }
+    }
+}
+
+// How the game runs on this PC: the verdict, and the reason after the label.
+component ThisPcFact inherits Rectangle {
+    accessible-role: text;
+    accessible-label: "on-this-pc";
+    accessible-value: Vm.detail.this-pc.headline;
+    Fact {
+        key: Vm.detail.this-pc.why != "" ? "ON THIS PC · " + Vm.detail.this-pc.why.to-uppercase() : "ON THIS PC";
+        value: Vm.detail.this-pc.headline;
+        tint: Look.pc-color(Vm.detail.this-pc.level);
+    }
+}
+
+// One release of a game a catalog offers: its version and region; its place by version, its
+// size and when the catalog got it; how easy it is to download, with the catalog's counts of
+// seeders and leechers. A New tag marks one from the last 14 days.
+component ReleaseRow inherits Rectangle {
+    in property <Release> release;
+    in property <bool> focused;
+    callback picked();
+    // The row has the keys: the page scrolls to show it.
+    callback reveal(length, length);
+    changed focused => { if (root.focused) { root.reveal(self.absolute-position.y, self.height); } }
+    property <string> d: root.release.download;
+    // The place of a part `x` from the start side, `w` wide, in a line `span` wide.
+    pure function at(x: length, w: length, span: length) -> length { Look.rtl ? span - x - w : x }
+    height: Math.max(84 * Look.px, lines.preferred-height + 24 * Look.px);
+    border-radius: 16 * Look.px;
+    background: root.focused ? #ffffff1f : #0b1020b8;
+    border-width: root.focused ? 3 * Look.px : 1px;
+    border-color: root.focused ? #ffffff : Look.line;
+    animate background { duration: Tokens.motion-fast; }
+    accessible-role: text;
+    accessible-label: "release-" + root.release.id;
+    accessible-value: root.release.version + " " + root.release.region;
+    HorizontalLayout {
+        padding-left: 22 * Look.px;
+        padding-right: 22 * Look.px;
+        spacing: 16 * Look.px;
+        alignment: Look.rtl ? end : start;
+        lines := VerticalLayout {
+            alignment: center;
+            spacing: 6 * Look.px;
+            Text {
+                text: (root.release.version != "" ? "Version " + root.release.version : "Release")
+                    + (root.release.region != "" ? " · " + root.release.region : "")
+                    + (root.release.system != "" ? " · " + root.release.system : "");
+                font-size: 21 * Look.px;
+                font-weight: 600;
+                color: Tokens.color-text;
+                horizontal-alignment: Look.rtl ? right : left;
+            }
+            Text {
+                text: (root.release.version-label != "" ? root.release.version-label + " · " : "")
+                    + (root.release.size != "" ? root.release.size : "Size unknown")
+                    + (root.release.added != "" ? " · added " + root.release.added : "");
+                font-size: 16 * Look.px;
+                color: Tokens.color-text-muted;
+                horizontal-alignment: Look.rtl ? right : left;
+                accessible-role: text;
+                accessible-label: "release-version";
+                accessible-value: root.release.version-label;
+            }
+            // "Availability: Good", then the catalog's counts.
+            if root.release.availability != "" : avail := Rectangle {
+                height: 22 * Look.px;
+                avail-name := Text {
+                    x: root.at(0, self.width, avail.width);
+                    height: parent.height;
+                    text: "Availability:";
+                    font-size: 16 * Look.px;
+                    color: Look.text3;
+                    vertical-alignment: center;
+                }
+                avail-level := Text {
+                    x: root.at(avail-name.width + 6 * Look.px, self.width, avail.width);
+                    height: parent.height;
+                    text: root.release.availability-text;
+                    font-size: 16 * Look.px;
+                    font-weight: 600;
+                    color: Look.availability-color(root.release.availability);
+                    vertical-alignment: center;
+                    accessible-role: text;
+                    accessible-label: "release-availability";
+                    accessible-value: self.text;
+                }
+                if root.release.seeders != "" : Text {
+                    x: root.at(avail-name.width + avail-level.width + 12 * Look.px, self.width, avail.width);
+                    height: parent.height;
+                    text: "·";
+                    font-size: 16 * Look.px;
+                    color: Tokens.color-text-muted;
+                    vertical-alignment: center;
+                }
+                if root.release.seeders != "" : Text {
+                    x: root.at(avail-name.width + avail-level.width + 26 * Look.px, self.width, avail.width);
+                    height: parent.height;
+                    text: root.release.seeders + (root.release.seeders == "1" ? " seeder" : " seeders")
+                        + (root.release.leechers != ""
+                            ? " · " + root.release.leechers + (root.release.leechers == "1" ? " leecher" : " leechers") : "");
+                    font-size: 16 * Look.px;
+                    color: Tokens.color-text-muted;
+                    vertical-alignment: center;
+                    accessible-role: text;
+                    accessible-label: "release-peers";
+                    accessible-value: root.release.seeders + (root.release.seeders == "1" ? " seeder" : " seeders")
+                        + (root.release.leechers != ""
+                            ? " · " + root.release.leechers + (root.release.leechers == "1" ? " leecher" : " leechers") : "");
+                }
+            }
+            if root.release.not-here != "" : Text {
+                text: root.release.not-here;
+                font-size: 16 * Look.px;
+                color: Tokens.color-warning;
+                accessible-role: text;
+                accessible-label: "release-not-here";
+                accessible-value: root.release.not-here;
+                horizontal-alignment: Look.rtl ? right : left;
+            }
+            if root.release.warning != "" : Text {
+                text: root.release.warning;
+                font-size: 16 * Look.px;
+                color: Tokens.color-warning;
+                accessible-role: text;
+                accessible-label: "release-warning";
+                accessible-value: root.release.warning;
+                horizontal-alignment: Look.rtl ? right : left;
+            }
+        }
+        if root.release.new : VerticalLayout {
+            alignment: center;
+            Chip { text: "New"; dot: Look.tone("info"); }
+        }
+        Rectangle { horizontal-stretch: 1; }
+        VerticalLayout {
+            alignment: center;
+            Pill {
+                h: 54 * Look.px;
+                icon: root.d == "" ? "download" : "";
+                primary: root.d == "";
+                focused: root.focused;
+                text: root.d == "" ? "Download"
+                    : root.d == "downloading" ? "Downloading " + Math.round(root.release.download-progress * 100) + "%"
+                    : root.d == "complete" ? "Downloaded"
+                    : root.d == "paused" ? "Paused"
+                    : root.d == "failed" ? "Failed"
+                    : "In Downloads";
+                accessible-role: button;
+                accessible-label: "release-download";
+                accessible-value: root.release.id;
+                accessible-action-default => { root.picked(); }
+                clicked => { root.picked(); }
+            }
+        }
+    }
+}
+
+// Asks before a release downloads: what, where, and that BitTorrent shows the player's
+// address to other peers. It rises in over a dark wash, as the install prompt.
+component DownloadSheet inherits Rectangle {
+    in property <Release> release;
+    property <bool> started: root.release.download != "";
+    changed started => { if (root.started) { Hub.started(); } }
+    property <bool> entered;
+    // After the first frame, so the entry animates from its start.
+    Timer { interval: 16ms; running: !root.entered; triggered => { root.entered = true; } }
+    background: root.entered ? #000000b0 : #00000000;
+    animate background { duration: Tokens.motion-normal; }
+    TouchArea { }
+    Rectangle {
+        width: Math.min(820 * Look.px, root.width - 120 * Look.px);
+        height: col.preferred-height;
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2 + (root.entered ? 0 : 30 * Look.px);
+        opacity: root.entered ? 1 : 0;
+        animate y { duration: Tokens.motion-slow; easing: ease-out-expo; }
+        animate opacity { duration: Tokens.motion-normal; easing: ease-out-quad; }
+        border-radius: 28 * Look.px;
+        background: #121a2e;
+        border-width: 1px;
+        border-color: Look.line;
+        drop-shadow-blur: 60 * Look.px;
+        drop-shadow-color: #000000cc;
+        col := VerticalLayout {
+            padding: 44 * Look.px;
+            spacing: 16 * Look.px;
+            Text {
+                text: "Set up a download";
+                font-size: 34 * Look.px;
+                font-weight: 700;
+                color: Tokens.color-text;
+                horizontal-alignment: Look.rtl ? right : left;
+                accessible-role: text;
+                accessible-label: "download-title";
+                accessible-value: self.text;
+            }
+            Text {
+                text: Vm.detail.title;
+                font-size: 24 * Look.px;
+                color: Tokens.color-text;
+                wrap: word-wrap;
+                horizontal-alignment: Look.rtl ? right : left;
+            }
+            Text {
+                text: (root.release.version != "" ? "Version " + root.release.version + " · " : "")
+                    + (root.release.region != "" ? root.release.region + " · " : "")
+                    + (root.release.size != "" ? root.release.size : "Size unknown")
+                    + " · runs with " + Vm.detail.emulator;
+                font-size: 20 * Look.px;
+                color: Tokens.color-text-muted;
+                wrap: word-wrap;
+                horizontal-alignment: Look.rtl ? right : left;
+            }
+            if root.release.not-here != "" : Text {
+                text: root.release.not-here + ". It installs, but it won't start on this computer.";
+                font-size: 18 * Look.px;
+                color: Tokens.color-warning;
+                wrap: word-wrap;
+                horizontal-alignment: Look.rtl ? right : left;
+            }
+            if root.release.warning != "" : Text {
+                text: root.release.warning + ".";
+                font-size: 18 * Look.px;
+                color: Tokens.color-warning;
+                wrap: word-wrap;
+                accessible-role: text;
+                accessible-label: "release-warning";
+                accessible-value: root.release.warning;
+                horizontal-alignment: Look.rtl ? right : left;
+            }
+            if Vm.detail.pc-warning != "" : Text {
+                text: Vm.detail.pc-warning + ".";
+                font-size: 18 * Look.px;
+                color: Tokens.color-warning;
+                wrap: word-wrap;
+                accessible-role: text;
+                accessible-label: "download-pc-warning";
+                accessible-value: Vm.detail.pc-warning;
+                horizontal-alignment: Look.rtl ? right : left;
+            }
+            // The Game Hub checked the folder it offers; the core checks a typed one.
+            if root.release.no-room != "" && Hub.folder == "" : Text {
+                text: root.release.no-room + ".";
+                font-size: 18 * Look.px;
+                color: Tokens.color-warning;
+                wrap: word-wrap;
+                accessible-role: text;
+                accessible-label: "release-no-room";
+                accessible-value: root.release.no-room;
+                horizontal-alignment: Look.rtl ? right : left;
+            }
+            if Vm.detail.download-folder == "" : Text {
+                text: Vm.detail.emulator + " can't install downloads: its packages folder isn't set.";
+                font-size: 18 * Look.px;
+                color: Look.text3;
+                wrap: word-wrap;
+                horizontal-alignment: Look.rtl ? right : left;
+            }
+            // Where it goes: Enter opens it for typing, a folder inside a packages folder.
+            if Vm.detail.download-folder != "" : folder-row := Row {
+                property <bool> typing: Prefs.editing && self.focused;
+                label: "Download folder";
+                hint: "Inside a packages folder (Settings) · the next download of this console goes here too";
+                first: true;
+                last: true;
+                focused: Hub.consent-focus == 2;
+                accessible-role: button;
+                accessible-label: "download-folder";
+                accessible-value: Hub.shown-folder;
+                accessible-action-default => { Hub.edit-folder(); }
+                clicked => { Hub.edit-folder(); }
+                if !folder-row.typing : Value { text: Hub.shown-folder; }
+                if folder-row.typing : Editor { horizontal-stretch: 2; done(text) => { Hub.folder = text; Hub.consent-focus = 0; } }
+            }
+            // What the player agrees to: what it shares, and for how long.
+            Text {
+                text: "Only download content you are allowed to get and share. While it downloads, it also uploads pieces to other peers, at most 128 KiB/s. "
+                    + (Vm.seed-downloads
+                        ? "A finished download goes on sharing while Nexus is open: turn this off in Settings (Keep sharing finished downloads), or stop it on its card in Downloads."
+                        : "A finished download stops sharing: Keep sharing finished downloads is off in Settings.");
+                font-size: 18 * Look.px;
+                color: Tokens.color-text-muted;
+                wrap: word-wrap;
+                accessible-role: text;
+                accessible-label: "download-consent";
+                accessible-value: self.text;
+                horizontal-alignment: Look.rtl ? right : left;
+            }
+            // Who sees the player's address: the VPN's, with "Download only through a VPN".
+            Text {
+                text: !Vm.vpn.only
+                        ? "Looking up this torrent contacts its trackers, the DHT and peers: they see your IP address from the lookup on, and while it downloads and shares."
+                    : Vm.vpn.route != ""
+                        ? "It goes only through your VPN (" + Vm.vpn.route + "): the trackers, the DHT and peers see the VPN's address, not yours."
+                    : "Your VPN isn't connected: the download waits, and starts through the VPN once it is. The trackers, the DHT and peers see the VPN's address, not yours.";
+                font-size: 18 * Look.px;
+                color: Vm.vpn.only && Vm.vpn.route == "" ? Tokens.color-warning : Tokens.color-text-muted;
+                wrap: word-wrap;
+                accessible-role: text;
+                accessible-label: "download-privacy";
+                accessible-value: self.text;
+                horizontal-alignment: Look.rtl ? right : left;
+            }
+            Text {
+                text: "First, Nexus looks up the torrent's metadata only: its files and size. Then you look at them in Downloads and press Download. Installation is a separate step.";
+                font-size: 18 * Look.px;
+                color: #8dbaff;
+                wrap: word-wrap;
+                accessible-role: text;
+                accessible-label: "download-steps";
+                accessible-value: self.text;
+                horizontal-alignment: Look.rtl ? right : left;
+            }
+            if Hub.asked && Vm.detail.download-error != "" : Text {
+                text: Vm.detail.download-error;
+                font-size: 18 * Look.px;
+                color: Tokens.color-danger;
+                wrap: word-wrap;
+                accessible-role: text;
+                accessible-label: "download-error";
+                accessible-value: self.text;
+                horizontal-alignment: Look.rtl ? right : left;
+            }
+            // Look up metadata first: on the left, or on the right from right to left.
+            HorizontalLayout {
+                spacing: 16 * Look.px;
+                alignment: Look.rtl ? end : start;
+                padding-top: 12 * Look.px;
+                if Look.rtl : Pill {
+                    text: "Not now";
+                    focused: Hub.consent-focus == 1;
+                    accessible-role: button;
+                    accessible-label: "download-not-now";
+                    accessible-action-default => { Hub.consent = -1; Prefs.editing = false; }
+                    clicked => { Hub.consent = -1; Prefs.editing = false; }
+                }
+                Pill {
+                    text: "Look up metadata";
+                    icon: "download";
+                    primary: true;
+                    enabled: Vm.detail.download-folder != "";
+                    focused: Hub.consent-focus == 0;
+                    dim: Hub.consent-focus != 0;
+                    accessible-role: button;
+                    accessible-label: "download-agree";
+                    accessible-value: self.text;
+                    accessible-action-default => { if (self.enabled) { Hub.agree(); } }
+                    clicked => { if (self.enabled) { Hub.agree(); } }
+                }
+                if !Look.rtl : Pill {
+                    text: "Not now";
+                    focused: Hub.consent-focus == 1;
+                    accessible-role: button;
+                    accessible-label: "download-not-now";
+                    accessible-action-default => { Hub.consent = -1; Prefs.editing = false; }
+                    clicked => { Hub.consent = -1; Prefs.editing = false; }
+                }
+            }
+        }
+    }
+}
+
+// The old launcher's Game Hub: the 2:3 cover on one side; the title, facts, buttons and the
+// plugins' sections in a column that scrolls on the other.
+export component GameDetailScreen inherits Rectangle {
+    property <bool> entered;
+    // After the first frame, so the entry animates from its start.
+    Timer { interval: 16ms; running: !root.entered; triggered => { root.entered = true; } }
+    // The Game Hub opens out of the card the player was on (`Origin`): its cover grows from the
+    // card's place and size into its own, and its column comes in after it. When the card's
+    // place isn't known, the cover fades in at its own place.
+    property <string> from;
+    property <length> from-x;
+    property <length> from-y;
+    property <length> from-width;
+    property <length> from-height;
+    init => {
+        self.from = Origin.from;
+        if (Origin.from == "row") {
+            // Home's selected tile.
+            self.from-x = Look.rtl ? root.width - 96 * Look.px - 172 * Look.px : 96 * Look.px;
+            self.from-y = 128 * Look.px;
+            self.from-width = 172 * Look.px;
+            self.from-height = 172 * Look.px;
+        } else if (Origin.from == "grid") {
+            self.from-x = Origin.x - root.absolute-position.x;
+            self.from-y = Origin.y - root.absolute-position.y;
+            self.from-width = Origin.width;
+            self.from-height = Origin.height;
+        }
+        Origin.from = "";
+    }
+    property <bool> grows: root.from != "";
+    // "PS5 · KONAMI · 2024 · Europe", as the old Game Hub's line over the title.
+    property <string> meta: Vm.detail.platform
+        + (Vm.detail.developer != "" ? " · " + Vm.detail.developer.to-uppercase() : "")
+        + (Vm.detail.year != "" ? " · " + Vm.detail.year : "")
+        + (Vm.detail.region != "" ? " · " + Vm.detail.region : "");
+    property <length> cover-x: Look.rtl ? root.width - 96 * Look.px - 380 * Look.px : 96 * Look.px;
+    property <length> col-w: Math.min(1060 * Look.px, root.width - 540 * Look.px - 96 * Look.px);
+    // The screenshots row's place in the column, and where the reading below it starts.
+    property <length> shots-y;
+    property <length> read-y;
+    property <int> reading: Hub.reading;
+    changed reading => { root.read(); }
+    // A step of reading: about 360 px further down the page from where the reading starts,
+    // as the old launcher.
+    function read() {
+        if (Hub.reading < 0) { return; }
+        let end = flick.viewport-height - flick.height;
+        let want = root.read-y - 200 * Look.px + Hub.reading * 360 * Look.px;
+        Hub.read-end = want >= end;
+        flick.viewport-y = -Math.max(0, Math.min(want, end));
+    }
+    property <TextHorizontalAlignment> align: Look.rtl ? right : left;
+    // The player's own result when there is one, as the old Game Hub's YOUR RESULT.
+    property <bool> mine: Vm.detail.your-result != "";
+    property <string> compat: root.mine ? Look.result-label(Vm.detail.your-result) : Vm.detail.has-compat ? Vm.detail.compat.label : "Not tested";
+    property <color> compat-tint: root.mine ? Look.result-color(Vm.detail.your-result) : Vm.detail.has-compat ? Look.compat-color(Vm.detail.compat.level) : Tokens.color-text;
+    // The community's result says when it was last tested, as PLAYED says when.
+    property <string> compat-key: root.mine ? "YOUR RESULT"
+        : Vm.detail.has-compat && Vm.detail.compat.tested != "" ? "COMPATIBILITY · " + Vm.detail.compat.tested.to-uppercase()
+        : "COMPATIBILITY";
+
+    // Dark enough behind the column for long descriptions over busy art.
+    if !Look.rtl : Rectangle { background: @linear-gradient(90deg, #04060ef7 0%, #04060ee8 50%, #04060ea6 72%, #04060e40 100%); }
+    if Look.rtl : Rectangle { background: @linear-gradient(270deg, #04060ef7 0%, #04060ee8 50%, #04060ea6 72%, #04060e40 100%); }
+    Rectangle { background: @linear-gradient(0deg, #04060ee6 0%, #04060e00 50%); }
+
+    Rectangle {
+        x: root.entered || !root.grows ? root.cover-x : root.from-x;
+        y: root.entered || !root.grows ? 130 * Look.px : root.from-y;
+        width: root.entered || !root.grows ? 380 * Look.px : root.from-width;
+        height: root.entered || !root.grows ? 570 * Look.px : root.from-height;
+        opacity: root.entered || root.grows ? 1 : 0;
+        animate x, y, width, height { duration: Look.timed(Tokens.motion-slow + 160ms); easing: ease-out-expo; }
+        animate opacity { duration: Tokens.motion-slow; easing: ease-out-quad; }
+        accessible-role: image;
+        accessible-label: "hub-cover";
+        accessible-value: root.grows ? "grows" : "fades";
+        drop-shadow-blur: 40 * Look.px;
+        drop-shadow-color: #00000099;
+        border-radius: 20 * Look.px;
+        Cover {
+            radius: 20 * Look.px;
+            source: Vm.detail.cover;
+            title: Vm.detail.title;
+            platform: Vm.detail.platform;
+            name-size: 40 * Look.px;
+        }
+    }
+
+    // Scrolls the page so the part at `y` (on screen), `h` high, is in view, as Settings does.
+    function reveal(y: length, h: length) {
+        let top = y - flick.absolute-position.y;
+        let margin = 120 * Look.px;
+        if (top + h > flick.height - margin) {
+            flick.viewport-y = Math.max(flick.height - flick.viewport-height, flick.viewport-y - (top + h - flick.height + margin));
+        } else if (top < margin) {
+            flick.viewport-y = Math.min(0, flick.viewport-y + (margin - top));
+        }
+    }
+
+    flick := Flickable {
+        // Up from the releases to the buttons: back to the top.
+        property <int> release: Hub.release;
+        changed release => { if (self.release < 0 && !Hub.details) { self.viewport-y = 0; } }
+        // The screenshots in view while the keys are on them.
+        property <bool> on-shots: Hub.shots;
+        changed on-shots => {
+            // On to the reading below: that scrolls the page itself.
+            if (!self.on-shots && Hub.reading >= 0) { return; }
+            // The row near the top, as far as the column goes.
+            self.viewport-y = self.on-shots ? Math.min(0, Math.max(self.height - self.viewport-height, 120 * Look.px - root.shots-y)) : 0;
+        }
+        animate viewport-y { duration: Tokens.motion-normal; easing: ease-out-quad; }
+
+        // Up and down only: nothing drags sideways.
+
+        viewport-width: self.width;
+        property <length> gutter: 40 * Look.px;
+        x: Look.rtl ? 60 * Look.px : 540 * Look.px - self.gutter;
+        width: root.width - 540 * Look.px - 60 * Look.px + self.gutter;
+        viewport-height: col.preferred-height + 200 * Look.px;
+        col := VerticalLayout {
+            x: Look.rtl ? parent.width - self.width - parent.gutter : parent.gutter;
+            y: (root.entered ? 0 : 24 * Look.px);
+            width: root.col-w;
+            height: self.preferred-height;
+            padding-top: 130 * Look.px;
+            spacing: 0;
+            opacity: root.entered ? 1 : 0;
+            animate y { duration: Look.timed(Tokens.motion-slow + 120ms); delay: Look.timed(60ms); easing: ease-out-expo; }
+            animate opacity { duration: Look.timed(320ms); delay: Look.timed(60ms); easing: ease-out-quad; }
+
+            Kicker {
+                alignment: Look.rtl ? end : start;
+                accent: Vm.detail.running ? "● PLAYING " + Vm.running.elapsed : "";
+                text: root.meta;
+            }
+            Rectangle { height: 16 * Look.px; }
+            if Vm.detail.has-logo : Image {
+                source: Vm.detail.logo;
+                height: 210 * Look.px;
+                image-fit: contain;
+                horizontal-alignment: Look.rtl ? right : left;
+                accessible-role: text;
+                accessible-label: "hub-title";
+                accessible-value: Vm.detail.title;
+            }
+            if !Vm.detail.has-logo : Text {
+                text: Vm.detail.title;
+                font-size: 72 * Look.px;
+                font-weight: 700;
+                color: Tokens.color-text;
+                wrap: word-wrap;
+                horizontal-alignment: root.align;
+            }
+            Rectangle { height: 22 * Look.px; }
+            HorizontalLayout {
+                spacing: 10 * Look.px;
+                alignment: Look.rtl ? end : start;
+                // The old Game Hub's chips: the plugin's badges, the rating, the age rating, the
+                // genres. Its size is a fact card below.
+                for badge in Vm.detail.badges : Chip {
+                    text: badge.text;
+                    dot: badge.tone == "neutral" ? transparent : Look.tone(badge.tone);
+                    accessible-role: text;
+                    accessible-label: badge.label;
+                    accessible-value: badge.text;
+                }
+                if Vm.detail.rating > 0 : Chip { text: Vm.detail.rating-text; stars: Vm.detail.rating; }
+                if Vm.detail.age-rating != "" : Chip { text: Vm.detail.age-rating; }
+                if Vm.detail.age-rating == "" && Vm.detail.age != "" : Chip { text: "Ages " + Vm.detail.age; }
+                for genre in Vm.detail.genres : Chip { text: genre; }
+            }
+            Rectangle { height: 30 * Look.px; }
+            HorizontalLayout {
+                spacing: 16 * Look.px;
+                alignment: Look.rtl ? end : start;
+                height: 76 * Look.px;
+                padding-top: 4 * Look.px;
+                padding-bottom: 4 * Look.px;
+                if Vm.detail.can-launch : Pill {
+                    text: Vm.detail.running ? "Resume" : "Play";
+                    icon: "play";
+                    primary: true;
+                    focused: Hub.focus == 0;
+                    dim: Hub.focus != 0;
+                    clicked => {
+                        Hub.focus = 0;
+                        if (Vm.detail.running) { Host.show-game(Vm.running.session); } else { Host.launch(Vm.detail.key); }
+                    }
+                }
+                if Vm.detail.can-launch && Vm.detail.running : Pill {
+                    text: "Stop";
+                    icon: "stop";
+                    danger: true;
+                    focused: Hub.focus == 1;
+                    accessible-role: button;
+                    accessible-label: "hub-stop";
+                    accessible-value: self.text;
+                    clicked => { Hub.focus = 1; Host.stop(Vm.running.session); }
+                }
+                SlotActions {
+                    items: Vm.detail.actions;
+                    game: Vm.detail.key;
+                    focused: Hub.focus - Hub.play;
+                }
+                if Vm.detail.store-url != "" : Pill {
+                    text: "Store";
+                    icon: "web";
+                    round: true;
+                    focused: Hub.focus == Hub.buttons;
+                    accessible-role: button;
+                    accessible-label: "hub-store";
+                    accessible-value: self.text;
+                    clicked => { Hub.focus = Hub.buttons; Host.open-url(Vm.detail.store-url); }
+                }
+                if Hub.trailer : Pill {
+                    text: "Trailer";
+                    icon: "film";
+                    round: true;
+                    focused: Hub.focus == Hub.trailer-button;
+                    accessible-role: button;
+                    accessible-label: "hub-trailer";
+                    accessible-value: self.text;
+                    accessible-action-default => { Trailers.watch(); }
+                    clicked => { Hub.focus = Hub.trailer-button; Trailers.watch(); }
+                }
+                // A Catalog game hides from the Catalog, or shows again. The pad's way is the
+                // game's menu (Options), so the eye is the pointer's, outside the key order.
+                if Vm.detail.releases.length > 0 : Pill {
+                    text: Vm.detail.hidden ? "Show" : "Hide";
+                    icon: Vm.detail.hidden ? "eye-off" : "eye";
+                    round: true;
+                    accessible-role: button;
+                    accessible-label: "hub-hide";
+                    accessible-value: self.text;
+                    accessible-action-default => { Host.hide-game(Vm.detail.key, !Vm.detail.hidden); }
+                    clicked => { Host.hide-game(Vm.detail.key, !Vm.detail.hidden); }
+                }
+                Pill {
+                    text: "Options";
+                    icon: "more";
+                    round: true;
+                    focused: Hub.focus == Hub.menu;
+                    accessible-role: button;
+                    accessible-label: "game-options";
+                accessible-value: self.text;
+                    clicked => { Hub.focus = Hub.menu; GameMenu.show(); }
+                }
+            }
+            if Vm.detail.launch-hint != "" : Text {
+                text: Vm.detail.launch-hint;
+                font-size: 19 * Look.px;
+                color: Tokens.color-text-muted;
+                wrap: word-wrap;
+                horizontal-alignment: root.align;
+            }
+            // A game a catalog offers: its releases by version, highest first.
+            if Vm.detail.releases.length > 0 : VerticalLayout {
+                padding-top: 8 * Look.px;
+                spacing: 10 * Look.px;
+                Text {
+                    text: "RELEASES · RUNS WITH " + Vm.detail.emulator.to-uppercase();
+                    font-size: 15 * Look.px;
+                    font-weight: 600;
+                    letter-spacing: 1.5 * Look.px;
+                    color: Look.text3;
+                    horizontal-alignment: root.align;
+                }
+                for r[i] in Vm.detail.releases : ReleaseRow {
+                    release: r;
+                    focused: Hub.release == i;
+                    reveal(y, h) => { root.reveal(y, h); }
+                    picked => { Hub.release = i; Hub.pick-release(i); }
+                }
+            }
+            Rectangle { height: 22 * Look.px; }
+            // The old launcher's fact cards: how it runs, how it runs on this PC, how long you
+            // played, how big it is, for a Windows game packed with Wine, ProtonDB's tier, and
+            // for a game a catalog offers, how easy its best release is to download. Three to a
+            // row; right to left mirrors each row.
+            facts := Rectangle {
+                property <int> pc: Vm.detail.has-this-pc ? 1 : 0;
+                property <int> proton: Vm.detail.protondb != "" ? 1 : 0;
+                property <int> count: 3 + self.pc + self.proton + (Vm.detail.availability != "" ? 1 : 0);
+                property <length> gap: 14 * Look.px;
+                property <length> cell: (self.width - 2 * self.gap) / 3;
+                property <length> pitch: 92 * Look.px + self.gap;
+                height: Math.ceil(self.count / 3) * self.pitch;
+                // The place of the fact at `index`, in reading order.
+                pure function at(index: int) -> length {
+                    let x = Math.mod(index, 3) * (self.cell + self.gap);
+                    Look.rtl ? self.width - x - self.cell : x
+                }
+                pure function line(index: int) -> length { Math.floor(index / 3) * self.pitch }
+                Fact {
+                    x: facts.at(0);
+                    y: facts.line(0);
+                    width: facts.cell;
+                    key: root.compat-key;
+                    value: root.compat;
+                    tint: root.compat-tint;
+                }
+                if Vm.detail.has-this-pc : ThisPcFact { x: facts.at(1); y: facts.line(1); width: facts.cell; height: 92 * Look.px; }
+                Rectangle {
+                    x: facts.at(1 + facts.pc);
+                    y: facts.line(1 + facts.pc);
+                    width: facts.cell;
+                    height: 92 * Look.px;
+                    accessible-role: text;
+                    accessible-label: "played";
+                    accessible-value: Vm.detail.played != "" ? Vm.detail.played + " · " + Vm.detail.last-played : "";
+                    Fact {
+                        key: Vm.detail.played != "" ? "PLAYED · " + Vm.detail.last-played.to-uppercase() : "PLAYED";
+                        value: Vm.detail.played != "" ? Vm.detail.played : "Not yet";
+                    }
+                }
+                Fact {
+                    x: facts.at(2 + facts.pc);
+                    y: facts.line(2 + facts.pc);
+                    width: facts.cell;
+                    key: "SIZE";
+                    value: Vm.detail.size != "" ? Vm.detail.size : "Unknown";
+                }
+                if Vm.detail.protondb != "" : Rectangle {
+                    x: facts.at(3 + facts.pc);
+                    y: facts.line(3 + facts.pc);
+                    width: facts.cell;
+                    height: 92 * Look.px;
+                    accessible-role: text;
+                    accessible-label: "protondb";
+                    accessible-value: Look.protondb-label(Vm.detail.protondb);
+                    Fact {
+                        key: "PROTONDB";
+                        value: Look.protondb-label(Vm.detail.protondb);
+                        tint: Look.protondb-color(Vm.detail.protondb);
+                    }
+                }
+                // The seeder counts are in the technical details.
+                if Vm.detail.availability != "" : Rectangle {
+                    x: facts.at(3 + facts.pc + facts.proton);
+                    y: facts.line(3 + facts.pc + facts.proton);
+                    width: facts.cell;
+                    height: 92 * Look.px;
+                    accessible-role: text;
+                    accessible-label: "hub-availability";
+                    accessible-value: Vm.detail.availability-text;
+                    Fact {
+                        key: "AVAILABILITY";
+                        value: Vm.detail.availability-text;
+                        tint: Look.availability-color(Vm.detail.availability);
+                    }
+                }
+            }
+            // Technical details, as the old launcher's "+ Technical details": every fact the
+            // plugin gives, opened with Down.
+            Rectangle {
+                height: 56 * Look.px;
+                border-radius: 14 * Look.px;
+                background: Hub.details ? #ffffff14 : #0b1020b8;
+                border-width: 1px;
+                border-color: Look.line;
+                animate background { duration: Tokens.motion-fast; }
+                accessible-role: button;
+                accessible-label: "technical-details";
+                accessible-value: Hub.details ? "open" : "closed";
+                accessible-action-default => { Hub.details = !Hub.details; }
+                Text {
+                    text: (Hub.details ? "−  " : "+  ") + "Technical details";
+                    font-size: 18 * Look.px;
+                    color: Tokens.color-text-muted;
+                }
+                TouchArea { mouse-cursor: pointer; clicked => { Hub.details = !Hub.details; } }
+            }
+            if Hub.details : VerticalLayout {
+                padding-top: 10 * Look.px;
+                padding-bottom: 14 * Look.px;
+                spacing: 2 * Look.px;
+                for f[i] in Vm.detail.facts : Rectangle {
+                    property <bool> shown;
+                    // After the first frame, so the entry animates from its start.
+                    Timer { interval: 16ms; running: !parent.shown; triggered => { parent.shown = true; } }
+                    height: 40 * Look.px;
+                    opacity: self.shown ? 1 : 0;
+                    animate opacity { duration: Tokens.motion-normal; delay: i * Look.timed(30ms); }
+                    // The name, then the value; right to left, the name is on the right.
+                    HorizontalLayout {
+                        padding-left: 18 * Look.px;
+                        padding-right: 18 * Look.px;
+                        spacing: 12 * Look.px;
+                        if !Look.rtl : Text {
+                            text: f.label;
+                            width: 230 * Look.px;
+                            font-size: 17 * Look.px;
+                            color: Look.text3;
+                            vertical-alignment: center;
+                            accessible-role: text;
+                            accessible-label: "fact-name:" + f.id;
+                        }
+                        Text {
+                            text: f.value;
+                            font-size: 17 * Look.px;
+                            color: Tokens.color-text;
+                            overflow: elide;
+                            vertical-alignment: center;
+                            horizontal-alignment: Look.rtl ? right : left;
+                            accessible-role: text;
+                            accessible-label: "fact:" + f.id;
+                            accessible-value: self.text;
+                        }
+                        if Look.rtl : Text {
+                            text: f.label;
+                            width: 230 * Look.px;
+                            font-size: 17 * Look.px;
+                            color: Look.text3;
+                            vertical-alignment: center;
+                            horizontal-alignment: right;
+                            accessible-role: text;
+                            accessible-label: "fact-name:" + f.id;
+                        }
+                    }
+                }
+            }
+            if Vm.detail.has-compat && Vm.detail.compat.notes != "" : Text {
+                height: self.preferred-height + 18 * Look.px;
+                vertical-alignment: bottom;
+                text: Vm.detail.compat.notes;
+                font-size: 18 * Look.px;
+                color: Look.text3;
+                wrap: word-wrap;
+                horizontal-alignment: root.align;
+            }
+            if Vm.detail.has-shader-cache : HorizontalLayout {
+                spacing: 16 * Look.px;
+                padding-top: 8 * Look.px;
+                alignment: Look.rtl ? end : start;
+                Text {
+                    text: "Shader cache: " + Vm.detail.shader-cache;
+                    font-size: 18 * Look.px;
+                    color: Tokens.color-text-muted;
+                    vertical-alignment: center;
+                    accessible-role: text;
+                    accessible-label: "shader-cache";
+                    accessible-value: self.text;
+                }
+                Button { text: "Clear"; clicked => { Host.clear-shader-cache(Vm.detail.key); } }
+            }
+            // The store's screenshots, in a row, as the old Game Hub.
+            if Vm.detail.screenshots.length > 0 : VerticalLayout {
+                padding-top: 30 * Look.px;
+                spacing: 16 * Look.px;
+                // Where the row is, for the column to scroll to it.
+                init => { root.shots-y = self.y; }
+                changed y => { root.shots-y = self.y; }
+                Text {
+                    text: "SCREENSHOTS";
+                    font-size: 18 * Look.px;
+                    font-weight: 600;
+                    letter-spacing: 2 * Look.px;
+                    color: Look.text3;
+                    horizontal-alignment: root.align;
+                }
+                // The row scrolls sideways to keep the focused shot in view: the keys never
+                // land on a shot out of sight.
+                strip := Rectangle {
+                    // Room for the focused shot to grow.
+                    property <length> inset: 8 * Look.px;
+                    property <length> step: 336 * Look.px;
+                    property <length> shift;
+                    property <int> aim: Hub.shot;
+                    changed aim => {
+                        let left = self.aim * self.step;
+                        let right = left + 320 * Look.px + 2 * self.inset;
+                        if (left < self.shift) { self.shift = left; }
+                        else if (right > self.shift + self.width) { self.shift = right - self.width; }
+                    }
+                    height: 180 * Look.px + 2 * self.inset;
+                    clip: true;
+                    for shot[i] in Vm.detail.screenshots : Rectangle {
+                        property <bool> focused: Hub.shots && Hub.shot == i;
+                        property <length> lx: strip.inset + i * strip.step - strip.shift;
+                        x: Look.rtl ? strip.width - self.lx - self.width : self.lx;
+                        y: strip.inset;
+                        width: 320 * Look.px;
+                        height: 180 * Look.px;
+                        animate x { duration: Tokens.motion-normal; easing: ease-out-quart; }
+                        border-radius: 12 * Look.px;
+                        clip: true;
+                        background: Tokens.color-surface;
+                        border-width: self.focused ? 3 * Look.px : 0;
+                        border-color: #ffffff;
+                        transform-scale: self.focused ? 1.04 : 1.0;
+                        animate transform-scale { duration: Look.timed(200ms); easing: ease-out-back; }
+                        accessible-role: button;
+                        accessible-label: "screenshot";
+                        accessible-value: i + 1;
+                        accessible-action-default => { Viewer.show(i); }
+                        // A soft light sweeps across the shot while it loads.
+                        Shimmer { active: shot.width == 0; }
+                        Image { source: shot; width: parent.width; height: parent.height; image-fit: cover; }
+                        TouchArea { mouse-cursor: pointer; clicked => { Hub.shots = true; Hub.shot = i; Viewer.show(i); } }
+                    }
+                }
+            }
+            if Vm.detail.sections.length > 0 : VerticalLayout {
+                // The reading starts here.
+                init => { root.read-y = self.y; }
+                changed y => { root.read-y = self.y; }
+                padding-top: 30 * Look.px;
+                SlotSections { items: Vm.detail.sections; }
+            }
+            if Vm.detail.description != "" : VerticalLayout {
+                // The reading starts here when there are no sections.
+                init => { if (Vm.detail.sections.length == 0) { root.read-y = self.y; } }
+                changed y => { if (Vm.detail.sections.length == 0) { root.read-y = self.y; } }
+                padding-top: 30 * Look.px;
+                spacing: 16 * Look.px;
+                Text {
+                    text: "ABOUT";
+                    font-size: 18 * Look.px;
+                    font-weight: 600;
+                    letter-spacing: 2 * Look.px;
+                    color: Look.text3;
+                    horizontal-alignment: root.align;
+                }
+                Text {
+                    width: root.col-w;
+                    text: Vm.detail.description;
+                    font-size: 21 * Look.px;
+                    color: Tokens.color-text-muted;
+                    wrap: word-wrap;
+                    horizontal-alignment: root.align;
+                    accessible-role: text;
+                    accessible-label: "hub-about";
+                    accessible-value: self.text;
+                }
+            }
+        }
+    }
+
+    BackButton {
+        x: Look.rtl ? root.width - self.width - 96 * Look.px : 96 * Look.px;
+        y: 44 * Look.px;
+        pad: Vm.input-mode == "gamepad";
+        clicked => { Host.back(); }
+    }
+
+    if Hub.consent >= 0 && Hub.consent < Vm.detail.releases.length : DownloadSheet {
+        width: root.width;
+        height: root.height;
+        release: Vm.detail.releases[Hub.consent];
+    }
+}

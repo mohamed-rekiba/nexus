@@ -1,0 +1,12 @@
+id = "playstation-store"
+# A service: it runs no games, it describes the PS4 and PS5 games other plugins find.
+kind = "service"
+name = "PlayStation Store"
+version = "0.1.0"
+host_api = "^0.1"
+platforms = ["linux", "macos", "windows"]
+capabilities = ["metadata"]
+
+[permissions]
+# Sony's public catalog API, and the image service its art is on.
+network = ["m.np.playstation.com", "image.api.playstation.com"]

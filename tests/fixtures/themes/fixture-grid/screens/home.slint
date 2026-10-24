@@ -1,0 +1,50 @@
+import { Vm, Host } from "../types.slint";
+import { Tokens } from "../tokens.slint";
+import { Card } from "../components/card.slint";
+
+// The library as a grid. Narrow windows get two columns.
+export component HomeScreen inherits Rectangle {
+    property <length> gap: Tokens.space-m;
+    property <length> cell: 168px;
+    property <length> row-height: 268px;
+    property <int> columns: Vm.viewport.breakpoint == "compact"
+        ? 2
+        : Math.max(3, Math.floor((self.width - 2 * Tokens.space-l + root.gap) / (root.cell + root.gap)));
+
+    VerticalLayout {
+        padding: Tokens.space-l;
+        spacing: Tokens.space-m;
+
+        HorizontalLayout {
+            spacing: Tokens.space-s;
+            alignment: start;
+            Text {
+                text: "Library";
+                color: Tokens.color-text;
+                font-size: Tokens.font-size-xl;
+                font-weight: Tokens.font-weight-bold;
+            }
+            Text {
+                text: Vm.home.games.length + " games";
+                color: Tokens.color-text-muted;
+                vertical-alignment: bottom;
+            }
+        }
+
+        if Vm.home.games.length == 0 : Text {
+            text: Vm.home.loading ? "Loading…" : "Your library is empty. Open Plugins to add one.";
+            color: Tokens.color-text-muted;
+        }
+
+        Flickable {
+            viewport-height: Math.ceil(Vm.home.games.length / root.columns) * (root.row-height + root.gap);
+            for game[i] in Vm.home.games : Card {
+                x: Math.mod(i, root.columns) * (root.cell + root.gap);
+                y: Math.floor(i / root.columns) * (root.row-height + root.gap);
+                width: root.cell;
+                game: game;
+                activated => { Host.open-game(game.key); }
+            }
+        }
+    }
+}

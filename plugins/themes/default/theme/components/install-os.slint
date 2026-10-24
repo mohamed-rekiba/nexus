@@ -1,0 +1,231 @@
+import { Vm, Host, DiskItem, SystemJobItem } from "../types.slint";
+import { Tokens } from "../tokens.slint";
+import { Look } from "look.slint";
+import { Icon } from "icon.slint";
+
+// Nexus OS's USB stick (`Vm.system.stick`): "Welcome to Nexus OS" first, with Try it or Install
+// on this PC; then the disks, a firm question that names the one to erase, the progress, and
+// how it ended. "Choose partitions instead" starts the installer that keeps other systems.
+//   welcome     Try it (0), Install on this PC (1)
+//   disks       one row per disk, then "Choose partitions instead", then Back
+//   confirm     Erase and install (0), Back (1)
+//   installing  no keys: it can't stop halfway
+//   done        Restart (0)
+//   failed      Back (0)
+export global Setup {
+    // welcome | disks | confirm | installing | done | failed, or "" when it's out of the way.
+    in-out property <string> step: "welcome";
+    in-out property <int> focus;
+    // The disk picked, as an index into `Vm.system.disks`.
+    in-out property <int> disk;
+
+    out property <bool> shown: Vm.system.stick && root.step != "";
+    out property <int> choices: root.step == "welcome" ? 2
+        : root.step == "disks" ? Vm.system.disks.length + 2
+        : root.step == "confirm" ? 2
+        : root.step == "done" || root.step == "failed" ? 1 : 0;
+
+    public function go(step: string) {
+        root.step = step;
+        root.focus = 0;
+        if (step == "disks") { Host.refresh-system(); }
+    }
+    public function activate() {
+        let f = root.focus;
+        if (root.step == "welcome") {
+            if (f == 0) { root.go(""); Host.play-sound("start"); } else { root.go("disks"); Host.play-sound("select"); }
+        } else if (root.step == "disks") {
+            if (f < Vm.system.disks.length) {
+                root.disk = f;
+                root.go("confirm");
+            } else if (f == Vm.system.disks.length) {
+                Host.choose-partitions();
+            } else {
+                root.go("welcome");
+            }
+            Host.play-sound("select");
+        } else if (root.step == "confirm") {
+            if (f == 0) {
+                Host.install-os(Vm.system.disks[root.disk].path);
+                root.go("installing");
+            } else {
+                root.go("disks");
+            }
+            Host.play-sound("select");
+        } else if (root.step == "done") {
+            Host.restart-pc();
+        } else if (root.step == "failed") {
+            root.go("disks");
+        }
+    }
+    // Handles a key while it shows. Every key stops here.
+    public function key(text: string) {
+        if (text == Key.DownArrow || text == Key.RightArrow) {
+            if (root.focus + 1 < root.choices) { root.focus += 1; Host.play-sound("move"); }
+        } else if (text == Key.UpArrow || text == Key.LeftArrow) {
+            if (root.focus > 0) { root.focus -= 1; Host.play-sound("move"); }
+        } else if (text == Key.Return || text == " ") {
+            root.activate();
+        } else if (text == Key.Escape || text == Key.Backspace) {
+            if (root.step == "disks") { root.go("welcome"); }
+            else if (root.step == "confirm" || root.step == "failed") { root.go("disks"); }
+        }
+    }
+}
+
+component Choice inherits Rectangle {
+    in property <string> text;
+    in property <string> detail;
+    in property <bool> focused;
+    in property <bool> danger;
+    in property <bool> warn;
+    in property <string> name;
+    callback clicked();
+    min-height: 64 * Look.px;
+    border-radius: 16 * Look.px;
+    background: root.focused ? (root.danger ? Tokens.color-danger : #ffffff) : ta.has-hover ? #ffffff1f : #ffffff12;
+    accessible-role: button;
+    accessible-label: root.name;
+    accessible-value: root.text;
+    accessible-item-selected: root.focused;
+    accessible-action-default => { root.clicked(); }
+    VerticalLayout {
+        padding-left: 22 * Look.px;
+        padding-right: 22 * Look.px;
+        padding-top: 12 * Look.px;
+        padding-bottom: 12 * Look.px;
+        spacing: 2 * Look.px;
+        alignment: center;
+        Text {
+            text: root.text;
+            width: parent.width;
+            wrap: word-wrap;
+            font-size: 21 * Look.tpx;
+            font-weight: 600;
+            color: root.focused && !root.danger ? Look.ink : Tokens.color-text;
+        }
+        if root.detail != "" : Text {
+            text: root.detail;
+            width: parent.width;
+            wrap: word-wrap;
+            font-size: 16 * Look.tpx;
+            color: root.warn ? (root.focused && !root.danger ? #9a5b00 : Tokens.color-warning)
+                : root.focused && !root.danger ? #3a4258 : Look.text3;
+        }
+    }
+    ta := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+export component InstallOs inherits Rectangle {
+    background: #03050cf2;
+    TouchArea {}
+    // The install job: its progress, and how it ended.
+    property <[SystemJobItem]> jobs: Vm.system.jobs;
+    property <SystemJobItem> job: root.jobs.length > 0 && root.jobs[root.jobs.length - 1].kind == "install"
+        ? root.jobs[root.jobs.length - 1] : { id: -1 };
+    property <string> job-state: root.job.state;
+    changed job-state => {
+        if (Setup.step == "installing" && root.job-state == "done") { Setup.go("done"); }
+        if (Setup.step == "installing" && root.job-state == "failed") { Setup.go("failed"); }
+    }
+    property <bool> mok: Setup.step == "done" && root.job.mok;
+    property <DiskItem> picked: Vm.system.disks.length > Setup.disk ? Vm.system.disks[Setup.disk] : { path: "" };
+
+    accessible-role: groupbox;
+    accessible-label: "install-os";
+    accessible-value: Setup.step;
+
+    VerticalLayout {
+        width: Math.min(root.width - 64 * Look.px, 760 * Look.tpx);
+        x: (root.width - self.width) / 2;
+        alignment: center;
+        spacing: 16 * Look.px;
+
+        Text {
+            text: Setup.step == "welcome" ? "Welcome to Nexus OS"
+                : Setup.step == "disks" ? "Where should Nexus OS go?"
+                : Setup.step == "confirm" ? "Erase " + root.picked.model + " (" + root.picked.size + ")?"
+                : Setup.step == "installing" ? "Installing Nexus OS"
+                : Setup.step == "done" ? "Nexus OS is installed"
+                : "Installation didn't finish";
+            width: parent.width;
+            wrap: word-wrap;
+            font-size: 44 * Look.tpx;
+            font-weight: 600;
+            color: Tokens.color-text;
+            accessible-role: text;
+            accessible-label: "install-title";
+            accessible-value: self.text;
+        }
+        Text {
+            text: Setup.step == "welcome" ? "Try it from this USB stick: nothing on this PC changes. Or install it, and the PC starts straight into Nexus."
+                : Setup.step == "disks" ? "Installing erases the disk you pick. To keep Windows or another system, choose partitions instead."
+                : Setup.step == "confirm" ? "Everything on " + root.picked.path + " is deleted" + (root.picked.windows ? ", including Windows" : "") + ". This can't be undone."
+                : Setup.step == "installing" ? (root.job.text != "" ? root.job.text : "Getting ready")
+                : Setup.step == "done" ? (root.mok
+                    ? "Remove the USB stick and restart. A blue screen comes once: choose Enroll MOK, Continue, Yes, type universalblue, then Reboot."
+                    : "Remove the USB stick and restart.")
+                : root.job.text;
+            width: parent.width;
+            wrap: word-wrap;
+            font-size: 20 * Look.tpx;
+            color: Setup.step == "confirm" || Setup.step == "failed" ? Tokens.color-warning : Tokens.color-text-muted;
+            accessible-role: text;
+            accessible-label: "install-text";
+            accessible-value: self.text;
+        }
+
+        if Setup.step == "installing" : Rectangle {
+            height: 10 * Look.px;
+            border-radius: 5 * Look.px;
+            background: #ffffff1f;
+            Rectangle {
+                x: 0;
+                width: parent.width * Math.max(0, root.job.percent) / 100;
+                border-radius: 5 * Look.px;
+                background: Tokens.color-accent;
+                animate width { duration: Look.timed(300ms); }
+            }
+            accessible-role: progress-indicator;
+            accessible-label: "install-progress";
+            accessible-value: Math.max(0, root.job.percent);
+        }
+
+        if Setup.step == "welcome" : VerticalLayout {
+            spacing: 12 * Look.px;
+            Choice { text: "Try it"; detail: "Play from the USB stick"; name: "setup"; focused: Setup.focus == 0; clicked => { Setup.focus = 0; Setup.activate(); } }
+            Choice { text: "Install on this PC"; detail: "Start straight into Nexus, from the PC's own disk"; name: "setup"; focused: Setup.focus == 1; clicked => { Setup.focus = 1; Setup.activate(); } }
+        }
+        if Setup.step == "disks" : VerticalLayout {
+            spacing: 12 * Look.px;
+            for disk[i] in Vm.system.disks : Choice {
+                text: disk.model + " · " + disk.size;
+                detail: disk.windows ? "Windows is on this disk: installing erases it" : disk.usb ? "A USB disk" : disk.path;
+                warn: disk.windows;
+                name: "install-disk";
+                focused: Setup.focus == i;
+                clicked => { Setup.focus = i; Setup.activate(); }
+            }
+            if Vm.system.disks.length == 0 : Text {
+                text: "No disk of 40 GB or more is free to install on.";
+                font-size: 18 * Look.tpx;
+                color: Look.text3;
+            }
+            Choice {
+                text: "Choose partitions instead";
+                detail: "Keep Windows or another system: needs a keyboard and mouse";
+                name: "setup";
+                focused: Setup.focus == Vm.system.disks.length;
+                clicked => { Setup.focus = Vm.system.disks.length; Setup.activate(); }
+            }
+            Choice { text: "Back"; name: "setup"; focused: Setup.focus == Vm.system.disks.length + 1; clicked => { Setup.focus = Vm.system.disks.length + 1; Setup.activate(); } }
+        }
+        if Setup.step == "confirm" : VerticalLayout {
+            spacing: 12 * Look.px;
+            Choice { text: "Erase and install"; name: "setup"; danger: true; focused: Setup.focus == 0; clicked => { Setup.focus = 0; Setup.activate(); } }
+            Choice { text: "Back"; name: "setup"; focused: Setup.focus == 1; clicked => { Setup.focus = 1; Setup.activate(); } }
+        }
+        if Setup.step == "done" : Choice { text: "Restart"; name: "setup"; focused: true; clicked => { Setup.activate(); } }
+        if Setup.step == "failed" : Choice { text: "Back"; detail: "Take a photo of this screen to ask for help"; name: "setup"; focused: true; clicked => { Setup.activate(); } }
+    }
+}

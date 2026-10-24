@@ -1,0 +1,5 @@
+target/
+node_modules/
+# Nexus OS stick builds (os/build-iso.sh).
+/nexus-os-x86_64.iso*
+/.iso-work/

@@ -1,0 +1,47 @@
+{
+  "source": "Nexus sample catalog",
+  "complete": true,
+  "collected_at": "2026-10-18T00:00:00Z",
+  "translation": {
+    "language": "en"
+  },
+  "topic_count": 2,
+  "topics": [
+    {
+      "id": "2001",
+      "title": "[PS4] Sample Platformer [EUR (Europe) / v01.02]",
+      "size": "263.6 MB",
+      "seeders": 3,
+      "leechers": 0,
+      "magnet": "magnet:?xt=urn:btih:dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c&dn=Big+Buck+Bunny&tr=wss%3A%2F%2Ftracker.openwebtorrent.com&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337",
+      "published_at": "2026-10-12",
+      "game_info": {
+        "name": "Sample Platformer",
+        "title_id": "CUSA99901",
+        "platform": "PS4",
+        "region": "EUR (Europe)",
+        "version": "v01.02",
+        "genre": "Platformer",
+        "release_summary": "A PS4 platformer for testing shadPS4's catalog. Added this week: it has the New badge. Sample entry: the torrent is Big Buck Bunny, a free Blender film (Creative Commons), not a game, so installing it fails."
+      }
+    },
+    {
+      "id": "2002",
+      "title": "[PS4] Sample Puzzle [USA / v01.00]",
+      "size": "123.3 MB",
+      "seeders": 3,
+      "leechers": 0,
+      "magnet": "magnet:?xt=urn:btih:08ada5a7a6183aae1e09d831df6748d566095a10&dn=Sintel&tr=wss%3A%2F%2Ftracker.openwebtorrent.com&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337",
+      "published_at": "2026-05-01",
+      "game_info": {
+        "name": "Sample Puzzle",
+        "title_id": "CUSA99902",
+        "platform": "PS4",
+        "region": "USA",
+        "version": "v01.00",
+        "genre": "Puzzle",
+        "release_summary": "A PS4 puzzle game with one release. Sample entry: the torrent is Sintel, a free Blender film (Creative Commons), not a game, so installing it fails."
+      }
+    }
+  ]
+}

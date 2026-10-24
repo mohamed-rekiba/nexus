@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# Nexus as the whole session, with no desktop behind it: display managers list it as "Nexus"
+# (nexus-session.desktop), Nexus OS's greetd starts it at boot, and from a text console it runs
+# as `nexus-session`.
+#
+# It starts gamescope full screen with Nexus in it, and Nexus opens games in the same gamescope.
+# If Nexus ends, or shows no window within NEXUS_WATCHDOG seconds, it starts again: the TV is
+# never left black. If gamescope can't drive the graphics card (two quick ends in a row), Nexus
+# runs in cage instead, where Settings → This PC can say what's missing.
+#
+# Settings: /usr/share/nexus/session.conf, then /etc/nexus/session.conf (see session.conf).
+set -u
+
+# shellcheck source=/dev/null
+for conf in /usr/share/nexus/session.conf /etc/nexus/session.conf; do
+    [ -r "$conf" ] && . "$conf"
+done
+bin=${NEXUS_BIN:-/usr/bin/nexus}
+watchdog=${NEXUS_WATCHDOG:-90}
+log=${NEXUS_LOG:-${XDG_CACHE_HOME:-$HOME/.cache}/nexus-session.log}
+read -r -a gamescope_args <<<"${NEXUS_GAMESCOPE_ARGS:--e --xwayland-count 1}"
+mkdir -p "$(dirname "$log")"
+note() { echo "$(date -Is) $*" >>"$log"; }
+note "session starting"
+
+# Tells Nexus nothing is behind it: it shows the system's settings and Restart and Shut down.
+export NEXUS_SESSION=1
+# Games and Nexus run on gamescope's X server, which Steam mode's focus needs. SDL (the
+# emulators), Qt and GTK are told so; games inherit this.
+export SDL_VIDEO_DRIVER=x11 SDL_VIDEODRIVER=x11 QT_QPA_PLATFORM=xcb GDK_BACKEND=x11
+
+if ! command -v gamescope >/dev/null 2>&1 && ! command -v cage >/dev/null 2>&1; then
+    if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+        note "neither gamescope nor cage is installed: running Nexus in the current desktop"
+        exec "$bin" >>"$log" 2>&1
+    fi
+    note "neither gamescope nor cage is installed, and there is no desktop to run in: install gamescope"
+    exit 1
+fi
+
+# A short wait for the network, which usually comes up just after the session starts. Nexus
+# retries what failed once it's online.
+if command -v nm-online >/dev/null 2>&1; then
+    nm-online -q -t "${NEXUS_WAIT_NETWORK:-5}" || note "no network yet; starting anyway"
+fi
+
+# Whether Nexus wrote "window shown" after byte $1 of the log.
+shown_since() {
+    tail -c +"$(($1 + 1))" "$log" 2>/dev/null | grep -qax 'window shown'
+}
+
+# Waits for the display server $1 (gamescope or cage) to end. True when the watchdog ended it.
+watch() {
+    local pid=$1 mark=$2 kiosk=$3 t0 shown='' running child
+    t0=$(date +%s)
+    while sleep 2 && kill -0 "$pid" 2>/dev/null; do
+        [ -n "$shown" ] || ! shown_since "$mark" || shown=1
+        if [ -z "$shown" ] && [ $(($(date +%s) - t0)) -ge "$watchdog" ]; then
+            note "nothing on screen after $watchdog s; starting again"
+            kill "$pid"
+            wait "$pid"
+            return 0
+        fi
+        # cage doesn't always notice its app ending, and would sit on a black screen: it ends
+        # once Nexus is gone, so the loop starts both again.
+        if [ -n "$kiosk" ]; then
+            running=''
+            for child in $(pgrep -P "$pid"); do
+                [ "$(cut -d' ' -f3 "/proc/$child/stat" 2>/dev/null)" != Z ] && running=1
+            done
+            [ -n "$running" ] || [ $(($(date +%s) - t0)) -lt 4 ] || { kill "$pid"; break; }
+        fi
+    done
+    wait "$pid"
+    return 1
+}
+
+failures=0
+while true; do
+    started=$(date +%s)
+    mark=$(stat -c %s "$log" 2>/dev/null || echo 0)
+    if ! command -v gamescope >/dev/null 2>&1; then
+        why="gamescope isn't installed"
+    elif ! "$bin" --supports gamescope 2>/dev/null; then
+        why="this Nexus can't run in gamescope"
+    elif [ "$failures" -ge 2 ]; then
+        why="gamescope can't run on this graphics card"
+    else
+        why=''
+    fi
+    if [ -z "$why" ]; then
+        note "starting in gamescope"
+        gamescope "${gamescope_args[@]}" -- "$bin" >>"$log" 2>&1 &
+        if watch $! "$mark" "" || [ $(($(date +%s) - started)) -lt 15 ]; then
+            failures=$((failures + 1))
+        else
+            failures=0
+        fi
+    elif command -v cage >/dev/null 2>&1; then
+        note "$why; starting in a basic display (cage)"
+        cage -s -- "$bin" >>"$log" 2>&1 &
+        watch $! "$mark" kiosk
+    else
+        note "$why, and cage isn't installed either"
+        exit 1
+    fi
+    sleep 2
+done

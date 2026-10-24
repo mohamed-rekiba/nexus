@@ -1,0 +1,95 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/nexus-api",
+    "crates/nexus-ui-api",
+    "crates/nexus-core",
+    "crates/nexus-ui-host",
+    "crates/nexus-testkit",
+    "crates/nexus-app",
+    "plugins/themes/default",
+    "plugins/shared/emulator-kit",
+    "plugins/emulators/kytyps5",
+    "plugins/emulators/shadps4",
+    "plugins/emulators/pc",
+    "plugins/services/playstation-store",
+    "plugins/services/release-catalog",
+    "plugins/system/host",
+    "tests",
+]
+# Vendored, and kept as it came: not formatted or linted with the workspace.
+exclude = ["third_party/oozextract"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+publish = false
+# The PS4 package reader is a port of shadPS4 code, which is GPL-2.0-or-later.
+license = "GPL-2.0-or-later"
+repository = "https://github.com/mohamed-rekiba/nexus"
+
+[workspace.dependencies]
+nexus-api = { path = "crates/nexus-api" }
+nexus-ui-api = { path = "crates/nexus-ui-api" }
+nexus-core = { path = "crates/nexus-core" }
+nexus-ui-host = { path = "crates/nexus-ui-host" }
+nexus-testkit = { path = "crates/nexus-testkit" }
+theme-default = { path = "plugins/themes/default" }
+emulator-kit = { path = "plugins/shared/emulator-kit" }
+emu-kyty = { path = "plugins/emulators/kytyps5" }
+emu-shadps4 = { path = "plugins/emulators/shadps4" }
+emu-pc = { path = "plugins/emulators/pc" }
+playstation-store = { path = "plugins/services/playstation-store" }
+release-catalog = { path = "plugins/services/release-catalog" }
+system-host = { path = "plugins/system/host" }
+
+aes = "0.8"
+async-trait = "0.1"
+cbc = "0.1"
+ed25519-dalek = "2"
+flate2 = "1"
+futures = "0.3"
+gilrs = "0.11"
+hex = "0.4"
+hmac = "0.12"
+url = "2"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+inventory = "0.3"
+petgraph = "0.8"
+rodio = { version = "0.23", default-features = false, features = ["playback", "wav", "vorbis"] }
+rsa = { version = "0.9", default-features = false, features = ["std"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }
+schemars = "1.2"
+semver = { version = "1", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+slint = { version = "=1.18.1", default-features = false, features = ["std", "compat-1-2"] }
+# `internal` gives create_with_existing_window, for swapping themes in one window. Pinned for that.
+slint-interpreter = { version = "=1.18.1", default-features = false, features = ["std", "compat-1-2", "internal"] }
+i-slint-backend-testing = "=1.18.1"
+sha2 = "0.10"
+spin_on = "0.1"
+tar = "0.4"
+tempfile = "3"
+thiserror = "2"
+tokio = { version = "1.53", features = ["rt-multi-thread", "sync", "time", "macros", "process", "fs", "io-util", "signal"] }
+toml = "1.1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+# Dependencies build optimised in debug builds too: image decoding, JSON reading and Slint
+# run at release speed under `cargo run` and in the tests, while the workspace's own crates
+# still build fast.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2

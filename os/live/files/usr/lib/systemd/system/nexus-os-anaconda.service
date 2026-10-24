@@ -1,0 +1,24 @@
+# On the USB stick: Anaconda full screen in cage on the first console, as root, with a logind
+# session of its own so cage gets the screen and input (nexus-os-anaconda.target starts it).
+[Unit]
+Description=Fedora's installer (Anaconda) for Nexus OS, full screen
+ConditionKernelCommandLine=rd.live.image
+Conflicts=greetd.service getty@tty1.service
+After=systemd-user-sessions.service plymouth-quit-wait.service greetd.service getty@tty1.service
+
+[Service]
+Type=simple
+User=root
+PAMName=login
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+UtmpIdentifier=tty1
+UtmpMode=user
+Environment=XDG_SESSION_TYPE=wayland
+ExecStartPre=-/usr/bin/plymouth quit
+ExecStart=/usr/libexec/nexus-os/anaconda

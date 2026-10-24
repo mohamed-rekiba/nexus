@@ -1,0 +1,28 @@
+id = "emu-pc"
+kind = "emulator"
+name = "PC"
+version = "0.1.0"
+host_api = "^0.1"
+platforms = ["linux", "macos", "windows"]
+# The console it plays: it gets that console's catalog.
+console = "PC"
+capabilities = ["catalog", "launcher", "slots", "game_installer", "configurator"]
+# What the install sheet says this emulator installs from.
+install_note = "Installs a PC game from its folder, a GOG installer or an AppImage, and finds how to start it. Nothing in it runs until you press Play. A PC game runs with your access to your files: install only releases you trust."
+
+[permissions]
+# A game's own program, script or AppImage in the games folder; a Windows game through
+# umu-launcher (Proton), the one this plugin installs or the system's, or Wine; a start script
+# without `#!` through sh; a Windows game at a resolution of its own inside gamescope.
+process = ["folder:games", "umu/umu-run", "system:umu-run", "system:wine", "system:wine64", "system:sh", "system:gamescope"]
+# umu-launcher's latest release on GitHub's API, its download, and the CDN it redirects to.
+network = ["api.github.com", "github.com", "*.githubusercontent.com"]
+
+# The player's game folders, shared with other emulators. PC games install to PC/ in the first.
+[[permissions.filesystem]]
+folder = "games"
+write = true
+
+# Downloads, which the host has unpacked. Read only.
+[[permissions.filesystem]]
+folder = "packages"

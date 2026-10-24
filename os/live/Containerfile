@@ -1,0 +1,49 @@
+# The Nexus OS USB stick: Nexus OS itself, started from the stick, with nothing on the PC touched
+# until you choose to install it. Nexus sees it's on the stick (rd.live.image and
+# /usr/libexec/nexus-os/install) and offers "Try it" or "Install on this PC". The stick installs in
+# two ways, both from the minimal image stored on it (no internet needed):
+# - erase a disk: /usr/libexec/nexus-os/install, from Nexus;
+# - choose partitions: Fedora's installer (Anaconda), from the boot entry
+#   "Install Nexus OS (choose partitions)" or Nexus's "Choose partitions instead".
+# os/build-iso.sh makes the ISO from it; it's never pushed to a registry. Build from the
+# repository root:
+#   podman build --build-arg CORE=IMAGE:minimal -f os/live/Containerfile .
+ARG CORE=ghcr.io/mohamed-rekiba/nexus-os:minimal
+FROM ${CORE}
+
+RUN set -eux; \
+    dnf5 -y install --setopt=install_weak_deps=False \
+        # Starting from the stick's squashfs, with the changes kept in memory.
+        dracut-live \
+        # Fedora's installer for a live system (liveinst), with its graphical screens (GTK, which
+        # also needs the xlib typelib) and the storage tools its disk screen uses.
+        anaconda-live anaconda-gui gobject-introspection libblockdev-btrfs libblockdev-lvm libblockdev-dm \
+        # The boot files image-builder puts on the ISO: Fedora's signed shim and GRUB for CDs and
+        # USB sticks, GRUB's BIOS modules and tools.
+        grub2-efi-x64-cdboot shim-x64 grub2-pc-modules grub2-tools \
+        # What image-builder runs inside this container to make the ISO.
+        xorriso isomd5sum squashfs-tools python3; \
+    dnf5 clean all; rm -rf /var/cache/* /var/log/*; \
+    # liveinst starts Anaconda's web interface whenever it's installed (anaconda-live requires
+    # it), and that needs a browser and a desktop's live user. The GTK screens need neither.
+    rpm -e --nodeps anaconda-webui; \
+    test ! -e /usr/share/cockpit/anaconda-webui; \
+    # image-builder takes shim and GRUB from /boot/efi/EFI/<vendor>.
+    mkdir -p /boot/efi; \
+    cp -a /usr/lib/efi/*/*/EFI /boot/efi/; \
+    ls /boot/efi/EFI/fedora/shimx64.efi /boot/efi/EFI/fedora/mmx64.efi /boot/efi/EFI/fedora/gcdx64.efi; \
+    kver=$(cd /usr/lib/modules && echo *); \
+    # /root links to /var/roothome, which only exists on an installed system (dracut follows it).
+    mkdir -p /var/roothome; \
+    dracut --force --add dmsquash-live --kver "$kver" "/usr/lib/modules/$kver/initramfs.img"; \
+    rm -rf /var/roothome
+
+COPY os/live/files/ /
+RUN set -eux; \
+    chmod 0755 /usr/libexec/nexus-os/install /usr/libexec/nexus-os/anaconda; \
+    # Anaconda installs the stored image and makes the installed PC follow the registry's.
+    sed -i "s|@IMAGE@|$(cat /usr/lib/nexus-os/image)|g" /usr/share/anaconda/interactive-defaults.ks; \
+    if grep -n @IMAGE@ /usr/share/anaconda/interactive-defaults.ks; then exit 1; fi; \
+    systemctl enable var-lib-containers-storage.mount var-tmp.mount; \
+    # It updates an installed PC's boot loader, and only fails on the stick.
+    systemctl disable bootloader-update.service

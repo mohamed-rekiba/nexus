@@ -1,0 +1,17 @@
+[package]
+name = "release-catalog"
+description = "The games each emulator's catalog offers to download: one catalog file per emulator, fetched from the catalog's address or bundled."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+nexus-api.workspace = true
+# The refresh runs in a task of its own: spawn, Notify and timers only. Not the workspace
+# tokio, so the plugin's own list names no fs, process or io feature.
+tokio = { version = "1.53", default-features = false, features = ["rt", "sync", "time"] }
+
+[lints]
+workspace = true

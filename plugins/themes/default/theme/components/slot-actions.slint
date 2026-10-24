@@ -1,0 +1,23 @@
+import { Host, Slot } from "../types.slint";
+import { Look } from "look.slint";
+import { Pill } from "widgets.slint";
+
+// Plugin actions as round buttons next to Play. `focused` is the focused action, or -1.
+export component SlotActions inherits HorizontalLayout {
+    in property <[Slot]> items;
+    // The game key the actions belong to.
+    in property <string> game;
+    in property <int> focused: -1;
+    spacing: 16 * Look.px;
+    alignment: Look.rtl ? end : start;
+
+    for item[i] in root.items : Pill {
+        text: item.text;
+        icon: item.style == "primary" ? "play" : "check";
+        primary: item.style == "primary";
+        focused: root.focused == i;
+        dim: root.focused >= 0 && root.focused != i;
+        accessible-label: item.label;
+        clicked => { Host.run-action(item.plugin, item.action, root.game, item.args); }
+    }
+}

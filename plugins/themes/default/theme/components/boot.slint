@@ -1,0 +1,272 @@
+import { Vm, Host } from "../types.slint";
+import { Tokens } from "../tokens.slint";
+import { Assets } from "../assets.slint";
+import { Look } from "look.slint";
+import { Icon } from "icon.slint";
+import { KeyCap } from "widgets.slint";
+import { PadGlyph } from "top-bar.slint";
+
+// The boot screen, as the old launcher's (its ui/app.slint, BOOT / WELCOME): a slowly drifting
+// wall of the library's covers behind the Nexus emblem and a progress bar. On the first run it is the
+// Welcome screen: a checklist of what was set up, and Start.
+//
+// It shows from the first frame until the library is in (and, on the first run, until Start),
+// then fades out over Home. Its motion clock runs only while it shows.
+export component BootScreen inherits Rectangle {
+    property <bool> welcome: Vm.boot.welcome;
+    // Home's art in too, as the old launcher: Home opens whole.
+    property <bool> ready: Vm.boot.ready && Vm.art-ready;
+    property <bool> shown: !root.ready || root.welcome;
+    property <float> t: root.shown ? animation-tick() / 1ms / 1000 : 0;
+    property <bool> pad: Vm.input-mode == "gamepad";
+    opacity: root.shown ? 1 : 0;
+    visible: self.opacity > 0.01;
+    animate opacity { duration: Look.timed(600ms); easing: ease-in-out-quad; }
+    transform-scale: root.shown ? 1.0 : 1.04;
+    animate transform-scale { duration: Look.timed(700ms); easing: ease-in-quad; }
+    background: Tokens.color-bg;
+    accessible-role: text;
+    accessible-label: root.shown ? (root.welcome ? "welcome" : "boot") : "";
+    accessible-value: Vm.boot.status;
+    // It takes the pointer while it shows; a click on Welcome is Start.
+    TouchArea {
+        enabled: root.shown;
+        clicked => { if (root.welcome && root.ready) { Host.finish-welcome(); } }
+    }
+
+    // A slowly drifting wall of the library's covers.
+    property <length> cw: 190 * Look.px;
+    property <length> ch: 285 * Look.px;
+    property <length> cg: 22 * Look.px;
+    property <int> cols: Math.ceil(root.width / (root.cw + root.cg)) + 1;
+    property <int> rows: Math.ceil(root.height / (root.ch + root.cg)) + 2;
+    Rectangle {
+        opacity: Vm.boot.covers.length > 0 ? 0.30 : 0;
+        animate opacity { duration: Look.timed(1600ms); easing: ease-out-quad; }
+        for c in root.cols : Rectangle {
+            // Each column drifts at its own speed, in px a second.
+            property <float> speed: 14 + Math.mod(c * 7, 11);
+            property <length> shift: root.t * self.speed * Look.px + c * 97 * Look.px;
+            property <length> loop-h: root.rows * (root.ch + root.cg);
+            x: c * (root.cw + root.cg) - 40 * Look.px;
+            width: root.cw;
+            for r in root.rows : Rectangle {
+                property <int> k: Math.mod(c * 7 + r * 11, Math.max(1, Vm.boot.covers.length));
+                y: Math.mod(r * (root.ch + root.cg) / 1px - parent.shift / 1px, parent.loop-h / 1px) * 1px - root.ch;
+                height: root.ch;
+                border-radius: 14 * Look.px;
+                clip: true;
+                background: Tokens.color-surface;
+                if Vm.boot.covers.length > 0 : Image {
+                    source: Vm.boot.covers[parent.k];
+                    width: parent.width;
+                    height: parent.height;
+                    image-fit: cover;
+                }
+            }
+        }
+    }
+    // A vignette and drifting light keep the middle calm and readable.
+    Rectangle { background: @radial-gradient(circle, #05070fd9 0%, #05070fa6 45%, #05070f40 100%); }
+    Rectangle {
+        x: root.width * (0.30 + 0.06 * Math.sin(root.t * 9deg)) - self.width / 2;
+        y: root.height * (0.35 + 0.05 * Math.cos(root.t * 7deg)) - self.height / 2;
+        width: 1100 * Look.px;
+        height: self.width;
+        background: @radial-gradient(circle, #1f4fd13d 0%, #1f4fd100 65%);
+    }
+    Rectangle {
+        x: root.width * (0.70 + 0.05 * Math.cos(root.t * 8deg)) - self.width / 2;
+        y: root.height * (0.62 + 0.06 * Math.sin(root.t * 6deg)) - self.height / 2;
+        width: 1000 * Look.px;
+        height: self.width;
+        background: @radial-gradient(circle, #8b5cf62e 0%, #8b5cf600 65%);
+    }
+
+    VerticalLayout {
+        alignment: center;
+        spacing: 0;
+        HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: 132 * Look.px;
+                height: self.width;
+                Rectangle {
+                    x: -40 * Look.px;
+                    y: -40 * Look.px;
+                    width: parent.width + 80 * Look.px;
+                    height: self.width;
+                    background: @radial-gradient(circle, #3d8bff66 0%, #3d8bff00 68%);
+                    opacity: 0.28;
+                }
+                Image { source: Assets.logo; width: parent.width; height: parent.height; image-fit: contain; }
+            }
+        }
+        Rectangle { height: 24 * Look.px; }
+        Text { text: "NEXUS"; font-size: 19 * Look.px; font-weight: 600; letter-spacing: 3 * Look.px; color: Tokens.color-text-muted; horizontal-alignment: center; }
+        Rectangle { height: 18 * Look.px; }
+        if root.welcome : Text {
+            text: "Welcome";
+            font-size: 64 * Look.px;
+            font-weight: 700;
+            color: Tokens.color-text;
+            horizontal-alignment: center;
+        }
+        if root.welcome : Text {
+            text: "Setting up Nexus";
+            font-size: 23 * Look.px;
+            color: Tokens.color-text-muted;
+            horizontal-alignment: center;
+        }
+        Rectangle { height: root.welcome ? 44 * Look.px : 6 * Look.px; }
+
+        // What was set up (first run only).
+        if root.welcome : HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: 560 * Look.px;
+                height: steps.preferred-height;
+                border-radius: 20 * Look.px;
+                background: #0b1122cc;
+                border-width: 1px;
+                border-color: #ffffff17;
+                steps := VerticalLayout {
+                    padding: 22 * Look.px;
+                    spacing: 14 * Look.px;
+                    for st in Vm.boot.steps : HorizontalLayout {
+                        spacing: 14 * Look.px;
+                        height: 30 * Look.px;
+                        Rectangle {
+                            width: 26 * Look.px;
+                            height: self.width;
+                            y: 2 * Look.px;
+                            border-radius: self.width / 2;
+                            background: st.state == "done" ? Tokens.color-success.with-alpha(0.18)
+                                : st.state == "failed" ? Tokens.color-danger.with-alpha(0.18) : #ffffff10;
+                            animate background { duration: Look.timed(300ms); }
+                            if st.state == "done" : Icon { name: "check"; color: Tokens.color-success; width: 16 * Look.px; height: self.width; }
+                            if st.state == "failed" : Icon { name: "alert"; color: Tokens.color-danger; width: 16 * Look.px; height: self.width; }
+                            if st.state == "working" : Path {
+                                width: 18 * Look.px;
+                                height: self.width;
+                                viewbox-width: 24;
+                                viewbox-height: 24;
+                                stroke: Tokens.color-text;
+                                stroke-width: 2.4 * Look.px;
+                                commands: "M 12 3 A 9 9 0 1 1 3 12";
+                                transform-rotation: root.t * 400deg;
+                            }
+                            if st.state == "waiting" : Rectangle {
+                                width: 6 * Look.px;
+                                height: self.width;
+                                border-radius: self.width / 2;
+                                background: Look.text3;
+                            }
+                        }
+                        Text {
+                            text: st.label;
+                            font-size: 19 * Look.px;
+                            font-weight: st.state == "working" ? 600 : 500;
+                            color: st.state == "waiting" ? Look.text3 : Tokens.color-text;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            accessible-role: text;
+                            accessible-label: "welcome-step";
+                            accessible-value: st.label + ": " + st.detail;
+                        }
+                        Text {
+                            text: st.detail;
+                            font-size: 17 * Look.px;
+                            color: st.state == "done" ? Tokens.color-success : st.state == "failed" ? Tokens.color-danger : Tokens.color-text-muted;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+        Rectangle { height: root.welcome ? 28 * Look.px : 4 * Look.px; }
+
+        // The progress bar with a moving sheen, and the percentage.
+        HorizontalLayout {
+            alignment: center;
+            spacing: 16 * Look.px;
+            Rectangle {
+                width: root.welcome ? 480 * Look.px : 360 * Look.px;
+                height: 6 * Look.px;
+                y: 10 * Look.px;
+                border-radius: 3 * Look.px;
+                background: #ffffff1a;
+                clip: true;
+                Rectangle {
+                    x: 0;
+                    width: parent.width * Vm.boot.progress;
+                    border-radius: 3 * Look.px;
+                    background: @linear-gradient(90deg, #2f6dff 0%, #6ea8ff 60%, #b4d0ff 100%);
+                    animate width { duration: Look.timed(400ms); easing: ease-out-quart; }
+                    drop-shadow-blur: 12 * Look.px;
+                    drop-shadow-color: #3d8bff99;
+                }
+                Rectangle {
+                    x: Math.mod(root.t * 0.6, 1.4) * parent.width - self.width;
+                    width: 120 * Look.px;
+                    background: @linear-gradient(90deg, #ffffff00 0%, #ffffff55 50%, #ffffff00 100%);
+                    visible: Vm.boot.progress < 1;
+                }
+            }
+            if root.welcome : Text {
+                text: Math.round(Vm.boot.progress * 100) + "%";
+                font-size: 18 * Look.px;
+                font-weight: 600;
+                color: Tokens.color-text-muted;
+                min-width: 48 * Look.px;
+            }
+        }
+        Rectangle { height: 16 * Look.px; }
+        Text {
+            text: Vm.boot.status;
+            font-size: 16 * Look.px;
+            color: Look.text3;
+            horizontal-alignment: center;
+        }
+        Rectangle { height: 40 * Look.px; }
+        if root.welcome : HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                height: 64 * Look.px;
+                width: prompt.preferred-width + 60 * Look.px;
+                border-radius: 32 * Look.px;
+                background: root.ready ? #ffffff : #ffffff14;
+                border-width: 1px;
+                border-color: #ffffff2e;
+                drop-shadow-blur: root.ready ? 30 * Look.px + 10 * Look.px * Math.sin(root.t * 150deg) : 0;
+                drop-shadow-color: #8cb9ffaa;
+                transform-scale: root.ready ? 1.0 : 0.96;
+                animate background { duration: Look.timed(300ms); }
+                animate transform-scale { duration: Look.timed(500ms); easing: ease-out-back; }
+                accessible-role: button;
+                accessible-label: "welcome-start";
+                accessible-action-default => { if (root.ready) { Host.finish-welcome(); } }
+                prompt := HorizontalLayout {
+                    alignment: center;
+                    spacing: 12 * Look.px;
+                    KeyCap {
+                        // The font has no ✕: a pad's mark is drawn.
+                        text: root.pad ? "" : "Enter";
+                        round: root.pad;
+                        fg: root.ready ? #ffffff : #8fb6ff;
+                        bg: root.ready ? #0a0d18 : #ffffff24;
+                        y: 17 * Look.px;
+                        if root.pad : PadGlyph { width: 14 * Look.px; height: 14 * Look.px; name: "✕"; }
+                    }
+                    Text {
+                        text: root.ready ? "Start" : "Setting up…";
+                        font-size: 21 * Look.px;
+                        font-weight: 600;
+                        color: root.ready ? #0a0d18 : Tokens.color-text;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+}

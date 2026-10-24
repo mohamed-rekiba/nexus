@@ -1,0 +1,107 @@
+id = "emu-kyty"
+kind = "emulator"
+# The plugin is shown by the console it plays.
+name = "PS5"
+# The program the plugin installs and runs. Sentences about the program name it.
+emulator = "KytyPS5"
+version = "0.1.0"
+host_api = "^0.1"
+# KytyPS5 ships Linux and Windows builds, and macOS x86-64 builds that run under Rosetta 2.
+platforms = ["linux", "macos", "windows"]
+# The console it plays: it gets that console's catalog.
+console = "PS5"
+capabilities = ["catalog", "downloader", "installer", "configurator", "launcher", "compatibility", "slots", "controllers", "game_installer"]
+# What the install sheet says this emulator installs from.
+install_note = "Installs a PS5 game from its folder, an exFAT image or an unsigned PS5 package (.pkg). A retail PS5 package can't install: only the console has its key. Installing checks that it holds a game, not that its files are genuine, and never runs them."
+
+# The emulator's default keyboard keys, as its keyboard panel lists them (KEYS in src/lib.rs).
+# The launch splash shows them.
+[[keymap]]
+button = "Cross"
+keys = "J"
+[[keymap]]
+button = "Circle"
+keys = "L"
+[[keymap]]
+button = "Square"
+keys = "K"
+[[keymap]]
+button = "Triangle"
+keys = "I"
+[[keymap]]
+button = "D-pad"
+keys = "Arrow keys"
+[[keymap]]
+button = "Options"
+keys = "Enter"
+[[keymap]]
+button = "Left stick"
+keys = "W A S D"
+[[keymap]]
+button = "Right stick"
+keys = "T F G H"
+[[keymap]]
+button = "L1 / R1"
+keys = "Q / E"
+[[keymap]]
+button = "L2 / R2"
+keys = "Z / C"
+[[keymap]]
+button = "L3 / R3"
+keys = "Left Shift / Left Ctrl"
+[[keymap]]
+button = "Touchpad"
+keys = "Backspace / Tab"
+[[keymap]]
+button = "Mouse as right stick"
+keys = "F7"
+
+# What PS5 games need from the computer: Vulkan 1.3 to start, and to run well the old
+# launcher's README numbers, a step up for PS5 games.
+[requires]
+vulkan = "1.3"
+
+[requires.recommended]
+cpu_threads = 12
+memory_gb = 14.5
+gpu_memory_gb = 7.5
+discrete_gpu = true
+
+[permissions]
+# GitHub's API, its release downloads and the CDN they redirect to, and the compatibility list.
+network = ["api.github.com", "github.com", "*.githubusercontent.com", "kytyps5.github.io"]
+# Where the binary is in each system's build: at the top (Linux, Windows), one folder down,
+# or inside the macOS app bundle.
+process = [
+    "builds/*/kyty_emulator",
+    "builds/*/*/kyty_emulator",
+    "builds/*/kyty_emulator.exe",
+    "builds/*/*/kyty_emulator.exe",
+    "builds/*/KytyPS5.app/Contents/MacOS/kyty_emulator",
+    # Your own build: in the folder you map as kyty-build, or on your PATH.
+    "folder:kyty-build",
+    "system:kyty_emulator",
+]
+
+# The player's game folders, shared with other emulators (the host's default is ~/Games).
+# PS5 games are found anywhere in them; installs go to PS5/ in the first one.
+[[permissions.filesystem]]
+folder = "games"
+write = true
+
+# PS5 packages (.pkg) and exFAT disc images to install. Read only.
+[[permissions.filesystem]]
+folder = "packages"
+
+# A KytyPS5 you built yourself. Read only: its saves and caches are copied when you switch to
+# official builds. Until you map it, each of these folders that exists is searched.
+[[permissions.filesystem]]
+folder = "kyty-build"
+title = "Your own KytyPS5 build"
+default = [
+    "~/KytyPS5", "~/kyty", "~/Kyty",
+    "~/projects/KytyPS5", "~/projects/kyty", "~/projects/Kyty",
+    "~/Games/KytyPS5", "~/Games/kyty", "~/Games/Kyty",
+    "~/Applications/KytyPS5", "~/Applications/kyty", "~/Applications/Kyty",
+    "~/src/KytyPS5", "~/src/kyty", "~/src/Kyty",
+]

@@ -1,0 +1,179 @@
+import { Vm, Host } from "../types.slint";
+import { Tokens } from "../tokens.slint";
+import { Look } from "look.slint";
+import { Icon } from "icon.slint";
+
+// A trailer in the window: Cross pauses or goes on, left and right go 10 seconds back or on,
+// Circle closes. The controls hide while it plays and no key comes for a while; any key, or the
+// pointer, shows them again.
+export global Trailers {
+    // The controls and the hints show.
+    in-out property <bool> controls: true;
+    // Counts the keys and pointer moves: each starts the wait again.
+    in-out property <int> pokes;
+    public function poke() {
+        root.controls = true;
+        root.pokes += 1;
+    }
+    // The shown game's trailer: in the window when the app can play it, else in the browser.
+    public function watch() {
+        if (Vm.detail.trailer-url == "") { return; }
+        root.poke();
+        if (Vm.can-play-trailers) { Host.play-trailer(Vm.detail.trailer-url); } else { Host.open-url(Vm.detail.trailer-url); }
+        Host.play-sound("select");
+    }
+    public function key(text: string) -> bool {
+        root.poke();
+        if (text == Key.Return || text == " ") { Host.pause-trailer(); return true; }
+        if (text == Key.LeftArrow || text == Key.RightArrow) {
+            Host.seek-trailer((text == Key.RightArrow) == !Look.rtl ? 10 : -10);
+            return true;
+        }
+        if (text == Key.Escape || text == Key.Backspace) { Host.play-sound("back"); Host.close-trailer(); return true; }
+        true
+    }
+    // "1:05", from seconds.
+    public pure function time(seconds: float) -> string {
+        let s = Math.max(0, Math.floor(seconds));
+        Math.floor(s / 60) + ":" + (Math.mod(s, 60) < 10 ? "0" : "") + Math.mod(s, 60)
+    }
+}
+
+export component TrailerPlayer inherits Rectangle {
+    property <bool> entered;
+    // About 3 s with no key while it plays: the controls hide. Paused, they stay.
+    hide := Timer {
+        interval: 3s;
+        running: Trailers.controls && Vm.trailer.playing;
+        triggered => { Trailers.controls = false; }
+    }
+    property <int> pokes: Trailers.pokes;
+    changed pokes => { hide.restart(); }
+    property <bool> controls: Trailers.controls || !Vm.trailer.playing;
+    Timer { interval: 16ms; running: !root.entered; triggered => { root.entered = true; } }
+    background: root.entered ? #000000 : #00000000;
+    animate background { duration: Tokens.motion-normal; }
+    TouchArea {
+        clicked => { Trailers.poke(); Host.pause-trailer(); }
+        // A move with no button pressed shows the controls too.
+        pointer-event(event) => { if (event.kind == PointerEventKind.move) { Trailers.poke(); } }
+    }
+    Image {
+        width: root.width;
+        height: root.height;
+        source: Vm.trailer-frame;
+        image-fit: contain;
+    }
+    if Vm.trailer.loading : Text {
+        width: root.width;
+        height: root.height;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        text: "Loading the trailer…";
+        font-size: 24 * Look.px;
+        color: Tokens.color-text-muted;
+    }
+    // Paused: a large sign in the middle.
+    if !Vm.trailer.playing && !Vm.trailer.loading : Rectangle {
+        width: 120 * Look.px;
+        height: 120 * Look.px;
+        border-radius: self.width / 2;
+        background: #00000080;
+        accessible-role: text;
+        accessible-label: "trailer-paused";
+        Icon { name: "play"; color: #ffffff; width: 56 * Look.px; height: 56 * Look.px; }
+    }
+    // The game's name at the top, with the controls.
+    Rectangle {
+        y: 0;
+        height: 140 * Look.px;
+        opacity: root.controls ? 1 : 0;
+        animate opacity { duration: Tokens.motion-normal; easing: ease-out-quad; }
+        background: @linear-gradient(180deg, #000000b0 0%, #00000000 100%);
+        Text {
+            x: Look.rtl ? parent.width - self.width - 60 * Look.px : 60 * Look.px;
+            y: 40 * Look.px;
+            width: parent.width - 200 * Look.px;
+            text: Vm.detail.title;
+            font-size: 30 * Look.px;
+            font-weight: 600;
+            color: Tokens.color-text;
+            horizontal-alignment: Look.rtl ? right : left;
+            overflow: elide;
+            accessible-role: text;
+            accessible-label: root.controls ? "trailer-title" : "";
+            accessible-value: self.text;
+        }
+    }
+    // The controls: what the keys do, the time, and how far it is.
+    Rectangle {
+        y: root.height - self.height;
+        opacity: root.controls ? 1 : 0;
+        animate opacity { duration: Tokens.motion-normal; easing: ease-out-quad; }
+        height: 180 * Look.px;
+        background: @linear-gradient(0deg, #000000d0 0%, #00000000 100%);
+        // Above the key hints at the bottom. Right to left, the pause button is on the right, and
+        // the bar fills from the right.
+        pause := Rectangle {
+            x: Look.rtl ? parent.width - self.width - 60 * Look.px : 60 * Look.px;
+            y: parent.height - self.height - 96 * Look.px;
+            width: 56 * Look.px;
+            height: 56 * Look.px;
+            border-radius: self.width / 2;
+            background: pause-area.has-hover ? #ffffff2e : #ffffff1a;
+            accessible-role: button;
+            accessible-label: "trailer-pause";
+            accessible-action-default => { Host.pause-trailer(); }
+            Icon { name: Vm.trailer.playing ? "stop" : "play"; color: #ffffff; width: 26 * Look.px; height: 26 * Look.px; }
+            pause-area := TouchArea { mouse-cursor: pointer; clicked => { Host.pause-trailer(); } }
+        }
+        VerticalLayout {
+            x: Look.rtl ? 60 * Look.px : pause.x + pause.width + 24 * Look.px;
+            y: 0;
+            width: parent.width - 120 * Look.px - pause.width - 24 * Look.px;
+            height: parent.height - 96 * Look.px;
+            alignment: end;
+            spacing: 10 * Look.px;
+            Text {
+                text: Trailers.time(Vm.trailer.position) + " / " + Trailers.time(Vm.trailer.duration);
+                font-size: 18 * Look.px;
+                color: Tokens.color-text-muted;
+                horizontal-alignment: Look.rtl ? right : left;
+                accessible-role: text;
+                accessible-label: "trailer-time";
+                accessible-value: (Vm.trailer.playing ? "playing " : "paused ") + self.text;
+            }
+            Rectangle {
+                height: 6 * Look.px;
+                border-radius: 3 * Look.px;
+                background: #ffffff33;
+                Rectangle {
+                    x: Look.rtl ? parent.width - self.width : 0;
+                    width: Vm.trailer.duration > 0 ? parent.width * Math.min(1, Vm.trailer.position / Vm.trailer.duration) : 0;
+                    border-radius: 3 * Look.px;
+                    background: #ffffff;
+                    animate width { duration: Look.timed(250ms); }
+                    accessible-role: text;
+                    accessible-label: "trailer-progress";
+                }
+            }
+        }
+    }
+    // The close button for a mouse.
+    Rectangle {
+        opacity: root.controls ? 1 : 0;
+        animate opacity { duration: Tokens.motion-normal; easing: ease-out-quad; }
+        x: Look.rtl ? 30 * Look.px : root.width - self.width - 30 * Look.px;
+        y: 30 * Look.px;
+        width: 56 * Look.px;
+        height: 56 * Look.px;
+        border-radius: self.width / 2;
+        background: close.has-hover ? #ffffff2e : #ffffff1a;
+        accessible-role: button;
+        accessible-label: "trailer-close";
+        accessible-action-default => { Host.close-trailer(); }
+        // A drawn cross: the theme's fonts have no "✕".
+        Icon { name: "close"; color: #ffffff; width: 26 * Look.px; height: 26 * Look.px; }
+        close := TouchArea { mouse-cursor: pointer; clicked => { Host.close-trailer(); } }
+    }
+}

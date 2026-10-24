@@ -1,0 +1,76 @@
+import { Vm, Host } from "../types.slint";
+import { Tokens } from "../tokens.slint";
+import { Look } from "look.slint";
+import { Icon } from "icon.slint";
+
+// A game's screenshots, full screen. Left and right move between them; Escape or Circle
+// closes.
+export global Viewer {
+    in-out property <bool> open;
+    in-out property <int> index;
+    out property <int> count: Vm.detail.screenshots.length;
+
+    public function show(index: int) {
+        if (root.count == 0) { return; }
+        root.index = Math.clamp(index, 0, root.count - 1);
+        root.open = true;
+        Host.play-sound("select");
+    }
+    public function step(delta: int) {
+        let next = Math.clamp(root.index + delta, 0, root.count - 1);
+        if (next != root.index) { root.index = next; Host.play-sound("move"); }
+    }
+    public function key(text: string) -> bool {
+        if (text == Key.LeftArrow || text == Key.RightArrow) {
+            root.step((text == Key.RightArrow) == !Look.rtl ? 1 : -1);
+            return true;
+        }
+        if (text == Key.Escape || text == Key.Backspace || text == Key.Return) {
+            root.open = false;
+            Host.play-sound("back");
+            return true;
+        }
+        true
+    }
+}
+
+export component ShotViewer inherits Rectangle {
+    property <bool> entered;
+    Timer { interval: 16ms; running: !root.entered; triggered => { root.entered = true; } }
+    background: root.entered ? #000000f2 : #00000000;
+    animate background { duration: Tokens.motion-normal; }
+    TouchArea { clicked => { Viewer.open = false; } }
+    shot := Image {
+        x: 80 * Look.px;
+        y: 80 * Look.px;
+        width: root.width - 160 * Look.px;
+        height: root.height - 200 * Look.px;
+        source: Viewer.count > 0 ? Vm.detail.screenshots[Viewer.index] : Vm.detail.background;
+        image-fit: contain;
+        opacity: root.entered ? 1 : 0;
+        animate opacity { duration: Tokens.motion-normal; }
+    }
+    Text {
+        y: root.height - 90 * Look.px;
+        width: root.width;
+        horizontal-alignment: center;
+        text: (Viewer.index + 1) + " / " + Viewer.count;
+        font-size: 20 * Look.px;
+        color: Tokens.color-text-muted;
+        accessible-role: text;
+        accessible-label: "shot-viewer";
+        accessible-value: self.text;
+    }
+    // Arrows for a mouse, at each side.
+    for side[i] in [-1, 1] : Rectangle {
+        x: side < 0 ? 20 * Look.px : root.width - self.width - 20 * Look.px;
+        y: (root.height - self.height) / 2;
+        width: 56 * Look.px;
+        height: 56 * Look.px;
+        border-radius: self.width / 2;
+        visible: side < 0 ? Viewer.index > 0 : Viewer.index < Viewer.count - 1;
+        background: arrow.has-hover ? #ffffff2e : #ffffff14;
+        Icon { name: side < 0 ? "chevl" : "chevr"; color: #ffffff; width: 28 * Look.px; height: 28 * Look.px; }
+        arrow := TouchArea { mouse-cursor: pointer; clicked => { Viewer.step(side); } }
+    }
+}

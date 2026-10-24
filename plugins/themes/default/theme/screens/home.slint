@@ -1,0 +1,474 @@
+import { Vm, Host, Slot } from "../types.slint";
+import { Tokens } from "../tokens.slint";
+import { Look } from "../components/look.slint";
+import { Nav, Origin } from "../components/nav.slint";
+import { Icon } from "../components/icon.slint";
+import { Card } from "../components/card.slint";
+import { LibraryView } from "../components/library-view.slint";
+import { FocusRing, Chip, Pill, Kicker, Cover } from "../components/widgets.slint";
+
+// What the hero and the name beside the selected tile show.
+struct Hero {
+    key: string,
+    title: string,
+    // Under the name beside the tile: "Last played today", "Playing now" or the system.
+    sub: string,
+    tag: string,
+    // "PLAYED 4 HR 6 MIN" over the title.
+    kicker: string,
+    // "● PLAYING · 12 min" over the title, in green.
+    accent: string,
+    description: string,
+    badges: [Slot],
+    // "Shooter · Arcade".
+    genres: string,
+    size: string,
+    // "12.03.2024".
+    release: string,
+    // Out of 5, and "4.4 · 3,225 ratings".
+    stars: float,
+    rating: string,
+    // The game's name as a picture, from the store, in place of the title.
+    has-logo: bool,
+    logo: image,
+    // The game's store page.
+    store: string,
+    // The player's own result: ingame, menus, boots, nothing, or empty.
+    result: string,
+    game: bool,
+    playing: bool,
+}
+
+// One layer of the hero. Two of these take turns when the selection changes. The new game's
+// hero comes in one piece after another, as on the PS5: the line over the title, the title,
+// the chips, the description, then the buttons, each a beat after the one before.
+component HeroView inherits Rectangle {
+    in property <Hero> data;
+    in property <bool> front;
+    in property <length> base-y;
+    y: root.base-y + (root.front ? 0 : 18 * Look.px);
+    visible: root.front || out.opacity > 0.01;
+    animate y { duration: root.front ? Look.timed(Tokens.motion-slow - 40ms) : Tokens.motion-fast; easing: ease-out-expo; }
+
+    // The whole layer fades out at once; it fades in a piece at a time.
+    out := Rectangle {
+        opacity: root.front ? 1 : 0;
+        animate opacity { duration: root.front ? Look.timed(1ms) : Look.timed(Tokens.motion-fast - 20ms); easing: ease-out-quad; }
+    }
+    pure function beat(n: int) -> duration { root.front ? Look.timed(n * 55ms) : 0ms }
+
+    property <TextHorizontalAlignment> align: Look.rtl ? right : left;
+    VerticalLayout {
+        alignment: end;
+        spacing: 0;
+        opacity: out.opacity;
+        if root.data.tag != "" || root.data.kicker != "" || root.data.accent != "" : Kicker {
+            alignment: Look.rtl ? end : start;
+            tag: root.data.tag;
+            accent: root.data.accent;
+            text: root.data.kicker;
+            opacity: root.front ? 1 : 0;
+            animate opacity { duration: Tokens.motion-normal; delay: root.beat(0); easing: ease-out-quad; }
+            accessible-role: text;
+            accessible-label: root.front && root.data.kicker != "" ? "default-played" : "";
+            accessible-value: root.data.kicker;
+        }
+        Rectangle { height: 14 * Look.px; }
+        // The logo, as the PS5 shows it, fitted in a box the size of the title.
+        if root.data.has-logo : Image {
+            source: root.data.logo;
+            height: 200 * Look.px;
+            width: Math.min(560 * Look.px, self.height * (self.source.width > 0 ? self.source.width / Math.max(1, self.source.height) : 2.6));
+            image-fit: contain;
+            horizontal-alignment: Look.rtl ? right : left;
+            opacity: root.front ? 1 : 0;
+            animate opacity { duration: Look.timed(Tokens.motion-normal + 40ms); delay: root.beat(1); easing: ease-out-quad; }
+            accessible-role: text;
+            accessible-label: root.front ? "default-title" : "";
+            accessible-value: root.data.title;
+        }
+        if !root.data.has-logo : Text {
+            text: root.data.title;
+            font-size: 84 * Look.px;
+            font-weight: 700;
+            color: Tokens.color-text;
+            wrap: word-wrap;
+            overflow: elide;
+            max-height: 200 * Look.px;
+            horizontal-alignment: root.align;
+            opacity: root.front ? 1 : 0;
+            animate opacity { duration: Look.timed(Tokens.motion-normal + 40ms); delay: root.beat(1); easing: ease-out-quad; }
+            accessible-role: text;
+            accessible-label: root.front ? "default-title" : "";
+            accessible-value: self.text;
+        }
+        Rectangle { height: 22 * Look.px; }
+        HorizontalLayout {
+            spacing: 10 * Look.px;
+            alignment: Look.rtl ? end : start;
+            opacity: root.front ? 1 : 0;
+            animate opacity { duration: Tokens.motion-normal; delay: root.beat(2); easing: ease-out-quad; }
+            // The player's own result first, as the old launcher; then the plugin's badges.
+            if root.data.result != "" : Chip {
+                text: Look.result-label(root.data.result) + " · your result";
+                dot: Look.result-color(root.data.result);
+                accessible-role: text;
+                accessible-label: root.front ? "your-result" : "";
+                accessible-value: self.text;
+            }
+            for badge in root.data.badges : Chip {
+                text: badge.text;
+                dot: badge.tone == "neutral" ? transparent : Look.tone(badge.tone);
+                accessible-role: text;
+                accessible-label: badge.label;
+                accessible-value: badge.text;
+            }
+            if root.data.stars > 0 : Chip { text: root.data.rating; stars: root.data.stars; }
+            if root.data.genres != "" : Chip { text: root.data.genres; icon: "tag"; }
+            if root.data.size != "" : Chip { text: root.data.size; icon: "disk"; accessible-role: text; accessible-label: root.front ? "default-size" : ""; accessible-value: self.text; }
+            if root.data.release != "" : Chip { text: root.data.release; icon: "cal"; }
+        }
+        Rectangle { height: 20 * Look.px; }
+        if root.data.description != "" : Text {
+            text: root.data.description;
+            font-size: 21 * Look.px;
+            color: Tokens.color-text-muted;
+            wrap: word-wrap;
+            overflow: elide;
+            max-height: 96 * Look.px;
+            horizontal-alignment: root.align;
+            opacity: root.front ? 1 : 0;
+            animate opacity { duration: Tokens.motion-normal; delay: root.beat(3); easing: ease-out-quad; }
+            accessible-role: text;
+            accessible-label: root.front ? "default-description" : "";
+            accessible-value: self.text;
+        }
+        Rectangle { height: 34 * Look.px; }
+        HorizontalLayout {
+            spacing: 16 * Look.px;
+            alignment: Look.rtl ? end : start;
+            height: 68 * Look.px;
+            opacity: root.front ? 1 : 0;
+            animate opacity { duration: Tokens.motion-normal; delay: root.beat(4); easing: ease-out-quad; }
+            property <bool> on-actions: root.front && Nav.zone == "actions";
+            // While the game runs: Resume, Stop and Game Hub, as the old launcher had them.
+            if root.data.playing : Pill {
+                text: "Resume";
+                icon: "play";
+                primary: true;
+                focused: parent.on-actions && Nav.action == 0;
+                dim: parent.on-actions && Nav.action != 0;
+                accessible-role: button;
+                accessible-label: "default-resume";
+                clicked => { Nav.action = 0; Nav.activate(); }
+            }
+            if root.data.playing : Pill {
+                text: "Stop";
+                icon: "stop";
+                danger: true;
+                focused: parent.on-actions && Nav.action == 1;
+                accessible-role: button;
+                accessible-label: "default-stop";
+                clicked => { Nav.action = 1; Nav.activate(); }
+            }
+            if root.data.game && !root.data.playing && Nav.has-detail && Vm.detail.can-launch : Pill {
+                text: "Play";
+                icon: "play";
+                primary: true;
+                focused: parent.on-actions && Nav.action == 0;
+                dim: parent.on-actions && Nav.action != 0;
+                clicked => { Nav.action = 0; Nav.activate(); }
+            }
+            if root.data.game : Pill {
+                text: "Game Hub";
+                icon: "info";
+                primary: Nav.actions == 1 || (Nav.store && Nav.actions == 2);
+                focused: parent.on-actions && Nav.action == Nav.hub-action;
+                dim: parent.on-actions && Nav.action != Nav.hub-action;
+                clicked => { Nav.action = Nav.hub-action; Nav.activate(); }
+            }
+            // The store page, as the old launcher's round link button.
+            if root.data.game && root.data.store != "" : Pill {
+                text: "Store";
+                icon: "web";
+                round: true;
+                focused: parent.on-actions && Nav.action == Nav.store-action;
+                dim: parent.on-actions && Nav.action != Nav.store-action;
+                clicked => { Nav.action = Nav.store-action; Nav.activate(); }
+            }
+            // The game's menu: its folder, its log, rating it, and more.
+            if root.data.game && Nav.has-detail : Pill {
+                text: "Options";
+                icon: "more";
+                round: true;
+                focused: parent.on-actions && Nav.action == Nav.actions - 1;
+                dim: parent.on-actions && Nav.action != Nav.actions - 1;
+                accessible-role: button;
+                accessible-label: "game-options";
+                accessible-value: self.text;
+                clicked => { Nav.action = Nav.actions - 1; Nav.activate(); }
+            }
+            if !root.data.game && Nav.has-game : Pill {
+                text: "Open Library";
+                icon: "grid";
+                primary: true;
+                clicked => { Nav.open-library(); }
+            }
+            if root.data.game && !root.data.playing && Nav.has-detail && Vm.detail.launch-hint != "" : Text {
+                text: Vm.detail.launch-hint;
+                font-size: 18 * Look.px;
+                color: Tokens.color-text-muted;
+                vertical-alignment: center;
+            }
+        }
+    }
+}
+
+// The old launcher's home: a row of tiles, the selected one larger with its name beside it,
+// and the game's hero over its art.
+component HomeView inherits Rectangle {
+    property <length> big: 172 * Look.px;
+    property <length> small: 112 * Look.px;
+    property <length> gap: 22 * Look.px;
+    property <length> x0: 96 * Look.px;
+    // The focused tile: a game, or the Library tile after the last one.
+    property <int> sel: Nav.extra ? Nav.games.length : Nav.shown;
+    property <bool> keys: Nav.zone == "row";
+
+    property <Hero> live: Nav.extra || !Nav.has-game ? {
+        key: "library",
+        title: Nav.has-game ? "Library" : "No games yet",
+        sub: Look.games(Vm.home.games.length),
+        description: Nav.has-game
+            ? "Every game, in a grid, by system."
+            : "Add a games folder in Settings, or install an emulator.",
+        game: false,
+    } : {
+        key: Nav.games[Nav.shown].key,
+        title: Nav.games[Nav.shown].title,
+        // As the old launcher: when it last ran, from the first frame.
+        sub: Nav.playing ? "Playing now"
+            : Nav.games[Nav.shown].last-played != "" ? "Last played " + Nav.games[Nav.shown].last-played.to-lowercase()
+            : "Not played yet",
+        tag: "",
+        kicker: !Nav.playing && Nav.has-detail && Vm.detail.played != "" ? "PLAYED " + Vm.detail.played.to-uppercase() : "",
+        accent: Nav.playing ? "● PLAYING · " + Vm.running.elapsed.to-uppercase() : "",
+        description: Nav.has-detail ? Vm.detail.summary : "",
+        badges: Nav.games[Nav.shown].badges,
+        genres: Nav.has-detail ? Look.join(Vm.detail.genres) : "",
+        size: Nav.has-detail ? Vm.detail.size : "",
+        release: Nav.has-detail ? Vm.detail.release : "",
+        stars: Nav.has-detail ? Vm.detail.rating : 0,
+        rating: Nav.has-detail ? Vm.detail.rating-text : "",
+        has-logo: Nav.has-detail && Vm.detail.has-logo,
+        logo: Vm.detail.logo,
+        store: Nav.has-detail ? Vm.detail.store-url : "",
+        result: Nav.has-detail ? Vm.detail.your-result : "",
+        game: true,
+        playing: Nav.playing,
+    };
+    // The hero's two layers: the front one shows `hero`, the other the hero before it. A new
+    // game's hero waits until its details are in, so it fades in whole and its title doesn't
+    // jump when the description arrives. A game whose details are slow comes in after
+    // `Look.wait-for-details` without them.
+    property <Hero> hero;
+    property <Hero> a;
+    property <Hero> b;
+    property <bool> front-b;
+    property <bool> hero-pending;
+    init => {
+        root.hero = root.live;
+        root.label-last = root.live;
+    }
+    changed live => {
+        if (root.live.key == root.hero.key) { root.hero = root.live; } else { root.hero-pending = true; }
+        if (root.live.key != root.label-last.key) {
+            if (root.label-b) { root.lb = root.label-last; } else { root.la = root.label-last; }
+            root.label-b = !root.label-b;
+        }
+        root.label-last = root.live;
+    }
+    function commit-hero() {
+        if (!root.hero-pending) { return; }
+        root.hero-pending = false;
+        if (root.front-b) { root.b = root.hero; } else { root.a = root.hero; }
+        root.front-b = !root.front-b;
+        root.hero = root.live;
+    }
+    Timer {
+        interval: 1ms;
+        running: root.hero-pending && (!root.live.game || Nav.has-detail);
+        triggered => { root.commit-hero(); }
+    }
+    Timer {
+        interval: Look.wait-for-details;
+        running: root.hero-pending;
+        triggered => { root.commit-hero(); }
+    }
+
+    // The name beside the selected tile changes at once, with layers of its own.
+    property <Hero> label-last;
+    property <Hero> la;
+    property <Hero> lb;
+    property <bool> label-b;
+
+    // Right-to-left mirrors every x.
+    pure function at(x: length, w: length) -> length {
+        Look.rtl ? root.width - x - w : x
+    }
+
+    Rectangle {
+        y: 128 * Look.px;
+        height: 210 * Look.px;
+        // The mouse wheel moves along the row, a game a notch, as the old launcher. Under the
+        // tiles, so their clicks stay theirs.
+        TouchArea {
+            scroll-event(event) => {
+                let delta = (event.delta-y + event.delta-x) / 1px;
+                if (Math.abs(delta) < 1) { return reject; }
+                Nav.step-row(delta > 0 ? 1 : -1);
+                Nav.zone = "row";
+                accept
+            }
+        }
+        for game[i] in Nav.games : tile := Rectangle {
+            property <length> lx: i < root.sel ? root.x0 - (root.sel - i) * (root.small + root.gap) - root.gap
+                : i == root.sel ? root.x0
+                : root.x0 + root.big + label.width + root.gap * 2.6 + (i - root.sel - 1) * (root.small + root.gap);
+            property <bool> runs: Vm.has-running && Vm.running.key == game.key;
+            x: root.at(self.lx, self.width);
+            y: 0;
+            width: i == root.sel ? root.big : root.small;
+            height: self.width;
+            opacity: i < root.sel ? 0 : 1;
+            visible: self.lx < root.width + 40 * Look.px && i >= root.sel - 2;
+            accessible-role: button;
+            accessible-label: "default-tile";
+            accessible-value: game.title;
+            accessible-action-default => { Nav.extra = false; Nav.select-now(game.key); }
+            accessible-item-selected: i == root.sel;
+            animate x, width { duration: Look.timed(Tokens.motion-slow - 60ms); easing: ease-out-expo; }
+            animate opacity { duration: Look.timed(Tokens.motion-normal - 40ms); easing: ease-out-quad; }
+            FocusRing { w: parent.width; h: parent.height; on: i == root.sel && root.keys; radius: 18 * Look.px; }
+            Cover {
+                radius: 18 * Look.px;
+                source: game.cover;
+                state: game.cover-state;
+                title: game.title;
+                platform: game.platform;
+                name-size: parent.width * 0.12;
+            }
+            // The running game's tile: a green frame and a PLAYING tag, as on the PS5.
+            if tile.runs : Rectangle {
+                border-radius: 18 * Look.px;
+                border-width: 3 * Look.px;
+                border-color: Tokens.color-success;
+            }
+            if tile.runs && i == root.sel : Rectangle {
+                x: 10 * Look.px;
+                y: parent.height - self.height - 10 * Look.px;
+                width: playing.preferred-width + 18 * Look.px;
+                height: 24 * Look.px;
+                border-radius: 12 * Look.px;
+                background: #000000c8;
+                playing := Text { text: "● PLAYING"; font-size: 13 * Look.px; font-weight: 700; letter-spacing: 1 * Look.px; color: Tokens.color-success; }
+            }
+            TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    if (i == Nav.selected && !Nav.extra) { Origin.from = "row"; Host.open-game(game.key); } else { Nav.extra = false; Nav.select-now(game.key); }
+                    Nav.zone = "row";
+                }
+            }
+        }
+        // The Library tile, after the games.
+        if Nav.has-game : Rectangle {
+            property <int> i: Nav.games.length;
+            property <length> lx: i == root.sel ? root.x0 : root.x0 + root.big + label.width + root.gap * 2.6 + (i - root.sel - 1) * (root.small + root.gap);
+            x: root.at(self.lx, self.width);
+            y: 0;
+            width: i == root.sel ? root.big : root.small;
+            height: self.width;
+            visible: self.lx < root.width + 40 * Look.px;
+            accessible-role: button;
+            accessible-label: "default-library-tile";
+            accessible-action-default => { Nav.open-library(); }
+            animate x, width { duration: Look.timed(Tokens.motion-slow - 60ms); easing: ease-out-expo; }
+            FocusRing { w: parent.width; h: parent.height; on: Nav.extra && root.keys; radius: 18 * Look.px; }
+            Rectangle {
+                border-radius: 18 * Look.px;
+                background: #ffffff1f;
+                border-width: 1px;
+                border-color: Look.line;
+                Icon { name: "grid"; color: Tokens.color-text; width: parent.width * 0.42; height: self.width; }
+            }
+            TouchArea {
+                mouse-cursor: pointer;
+                clicked => { if (Nav.extra) { Nav.open-library(); } else { Nav.extra = true; } Nav.zone = "row"; }
+            }
+        }
+        // The name beside the selected tile. Its two layers take turns as the hero's do.
+        label := Rectangle {
+            width: Math.min(560 * Look.px, Math.max(name-probe.preferred-width, sub-probe.preferred-width));
+            name-probe := Text { visible: false; text: root.live.title; font-size: 30 * Look.px; font-weight: 500; }
+            sub-probe := Text { visible: false; text: root.live.sub; font-size: 18 * Look.px; }
+        }
+        for slot in [0, 1] : name := Rectangle {
+            property <bool> front: (slot == 1) == root.label-b;
+            property <Hero> data: self.front ? root.live : slot == 0 ? root.la : root.lb;
+            property <length> lx: root.x0 + root.big + root.gap * 1.2 + (self.front ? 0 : 14 * Look.px);
+            x: root.at(self.lx, self.width);
+            y: 0;
+            height: root.big;
+            width: label.width;
+            opacity: self.front ? 1 : 0;
+            animate opacity { duration: self.front ? Look.timed(Tokens.motion-normal + 20ms) : Look.timed(Tokens.motion-fast - 40ms); easing: ease-out-quad; }
+            animate x { duration: self.front ? Look.timed(Tokens.motion-slow - 60ms) : Look.timed(Tokens.motion-fast - 40ms); easing: ease-out-expo; }
+            VerticalLayout {
+                alignment: center;
+                spacing: 6 * Look.px;
+                Text { text: data.title; font-size: 30 * Look.px; font-weight: 500; color: Tokens.color-text; overflow: elide; horizontal-alignment: Look.rtl ? right : left; }
+                Text {
+                    text: data.sub;
+                    font-size: 18 * Look.px;
+                    color: data.playing ? Tokens.color-success : Tokens.color-text-muted;
+                    overflow: elide;
+                    horizontal-alignment: Look.rtl ? right : left;
+                    accessible-role: text;
+                    accessible-label: name.front ? "default-sub" : "";
+                    accessible-value: self.text;
+                }
+            }
+        }
+    }
+
+    for slot in [0, 1] : HeroView {
+        x: root.at(96 * Look.px, self.width);
+        width: Math.min(900 * Look.px, root.width - 192 * Look.px);
+        base-y: 360 * Look.px;
+        height: root.height - 360 * Look.px - 112 * Look.px;
+        front: (slot == 1) == root.front-b;
+        data: self.front ? root.hero : slot == 0 ? root.a : root.b;
+    }
+}
+
+export component HomeScreen inherits Rectangle {
+    HomeView {
+        opacity: Nav.view == "home" ? 1 : 0;
+        visible: self.opacity > 0;
+        x: Nav.view == "home" ? 0 : -40 * Look.px * (Look.rtl ? -1 : 1);
+        animate opacity { duration: Tokens.motion-normal; easing: ease-out-quad; }
+        animate x { duration: Tokens.motion-slow; easing: ease-out-expo; }
+    }
+    // Made each time the Library opens, so its cards come in again.
+    if Nav.view == "library" : LibraryView {
+        active: Vm.screen == "home";
+        property <bool> shown;
+        // After the first frame, so the entry animates from its start.
+        Timer { interval: 16ms; running: !parent.shown; triggered => { parent.shown = true; } }
+        opacity: self.shown ? 1 : 0;
+        x: self.shown ? 0 : 40 * Look.px * (Look.rtl ? -1 : 1);
+        animate opacity { duration: Tokens.motion-normal; easing: ease-out-quad; }
+        animate x { duration: Tokens.motion-slow; easing: ease-out-expo; }
+    }
+}

@@ -1,0 +1,48 @@
+name: libarchive
+description: >-
+  What scripts/bundle-libarchive.sh needs to ship libarchive with the package: on macOS and
+  Linux the codecs and tools to build its pinned release (Homebrew's zstd, lz4 and dylibbundler;
+  apt's xz, zstd, bzip2, lz4 and zlib headers and patchelf), on Windows MSYS2's
+  libarchive package with the DLLs it needs, their licences and their source packages. Sets
+  LIBARCHIVE_DIR and LIBARCHIVE_PACKAGES on Windows.
+runs:
+  using: composite
+  steps:
+    - name: macOS
+      if: runner.os == 'macOS'
+      shell: bash
+      run: brew install cmake zstd lz4 dylibbundler
+    - name: Linux
+      if: runner.os == 'Linux'
+      shell: bash
+      run: >-
+        sudo apt-get install -y --no-install-recommends cmake patchelf
+        liblzma-dev libzstd-dev libbz2-dev liblz4-dev zlib1g-dev
+    - name: Windows
+      if: runner.os == 'Windows'
+      shell: bash
+      # The runner's MSYS2. Its packages aren't pinned: the package names and versions it
+      # installed go into the package's NOTICE and SOURCES.
+      run: |
+        out="$RUNNER_TEMP/libarchive"
+        mkdir -p "$out/licenses"
+        msys=/c/msys64/usr/bin/bash.exe
+        "$msys" -lc "pacman -Sy --noconfirm --needed mingw-w64-ucrt-x86_64-libarchive" > /dev/null
+        # libarchive-13.dll and the DLLs from MSYS2 it loads; not Windows' own.
+        dlls="$("$msys" -lc "ldd /ucrt64/bin/libarchive-13.dll" | awk '/\/ucrt64\// {print $3}')"
+        packages=""
+        : > "$out/licenses/SOURCES"
+        for dll in /ucrt64/bin/libarchive-13.dll $dlls; do
+          cp "/c/msys64$dll" "$out/"
+          owner="$("$msys" -lc "pacman -Qo $dll" | awk '{print $(NF-1), $NF}')"
+          name="${owner% *}" version="${owner#* }"
+          base="${name#mingw-w64-ucrt-x86_64-}"
+          case " $packages " in *" $name "*) continue ;; esac
+          packages="$packages $name"
+          echo "$name https://repo.msys2.org/mingw/sources/mingw-w64-$base-$version.src.tar.zst" >> "$out/licenses/SOURCES"
+          if [ -d "/c/msys64/ucrt64/share/licenses/$base" ]; then
+            cp -R "/c/msys64/ucrt64/share/licenses/$base" "$out/licenses/"
+          fi
+        done
+        echo "LIBARCHIVE_DIR=$out" >> "$GITHUB_ENV"
+        echo "LIBARCHIVE_PACKAGES=${packages# }" >> "$GITHUB_ENV"

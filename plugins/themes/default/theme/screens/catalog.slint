@@ -1,0 +1,21 @@
+import { Vm } from "../types.slint";
+import { Tokens } from "../tokens.slint";
+import { Look } from "../components/look.slint";
+import { LibraryView } from "../components/library-view.slint";
+
+// The games the catalogs offer to download, as the Library shows its games: search, sort,
+// systems, genres and the grid, a page at a time. The Game Catalog's page says which copy of
+// each catalog is in use.
+export component CatalogScreen inherits Rectangle {
+    property <bool> shown;
+    // After the first frame, so the entry animates from its start.
+    Timer { interval: 16ms; running: !root.shown; triggered => { root.shown = true; } }
+    // It slides in from the side as the Library does.
+    LibraryView {
+        active: true;
+        opacity: root.shown ? 1 : 0;
+        x: root.shown ? 0 : 40 * Look.px * (Look.rtl ? -1 : 1);
+        animate opacity { duration: Tokens.motion-normal; easing: ease-out-quad; }
+        animate x { duration: Tokens.motion-slow; easing: ease-out-expo; }
+    }
+}

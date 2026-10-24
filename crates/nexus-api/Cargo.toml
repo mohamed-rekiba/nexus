@@ -1,0 +1,30 @@
+[package]
+name = "nexus-api"
+description = "The plugin contract: traits, manifest, context, events and errors. Semver-versioned; the only crate plugins depend on."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[features]
+default = ["inventory"]
+# Compile-time plugin registration.
+inventory = ["dep:inventory"]
+
+[dependencies]
+async-trait.workspace = true
+futures.workspace = true
+inventory = { workspace = true, optional = true }
+schemars.workspace = true
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+
+[lints]
+workspace = true

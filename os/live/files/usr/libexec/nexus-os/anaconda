@@ -1,0 +1,21 @@
+#!/usr/bin/bash
+# On the USB stick: Fedora's installer (Anaconda) full screen in cage, as root
+# (nexus-os-anaconda.service). Its kickstart, /usr/share/anaconda/interactive-defaults.ks,
+# installs the system stored on the stick; the disk screen decides the partitions.
+set -u
+# Nexus's session ends first: it would keep the screen, and its processes outlive greetd.
+loginctl terminate-user player 2>/dev/null
+# liveinst runs as root, not through pkexec from a desktop's live user: Anaconda then uses
+# root's session bus, and the kickstart's full keyboard spares it asking that user for one.
+cage -s -- /usr/bin/liveinst
+status=$?
+# Once Anaconda has installed (or tried to), the PC restarts: without the stick that's the
+# installed system, with it Nexus OS again. If it ended before installing (quit, or failed to
+# start), Nexus comes back instead, so a broken start can't loop through restarts.
+if grep -qs 'ostree container image deploy' /tmp/packaging.log; then
+    echo "Anaconda ended (status $status) after installing; restarting"
+    systemctl --no-block reboot
+else
+    echo "Anaconda ended (status $status) without installing; back to Nexus"
+    systemctl --no-block isolate graphical.target
+fi

@@ -1,0 +1,106 @@
+id = "emu-shadps4"
+kind = "emulator"
+# The plugin is shown by the console it plays.
+name = "PS4"
+# The program the plugin installs and runs. Sentences about the program name it.
+emulator = "shadPS4"
+version = "0.1.0"
+host_api = "^0.1"
+# The official builds this plugin installs: the Linux AppImage and the Windows program.
+platforms = ["linux", "macos", "windows"]
+# The console it plays: it gets that console's catalog.
+console = "PS4"
+capabilities = ["catalog", "downloader", "installer", "configurator", "launcher", "compatibility", "slots", "controllers", "game_installer"]
+# What the install sheet says this emulator installs from.
+install_note = "Installs a PS4 game from its folder or from PS4 packages (.pkg), with its update and DLC. Installing checks that it holds a game, not that its files are genuine, and never runs them."
+
+# shadPS4's default keyboard keys, as its keyboard panel lists them (KEYS in src/lib.rs). The
+# player's own may differ: shadPS4 keeps them in its settings file. The launch splash shows them.
+[[keymap]]
+button = "Cross"
+keys = "N (or keypad 2)"
+[[keymap]]
+button = "Circle"
+keys = "B (or keypad 6)"
+[[keymap]]
+button = "Square"
+keys = "V (or keypad 4)"
+[[keymap]]
+button = "Triangle"
+keys = "C (or keypad 8)"
+[[keymap]]
+button = "D-pad"
+keys = "Arrow keys"
+[[keymap]]
+button = "Options"
+keys = "Enter"
+[[keymap]]
+button = "Left stick"
+keys = "W A S D"
+[[keymap]]
+button = "Right stick"
+keys = "I J K L"
+[[keymap]]
+button = "L1 / R1"
+keys = "Q / U"
+[[keymap]]
+button = "L2 / R2"
+keys = "E / O"
+[[keymap]]
+button = "L3 / R3"
+keys = "X / M"
+[[keymap]]
+button = "Touchpad"
+keys = "Space"
+
+# What PS4 games need from the computer: Vulkan 1.3 and AVX2 to start (shadPS4 is built for
+# x86-64-v3), and to run well the old launcher's README numbers.
+[requires]
+vulkan = "1.3"
+avx2 = true
+
+[requires.recommended]
+cpu_threads = 8
+memory_gb = 7.0
+gpu_memory_gb = 3.5
+discrete_gpu = true
+
+[permissions]
+# GitHub's API, release downloads and the CDN they redirect to (builds and the compatibility list).
+network = ["api.github.com", "github.com", "*.githubusercontent.com"]
+# The AppImage is unpacked once, so running it needs no FUSE.
+# The host runs the downloaded AppImage once, to unpack it.
+# Your own build: in the folder you map as shadps4-build, or on your PATH.
+process = [
+    "builds/*/squashfs-root/AppRun",
+    "builds/*/shadPS4.exe",
+    # macOS: the program next to its Vulkan libraries.
+    "builds/*/shadps4",
+    "builds/*/*.AppImage",
+    "folder:shadps4-build",
+    "system:shadps4",
+]
+
+# The player's game folders, shared with other emulators (the host's default is ~/Games).
+# PS4 games are found anywhere in them; installs go to PS4/ in the first one, updates beside
+# their game.
+[[permissions.filesystem]]
+folder = "games"
+write = true
+
+# PS4 packages (.pkg) to install. Read only.
+[[permissions.filesystem]]
+folder = "packages"
+
+# shadPS4's own data folder: DLC goes into its addcont folder.
+[[permissions.filesystem]]
+folder = "shadps4-data"
+default = "~/.local/share/shadPS4"
+default_on = { macos = "~/Library/Application Support/shadPS4" }
+title = "shadPS4 data"
+write = true
+
+# A shadPS4 you built or installed yourself. Read only.
+[[permissions.filesystem]]
+folder = "shadps4-build"
+title = "Your own shadPS4 build"

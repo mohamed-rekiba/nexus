@@ -1,0 +1,36 @@
+import { Tokens } from "../tokens.slint";
+import { Look } from "look.slint";
+
+// A titled card: the old launcher's small-caps section header over a glass card.
+export component Dialog inherits VerticalLayout {
+    in property <string> title;
+    // Its place on the page: cards rise in one after another.
+    in property <int> order;
+
+    property <float> shown: 0;
+    init => { root.shown = 1; }
+    animate shown { duration: Tokens.motion-slow; delay: Look.timed(Math.min(root.order, 6) * 60ms); easing: ease-out-expo; }
+
+    spacing: 12 * Look.px;
+    if root.title != "" : Text {
+        text: root.title.to-uppercase();
+        font-size: 16 * Look.tpx;
+        font-weight: 600;
+        letter-spacing: 2 * Look.px;
+        color: Look.text3;
+        horizontal-alignment: Look.rtl ? right : left;
+        opacity: root.shown;
+    }
+    Rectangle {
+        opacity: root.shown;
+        border-radius: 16 * Look.px;
+        background: #0b1020b8;
+        border-width: 1px;
+        border-color: Look.line;
+        VerticalLayout {
+            padding: 22 * Look.px;
+            spacing: 14 * Look.px;
+            @children
+        }
+    }
+}

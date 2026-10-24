@@ -1,0 +1,21 @@
+# The Nexus OS USB stick's boot menu, for image-builder's bootc-generic-iso type (os/build-iso.sh).
+# Fedora's signed shim, GRUB and kernel keep Secure Boot working. Each entry starts the same live
+# system from the stick (rd.live.image), with changes kept in memory:
+# - "Nexus OS": Nexus, with "Try it" and "Install on this PC";
+# - "Install Nexus OS (choose partitions)": Fedora's installer instead (nexus-os-anaconda.target);
+# - basic graphics: the firmware's display only, for a graphics card that shows nothing.
+# The label must match root=live:CDLABEL=… below (and os/build-iso.sh's LABEL).
+label: "NEXUS-OS"
+grub2:
+  default: "0"
+  timeout: "5"
+  entries:
+    - name: "Nexus OS"
+      linux: "/images/pxeboot/vmlinuz root=live:CDLABEL=NEXUS-OS rd.live.image rd.live.overlay.overlayfs=1 enforcing=0 quiet splash loglevel=3 rd.udev.log_level=3 systemd.show_status=auto vt.global_cursor_default=0"
+      initrd: "/images/pxeboot/initrd.img"
+    - name: "Install Nexus OS (choose partitions)"
+      linux: "/images/pxeboot/vmlinuz root=live:CDLABEL=NEXUS-OS rd.live.image rd.live.overlay.overlayfs=1 enforcing=0 quiet splash loglevel=3 rd.udev.log_level=3 systemd.show_status=auto systemd.unit=nexus-os-anaconda.target"
+      initrd: "/images/pxeboot/initrd.img"
+    - name: "Nexus OS (basic graphics)"
+      linux: "/images/pxeboot/vmlinuz root=live:CDLABEL=NEXUS-OS rd.live.image rd.live.overlay.overlayfs=1 enforcing=0 quiet splash loglevel=3 rd.udev.log_level=3 systemd.show_status=auto vt.global_cursor_default=0 nomodeset"
+      initrd: "/images/pxeboot/initrd.img"

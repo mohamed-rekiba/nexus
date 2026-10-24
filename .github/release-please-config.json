@@ -1,0 +1,45 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "separate-pull-requests": true,
+  "include-component-in-tag": false,
+  "bump-minor-pre-major": true,
+  "draft": true,
+  "force-tag-creation": true,
+  "packages": {
+    ".": {
+      "component": "nexus",
+      "release-type": "simple",
+      "package-name": "nexus",
+      "changelog-path": "CHANGELOG.md",
+      "exclude-paths": [
+        "os"
+      ],
+      "extra-files": [
+        {
+          "type": "toml",
+          "path": "Cargo.toml",
+          "jsonpath": "$.workspace.package.version"
+        },
+        {
+          "type": "toml",
+          "path": "Cargo.lock",
+          "jsonpath": "$.package[?(!@.source && @.name.value != 'oozextract')].version"
+        }
+      ]
+    },
+    "os": {
+      "component": "nexus-os",
+      "release-type": "simple",
+      "package-name": "nexus-os",
+      "version-file": "version.txt",
+      "changelog-path": "CHANGELOG.md",
+      "include-component-in-tag": true,
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "/README.md"
+        }
+      ]
+    }
+  }
+}

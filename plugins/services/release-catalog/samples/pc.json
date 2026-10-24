@@ -1,0 +1,54 @@
+{
+  "source": "Nexus sample catalog",
+  "complete": true,
+  "collected_at": "2026-10-18T00:00:00Z",
+  "translation": {
+    "language": "en"
+  },
+  "topic_count": 1,
+  "topics": [
+    {
+      "id": "3001",
+      "title": "Sample Windows Game (v1.0.2) [Wine]",
+      "size": "372 MB",
+      "seeders": 3,
+      "leechers": 0,
+      "magnet": "magnet:?xt=urn:btih:209c8226b299b308beaf2b9cd3fb49212dbd13ec&dn=Tears+of+Steel&tr=wss%3A%2F%2Ftracker.openwebtorrent.com&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337",
+      "published_at": "2026-10-12",
+      "game_info": {
+        "genre": "Adventure"
+      },
+      "steam": {
+        "appid": 3000002,
+        "name": "Sample Windows Game",
+        "short": "An adventure for testing a Windows game packed with Wine: its Steam art, its store page and its ProtonDB tier. Sample entry: the torrent is Tears of Steel, a free Blender film (Creative Commons), not a game, so installing it fails.",
+        "genres": [
+          "Adventure",
+          "Indie"
+        ],
+        "release": "Sep 26, 2012",
+        "developers": [
+          "Nexus Samples"
+        ],
+        "publishers": [
+          "Nexus Samples"
+        ],
+        "linux": false,
+        "metacritic": null,
+        "header": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/3000002/header.jpg",
+        "shots": [
+          "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/3000002/ss_1.jpg",
+          "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/3000002/ss_2.jpg"
+        ],
+        "video": null,
+        "assets": {
+          "portrait": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/3000002/library_600x900_2x.jpg",
+          "hero": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/3000002/library_hero.jpg",
+          "logo": null
+        },
+        "protondb": "gold",
+        "checked_at": "2026-10-14T00:00:00Z"
+      }
+    }
+  ]
+}

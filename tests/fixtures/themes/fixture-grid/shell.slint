@@ -1,0 +1,93 @@
+import { Vm, Host } from "types.slint";
+import { Tokens } from "tokens.slint";
+import { Button } from "components/button.slint";
+import { ListItem } from "components/list-item.slint";
+import { HomeScreen } from "screens/home.slint";
+import { GameDetailScreen } from "screens/game-detail.slint";
+import { CatalogScreen } from "screens/catalog.slint";
+import { DownloadsScreen } from "screens/downloads.slint";
+import { SettingsScreen } from "screens/settings.slint";
+import { EmulatorsScreen } from "screens/emulators.slint";
+import { ThemesScreen } from "screens/themes.slint";
+import { PluginScreen } from "screens/plugin.slint";
+import { RunningScreen } from "screens/running.slint";
+
+component NavItem inherits ListItem {
+    in property <string> screen;
+    selected: Vm.screen == self.screen;
+    clicked => { Host.navigate(self.screen); }
+}
+
+// A desktop layout: a sidebar of sections next to the current screen.
+export component Shell inherits Window {
+    title: "Launcher";
+    background: Tokens.color-bg;
+    preferred-width: 1280px;
+    preferred-height: 760px;
+    default-font-family: Tokens.font-family;
+    default-font-size: Tokens.font-size-m;
+
+    HorizontalLayout {
+        Rectangle {
+            width: 220px;
+            background: Tokens.color-surface;
+            drop-shadow-blur: Tokens.shadow-blur-1;
+            drop-shadow-color: Tokens.shadow-color;
+            VerticalLayout {
+                padding: Tokens.space-m;
+                spacing: Tokens.space-xs;
+                alignment: start;
+                Text {
+                    text: "Launcher";
+                    color: Tokens.color-accent;
+                    font-size: Tokens.font-size-l;
+                    font-weight: Tokens.font-weight-bold;
+                }
+                Rectangle { height: Tokens.space-m; }
+                NavItem { title: "Library"; screen: "home"; }
+                NavItem { title: "Search"; screen: "catalog"; }
+                NavItem { title: "Downloads"; screen: "downloads"; trailing: Vm.downloads.length > 0 ? Vm.downloads.length : ""; }
+                NavItem { title: "Emulators"; screen: "emulators"; }
+                NavItem { title: "Themes"; screen: "themes"; }
+                NavItem { title: "Settings"; screen: "settings"; }
+                if Vm.can-go-back : Button { text: "‹ Back"; clicked => { Host.back(); } }
+            }
+        }
+
+        Rectangle {
+            horizontal-stretch: 1;
+            if Vm.screen == "home" || Vm.screen == "running" : HomeScreen { width: parent.width; height: parent.height; }
+            if Vm.screen == "game-detail" : GameDetailScreen { width: parent.width; height: parent.height; }
+            if Vm.screen == "catalog" : CatalogScreen { width: parent.width; height: parent.height; }
+            if Vm.screen == "downloads" : DownloadsScreen { width: parent.width; height: parent.height; }
+            if Vm.screen == "settings" : SettingsScreen { width: parent.width; height: parent.height; }
+            if Vm.screen == "emulators" : EmulatorsScreen { width: parent.width; height: parent.height; }
+            if Vm.screen == "themes" : ThemesScreen { width: parent.width; height: parent.height; }
+            if Vm.screen == "plugin" : PluginScreen { width: parent.width; height: parent.height; }
+            if Vm.screen == "running" : RunningScreen { width: parent.width; height: parent.height; }
+
+            if Vm.notices.length > 0 : Rectangle {
+                x: parent.width - self.width - Tokens.space-m;
+                y: parent.height - self.height - Tokens.space-m;
+                width: 360px;
+                height: 64px;
+                border-radius: Tokens.radius-m;
+                background: Tokens.color-surface;
+                drop-shadow-blur: Tokens.shadow-blur-2;
+                drop-shadow-color: Tokens.shadow-color;
+                HorizontalLayout {
+                    padding: Tokens.space-s;
+                    spacing: Tokens.space-s;
+                    Text {
+                        text: Vm.notices[Vm.notices.length - 1];
+                        color: Tokens.color-danger;
+                        wrap: word-wrap;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    Button { text: "Dismiss"; clicked => { Host.dismiss-notices(); } }
+                }
+            }
+        }
+    }
+}

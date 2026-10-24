@@ -1,0 +1,406 @@
+import { Vm, Host } from "../types.slint";
+import { Tokens } from "../tokens.slint";
+import { Look } from "look.slint";
+import { Nav } from "nav.slint";
+import { Icon } from "icon.slint";
+import { NetIcon, SoundIcon, BluetoothIcon, BatteryIcon, Sys } from "system-panel.slint";
+
+// One system in the top bar, as the old launcher's "Home" and "Library" tabs: white when
+// shown, with a short bar under it; a white outline when the keys are on it.
+component Tab inherits Rectangle {
+    in property <string> text;
+    in property <int> count;
+    in property <bool> active;
+    in property <bool> focused;
+    callback clicked();
+    width: row.preferred-width + 8 * Look.px;
+    accessible-role: button;
+    accessible-label: "default-system";
+    accessible-value: root.text;
+    accessible-action-default => { root.clicked(); }
+
+    row := HorizontalLayout {
+        x: 4 * Look.px;
+        spacing: 8 * Look.px;
+        Text {
+            text: root.text;
+            font-size: 30 * Look.px;
+            font-weight: 500;
+            color: root.active || root.focused ? Tokens.color-text : Look.text3;
+            vertical-alignment: center;
+            animate color { duration: Tokens.motion-fast; }
+        }
+        Text {
+            text: root.count > 0 ? root.count : "";
+            font-size: 17 * Look.px;
+            color: root.active ? Tokens.color-text-muted : Look.text3;
+            vertical-alignment: center;
+            opacity: root.active || root.focused ? 1 : 0;
+            animate opacity { duration: Tokens.motion-fast; }
+        }
+    }
+    Rectangle {
+        x: Look.rtl ? parent.width - self.width - 4 * Look.px : 4 * Look.px;
+        y: parent.height / 2 + 28 * Look.px;
+        width: root.active ? 28 * Look.px : 0;
+        height: 3 * Look.px;
+        border-radius: 2 * Look.px;
+        background: #ffffff;
+        animate width { duration: Look.move; easing: cubic-bezier(0.2, 0.8, 0.2, 1); }
+    }
+    Rectangle {
+        x: -14 * Look.px;
+        width: parent.width + 28 * Look.px;
+        y: parent.height / 2 - 26 * Look.px;
+        height: 52 * Look.px;
+        border-radius: 26 * Look.px;
+        border-width: 3 * Look.px;
+        border-color: #ffffff;
+        opacity: root.focused ? 1 : 0;
+        animate opacity { duration: Tokens.motion-fast; }
+    }
+    TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+// A round button on the far side of the top bar. It turns white under the keys.
+component RoundButton inherits Rectangle {
+    in property <string> icon;
+    in property <string> label;
+    in property <bool> focused;
+    in property <bool> current;
+    callback clicked();
+    width: 52 * Look.px;
+    height: 52 * Look.px;
+    border-radius: 26 * Look.px;
+    background: root.focused ? #ffffff : root.current ? #ffffff24 : ta.has-hover ? #ffffff14 : transparent;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
+    animate background { duration: Tokens.motion-fast; }
+    Icon {
+        name: root.icon;
+        color: root.focused ? Look.ink : root.current ? Tokens.color-text : Tokens.color-text-muted;
+        width: 26 * Look.px;
+        height: 26 * Look.px;
+    }
+    ta := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+// A machine status icon on the far side of the top bar, as a round button: its panel opens
+// under it. Its icon is its child.
+component StatusButton inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    in property <bool> focused;
+    in property <bool> current;
+    callback clicked();
+    width: 52 * Look.px;
+    height: 52 * Look.px;
+    border-radius: 26 * Look.px;
+    background: root.focused ? #ffffff : root.current ? #ffffff24 : ta.has-hover ? #ffffff14 : transparent;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-value: root.value;
+    accessible-action-default => { root.clicked(); }
+    animate background { duration: Tokens.motion-fast; }
+    @children
+    ta := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+// A small button inside the playing pill.
+component PillButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> danger;
+    callback clicked();
+    width: label.preferred-width + 24 * Look.px;
+    height: 36 * Look.px;
+    border-radius: 18 * Look.px;
+    background: ta.pressed ? #ffffff40 : ta.has-hover ? #ffffff2e : #ffffff1a;
+    transform-scale: ta.pressed ? 0.94 : 1.0;
+    animate transform-scale { duration: Tokens.motion-fast; easing: ease-out-back; }
+    animate background { duration: Tokens.motion-fast; }
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-action-default => { root.clicked(); }
+    label := Text { text: root.text; font-size: 16 * Look.px; font-weight: 600; color: root.danger ? #ffb3bb : Tokens.color-text; }
+    ta := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+// The old launcher's top bar: Home and Library on the reading side; a running game, the
+// active download, the screen buttons and the clock on the other.
+export component TopBar inherits Rectangle {
+    // The keys are on the top bar (home only).
+    in property <bool> keys;
+    height: 104 * Look.px;
+
+    property <int> download: Vm.downloads.length > 0 ? 0 : -1;
+
+    tabs := HorizontalLayout {
+        x: Look.rtl ? parent.width - self.width - 96 * Look.px : 96 * Look.px;
+        y: 0;
+        height: root.height;
+        width: self.preferred-width;
+        spacing: 44 * Look.px;
+        for t[i] in ["Home", "Library"] : Tab {
+            text: t;
+            count: i == 1 ? Vm.home.games.length : 0;
+            active: Vm.screen == "home" && (Nav.view == "library") == (i == 1);
+            focused: root.keys && Nav.zone == "tabs" && Nav.tab == i;
+            clicked => {
+                if (Vm.screen != "home") { Host.navigate("home"); }
+                Nav.activate-tab(i);
+            }
+        }
+    }
+
+    side := HorizontalLayout {
+        x: Look.rtl ? 96 * Look.px : parent.width - self.width - 96 * Look.px;
+        y: 0;
+        height: root.height;
+        width: self.preferred-width;
+        padding-top: 26 * Look.px;
+        padding-bottom: 26 * Look.px;
+        spacing: 22 * Look.px;
+        alignment: center;
+        // The running game, as the old launcher showed it: its name, the time played, and
+        // Resume and Stop.
+        if Vm.has-running : Rectangle {
+            property <bool> shown;
+            // After the first frame, so the entry animates from its start.
+            Timer { interval: 16ms; running: !parent.shown; triggered => { parent.shown = true; } }
+            height: 52 * Look.px;
+            width: pill.preferred-width;
+            border-radius: 26 * Look.px;
+            background: #3ddc971f;
+            border-width: 1px;
+            border-color: #3ddc975a;
+            opacity: self.shown ? 1 : 0;
+            transform-scale: self.shown ? 1 : 0.9;
+            animate opacity { duration: Tokens.motion-normal; }
+            animate transform-scale { duration: Tokens.motion-slow; easing: ease-out-back; }
+            pill := HorizontalLayout {
+                padding-left: 18 * Look.px;
+                padding-right: 8 * Look.px;
+                spacing: 12 * Look.px;
+                alignment: center;
+                Rectangle {
+                    width: 10 * Look.px;
+                    height: 10 * Look.px;
+                    y: 21 * Look.px;
+                    border-radius: 5 * Look.px;
+                    // No beat: a frame drawn every tick would take GPU time from the game.
+                    background: Tokens.color-success;
+                }
+                Text { text: Vm.running.title; font-size: 18 * Look.px; font-weight: 600; color: Tokens.color-text; vertical-alignment: center; }
+                Text { text: Vm.running.elapsed; font-size: 16 * Look.px; color: Tokens.color-text-muted; vertical-alignment: center; }
+                VerticalLayout {
+                    alignment: center;
+                    PillButton { text: "Resume"; clicked => { Host.show-game(Vm.running.session); } }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    PillButton { text: "Stop"; danger: true; clicked => { Host.stop(Vm.running.session); } }
+                }
+            }
+        }
+        if root.download >= 0 : Rectangle {
+            width: 230 * Look.px;
+            height: 52 * Look.px;
+            border-radius: 12 * Look.px;
+            background: #0a6cff26;
+            Text {
+                text: Vm.downloads[0].label;
+                font-size: 17 * Look.px;
+                color: #a7caff;
+                y: 8 * Look.px;
+                height: 24 * Look.px;
+                width: parent.width - 28 * Look.px;
+                overflow: elide;
+                horizontal-alignment: center;
+            }
+            Rectangle {
+                x: 14 * Look.px;
+                y: 39 * Look.px;
+                width: parent.width - 28 * Look.px;
+                height: 4 * Look.px;
+                background: #ffffff14;
+                Rectangle { x: 0; width: parent.width * Vm.downloads[0].progress; background: Tokens.color-accent; animate width { duration: Look.timed(300ms); } }
+            }
+            TouchArea { mouse-cursor: pointer; clicked => { Host.navigate("downloads"); } }
+        }
+        // Search opens the Catalog, which a turned-off Game Catalog takes away. The buttons
+        // keep their places for the keys (`Nav.tabs` + 0 to 4): the keys skip Search's.
+        if Vm.catalog-available : RoundButton {
+            icon: "search";
+            label: "Search";
+            current: Vm.screen == "catalog";
+            focused: root.keys && Nav.zone == "tabs" && Nav.tab == Nav.tabs;
+            clicked => { Host.navigate("catalog"); }
+        }
+        for b[i] in [
+            { icon: "disk", label: "Downloads", screen: "downloads" },
+            { icon: "gamepad", label: "Emulators", screen: "emulators" },
+            { icon: "palette", label: "Themes", screen: "themes" },
+            { icon: "gear", label: "Settings", screen: "settings" },
+        ] : RoundButton {
+            icon: b.icon;
+            label: b.label;
+            current: Vm.screen == b.screen;
+            focused: root.keys && Nav.zone == "tabs" && Nav.tab == Nav.tabs + 1 + i;
+            clicked => { Host.navigate(b.screen); }
+        }
+        // The machine, when Nexus is the whole screen: each icon opens its panel (`Sys`).
+        if Vm.system.whole-screen : StatusButton {
+            label: "status:network";
+            value: Vm.system.connection == "wifi" ? "wifi " + Vm.system.signal-bars : Vm.system.connection;
+            current: Sys.open == 0;
+            focused: root.keys && Nav.zone == "tabs" && Nav.tab == Nav.tabs + 5;
+            clicked => { if (Sys.open == 0) { Sys.close(); } else { Sys.show(0); } }
+            NetIcon { tint: parent.focused ? Look.ink : Tokens.color-text; }
+        }
+        if Vm.system.whole-screen : StatusButton {
+            label: "status:sound";
+            value: Vm.system.muted ? "muted" : Vm.system.volume;
+            current: Sys.open == 1;
+            focused: root.keys && Nav.zone == "tabs" && Nav.tab == Nav.tabs + 6;
+            clicked => { if (Sys.open == 1) { Sys.close(); } else { Sys.show(1); } }
+            SoundIcon { color: parent.focused ? Look.ink : Tokens.color-text; }
+        }
+        if Vm.system.whole-screen : StatusButton {
+            label: "status:bluetooth";
+            value: !Vm.system.bluetooth-on ? "off" : "on " + Vm.system.connected-devices;
+            current: Sys.open == 2;
+            focused: root.keys && Nav.zone == "tabs" && Nav.tab == Nav.tabs + 7;
+            clicked => { if (Sys.open == 2) { Sys.close(); } else { Sys.show(2); } }
+            BluetoothIcon { color: parent.focused ? Look.ink : Tokens.color-text; }
+        }
+        if Vm.system.battery-shown : BatteryIcon {}
+        if Vm.clock != "" : Text {
+            text: Vm.clock;
+            font-size: 30 * Look.px;
+            font-weight: 500;
+            color: Tokens.color-text;
+            vertical-alignment: center;
+            accessible-role: text;
+            accessible-label: "clock";
+            accessible-value: self.text;
+        }
+    }
+}
+
+// A face button's mark, drawn: the PlayStation symbols are in no font the theme ships. The
+// d-pad's pairs ("▲ ▼", "◀ ▶") are two filled arrows, drawn to fit the same round cap.
+export component PadGlyph inherits Path {
+    in property <string> name;
+    property <bool> arrows: root.name == "▲ ▼" || root.name == "◀ ▶";
+    viewbox-width: 24;
+    viewbox-height: 24;
+    fill: root.arrows ? #ffffff : transparent;
+    // The menu's three lines are thinner, or they run together at small sizes.
+    stroke-width: root.arrows ? 0 : root.name == "☰" ? 2 * Look.px : 3 * Look.px;
+    stroke: root.name == "✕" ? #8fb6ff : root.name == "○" ? #ff8f9c : root.name == "△" ? #6ee7c8 : root.name == "☰" ? #ffffff : #f5a3e6;
+    commands: root.name == "✕" ? "M4 4 L20 20 M20 4 L4 20"
+        : root.name == "○" ? "M12 3 A9 9 0 1 1 11.99 3 Z"
+        : root.name == "△" ? "M12 3 L21 19 L3 19 Z"
+        : root.name == "☰" ? "M3 5 H21 M3 12 H21 M3 19 H21"
+        : root.name == "▲ ▼" ? "M12 2 L19 10 L5 10 Z M12 22 L19 14 L5 14 Z"
+        : root.name == "◀ ▶" ? "M2 12 L10 5 L10 19 Z M22 12 L14 5 L14 19 Z"
+        : "M4 4 H20 V20 H4 Z";
+}
+
+// The d-pad's pairs ("◀ ▶", "▲ ▼"): two filled arrows, each its own path at whole pixels and
+// placed as the other's mirror. Drawn as one path, their edges fall inside pixels at most sizes
+// and the renderer shades them unevenly: one arrow looks smaller.
+export component PadArrows inherits Rectangle {
+    in property <bool> vertical;
+    // The size along the pair, and an arrow's: whole pixels.
+    property <length> side: Math.round(self.width / 1px) * 1px;
+    property <length> long: Math.round(self.width * 14 / 24 / 1px) * 1px;
+    property <length> deep: Math.round(self.width * 8 / 24 / 1px) * 1px;
+    property <length> edge: Math.round(self.width * 2 / 24 / 1px) * 1px;
+    Path {
+        x: root.vertical ? (root.side - root.long) / 2 : root.edge;
+        y: root.vertical ? root.edge : (root.side - root.long) / 2;
+        width: root.vertical ? root.long : root.deep;
+        height: root.vertical ? root.deep : root.long;
+        viewbox-width: 1;
+        viewbox-height: 1;
+        fill: #ffffff;
+        commands: root.vertical ? "M0.5 0 L1 1 L0 1 Z" : "M0 0.5 L1 0 L1 1 Z";
+    }
+    Path {
+        x: root.vertical ? (root.side - root.long) / 2 : root.side - root.edge - root.deep;
+        y: root.vertical ? root.side - root.edge - root.deep : (root.side - root.long) / 2;
+        width: root.vertical ? root.long : root.deep;
+        height: root.vertical ? root.deep : root.long;
+        viewbox-width: 1;
+        viewbox-height: 1;
+        fill: #ffffff;
+        commands: root.vertical ? "M0.5 1 L1 0 L0 0 Z" : "M1 0.5 L0 0 L0 1 Z";
+    }
+}
+
+// The keys that do something on this screen, in a pill at the far bottom corner. A gamepad
+// shows its buttons; a keyboard its keys.
+export component Hints inherits Rectangle {
+    // Each hint: the gamepad button, the keyboard key, and what it does.
+    in property <[{pad: string, key: string, label: string}]> hints;
+    property <bool> pad: Vm.input-mode == "gamepad";
+    width: row.preferred-width;
+    height: 50 * Look.px;
+    border-radius: 25 * Look.px;
+    background: #070a14e6;
+    border-width: 1px;
+    border-color: Look.line;
+    row := HorizontalLayout {
+        padding-left: 20 * Look.px;
+        padding-right: 22 * Look.px;
+        spacing: 24 * Look.px;
+        alignment: center;
+        for h in root.hints : HorizontalLayout {
+            spacing: 10 * Look.px;
+            // As wide as the cap itself: a pad's cap is round, whatever its hidden text measures.
+            Rectangle {
+                width: cap.width;
+                cap := Rectangle {
+                    // Whole even pixels, as the glyph inside: then its two arrows are mirrors
+                    // pixel for pixel, and neither looks smaller.
+                    y: 10 * Look.px;
+                    height: Math.round(15 * Look.px / 1px) * 2px;
+                    width: root.pad ? self.height : Math.max(self.height, t.preferred-width + 16 * Look.px);
+                    border-radius: root.pad ? 15 * Look.px : 8 * Look.px;
+                    background: #ffffff24;
+                    border-width: 1px;
+                    border-color: #ffffff1f;
+                    property <bool> glyph: root.pad && (h.pad == "✕" || h.pad == "○" || h.pad == "△" || h.pad == "□" || h.pad == "☰"
+                        || h.pad == "▲ ▼" || h.pad == "◀ ▶");
+                    t := Text {
+                        visible: !cap.glyph;
+                        text: root.pad ? h.pad : h.key;
+                        font-size: 14 * Look.px;
+                        font-weight: 700;
+                        color: #ffffff;
+                    }
+                    property <bool> arrows: h.pad == "▲ ▼" || h.pad == "◀ ▶";
+                    if cap.glyph && !cap.arrows : PadGlyph { width: 14 * Look.px; height: 14 * Look.px; name: h.pad; }
+                    if cap.glyph && cap.arrows : PadArrows {
+                        width: Math.round(8 * Look.px / 1px) * 2px;
+                        height: self.width;
+                        x: (cap.width - self.width) / 2;
+                        y: (cap.height - self.height) / 2;
+                        vertical: h.pad == "▲ ▼";
+                    }
+                }
+            }
+            Text {
+                text: h.label;
+                font-size: 17 * Look.px;
+                color: Tokens.color-text-muted;
+                vertical-alignment: center;
+                accessible-role: text;
+                accessible-label: "hint";
+                accessible-value: self.text;
+            }
+        }
+    }
+}

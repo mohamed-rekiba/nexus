@@ -1,0 +1,28 @@
+[package]
+name = "emu-shadps4"
+description = "shadPS4, the PS4 emulator: official Linux builds from GitHub, PS4 games in the game folders, community compatibility, and PS4 package installs."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[features]
+# The fake-package builder, for other crates' tests.
+fixtures = []
+
+[dependencies]
+aes.workspace = true
+cbc.workspace = true
+emulator-kit.workspace = true
+flate2.workspace = true
+hmac.workspace = true
+nexus-api.workspace = true
+rsa.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

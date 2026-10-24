@@ -1,0 +1,74 @@
+import { Tokens } from "../tokens.slint";
+import { Look } from "look.slint";
+
+// The art behind every screen, as on the old launcher's home: a deep blue glow, the game's art,
+// and dark washes that keep text readable. New art fades in over the old and settles from a
+// slight zoom in about 1.6 s. The zoom ends: nothing is drawn every frame once it settles.
+export component Backdrop inherits Rectangle {
+    in property <image> art;
+    // Darkens the art under menus.
+    in property <float> dim;
+
+    background: Tokens.color-bg;
+    clip: true;
+
+    // `art` is the one to keep: the game's own art, not a stand-in until it loads. While it is
+    // false, a new `art` waits, at most `Look.wait-for-details`, so the art fades once.
+    in property <bool> ready: true;
+
+    // Two layers take turns: the new art goes on the hidden one, then it fades in.
+    property <image> a;
+    property <image> b;
+    property <bool> show-b;
+    property <bool> pending;
+    init => { root.a = root.art; }
+    changed art => { root.pending = true; }
+    function swap() {
+        if (!root.pending) { return; }
+        root.pending = false;
+        if (root.show-b) { root.a = root.art; } else { root.b = root.art; }
+        root.show-b = !root.show-b;
+    }
+    Timer {
+        interval: 1ms;
+        running: root.pending && root.ready;
+        triggered => { root.swap(); }
+    }
+    Timer {
+        interval: Look.wait-for-details;
+        running: root.pending;
+        triggered => { root.swap(); }
+    }
+
+    Rectangle { background: @radial-gradient(circle, #13204a 0%, Tokens.color-bg 70%); }
+    Image {
+        source: root.a;
+        width: root.width;
+        height: root.height;
+        image-fit: cover;
+        opacity: root.show-b ? 0 : 1;
+        transform-scale: root.show-b ? 1.06 : 1.0;
+        animate opacity { duration: Look.timed(Tokens.motion-slow + 100ms); easing: ease-out-quad; }
+        animate transform-scale { duration: root.show-b ? 0ms : Tokens.motion-slow * 4; easing: ease-out-quint; }
+    }
+    Image {
+        source: root.b;
+        width: root.width;
+        height: root.height;
+        image-fit: cover;
+        opacity: root.show-b ? 1 : 0;
+        transform-scale: root.show-b ? 1.0 : 1.06;
+        animate opacity { duration: Look.timed(Tokens.motion-slow + 100ms); easing: ease-out-quad; }
+        animate transform-scale { duration: !root.show-b ? 0ms : Tokens.motion-slow * 4; easing: ease-out-quint; }
+    }
+    // The washes: from the text side, from the bottom, and under the top bar.
+    if !Look.rtl : Rectangle { background: @linear-gradient(90deg, #04060ef0 0%, #04060eb8 30%, #04060e2e 62%, #04060e00 80%); }
+    if Look.rtl : Rectangle { background: @linear-gradient(270deg, #04060ef0 0%, #04060eb8 30%, #04060e2e 62%, #04060e00 80%); }
+    Rectangle { background: @linear-gradient(0deg, #04060ef5 0%, #04060e59 38%, #04060e00 60%); }
+    Rectangle { background: @linear-gradient(180deg, #04060ed9 0%, #04060e00 26%); }
+    Rectangle {
+        background: #04060e;
+        opacity: root.dim;
+        animate opacity { duration: Look.timed(Tokens.motion-normal + 40ms); }
+    }
+}

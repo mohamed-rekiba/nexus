@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Nexus
+Comment=Nexus as the whole screen, without a desktop: a console for the TV
+Exec=/usr/bin/nexus-session
+DesktopNames=Nexus

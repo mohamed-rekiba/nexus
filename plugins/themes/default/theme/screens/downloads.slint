@@ -1,0 +1,751 @@
+import { Vm, Host, Torrent } from "../types.slint";
+import { Tokens } from "../tokens.slint";
+import { Look } from "../components/look.slint";
+import { Button } from "../components/button.slint";
+import { ProgressBar } from "../components/progress-bar.slint";
+import { Pill } from "../components/widgets.slint";
+import { Editor, Prefs, Row, Value } from "../components/settings-rows.slint";
+
+// The keys on Downloads. The rows are each torrent, then each emulator download; `button` is
+// the button in the row's card. "Keep sharing finished downloads" is in Settings.
+export global Dl {
+    in-out property <int> row;
+    in-out property <int> button;
+    out property <int> rows: Vm.torrents.length + Vm.downloads.length;
+
+    // The torrent at `row`, or -1.
+    public pure function torrent(row: int) -> int {
+        return row >= 0 && row < Vm.torrents.length ? row : -1;
+    }
+    // The emulator download at `row`, or -1.
+    public pure function job(row: int) -> int {
+        let i = row - Vm.torrents.length;
+        return i >= 0 && i < Vm.downloads.length ? i : -1;
+    }
+    // An emulator download's buttons, in order: resume, pause, cancel.
+    public pure function job-actions(i: int) -> int {
+        return (Vm.downloads[i].can-resume ? 1 : 0) + (Vm.downloads[i].can-pause ? 1 : 0) + (Vm.downloads[i].can-cancel ? 1 : 0);
+    }
+    public pure function job-action(i: int, n: int) -> string {
+        let resume = Vm.downloads[i].can-resume ? 1 : 0;
+        let pause = Vm.downloads[i].can-pause ? 1 : 0;
+        return n < resume ? "resume" : n < resume + pause ? "pause" : "cancel";
+    }
+    // A torrent's folder is on disk from its start: Open folder comes after its actions.
+    public pure function has-folder(i: int) -> bool {
+        return Vm.torrents[i].state != "resolving" && Vm.torrents[i].state != "ready";
+    }
+    public pure function buttons(row: int) -> int {
+        return root.torrent(row) >= 0 ? Vm.torrents[root.torrent(row)].actions.length + (root.has-folder(root.torrent(row)) ? 1 : 0)
+            : root.job(row) >= 0 ? root.job-actions(root.job(row))
+            : 0;
+    }
+    // The focused button: kept on the card's last one when its buttons get fewer.
+    out property <int> at: Math.max(0, Math.min(root.button, root.buttons(root.row) - 1));
+
+    // The install sheet is open, asking the player first: the torrent's index and id, or -1.
+    // The keys are on Install (0), Not now (1) or the folder row above them (2).
+    in-out property <int> install: -1;
+    in-out property <string> install-id;
+    in-out property <int> install-focus;
+    // The folder the player typed in the sheet; "" for the one the download offers.
+    in-out property <string> install-folder;
+    out property <bool> installing: root.install >= 0 && root.install < Vm.torrents.length
+        && Vm.torrents[root.install].id == root.install-id;
+    out property <string> shown-install-folder: root.install-folder != "" ? root.install-folder
+        : root.installing ? Vm.torrents[root.install].install-folder : "";
+
+    // The remove sheet is open, asking whether the files go too: the torrent's index and id, or
+    // -1. The keys are on Remove from Downloads (0), Remove and delete files (1) or Not now (2).
+    in-out property <int> remove: -1;
+    in-out property <string> remove-id;
+    in-out property <int> remove-focus;
+    out property <bool> removing: root.remove >= 0 && root.remove < Vm.torrents.length
+        && Vm.torrents[root.remove].id == root.remove-id;
+
+    public function reset() {
+        root.row = 0;
+        root.button = 0;
+        root.install = -1;
+        root.remove = -1;
+        Prefs.editing = false;
+    }
+
+    // The player's answer on the remove sheet: 0 keeps the files, 1 deletes them, 2 is Not now.
+    public function answer-remove(choice: int) {
+        if (choice < 2) { Host.torrent-action(root.remove-id, choice == 0 ? "remove" : "delete-files"); }
+        root.remove = -1;
+        Host.play-sound(choice < 2 ? "select" : "back");
+    }
+
+    // The torrent's action, as its button runs it: Install and Remove ask first.
+    public function run(t: int, action: string) {
+        if (action == "remove") {
+            root.remove = t;
+            root.remove-id = Vm.torrents[t].id;
+            root.remove-focus = 0;
+            Host.play-sound("select");
+        } else if (action == "play") {
+            Host.launch(Vm.torrents[t].game);
+        } else if (action == "install") {
+            root.install = t;
+            root.install-id = Vm.torrents[t].id;
+            root.install-focus = 0;
+            root.install-folder = "";
+            Host.play-sound("select");
+        } else {
+            Host.torrent-action(Vm.torrents[t].id, action);
+        }
+    }
+    // Opens the sheet's folder row for typing.
+    public function edit-install-folder() {
+        root.install-focus = 2;
+        Prefs.edit-text = root.shown-install-folder;
+        Prefs.editing = true;
+    }
+    // The player agreed: the install starts. The sheet closes once it runs, and stays open
+    // with the core's reason when it doesn't.
+    public function agree-install() {
+        Host.install-download(root.install-id, root.install-folder);
+    }
+    public function close-install() {
+        root.install = -1;
+        Prefs.editing = false;
+    }
+
+    public function key(text: string) -> bool {
+        if (root.removing) {
+            // The answers are a list: Down moves on, as Right does (Left from right to left).
+            if (text == Key.UpArrow || text == Key.DownArrow || text == Key.LeftArrow || text == Key.RightArrow) {
+                let forward = text == Key.DownArrow || (text != Key.UpArrow && (text == Key.RightArrow) != Look.rtl);
+                let next = Math.clamp(root.remove-focus + (forward ? 1 : -1), 0, 2);
+                if (next != root.remove-focus) { root.remove-focus = next; Host.play-sound("move"); }
+                return true;
+            }
+            if (text == Key.Return) { root.answer-remove(root.remove-focus); return true; }
+            if (text == Key.Escape || text == Key.Backspace) { root.answer-remove(2); }
+            return true;
+        }
+        if (root.install >= 0) {
+            // The folder is open for typing: the text box has the keys; Escape closes it.
+            if (Prefs.editing) {
+                if (text == Key.Escape) { Prefs.editing = false; }
+                return true;
+            }
+            if (text == Key.UpArrow && root.shown-install-folder != "") { root.install-focus = 2; return true; }
+            if (text == Key.DownArrow) { root.install-focus = 0; return true; }
+            // Install is on the start side: Left, or Right from right to left, goes to it.
+            if (text == Key.LeftArrow || text == Key.RightArrow) {
+                if (root.install-focus < 2) { root.install-focus = (text == Key.RightArrow) == Look.rtl ? 0 : 1; }
+                return true;
+            }
+            if (text == Key.Return) {
+                if (root.install-focus == 2) { root.edit-install-folder(); }
+                else if (root.install-focus == 0) { if (root.shown-install-folder != "") { root.agree-install(); } }
+                else { root.close-install(); }
+                return true;
+            }
+            if (text == Key.Escape || text == Key.Backspace) { root.close-install(); }
+            return true;
+        }
+        if (text == Key.UpArrow || text == Key.DownArrow) {
+            let next = Math.clamp(root.row + (text == Key.DownArrow ? 1 : -1), 0, Math.max(0, root.rows - 1));
+            if (next != root.row) {
+                root.row = next;
+                root.button = 0;
+                Host.play-sound("move");
+            }
+            return true;
+        }
+        if (text == Key.LeftArrow || text == Key.RightArrow) {
+            let forward = (text == Key.RightArrow) == !Look.rtl;
+            let next = Math.clamp(root.at + (forward ? 1 : -1), 0, Math.max(0, root.buttons(root.row) - 1));
+            if (next != root.at) { Host.play-sound("move"); }
+            root.button = next;
+            return true;
+        }
+        if (text == Key.Return) {
+            let t = root.torrent(root.row);
+            let j = root.job(root.row);
+            if (t >= 0 && root.at < Vm.torrents[t].actions.length) {
+                root.run(t, Vm.torrents[t].actions[root.at]);
+            } else if (t >= 0 && root.has-folder(t)) {
+                Host.open-download-folder(Vm.torrents[t].id);
+            } else if (j >= 0 && root.job-actions(j) > 0) {
+                let action = root.job-action(j, root.at);
+                if (action == "resume") { Host.resume-download(Vm.downloads[j].id); }
+                else if (action == "pause") { Host.pause-download(Vm.downloads[j].id); }
+                else { Host.cancel-download(Vm.downloads[j].id); }
+            }
+            return true;
+        }
+        return false;
+    }
+}
+
+// Asks before a finished download installs: the game, the game folder it goes to, and what
+// its emulator installs from. It rises in over a dark wash, as the download sheet. It closes
+// once the install (or the unpacking before it) runs; when the core refuses, it stays open and
+// says why.
+component InstallSheet inherits Rectangle {
+    in property <Torrent> torrent;
+    property <bool> entered;
+    // After the first frame, so the entry animates from its start.
+    Timer { interval: 16ms; running: !root.entered; triggered => { root.entered = true; } }
+    property <bool> started: root.torrent.install == "installing" || root.torrent.install == "done" || root.torrent.unpack == "unpacking";
+    changed started => { if (root.started) { Dl.close-install(); } }
+    property <TextHorizontalAlignment> align: Look.rtl ? right : left;
+    background: root.entered ? #000000b0 : #00000000;
+    animate background { duration: Tokens.motion-normal; }
+    TouchArea { }
+    Rectangle {
+        width: Math.min(820 * Look.px, root.width - 120 * Look.px);
+        height: col.preferred-height;
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2 + (root.entered ? 0 : 30 * Look.px);
+        opacity: root.entered ? 1 : 0;
+        animate y { duration: Tokens.motion-slow; easing: ease-out-expo; }
+        animate opacity { duration: Tokens.motion-normal; easing: ease-out-quad; }
+        border-radius: 28 * Look.px;
+        background: #121a2e;
+        border-width: 1px;
+        border-color: Look.line;
+        drop-shadow-blur: 60 * Look.px;
+        drop-shadow-color: #000000cc;
+        col := VerticalLayout {
+            padding: 44 * Look.px;
+            spacing: 16 * Look.px;
+            Text {
+                text: "Install game";
+                font-size: 34 * Look.px;
+                font-weight: 700;
+                color: Tokens.color-text;
+                horizontal-alignment: root.align;
+                accessible-role: text;
+                accessible-label: "install-title";
+                accessible-value: self.text;
+            }
+            Text {
+                text: root.torrent.title + (root.torrent.version != "" ? " · " + root.torrent.version : "") + (root.torrent.region != "" ? " · " + root.torrent.region : "");
+                font-size: 22 * Look.px;
+                color: Tokens.color-text-muted;
+                wrap: word-wrap;
+                horizontal-alignment: root.align;
+            }
+            Text {
+                text: "Nexus copies or unpacks this finished download into your game folder. The install runs in the background and checks the free space first. It never writes over a game that is there, and the downloaded files stay.";
+                font-size: 18 * Look.px;
+                color: Tokens.color-text-muted;
+                wrap: word-wrap;
+                horizontal-alignment: root.align;
+            }
+            if root.torrent.install-folder == "" : Text {
+                text: "This emulator has no game folder: add one in Settings.";
+                font-size: 18 * Look.px;
+                color: Look.text3;
+                wrap: word-wrap;
+                horizontal-alignment: root.align;
+            }
+            // Where it goes: Enter opens it for typing, a folder inside a game folder.
+            if root.torrent.install-folder != "" : folder-row := Row {
+                property <bool> typing: Prefs.editing && self.focused;
+                label: "Game folder";
+                hint: "Inside a game folder (Settings) · the next install for this console goes here too";
+                first: true;
+                last: true;
+                focused: Dl.install-focus == 2;
+                accessible-role: button;
+                accessible-label: "install-folder";
+                accessible-value: Dl.shown-install-folder;
+                accessible-action-default => { Dl.edit-install-folder(); }
+                clicked => { Dl.edit-install-folder(); }
+                if !folder-row.typing : Value { text: Dl.shown-install-folder; }
+                if folder-row.typing : Editor { horizontal-stretch: 2; done(text) => { Dl.install-folder = text; Dl.install-focus = 0; } }
+            }
+            Text {
+                text: root.torrent.install-note;
+                font-size: 18 * Look.px;
+                color: #8dbaff;
+                wrap: word-wrap;
+                horizontal-alignment: root.align;
+                accessible-role: text;
+                accessible-label: "install-note";
+                accessible-value: self.text;
+            }
+            if root.torrent.install-error != "" : Text {
+                text: root.torrent.install-error;
+                font-size: 18 * Look.px;
+                color: Tokens.color-danger;
+                wrap: word-wrap;
+                horizontal-alignment: root.align;
+                accessible-role: text;
+                accessible-label: "install-error";
+                accessible-value: self.text;
+            }
+            // Install first: on the left, or on the right from right to left.
+            HorizontalLayout {
+                spacing: 16 * Look.px;
+                alignment: Look.rtl ? end : start;
+                padding-top: 12 * Look.px;
+                if Look.rtl : Pill {
+                    text: "Not now";
+                    focused: Dl.install-focus == 1;
+                    accessible-role: button;
+                    accessible-label: "install-not-now";
+                    accessible-action-default => { Dl.close-install(); }
+                    clicked => { Dl.close-install(); }
+                }
+                Pill {
+                    text: "Install";
+                    primary: true;
+                    enabled: root.torrent.install-folder != "";
+                    focused: Dl.install-focus == 0;
+                    dim: Dl.install-focus != 0;
+                    accessible-role: button;
+                    accessible-label: "install-agree";
+                    accessible-action-default => { if (self.enabled) { Dl.agree-install(); } }
+                    clicked => { if (self.enabled) { Dl.agree-install(); } }
+                }
+                if !Look.rtl : Pill {
+                    text: "Not now";
+                    focused: Dl.install-focus == 1;
+                    accessible-role: button;
+                    accessible-label: "install-not-now";
+                    accessible-action-default => { Dl.close-install(); }
+                    clicked => { Dl.close-install(); }
+                }
+            }
+        }
+    }
+}
+
+// One answer on the remove sheet: the whole width of the card, what it does under it. The
+// focused one is white, or red when it deletes.
+component RemoveChoice inherits Rectangle {
+    in property <string> label;
+    in property <string> hint;
+    in property <bool> danger;
+    in property <bool> focused;
+    in property <string> name;
+    callback picked();
+    property <color> ink: root.focused ? (root.danger ? #ffffff : Look.ink) : root.danger ? Tokens.color-danger : Tokens.color-text;
+    height: col.preferred-height;
+    border-radius: 16 * Look.px;
+    background: root.focused ? (root.danger ? Tokens.color-danger : #ffffff) : ta.has-hover ? #ffffff14 : #ffffff0a;
+    border-width: 1px;
+    border-color: root.focused ? transparent : root.danger ? #ff5a6a40 : Look.line;
+    animate background { duration: Tokens.motion-fast; }
+    accessible-role: button;
+    accessible-label: root.name;
+    accessible-value: root.label;
+    accessible-item-selected: root.focused;
+    accessible-action-default => { root.picked(); }
+    col := VerticalLayout {
+        padding-left: 22 * Look.px;
+        padding-right: 22 * Look.px;
+        padding-top: 14 * Look.px;
+        padding-bottom: 14 * Look.px;
+        spacing: 4 * Look.px;
+        Text {
+            text: root.label;
+            font-size: 22 * Look.px;
+            font-weight: 600;
+            color: root.ink;
+            horizontal-alignment: Look.rtl ? right : left;
+        }
+        if root.hint != "" : Text {
+            text: root.hint;
+            font-size: 16 * Look.px;
+            color: root.focused ? root.ink.with-alpha(0.75) : Tokens.color-text-muted;
+            wrap: word-wrap;
+            horizontal-alignment: Look.rtl ? right : left;
+        }
+    }
+    ta := TouchArea { mouse-cursor: pointer; clicked => { root.picked(); } }
+}
+
+// Remove asks first whether the downloaded files go too: a list of answers, each saying what
+// it does. Remove from Downloads, the safe answer, comes first and has the keys; Delete files
+// too is red.
+component RemoveSheet inherits Rectangle {
+    in property <Torrent> torrent;
+    property <bool> entered;
+    // After the first frame, so the entry animates from its start.
+    Timer { interval: 16ms; running: !root.entered; triggered => { root.entered = true; } }
+    property <TextHorizontalAlignment> align: Look.rtl ? right : left;
+    background: root.entered ? #000000b0 : #00000000;
+    animate background { duration: Tokens.motion-normal; }
+    // A click beside the sheet is Not now.
+    TouchArea { clicked => { Dl.answer-remove(2); } }
+    Rectangle {
+        width: Math.min(640 * Look.px, root.width - 80 * Look.px);
+        height: col.preferred-height;
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2 + (root.entered ? 0 : 30 * Look.px);
+        opacity: root.entered ? 1 : 0;
+        animate y { duration: Tokens.motion-slow; easing: ease-out-expo; }
+        animate opacity { duration: Tokens.motion-normal; easing: ease-out-quad; }
+        border-radius: 28 * Look.px;
+        background: #121a2e;
+        border-width: 1px;
+        border-color: Look.line;
+        drop-shadow-blur: 60 * Look.px;
+        drop-shadow-color: #000000cc;
+        TouchArea { }
+        col := VerticalLayout {
+            padding: 36 * Look.px;
+            spacing: 10 * Look.px;
+            Text {
+                text: "Remove " + root.torrent.title + "?";
+                font-size: 30 * Look.px;
+                font-weight: 700;
+                color: Tokens.color-text;
+                wrap: word-wrap;
+                horizontal-alignment: root.align;
+                accessible-role: text;
+                accessible-label: "remove-title";
+                accessible-value: self.text;
+            }
+            if root.torrent.version != "" || root.torrent.region != "" : Text {
+                text: root.torrent.version + (root.torrent.version != "" && root.torrent.region != "" ? " · " : "") + root.torrent.region;
+                font-size: 18 * Look.px;
+                color: Tokens.color-text-muted;
+                overflow: elide;
+                horizontal-alignment: root.align;
+            }
+            Rectangle { height: 10 * Look.px; }
+            for choice in [0, 1, 2] : RemoveChoice {
+                label: choice == 0 ? "Remove from Downloads" : choice == 1 ? "Delete files too" : "Not now";
+                hint: choice == 0 ? "The downloaded files stay in their folder."
+                    : choice == 1 ? "Deletes the folder and the copy Nexus unpacked. A game you installed stays."
+                    : "";
+                danger: choice == 1;
+                focused: Dl.remove-focus == choice;
+                name: choice == 0 ? "remove-keep" : choice == 1 ? "remove-delete" : "remove-not-now";
+                picked => { Dl.remove-focus = choice; Dl.answer-remove(choice); }
+            }
+            if root.torrent.folder != "" : Text {
+                text: root.torrent.folder;
+                font-size: 15 * Look.px;
+                color: Look.text3;
+                overflow: elide;
+                horizontal-alignment: root.align;
+            }
+        }
+    }
+}
+
+// Downloads, as the old launcher's Downloads sheet: one card per transfer, with its bar and
+// its buttons.
+export component DownloadsScreen inherits Rectangle {
+    property <bool> entered;
+    // After the first frame, so the entry animates from its start.
+    Timer { interval: 16ms; running: !root.entered; triggered => { root.entered = true; } }
+    background: #050914d9;
+    property <TextHorizontalAlignment> align: Look.rtl ? right : left;
+
+    // Keeps the focused card in view.
+    function reveal(y: length, h: length) {
+        let top = y - flick.absolute-position.y;
+        let margin = 120 * Look.px;
+        if (top + h > flick.height - margin) {
+            flick.viewport-y = Math.max(flick.height - flick.viewport-height, flick.viewport-y - (top + h - flick.height + margin));
+        } else if (top < margin) {
+            flick.viewport-y = Math.min(0, flick.viewport-y + (margin - top));
+        }
+    }
+
+    flick := Flickable {
+
+        // Up and down only: nothing drags sideways.
+
+        viewport-width: self.width;
+        x: 120 * Look.px;
+        y: 120 * Look.px;
+        width: root.width - 240 * Look.px;
+        height: root.height - self.y;
+        viewport-height: col.preferred-height + 120 * Look.px;
+        animate viewport-y { duration: Tokens.motion-normal; easing: ease-out-quad; }
+        col := VerticalLayout {
+            width: parent.width;
+            // The cards keep their own height; the room left over stays below them.
+            alignment: start;
+            spacing: 14 * Look.px;
+            y: root.entered ? 0 : 20 * Look.px;
+            opacity: root.entered ? 1 : 0;
+            animate y { duration: Tokens.motion-slow; easing: ease-out-expo; }
+            animate opacity { duration: Tokens.motion-normal; easing: ease-out-quad; }
+
+            Text { text: "Downloads"; font-size: 44 * Look.px; font-weight: 600; color: Tokens.color-text; horizontal-alignment: root.align; }
+            property <int> count: Vm.downloads.length + Vm.torrents.length;
+            // The VPN's state, then what downloads and shares, of all the transfers.
+            property <string> vpn: !Vm.vpn.only ? "" : Vm.vpn.route != "" ? "Protected by your VPN · " + Vm.vpn.route : "Waiting for your VPN";
+            if self.count > 0 || self.vpn != "" : Text {
+                text: parent.count == 0 ? parent.vpn
+                    : (parent.vpn != "" ? parent.vpn + " · " : "") + Vm.torrents-downloading + " downloading · " + Vm.torrents-sharing + " sharing · " + parent.count + " in all";
+                font-size: 19 * Look.px;
+                color: Tokens.color-text-muted;
+                wrap: word-wrap;
+                horizontal-alignment: root.align;
+                accessible-role: text;
+                accessible-label: "downloads-summary";
+                accessible-value: self.text;
+            }
+            // How transfers behave, as the core runs them.
+            Text {
+                text: "Downloads go on while Nexus is open, also when it is minimized, and stop when you close it. At the next start, unfinished ones come back paused. "
+                    + (Vm.seed-downloads
+                        ? "Finished downloads go on sharing while Nexus is open: Stop sharing stops one until the next start, and Keep sharing finished downloads, in Settings, stops them all."
+                        : "Finished downloads don't share: Keep sharing finished downloads is off in Settings.");
+                font-size: 17 * Look.px;
+                color: Look.text3;
+                wrap: word-wrap;
+                horizontal-alignment: root.align;
+                accessible-role: text;
+                accessible-label: "downloads-note";
+                accessible-value: self.text;
+            }
+            Rectangle { height: 8 * Look.px; }
+            for t[n] in Vm.torrents : card := Rectangle {
+                property <bool> failed: t.state == "failed" || t.install == "failed" || t.unpack == "failed";
+                property <bool> done: t.state == "complete";
+                property <bool> waiting: t.state == "resolving" || t.install == "installing";
+                property <bool> focused: Dl.row == n;
+                changed focused => { if (self.focused) { root.reveal(self.absolute-position.y, self.height); } }
+                background: self.failed ? #331727 : #101c32;
+                border-radius: 18 * Look.px;
+                border-width: self.focused ? 2 * Look.px : 1px;
+                border-color: self.focused ? Look.ring : Look.line;
+                accessible-role: text;
+                accessible-label: "torrent";
+                accessible-value: t.title + " " + t.state;
+                VerticalLayout {
+                    padding: 22 * Look.px;
+                    spacing: 10 * Look.px;
+                    HorizontalLayout {
+                        spacing: 20 * Look.px;
+                        Text {
+                            text: t.title + (t.version != "" ? " · " + t.version : "") + (t.region != "" ? " · " + t.region : "");
+                            font-size: 24 * Look.px;
+                            font-weight: 600;
+                            color: Tokens.color-text;
+                            overflow: elide;
+                            horizontal-stretch: 1;
+                            horizontal-alignment: root.align;
+                        }
+                        Text {
+                            text: t.install == "installing" ? "Installing"
+                                : t.install == "done" ? "Installed"
+                                : t.unpack == "unpacking" ? "Unpacking"
+                                : t.unpack == "failed" ? "Unpacking failed"
+                                : t.state == "resolving" ? "Reading its files"
+                                : t.state == "ready" ? "Ready: look at the files, then download"
+                                : t.state == "checking" ? "Checking"
+                                : t.state == "downloading" ? "Downloading"
+                                : t.state == "paused" ? (t.waiting-vpn ? "Paused · waiting for your VPN" : "Paused")
+                                : t.state == "complete" ? (t.seeding ? "Complete · sharing" : t.verifying ? "Complete · checking" : "Complete")
+                                : t.state == "failed" ? "Failed"
+                                : "Cancelled · the files stay";
+                            font-size: 17 * Look.px;
+                            color: card.failed ? Tokens.color-danger : card.done ? Tokens.color-success : #8dbaff;
+                            accessible-role: text;
+                            accessible-label: "torrent-state";
+                            accessible-value: self.text;
+                        }
+                    }
+                    ProgressBar {
+                        progress: t.install == "installing" ? t.install-progress : t.unpack == "unpacking" ? t.unpack-progress : t.progress;
+                        bar-color: card.done ? Tokens.color-success : card.failed ? Tokens.color-danger : Tokens.color-accent;
+                    }
+                    Text { text: t.detail; font-size: 18 * Look.px; color: Tokens.color-text-muted; overflow: elide; horizontal-alignment: root.align; }
+                    // The files to look at before Download: up to 100, in a list that scrolls.
+                    if t.state == "ready" : VerticalLayout {
+                        spacing: 6 * Look.px;
+                        Text {
+                            text: t.file-summary;
+                            font-size: 18 * Look.px;
+                            color: Tokens.color-text;
+                            horizontal-alignment: root.align;
+                            accessible-role: text;
+                            accessible-label: "torrent-file-summary";
+                            accessible-value: self.text;
+                        }
+                        // Six rows show; the rest scroll.
+                        Rectangle {
+                            height: Math.min(6, t.files.length) * 24 * Look.px;
+                            clip: true;
+                            Flickable {
+                                width: parent.width;
+                                height: parent.height;
+                                viewport-width: self.width;
+                                viewport-height: t.files.length * 24 * Look.px;
+                                accessible-role: list;
+                                accessible-label: "torrent-files";
+                                accessible-value: t.files.length;
+                                VerticalLayout {
+                                    width: parent.width;
+                                    alignment: start;
+                                    for f in t.files : Text {
+                                        height: 24 * Look.px;
+                                        vertical-alignment: center;
+                                        text: f;
+                                        font-size: 16 * Look.px;
+                                        color: Look.text3;
+                                        overflow: elide;
+                                        horizontal-alignment: root.align;
+                                        accessible-role: text;
+                                        accessible-label: "torrent-file";
+                                        accessible-value: f;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Text { text: t.folder; font-size: 15 * Look.px; color: Look.text3; overflow: elide; horizontal-alignment: root.align; }
+                    if t.error != "" : Text { text: t.error; font-size: 17 * Look.px; color: Tokens.color-danger; wrap: word-wrap; horizontal-alignment: root.align; }
+                    HorizontalLayout {
+                        spacing: 14 * Look.px;
+                        alignment: Look.rtl ? end : start;
+                        // While it looks up its files or installs, the first button says so
+                        // and does nothing; the keys skip it.
+                        if card.waiting : Button {
+                            text: t.install == "installing" ? "Installing…" : "Resolving…";
+                            primary: true;
+                            enabled: false;
+                            accessible-role: button;
+                            accessible-label: "torrent-placeholder";
+                            accessible-value: self.text;
+                        }
+                        for action[i] in t.actions : Button {
+                            primary: i == 0 && !card.waiting;
+                            focused: card.focused && Dl.at == i;
+                            text: action == "start" ? (t.state == "ready" ? "Download" : t.state == "paused" ? "Resume" : "Retry")
+                                : action == "pause" ? "Pause"
+                                : action == "cancel" ? (t.unpack == "unpacking" ? "Stop unpacking" : "Cancel")
+                                : action == "remove" ? "Remove"
+                                : action == "stop-seeding" ? "Stop sharing"
+                                : action == "install" ? (t.install == "failed" ? "Retry install" : t.unpack == "failed" || t.unpack == "cancelled" ? "Unpack and install" : "Install")
+                                : action == "remove-unpacked" ? "Remove unpacked files"
+                                : action == "cancel-install" ? "Cancel install"
+                                : "Play";
+                            accessible-role: button;
+                            accessible-label: "torrent-action:" + action;
+                            accessible-value: t.id;
+                            accessible-action-default => { self.clicked(); }
+                            clicked => { Dl.row = n; Dl.button = i; Dl.run(n, action); }
+                        }
+                        if Dl.has-folder(n) : Button {
+                            text: "Open folder";
+                            focused: card.focused && Dl.at == t.actions.length;
+                            accessible-role: button;
+                            accessible-label: "torrent-open-folder";
+                            accessible-value: t.id;
+                            accessible-action-default => { self.clicked(); }
+                            clicked => { Dl.row = n; Dl.button = t.actions.length; Host.open-download-folder(t.id); }
+                        }
+                    }
+                }
+            }
+            if Vm.downloads.length == 0 && Vm.torrents.length == 0 : Rectangle {
+                background: #10203c;
+                border-radius: 20 * Look.px;
+                VerticalLayout {
+                    padding: 52 * Look.px;
+                    spacing: 18 * Look.px;
+                    alignment: center;
+                    Text { text: "Nothing downloading yet"; font-size: 32 * Look.px; font-weight: 600; color: Tokens.color-text; horizontal-alignment: root.align; }
+                    Text {
+                        text: "Install an emulator in Emulators, or download a game from its Game Hub.";
+                        font-size: 21 * Look.px;
+                        color: Tokens.color-text-muted;
+                        wrap: word-wrap;
+                        horizontal-alignment: root.align;
+                    }
+                }
+            }
+            for job[i] in Vm.downloads : job-card := Rectangle {
+                property <bool> failed: job.state == "failed";
+                property <bool> done: job.state == "done";
+                property <bool> focused: Dl.row == Vm.torrents.length + i;
+                changed focused => { if (self.focused) { root.reveal(self.absolute-position.y, self.height); } }
+                background: self.failed ? #331727 : #101c32;
+                border-radius: 18 * Look.px;
+                border-width: self.focused ? 2 * Look.px : 1px;
+                border-color: self.focused ? Look.ring : Look.line;
+                VerticalLayout {
+                    padding: 22 * Look.px;
+                    spacing: 10 * Look.px;
+                    HorizontalLayout {
+                        spacing: 20 * Look.px;
+                        Text { text: job.label; font-size: 24 * Look.px; font-weight: 600; color: Tokens.color-text; overflow: elide; horizontal-stretch: 1; horizontal-alignment: root.align; }
+                        Text {
+                            text: Look.job-state-label(job.state);
+                            accessible-role: text;
+                            accessible-label: "download-state";
+                            accessible-value: self.text;
+                            font-size: 17 * Look.px;
+                            color: job.state == "failed" ? Tokens.color-danger : job.state == "done" ? Tokens.color-success : #8dbaff;
+                        }
+                    }
+                    ProgressBar {
+                        progress: job.progress;
+                        bar-color: job.state == "done" ? Tokens.color-success : job.state == "failed" ? Tokens.color-danger : Tokens.color-accent;
+                    }
+                    Text { text: job.progress-text; font-size: 18 * Look.px; color: Tokens.color-text-muted; overflow: elide; horizontal-alignment: root.align; }
+                    Text { text: job.plugin; font-size: 16 * Look.px; color: Look.text3; overflow: elide; horizontal-alignment: root.align; }
+                    if job.error != "" : Text { text: job.error; font-size: 17 * Look.px; color: Tokens.color-danger; wrap: word-wrap; horizontal-alignment: root.align; }
+                    HorizontalLayout {
+                        spacing: 14 * Look.px;
+                        alignment: Look.rtl ? end : start;
+                        if job.can-resume : Button {
+                            text: "Resume";
+                            primary: true;
+                            focused: job-card.focused && Dl.job-action(i, Dl.at) == "resume";
+                            clicked => { Dl.row = Vm.torrents.length + i; Dl.button = 0; Host.resume-download(job.id); }
+                        }
+                        if job.can-pause : Button {
+                            text: "Pause";
+                            focused: job-card.focused && Dl.job-action(i, Dl.at) == "pause";
+                            clicked => {
+                                Dl.row = Vm.torrents.length + i;
+                                Dl.button = job.can-resume ? 1 : 0;
+                                Host.pause-download(job.id);
+                            }
+                        }
+                        if job.can-cancel : Button {
+                            text: "Cancel";
+                            focused: job-card.focused && Dl.job-action(i, Dl.at) == "cancel";
+                            clicked => {
+                                Dl.row = Vm.torrents.length + i;
+                                Dl.button = Dl.job-actions(i) - 1;
+                                Host.cancel-download(job.id);
+                            }
+                        }
+                    }
+                }
+            }
+            // What the card's buttons never do.
+            if Vm.torrents.length > 0 : Text {
+                text: "Cancel never deletes your downloaded files, and Remove asks first whether they go too. Remove unpacked files deletes only the copies Nexus unpacked.";
+                font-size: 17 * Look.px;
+                color: Look.text3;
+                wrap: word-wrap;
+                horizontal-alignment: root.align;
+                accessible-role: text;
+                accessible-label: "downloads-footer";
+                accessible-value: self.text;
+            }
+        }
+    }
+
+    if Dl.installing : InstallSheet {
+        width: root.width;
+        height: root.height;
+        torrent: Vm.torrents[Dl.install];
+    }
+    if Dl.removing : RemoveSheet {
+        width: root.width;
+        height: root.height;
+        torrent: Vm.torrents[Dl.remove];
+    }
+}

@@ -1,0 +1,142 @@
+import { Vm, Host, Notice } from "../types.slint";
+import { Tokens } from "../tokens.slint";
+import { Look } from "look.slint";
+import { Icon } from "icon.slint";
+import { Button } from "button.slint";
+
+// The notices on screen. Delete on a keyboard, or Create on a pad, closes the newest one that
+// is not closing yet; each card closes itself after a while.
+export global Notices {
+    // The notice the player closed last, by id.
+    in-out property <int> closing: -1;
+    out property <int> count: Vm.notice-cards.length;
+    // Closes the newest notice that is not closing yet. The ids grow from the oldest to the
+    // newest, and there are at most three.
+    public function close-newest() {
+        let a = root.count > 0 ? Vm.notice-cards[root.count - 1].id : -1;
+        let b = root.count > 1 ? Vm.notice-cards[root.count - 2].id : -1;
+        let c = root.count > 2 ? Vm.notice-cards[root.count - 3].id : -1;
+        let inside = root.closing >= 0 && (root.closing == a || root.closing == b || root.closing == c);
+        let next = !inside ? a : root.closing == a ? b : root.closing == b ? c : -1;
+        if (next >= 0) { root.closing = next; }
+    }
+    // The colour of a kind: info, success or error.
+    public pure function tint(kind: string) -> color {
+        kind == "error" ? Tokens.color-danger : kind == "success" ? Tokens.color-success : Tokens.color-info
+    }
+}
+
+// The art of the game a notice is about, else the sign of its kind.
+component NoticeSign inherits Rectangle {
+    in property <Notice> notice;
+    width: 48 * Look.px;
+    height: 48 * Look.px;
+    border-radius: 13 * Look.px;
+    clip: true;
+    background: Notices.tint(root.notice.kind).with-alpha(0.18);
+    accessible-role: text;
+    accessible-label: "notice-kind";
+    accessible-value: root.notice.kind;
+    if root.notice.art.width == 0 : Icon {
+        name: root.notice.kind == "error" ? "alert" : root.notice.kind == "success" ? "check" : "info";
+        color: Notices.tint(root.notice.kind);
+        width: 26 * Look.px;
+        height: 26 * Look.px;
+    }
+    if root.notice.art.width > 0 : Image { source: root.notice.art; width: parent.width; height: parent.height; image-fit: cover; }
+}
+
+// One notice, as the old launcher's notification card: the game's art or the kind's sign, the
+// text, and what it opens. It slides in from the side and stays long enough to read: 4 s, or
+// 10 s for one with something to open. Then it slides out, and the core closes it.
+component NoticeCard inherits Rectangle {
+    in property <Notice> notice;
+    property <bool> shown;
+    property <bool> leaving;
+    property <bool> gone;
+    property <bool> in-view: self.shown && !self.leaving;
+    // The player closed this one.
+    property <bool> closed: Notices.closing == root.notice.id;
+    changed closed => { if (self.closed) { self.leaving = true; } }
+    // After the first frame, so the entry animates from its start.
+    Timer { interval: 16ms; running: !root.shown; triggered => { root.shown = true; } }
+    Timer {
+        interval: root.notice.opens != "" ? 10s : 4s;
+        running: !root.leaving;
+        triggered => { root.leaving = true; }
+    }
+    // Once it slid out, the core closes it.
+    Timer {
+        interval: Tokens.motion-slow;
+        running: root.leaving && !root.gone;
+        triggered => { root.gone = true; Host.dismiss-notice(root.notice.id); }
+    }
+    width: 480 * Look.px;
+    height: row.preferred-height;
+    // The stack's layout places this; the card slides inside it.
+    card := Rectangle {
+        x: (root.in-view ? 0 : (Look.rtl ? -60 : 60)) * Look.px;
+        width: root.width;
+        height: root.height;
+        opacity: root.in-view ? 1 : 0;
+        animate x { duration: Tokens.motion-slow; easing: ease-out-expo; }
+        animate opacity { duration: Look.timed(Tokens.motion-normal - 20ms); easing: ease-out-quad; }
+        border-radius: 18 * Look.px;
+        background: #141c33fa;
+        border-width: 1px;
+        border-color: #ffffff1f;
+        drop-shadow-blur: 36 * Look.px;
+        drop-shadow-offset-y: 10 * Look.px;
+        drop-shadow-color: #00000099;
+        row := HorizontalLayout {
+            padding: 18 * Look.px;
+            spacing: 16 * Look.px;
+            // Right to left, the sign is on the right and the button on the left.
+            if !Look.rtl : NoticeSign { notice: root.notice; }
+            if Look.rtl : VerticalLayout {
+                alignment: center;
+                Button { text: "Dismiss"; clicked => { root.leaving = true; } }
+            }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                alignment: center;
+                spacing: 6 * Look.px;
+                Text {
+                    text: root.notice.text;
+                    font-size: 17 * Look.px;
+                    color: Tokens.color-text;
+                    horizontal-alignment: Look.rtl ? right : left;
+                    wrap: word-wrap;
+                    accessible-role: text;
+                    accessible-label: "notice";
+                    accessible-value: self.text;
+                }
+                // The notice's subject, one click away.
+                if root.notice.opens != "" : Text {
+                    text: root.notice.opens + (Look.rtl ? " ‹" : " ›");
+                    font-size: 16 * Look.px;
+                    font-weight: 600;
+                    color: Tokens.color-info;
+                    horizontal-alignment: Look.rtl ? right : left;
+                    accessible-role: button;
+                    accessible-label: "notice-open";
+                    accessible-value: root.notice.opens;
+                    accessible-action-default => { Host.open-notice(root.notice.id); }
+                    TouchArea { mouse-cursor: pointer; clicked => { Host.open-notice(root.notice.id); } }
+                }
+            }
+            if !Look.rtl : VerticalLayout {
+                alignment: center;
+                Button { text: "Dismiss"; clicked => { root.leaving = true; } }
+            }
+            if Look.rtl : NoticeSign { notice: root.notice; }
+        }
+    }
+}
+
+// The notices, oldest at the top, on the far side from the reading start.
+export component NoticeStack inherits VerticalLayout {
+    spacing: 12 * Look.px;
+    alignment: start;
+    for n in Vm.notice-cards : NoticeCard { notice: n; }
+}
