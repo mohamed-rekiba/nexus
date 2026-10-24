@@ -58,7 +58,7 @@ libc = "0.2"
 # KDE's windows on Wayland, through KWin's scripting over D-Bus (src/desktop.rs). Already in
 # the lock file through winit.
 [target.'cfg(target_os = "linux")'.dependencies]
-zbus = { version = "5.14", default-features = false, features = ["async-io", "blocking-api"] }
+zbus = { version = "5.19", default-features = false, features = ["async-io", "blocking-api"] }
 
 # The window in front, and bringing a window to it (src/desktop.rs), and the local time.
 # Already in the lock file through winit and tokio.
