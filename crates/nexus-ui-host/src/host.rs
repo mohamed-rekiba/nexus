@@ -36,6 +36,8 @@ pub enum UiRequest {
     Quit,
     /// Close the launcher and start it again, for a kept launcher update to go in.
     Restart,
+    /// Close the launcher and end the Nexus session, back to the login screen.
+    LogOut,
     /// The trailer player: play an `https://` video, pause or go on, seek, close.
     Trailer(TrailerRequest),
     /// Render again: the theme moved a grid, and other covers are near the screen now.
@@ -765,6 +767,7 @@ impl ThemeHost {
         callback("set-volume", Box::new(move |a| system(SystemCommand::SetVolume(int(a, 0).min(100) as u8))))?;
         callback("set-muted", Box::new(move |a| system(SystemCommand::SetMuted(flag(a, 0)))))?;
         callback("restart-pc", Box::new(move |_| system(SystemCommand::Restart)))?;
+        callback("log-out", Box::new(move |_| Some(UiRequest::LogOut)))?;
         callback("shut-down-pc", Box::new(move |_| system(SystemCommand::ShutDown)))?;
         callback("check-os-update", Box::new(move |_| system(SystemCommand::CheckOsUpdate)))?;
         callback("install-os", Box::new(move |a| system(SystemCommand::InstallOs(arg(a, 0).into()))))?;

@@ -11,13 +11,15 @@ import { Osk, TextField } from "keyboard.slint";
 //   1   UPDATES: "Update automatically", "Nexus updates"
 //   2   LAUNCHER: full screen, size of everything, back to the launcher, interface sounds,
 //       start at login (in an installed build), the screen (with two monitors or more), quit
+//       ("Restart Nexus" when Nexus is the whole screen: the session starts it again)
 //   3   DOWNLOADS: "Download only through a VPN", one row per VPN (one that says none when
 //       there is none), "Add a VPN" where the system can, then "Keep sharing finished
 //       downloads". Where the system can't bind downloads to a VPN: the switch and sharing.
 //   4   THIS PC: processor, memory, graphics, then one verdict per emulator (they only show)
 //   5   SYSTEM, when Nexus is the whole screen: Internet, Sound, Bluetooth (each opens its
 //       panel), Nexus OS updates (on Nexus OS), "Install Nexus OS on this PC" (on its USB
-//       stick), then Restart and Shut down, which ask again before they act
+//       stick), then Log out (the Nexus session on a desktop), Restart and Shut down, which
+//       ask again before they act
 // On a theme's page:
 //   0   "Use this theme"
 //   1   its options, when it is the one in use
@@ -68,7 +70,10 @@ export global Prefs {
     // SYSTEM's rows after Internet, Sound and Bluetooth (-1 for one that doesn't show).
     out property <int> os-row: Vm.system.os-update != "" ? 3 : -1;
     out property <int> install-row: Vm.system.stick ? 3 + (root.os-row >= 0 ? 1 : 0) : -1;
-    out property <int> restart-row: 3 + (root.os-row >= 0 ? 1 : 0) + (root.install-row >= 0 ? 1 : 0);
+    // Log out only on a desktop: on Nexus OS the session would just start again.
+    out property <int> logout-row: Vm.system.nexus-os ? -1 : 3 + (root.os-row >= 0 ? 1 : 0) + (root.install-row >= 0 ? 1 : 0);
+    out property <int> restart-row: 3 + (root.os-row >= 0 ? 1 : 0) + (root.install-row >= 0 ? 1 : 0)
+        + (root.logout-row >= 0 ? 1 : 0);
     out property <int> system-rows: Vm.system.power-available ? root.restart-row + 2 : root.restart-row;
 
     public pure function rows(section: int) -> int {

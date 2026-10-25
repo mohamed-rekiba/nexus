@@ -188,6 +188,10 @@ game doesn't have it:
 10. "Settings"
 11. "Uninstall", in red, when `Vm.detail.can-uninstall`
 
+When Nexus is the whole screen (the Nexus session, Nexus OS), the menu leaves out "Open game
+folder", "View emulator log", "Compatibility list" and "ProtonDB page": no file manager or
+browser is on screen to open them in.
+
 Rows are labelled `game-menu`. The focus opens on the first item off the Game Hub, and on the
 second in it. "Uninstall" asks in the same card: "Uninstall <title>?" (`uninstall-title`), "Its
 folder is deleted from your game folder. A download it came from stays in Downloads.", then
@@ -257,9 +261,10 @@ automatically". Sections, in order:
 |---|---|
 | GAMES | One row per folder (`folder:<name>`, with `~` for the home folder), "Rescan game folders" (`rescan`) |
 | UPDATES | "Update automatically" (`auto-update`), "Nexus updates" (`launcher-update`: check, download, restart) |
-| LAUNCHER | "Full screen", "Size of everything" (80% to 140%), "Back to the launcher", "Interface sounds", "Start at login" (installed builds only), "Screen" (two monitors or more), "Quit Nexus" (red, hint "Ctrl+Q") |
+| LAUNCHER | "Full screen", "Size of everything" (80% to 140%), "Back to the launcher", "Interface sounds", "Start at login" (installed builds only), "Screen" (two monitors or more), "Quit Nexus" (`quit`, red, hint "Ctrl+Q"), or "Restart Nexus" (`restart-nexus`) when Nexus is the whole screen, where the session starts it again |
 | DOWNLOADS | "Download only through a VPN" (`vpn-only`), one row per VPN (`vpn`) or "Your VPN" (`vpn-none`), "Add a VPN" (`vpn-import`, Linux with NetworkManager), "Keep sharing finished downloads" (`seed-downloads`) |
 | THIS PC | "Checking this PC…", then "Processor", "Memory", one "Graphics" row per card, and one row per emulator ("KytyPS5 games: May run slowly · Integrated GPU") |
+| SYSTEM | When Nexus is the whole screen: "Internet", "Sound", "Bluetooth", Nexus OS's updates, "Install Nexus OS on this PC" (its USB stick), "Log out" (`system-log-out`, the Nexus session on a desktop only: Nexus OS's session would start again), "Restart" (`system-restart`) and "Shut down" (`system-shut-down`). Log out, Restart and Shut down ask again: the first press arms them, the second acts. |
 | ABOUT | The logo, "Nexus", "N plugins · M emulators", "Games from every emulator, in one place" |
 
 "Size of everything" moves a tenth at a time. Left and Right stop at the ends; Enter goes round.

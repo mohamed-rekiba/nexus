@@ -611,6 +611,9 @@ export global Host {
     callback set-muted(bool);
     // The PC: restart or shut down; Nexus OS: look for an update now.
     callback restart-pc();
+    // The Nexus session on a desktop (whole-screen, not nexus-os): end it, back to the login
+    // screen.
+    callback log-out();
     callback shut-down-pc();
     callback check-os-update();
     // Nexus OS's USB stick: erase this disk (its path) and install; or start the installer that

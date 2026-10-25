@@ -141,6 +141,7 @@ impl Composed {
                 | UiRequest::OpenPath(_)
                 | UiRequest::Quit
                 | UiRequest::Restart
+                | UiRequest::LogOut
                 | UiRequest::Trailer(_) => {}
                 UiRequest::Render => self.ui.render().unwrap(),
             }

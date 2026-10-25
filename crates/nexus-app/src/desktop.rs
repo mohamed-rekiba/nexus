@@ -193,6 +193,12 @@ mod system {
         true
     }
 
+    /// Under Gamescope, tags the launcher's window so Gamescope shows it: in its Steam mode it
+    /// shows no window without an id. False until the window is there, and outside Gamescope.
+    pub fn claim_gamescope() -> bool {
+        gamescope() && gamescope_show(&[std::process::id()], LAUNCHER_APPID)
+    }
+
     pub fn has_window(ids: &[u32]) -> Option<bool> {
         if let Some(kwin) = super::kwin::Kwin::get() {
             return kwin.has_window(ids);
@@ -514,6 +520,16 @@ fn with_group(id: u32) -> Vec<u32> {
     #[cfg(windows)]
     let ids = system::tree(id);
     ids
+}
+
+/// Puts the launcher on screen under Gamescope, once its window is there: Gamescope's Steam
+/// mode shows nothing until a window carries an id, and winit sets none. True when done; false
+/// while the window isn't up yet, and always outside Gamescope (Linux only).
+pub fn claim_gamescope() -> bool {
+    #[cfg(target_os = "linux")]
+    return system::claim_gamescope();
+    #[cfg(not(target_os = "linux"))]
+    false
 }
 
 impl Desktop for SystemDesktop {

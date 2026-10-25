@@ -245,7 +245,7 @@ them. The main groups:
 | `can-play-trailers`, `has-trailer`, `trailer`, `trailer-frame` | The trailer player |
 | `viewport` (`Viewport`) | Window size, scale, size of everything, aspect, breakpoint |
 | `input-mode`, `pad-name` | `pointer`, `gamepad` or `touch`; the controller's name |
-| `system` (`System`) | The machine: `whole-screen`, `nexus-os`, `stick`; the network, Wi-Fi list, sound, Bluetooth and devices, battery, power, Nexus OS's update, the stick's disks, and running jobs. Each part has `*-available` and a `*-reason`. The callbacks `join-wifi`, `set-volume`, `pair-device`, `restart-pc`, `install-os` and the rest change it |
+| `system` (`System`) | The machine: `whole-screen`, `nexus-os`, `stick`; the network, Wi-Fi list, sound, Bluetooth and devices, battery, power, Nexus OS's update, the stick's disks, and running jobs. Each part has `*-available` and a `*-reason`. The callbacks `join-wifi`, `set-volume`, `pair-device`, `restart-pc`, `install-os` and the rest change it. `log-out` (UI API 0.1.1) ends the Nexus session on a desktop |
 | `pad-key` | True while a controller's button is delivered as a key: a keyboard's keys leave it false |
 
 Recent additions to know about:

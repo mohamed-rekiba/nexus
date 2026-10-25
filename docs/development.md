@@ -172,7 +172,7 @@ Three switches make Nexus behave as it does on Nexus OS, for this run, on any Li
 
 | Switch | What shows |
 |---|---|
-| `NEXUS_SESSION=1` | Nexus as the whole screen, as the Nexus session sets it: the network, sound and Bluetooth controls in the top bar, the on-screen keyboard for text fields, and Restart and Shut down |
+| `NEXUS_SESSION=1` | Nexus as the whole screen, as the Nexus session sets it: the network, sound and Bluetooth controls in the top bar, the on-screen keyboard for text fields, Log out, Restart and Shut down, and "Restart Nexus" in place of "Quit Nexus" |
 | `NEXUS_OS=1` | Also Nexus OS: the launcher updates with the system, and Settings has System updates |
 | `NEXUS_USB=1` | Also Nexus OS's USB stick: "Install Nexus OS" |
 

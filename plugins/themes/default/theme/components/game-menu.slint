@@ -23,15 +23,17 @@ export global GameMenu {
     in-out property <string> uninstall-title;
     out property <bool> hub: Vm.screen != "game-detail";
     out property <int> actions: Vm.detail.actions.length;
+    // Nothing outside Nexus is on screen when it's the whole screen: no file manager or browser.
+    out property <bool> outside: !Vm.system.whole-screen;
     // The fixed items after the emulator's actions.
     out property <[{ id: string, label: string, icon: string, on: bool }]> items: [
         { id: "settings-game", label: "Game settings", icon: "gear", on: Vm.detail.settings.length > 0 },
-        { id: "folder", label: "Open game folder", icon: "folder", on: Vm.detail.has-folder },
-        { id: "log", label: "View emulator log", icon: "log", on: Vm.detail.has-log },
+        { id: "folder", label: "Open game folder", icon: "folder", on: Vm.detail.has-folder && root.outside },
+        { id: "log", label: "View emulator log", icon: "log", on: Vm.detail.has-log && root.outside },
         { id: "trailer", label: "Watch trailer", icon: "film", on: Vm.detail.trailer-url != "" },
         { id: "rate", label: "Rate how it runs", icon: "star", on: true },
-        { id: "compat", label: "Compatibility list", icon: "web", on: Vm.detail.compat-page != "" },
-        { id: "protondb", label: "ProtonDB page", icon: "web", on: Vm.detail.protondb-url != "" },
+        { id: "compat", label: "Compatibility list", icon: "web", on: Vm.detail.compat-page != "" && root.outside },
+        { id: "protondb", label: "ProtonDB page", icon: "web", on: Vm.detail.protondb-url != "" && root.outside },
         { id: "settings", label: "Settings", icon: "gear", on: true },
         { id: "hide", label: Vm.detail.hidden ? "Show in the Catalog" : "Hide from the Catalog",
             icon: Vm.detail.hidden ? "eye" : "eye-off", on: Vm.detail.releases.length > 0 },

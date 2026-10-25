@@ -263,14 +263,16 @@ export component SettingsScreen inherits Rectangle {
                     }
                     Value { kind: "choice"; text: Vm.monitor != "" ? Vm.monitor : "The one it is on"; focused: parent.focused; }
                 }
+                // As the whole screen, the session starts Nexus again after it quits: there the row
+                // says so. Log out and the power rows in SYSTEM leave the session.
                 Row {
-                    label: "Quit Nexus";
-                    hint: "Ctrl+Q";
+                    label: Vm.system.whole-screen ? "Restart Nexus" : "Quit Nexus";
+                    hint: Vm.system.whole-screen ? "Starts Nexus again · Ctrl+Q" : "Ctrl+Q";
                     focused: Prefs.is(2, Prefs.quit-row);
                     danger: true;
                     last: true;
                     accessible-role: button;
-                    accessible-label: "quit";
+                    accessible-label: Vm.system.whole-screen ? "restart-nexus" : "quit";
                     accessible-action-default => { Host.quit(); }
                     reveal(y, h) => { root.reveal(y, h); }
                     clicked => { Prefs.section = 2; Prefs.row = Prefs.quit-row; Host.quit(); }
@@ -545,7 +547,31 @@ export component SettingsScreen inherits Rectangle {
                     changed seen => { if (self.focused && Prefs.pending == 0) { Setup.go("disks"); } }
                     Value { text: "Install"; tone: 3; }
                 }
-                // Restart and Shut down ask again: the first press arms them, the second acts.
+                // Log out, Restart and Shut down ask again: the first press arms them, the second
+                // acts.
+                if Vm.system.whole-screen && Prefs.logout-row >= 0 : Row {
+                    property <bool> armed;
+                    label: "Log out";
+                    hint: "Back to the login screen";
+                    focused: Prefs.is(5, Prefs.logout-row);
+                    last: Prefs.system-rows == Prefs.logout-row + 1;
+                    danger: self.armed;
+                    accessible-role: button;
+                    accessible-label: "system-log-out";
+                    accessible-value: self.armed ? "armed" : "";
+                    accessible-action-default => { self.act(); }
+                    changed focused => { if (!self.focused) { self.armed = false; } }
+                    reveal(y, h) => { root.reveal(y, h + (self.last ? 180 * Look.px : 0)); }
+                    clicked => { Prefs.section = 5; Prefs.row = Prefs.logout-row; self.act(); }
+                    property <int> seen: Prefs.serial;
+                    changed seen => { if (self.focused && Prefs.pending == 0) { self.act(); } }
+                    function act() {
+                        if (!self.armed) { self.armed = true; return; }
+                        self.armed = false;
+                        Host.log-out();
+                    }
+                    Value { text: parent.armed ? "Press again to log out" : ""; tone: 2; }
+                }
                 for power[i] in Vm.system.whole-screen && Vm.system.power-available ? ["Restart", "Shut down"] : [] : Row {
                     property <bool> armed;
                     label: power;
