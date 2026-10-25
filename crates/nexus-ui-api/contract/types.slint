@@ -472,6 +472,10 @@ export global Vm {
     // True while the host delivers a controller's button as a key press, false for a
     // keyboard's: a theme tells the two apart with it (an on-screen keyboard opens for one).
     in-out property <bool> pad-key;
+    // Goes up by one each time the player asks for the power menu with the pad (the PS, Xbox or
+    // Logitech button, held, with no game running; a hold over a game closes it): the theme opens
+    // it when this changes.
+    in-out property <int> power-menu;
     // The connected controller's name, for example "DualSense Wireless Controller"; empty for none.
     in-out property <string> pad-name;
     // The monitors' names, and the one the player chose for the launcher ("" for the one it is on).

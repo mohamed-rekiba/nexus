@@ -247,6 +247,7 @@ them. The main groups:
 | `input-mode`, `pad-name` | `pointer`, `gamepad` or `touch`; the controller's name |
 | `system` (`System`) | The machine: `whole-screen`, `nexus-os`, `stick`; the network, Wi-Fi list, sound, Bluetooth and devices, battery, power, Nexus OS's update, the stick's disks, and running jobs. Each part has `*-available` and a `*-reason`. The callbacks `join-wifi`, `set-volume`, `pair-device`, `restart-pc`, `install-os` and the rest change it. `log-out` (UI API 0.1.1) ends the Nexus session on a desktop |
 | `pad-key` | True while a controller's button is delivered as a key: a keyboard's keys leave it false |
+| `power-menu` | Goes up by one each time the PS or Xbox button is held with no game running (UI API 0.1.1): a theme opens its power menu when it changes |
 
 Recent additions to know about:
 
@@ -439,12 +440,14 @@ button into a key press the theme already handles (`PadButton::action` in
 | L1 / LB | `LeftShoulder` | `Key.Backtab` |
 | L2 / LT | `LeftTrigger` | `Key.PageUp` |
 | R2 / RT | `RightTrigger` | `Key.PageDown` |
-| PS / Xbox | `Guide` | No key: the host opens Home, or while a game runs switches between the game and the launcher |
+| PS / Xbox (Logitech's too) | `Guide` | A tap, no key: the host opens Home; while a game runs, a tap does nothing |
+| PS / Xbox, held 600 ms | `GuideHeld` | No key: while a game runs, the host closes it at once. Else `Vm.power-menu` goes up by one, and the default theme opens its power menu |
 
 A held button or stick repeats after 380 ms, then every 85 ms, as a key press with
 `event.repeat` set, so a theme can ignore repeats where a second press would do harm. The default
 theme ignores a repeated Return. While a game's window is in front, or the launcher's window
-doesn't have the focus, only the PS button reaches the launcher.
+doesn't have the focus, only the PS button reaches the launcher. The PS button never repeats:
+the host waits for it to go up (a tap) or to be held 600 ms (close the game, or the power menu).
 
 Handle the keys in a `FocusScope`:
 

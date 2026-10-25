@@ -22,6 +22,7 @@ import { BootScreen } from "components/boot.slint";
 import { ResultPrompt, Ask } from "components/result-prompt.slint";
 import { Lingering } from "components/lingering.slint";
 import { GameMenu, GameMenuSheet } from "components/game-menu.slint";
+import { PowerMenu, PowerMenuSheet } from "components/power-menu.slint";
 import { Viewer, ShotViewer } from "components/shot-viewer.slint";
 import { Trailers, TrailerPlayer } from "components/trailer-player.slint";
 import { Notices, NoticeStack } from "components/notices.slint";
@@ -157,6 +158,9 @@ export component Shell inherits Window {
         key-pressed(event) => {
             // A held Enter doesn't repeat: it would play, download or install again.
             if (event.repeat && event.text == Key.Return) { return accept; }
+            // The power menu, over everything: the PS or Xbox button held (Vm.power-menu), or Ctrl+P.
+            if (PowerMenu.open) { PowerMenu.key(event.text); return accept; }
+            if (event.modifiers.control && (event.text == "p" || event.text == "P")) { PowerMenu.show(); return accept; }
             // The Welcome screen: Enter is Start, once the library is in.
             if (Vm.boot.welcome) {
                 if (event.text == Key.Return && Vm.boot.ready && Vm.art-ready) { Host.finish-welcome(); }
@@ -277,6 +281,7 @@ export component Shell inherits Window {
         if GameMenu.open : GameMenuSheet { width: parent.width; height: parent.height; }
         if Vm.has-result-prompt : ResultPrompt { width: parent.width; height: parent.height; }
         if Setup.shown : InstallOs { width: parent.width; height: parent.height; }
+        if PowerMenu.open : PowerMenuSheet { width: parent.width; height: parent.height; }
     }
 
     // The shown game's menu and trailer: the keys that open them work here.
@@ -285,7 +290,10 @@ export component Shell inherits Window {
         && (Vm.screen == "game-detail" || (root.home && Nav.has-detail && !Nav.extra));
     property <bool> trailer-key: root.game-keys && Vm.detail.trailer-url != "";
     property <bool> overlay: Vm.has-install-prompt || GameMenu.open || Vm.has-trailer || Viewer.open || Nav.sort-open
-        || Osk.open;
+        || Osk.open || PowerMenu.open;
+    // The PS or Xbox button, held: the host counts it up.
+    property <int> power-asks: Vm.power-menu;
+    changed power-asks => { PowerMenu.show(); }
     // No pill over the Library's and the Catalog's cards, as the old launcher: it would cover
     // their titles. Over their header rows (search, filters, genres) it says how the keys move.
     // Over a trailer, the hints hide with its controls.

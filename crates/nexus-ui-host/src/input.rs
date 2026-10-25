@@ -26,8 +26,10 @@ pub enum PadButton {
     /// L2 and R2.
     LeftTrigger,
     RightTrigger,
-    /// The PS or Xbox button.
+    /// The PS or Xbox button (Logitech's too).
     Guide,
+    /// The PS or Xbox button, held: closes the running game, else the power menu.
+    GuideHeld,
 }
 
 /// What a button does.
@@ -35,8 +37,11 @@ pub enum PadButton {
 pub enum PadAction {
     /// Sent to the theme as this key.
     Key(slint::SharedString),
-    /// Back to the library, whatever the screen.
+    /// Back to the library, whatever the screen; nothing while a game runs.
     Home,
+    /// Closes the running game at once; with none, the power menu: log out, restart Nexus,
+    /// restart, shut down.
+    Power,
     Nothing,
 }
 
@@ -57,6 +62,7 @@ impl PadButton {
             // Create, Share or View: closes the notice.
             Self::Select => key(Key::Delete),
             Self::Guide => PadAction::Home,
+            Self::GuideHeld => PadAction::Power,
             // Triangle: search. Square: the trailer. L1: the screen before. L2 and R2: a page.
             Self::North => PadAction::Key("/".into()),
             // Not a letter: in the Library a typed "t" searches, Square still plays the trailer.

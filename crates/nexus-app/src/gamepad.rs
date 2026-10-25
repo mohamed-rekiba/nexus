@@ -1,7 +1,9 @@
 //! Controllers, read with `gilrs` on a thread of their own. DualSense, DualShock 4, Xbox and
 //! most pads with a standard mapping work. The d-pad and the left stick move; a held button or
 //! stick repeats after 380 ms, then every 85 ms. Each press goes to the UI thread as a
-//! [`PadButton`], marked when it is a repeat.
+//! [`PadButton`], marked when it is a repeat. The PS or Xbox button doesn't repeat: a tap is
+//! Home (nothing while a game runs), and held for [`GUIDE_HOLD`] it closes the running game, or with none opens the power
+//! menu.
 
 use std::time::{Duration, Instant};
 
@@ -27,6 +29,52 @@ fn button(b: Button) -> Option<PadButton> {
         Button::Mode => PadButton::Guide,
         _ => return None,
     })
+}
+
+/// How long the PS or Xbox button is held to close the game or open the power menu.
+pub const GUIDE_HOLD: Duration = Duration::from_millis(600);
+
+/// The PS or Xbox button: a tap or a hold. Nothing goes out when it goes down, since a tap and
+/// a hold start the same way: a release before [`GUIDE_HOLD`] is the tap, [`PadButton::Guide`];
+/// still down at [`GUIDE_HOLD`] is the hold, [`PadButton::GuideHeld`], once.
+#[derive(Default)]
+pub struct GuideHold {
+    down: Option<Instant>,
+    held: bool,
+}
+
+impl GuideHold {
+    pub fn press(&mut self, now: Instant) {
+        if self.down.is_none() {
+            self.down = Some(now);
+            self.held = false;
+        }
+    }
+
+    /// The tap, when it went up before it was a hold.
+    pub fn release(&mut self) -> Option<PadButton> {
+        let tap = self.down.take().is_some() && !self.held;
+        tap.then_some(PadButton::Guide)
+    }
+
+    /// The hold, once, when it has been down [`GUIDE_HOLD`] at `now`.
+    pub fn due(&mut self, now: Instant) -> Option<PadButton> {
+        let down = self.down?;
+        (!self.held && now >= down + GUIDE_HOLD).then(|| {
+            self.held = true;
+            PadButton::GuideHeld
+        })
+    }
+
+    /// How long until the hold is due, while it can still come.
+    pub fn wait(&self, now: Instant) -> Option<Duration> {
+        self.down.filter(|_| !self.held).map(|down| (down + GUIDE_HOLD).saturating_duration_since(now))
+    }
+
+    /// A controller came or went: nothing is down.
+    pub fn clear(&mut self) {
+        self.down = None;
+    }
 }
 
 /// How far a stick goes before it counts as a press, and how far back before it lets go.
@@ -166,9 +214,17 @@ pub fn spawn(press: impl Fn(PadButton, bool) + Send + 'static, named: impl Fn(Op
         named(first(&gilrs));
         let mut stick = Stick::default();
         let mut held = Repeater::default();
+        let mut guide = GuideHold::default();
         loop {
-            if let Some(event) = gilrs.next_event_blocking(Some(held.wait(Instant::now()))) {
+            let now = Instant::now();
+            let wait = guide.wait(now).map_or(held.wait(now), |g| g.clamp(Duration::from_millis(1), held.wait(now)));
+            if let Some(event) = gilrs.next_event_blocking(Some(wait)) {
                 let pressed = match event.event {
+                    EventType::ButtonPressed(Button::Mode, _) => {
+                        guide.press(Instant::now());
+                        None
+                    }
+                    EventType::ButtonReleased(Button::Mode, _) => guide.release(),
                     EventType::ButtonPressed(b, _) => button(b).inspect(|&b| held.press(b, Instant::now())),
                     EventType::ButtonReleased(b, _) => {
                         if let Some(b) = button(b) {
@@ -192,11 +248,13 @@ pub fn spawn(press: impl Fn(PadButton, bool) + Send + 'static, named: impl Fn(Op
                     EventType::Connected => {
                         tracing::info!(name = gilrs.gamepad(event.id).name(), "controller connected");
                         held.clear();
+                        guide.clear();
                         named(first(&gilrs));
                         None
                     }
                     EventType::Disconnected => {
                         held.clear();
+                        guide.clear();
                         named(first(&gilrs));
                         None
                     }
@@ -207,6 +265,10 @@ pub fn spawn(press: impl Fn(PadButton, bool) + Send + 'static, named: impl Fn(Op
                     press(pressed, false);
                 }
                 gilrs.inc();
+            }
+            if let Some(hold) = guide.due(Instant::now()) {
+                tracing::debug!("controller guide held");
+                press(hold, false);
             }
             for repeated in held.due(Instant::now()) {
                 tracing::debug!(button = ?repeated, "controller repeat");
@@ -243,6 +305,29 @@ mod tests {
         assert_eq!(held.due(at(2380)), [PadButton::South], "a second press doesn't restart the wait");
         held.clear();
         assert_eq!(held.due(at(9000)), [], "a controller went: nothing is held");
+    }
+
+    #[test]
+    fn a_tap_on_the_guide_button_is_home_and_a_hold_is_the_power_menu_once() {
+        let start = Instant::now();
+        let at = |ms| start + Duration::from_millis(ms);
+        let mut guide = GuideHold::default();
+        assert_eq!(guide.wait(start), None, "nothing down: no wait");
+        guide.press(start);
+        assert_eq!(guide.due(at(599)), None, "not a hold yet");
+        assert_eq!(guide.wait(at(100)), Some(Duration::from_millis(500)));
+        assert_eq!(guide.release(), Some(PadButton::Guide), "a tap");
+        assert_eq!(guide.due(at(2000)), None, "up: nothing comes later");
+
+        guide.press(at(3000));
+        assert_eq!(guide.due(at(3600)), Some(PadButton::GuideHeld), "held 600 ms");
+        assert_eq!(guide.due(at(4000)), None, "once");
+        assert_eq!(guide.wait(at(4000)), None);
+        assert_eq!(guide.release(), None, "the hold's release is no tap");
+
+        guide.press(at(5000));
+        guide.clear();
+        assert_eq!(guide.due(at(6000)), None, "a controller went: nothing is down");
     }
 
     #[test]

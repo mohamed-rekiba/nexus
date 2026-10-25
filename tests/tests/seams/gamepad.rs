@@ -88,8 +88,7 @@ fn until(host: &mut Composed, what: &str, done: impl Fn(&nexus_core::Core) -> bo
 }
 
 #[test]
-fn while_a_game_is_in_front_the_pad_is_the_game_s_and_the_ps_button_comes_back() {
-    use nexus_testkit::{Shown, Signal};
+fn while_a_game_is_in_front_the_pad_is_the_game_s_and_a_ps_button_tap_too() {
     let mut host = composed(|h| h.plugin(playable_games("emu-a", vec!["Alpha"])));
     host.ui.start().unwrap();
     host.dispatch(Command::RefreshLibrary);
@@ -100,30 +99,30 @@ fn while_a_game_is_in_front_the_pad_is_the_game_s_and_the_ps_button_comes_back()
     // What the theme asked for as the game started (it selects the running game).
     host.pump();
 
-    // Cross in the game is the game's: the launcher behind it does nothing.
-    for button in [PadButton::South, PadButton::Right, PadButton::South, PadButton::East] {
+    // Cross in the game is the game's: the launcher behind it does nothing. A tap of the PS
+    // button does nothing either: only a hold reaches the launcher, and closes the game.
+    for button in [PadButton::South, PadButton::Right, PadButton::Guide, PadButton::South, PadButton::East] {
         host.ui.pad(button).unwrap();
     }
     assert!(host.requests.borrow().is_empty(), "{:?}", host.requests.borrow());
-
-    // The PS button brings the launcher back.
-    press(&mut host, PadButton::Guide);
-    assert!(!host.core().game_in_front());
-    assert_eq!(host.test.desktop.shown().last(), Some(&Shown::Launcher));
-
-    // Resume is first, so Cross goes back to the game.
-    settle(&mut host);
-    press(&mut host, PadButton::South);
-    assert!(host.core().game_in_front(), "Resume");
-    assert_eq!(host.test.desktop.shown().last(), Some(&Shown::Game(process.id)));
+    assert!(host.core().game_in_front());
     assert!(process.signals().is_empty(), "the game still runs");
+}
 
-    // Back in the launcher, Right then Cross stops the game.
-    press(&mut host, PadButton::Guide);
-    settle(&mut host);
-    press(&mut host, PadButton::Right);
-    press(&mut host, PadButton::South);
+#[test]
+fn holding_the_ps_button_closes_a_running_game_at_once_and_opens_no_power_menu() {
+    use nexus_testkit::Signal;
+    let mut host = composed(|h| h.plugin(playable_games("emu-a", vec!["Alpha"])));
+    host.ui.start().unwrap();
+    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Launch("emu-a:G0".parse().unwrap()));
+    until(&mut host, "the game is in front", |core| core.game_in_front());
+    let process = host.test.spawner.spawned()[0].clone();
+    host.pump();
+
+    press(&mut host, PadButton::GuideHeld);
     until(&mut host, "the game was asked to close", |_| process.signals().contains(&Signal::Terminate));
+    assert_eq!(host.count("power-menu"), 0, "no power menu while a game runs");
 }
 
 #[test]

@@ -1,0 +1,113 @@
+import { Vm, Host } from "../types.slint";
+import { Tokens } from "../tokens.slint";
+import { Look } from "look.slint";
+import { MenuRow } from "game-menu.slint";
+
+// Leaving Nexus, from any screen: hold the PS, Xbox or Logitech button with no game running
+// (`Vm.power-menu` goes up; over a game the hold closes it), or press Ctrl+P. When Nexus is the whole screen: Log out (the Nexus session on a desktop; on
+// Nexus OS the session would only start again), Restart Nexus, Restart and Shut down. In a
+// desktop's window: Quit Nexus. Restart and Shut down ask again, as in Settings: the first press
+// arms them, the second acts. Up and down move, Enter picks, Escape closes.
+export global PowerMenu {
+    in-out property <bool> open;
+    in-out property <int> focus;
+    // The item pressed once, which the next press carries out; -1 for none.
+    in-out property <int> armed: -1;
+    out property <bool> whole: Vm.system.whole-screen;
+    out property <[{ id: string, label: string, icon: string, on: bool }]> items: [
+        { id: "log-out", label: "Log out", icon: "user", on: root.whole && !Vm.system.nexus-os },
+        { id: "quit", label: root.whole ? "Restart Nexus" : "Quit Nexus", icon: root.whole ? "bolt" : "close", on: true },
+        { id: "restart", label: "Restart", icon: "power", on: root.whole && Vm.system.power-available },
+        { id: "shut-down", label: "Shut down", icon: "power", on: root.whole && Vm.system.power-available },
+    ];
+
+    public function show() {
+        root.open = true;
+        root.armed = -1;
+        root.focus = root.items[0].on ? 0 : 1;
+        Host.play-sound("select");
+    }
+    public function close() { root.open = false; root.armed = -1; }
+    // The next shown item that way, or the same one at an end.
+    function step(delta: int) {
+        let a = Math.clamp(root.focus + delta, 0, root.items.length - 1);
+        let b = Math.clamp(a + delta, 0, root.items.length - 1);
+        root.focus = root.items[a].on ? a : root.items[b].on ? b : root.focus;
+        root.armed = -1;
+    }
+    public function key(text: string) {
+        if (text == Key.UpArrow || text == Key.DownArrow) {
+            root.step(text == Key.DownArrow ? 1 : -1);
+            Host.play-sound("move");
+        } else if (text == Key.Return) {
+            root.pick(root.focus);
+        } else if (text == Key.Escape || text == Key.Backspace) {
+            root.close();
+            Host.play-sound("back");
+        }
+    }
+    public function pick(i: int) {
+        root.focus = i;
+        let id = root.items[i].id;
+        // The PC's power asks again first.
+        if ((id == "restart" || id == "shut-down") && root.armed != i) {
+            root.armed = i;
+            Host.play-sound("select");
+            return;
+        }
+        root.close();
+        Host.play-sound("select");
+        if (id == "log-out") { Host.log-out(); }
+        if (id == "quit") { Host.quit(); }
+        if (id == "restart") { Host.restart-pc(); }
+        if (id == "shut-down") { Host.shut-down-pc(); }
+    }
+}
+
+export component PowerMenuSheet inherits Rectangle {
+    property <bool> entered;
+    // After the first frame, so the entry animates from its start.
+    Timer { interval: 16ms; running: !root.entered; triggered => { root.entered = true; } }
+    background: root.entered ? #03050c99 : #03050c00;
+    animate background { duration: Look.timed(200ms); }
+    TouchArea { clicked => { PowerMenu.close(); } }
+    Rectangle {
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        opacity: root.entered ? 1 : 0;
+        transform-scale: root.entered ? 1.0 : 0.94;
+        animate opacity { duration: Look.timed(180ms); easing: ease-out-quad; }
+        animate transform-scale { duration: Look.timed(320ms); easing: ease-out-back; }
+        width: 440 * Look.px;
+        height: col.preferred-height;
+        border-radius: 22 * Look.px;
+        background: #121a31fa;
+        border-width: 1px;
+        border-color: Look.line;
+        drop-shadow-blur: 40 * Look.px;
+        drop-shadow-color: #00000099;
+        TouchArea {}
+        col := VerticalLayout {
+            padding: 18 * Look.px;
+            padding-bottom: 12 * Look.px;
+            spacing: 0;
+            Text {
+                text: "Nexus";
+                font-size: 20 * Look.px;
+                font-weight: 600;
+                color: Tokens.color-text-muted;
+                horizontal-alignment: Look.rtl ? right : left;
+            }
+            Rectangle { height: 18 * Look.px; }
+            for item[i] in PowerMenu.items : MenuRow {
+                on: item.on;
+                label: PowerMenu.armed == i ? "Press again to " + (item.id == "restart" ? "restart" : "shut down") : item.label;
+                icon: item.icon;
+                focused: PowerMenu.focus == i;
+                danger: PowerMenu.armed == i;
+                name: "power-menu";
+                picked => { PowerMenu.pick(i); }
+            }
+        }
+    }
+}

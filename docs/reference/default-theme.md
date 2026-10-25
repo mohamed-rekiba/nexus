@@ -201,6 +201,20 @@ folder is deleted from your game folder. A download it came from stays in Downlo
 "Rate how it runs" opens the result prompt for that game. Open game folder and View emulator
 log name the game, never a path: the host resolves the folder through the plugin's grants.
 
+### The power menu
+
+Holding the PS, Xbox or Logitech button (`Vm.power-menu`) or Ctrl+P opens it over any screen
+(`components/power-menu.slint`); a tap still goes Home. While a game runs, the hold closes the
+game at once instead, and the menu doesn't open. Items, each `power-menu`:
+
+1. "Log out", when Nexus is the whole screen and not Nexus OS (`Host.log-out`)
+2. "Restart Nexus" when Nexus is the whole screen, else "Quit Nexus" (`Host.quit`)
+3. "Restart" and 4. "Shut down", when Nexus is the whole screen and the system can
+   (`Host.restart-pc`, `Host.shut-down-pc`)
+
+Restart and Shut down ask again: the first press turns the row red and says "Press again to
+restart" or "to shut down"; moving away cancels it. Up and down move, Enter picks, Escape closes.
+
 ### Game settings
 
 "Game settings" opens a side sheet (`screens/game-settings.slint`) with the game's title
@@ -346,6 +360,7 @@ The pad acts only while the launcher's window has the focus and no game is in fr
 | T | The trailer, outside the Library and the Catalog (where T types) |
 | Ctrl+D | Downloads |
 | Ctrl+Q | Quit |
+| Ctrl+P | The power menu |
 | Page Up, Page Down | Page the grid |
 | Delete | Close the newest notice |
 | A letter or digit in the grid | Start a search with it |

@@ -106,6 +106,8 @@ pub struct ThemeHost {
     boot_ready_at: Option<std::time::Instant>,
     /// The launcher's window has the keyboard focus. The app sets it from the window system.
     window_focused: bool,
+    /// How many times the power menu was asked for: `Vm.power-menu`, which the theme watches.
+    power_asks: i32,
     /// The view the last render bound: an image coming in binds it again, without asking the
     /// core for a new one.
     last_view: Option<nexus_ui_api::AppView>,
@@ -153,6 +155,7 @@ impl ThemeHost {
             art_ready: false,
             boot_ready_at: None,
             window_focused: true,
+            power_asks: 0,
             last_view: None,
             cards: bind::CardModels::default(),
         }
@@ -418,7 +421,9 @@ impl ThemeHost {
     /// [`PadButton::action`]) while `Vm.pad-key` is true, and `Vm.input-mode` becomes `gamepad`.
     ///
     /// While a game's window is in front, or the launcher's window doesn't have the focus, the
-    /// pad is the other window's: only the PS button reaches the launcher, to bring it back.
+    /// pad is the other window's: only the PS button held reaches the launcher, to close the
+    /// running game at once (with no game, it opens the power menu). A tap while a game runs
+    /// does nothing.
     pub fn pad(&mut self, button: crate::PadButton) -> Result<(), ThemeError> {
         self.pad_press(button, false)
     }
@@ -431,7 +436,8 @@ impl ThemeHost {
 
     fn pad_press(&mut self, button: crate::PadButton, repeat: bool) -> Result<(), ThemeError> {
         let action = button.action();
-        if action != crate::PadAction::Home && (self.core.game_in_front() || !self.window_focused) {
+        let reaches = matches!(action, crate::PadAction::Home | crate::PadAction::Power);
+        if !reaches && (self.core.game_in_front() || !self.window_focused) {
             return Ok(());
         }
         if self.input_mode.as_deref() != Some("gamepad") {
@@ -454,11 +460,22 @@ impl ThemeHost {
                     let _ = live.instance.set_global_property("Vm", "pad-key", Value::Bool(false));
                 }
             }
-            // While a game runs, the PS button goes between the game and the launcher.
-            crate::PadAction::Home if self.core.game_running() => {
-                (self.requests)(UiRequest::Core(Command::ToggleFocus))
-            }
+            // While a game runs, a tap of the PS button does nothing: a hold closes the game.
+            crate::PadAction::Home if self.core.game_running() => {}
             crate::PadAction::Home => (self.requests)(UiRequest::Core(Command::Navigate(Route::Home))),
+            // While a game runs, the PS button held closes it at once.
+            crate::PadAction::Power if self.core.game_running() => {
+                for session in self.core.running_sessions() {
+                    (self.requests)(UiRequest::Core(Command::Stop(session)));
+                }
+            }
+            crate::PadAction::Power => {
+                self.power_asks += 1;
+                if let Some(live) = &self.live {
+                    let _ =
+                        live.instance.set_global_property("Vm", "power-menu", Value::Number(self.power_asks.into()));
+                }
+            }
             crate::PadAction::Nothing => {}
         }
         Ok(())

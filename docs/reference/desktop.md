@@ -160,12 +160,14 @@ At the end:
 The Guide button (PS or Xbox) is not sent to the theme as a key. In
 `crates/nexus-ui-host/src/host.rs`:
 
-- While a game runs, it sends `Command::ToggleFocus`. With the game in front, the core shows
-  the launcher and sets `game_in_front` to false. Otherwise it shows the game, and sets
-  `game_in_front` to true when the game came up.
-- With no game running, it opens Home.
+- A tap while a game runs does nothing: the game keeps the screen.
+- A tap with no game running opens Home.
+- A hold (600 ms) while a game runs sends `Command::Stop` for each running game, at once,
+  with no question.
+- A hold with no game running opens the power menu (`Vm.power-menu`).
 
-The theme's Resume button calls `Host.show-game`, which is the same as the second case.
+The theme's Resume button calls `Host.show-game`, which shows the game again when the launcher
+is in front of it.
 
 ## The pad acts only while the launcher has the focus
 
