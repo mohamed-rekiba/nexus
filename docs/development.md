@@ -22,7 +22,7 @@ in [architecture.md](architecture.md).
 | Tool | For | Install |
 |---|---|---|
 | cargo-deny | `make deny`: advisories, licences and sources (`deny.toml`) | `cargo install --locked cargo-deny` |
-| cargo-about | The crates' licences in a package (`about.toml`, `about.hbs`) | `cargo install --locked cargo-about --version 0.9.2` |
+| cargo-about | The crates' licences in a package (`about.toml`, `about.hbs`) | `cargo install --locked cargo-about --version 0.9.2 --features cli` |
 | pre-commit | The git hooks | `pipx install pre-commit`, or `brew install pre-commit` |
 | shellcheck | Checking the shell scripts | `sudo dnf install ShellCheck`, `sudo apt-get install shellcheck` |
 
@@ -56,7 +56,7 @@ To build: a C toolchain, `pkg-config`, and the development files for fontconfig 
 | | Fedora | Debian and Ubuntu |
 |---|---|---|
 | Build | `gcc gcc-c++ make pkgconf-pkg-config fontconfig-devel libxkbcommon-devel systemd-devel alsa-lib-devel` | `build-essential pkg-config libfontconfig1-dev libxkbcommon-dev libudev-dev libasound2-dev` |
-| Run (all optional) | `xdotool xprop mpv-libs libarchive vulkan-loader mesa-vulkan-drivers wine NetworkManager` | `xdotool x11-utils libmpv2 libarchive13 libvulkan1 mesa-vulkan-drivers wine network-manager` |
+| Run (all optional) | `xdotool xprop mpv-libs libarchive vulkan-loader mesa-vulkan-drivers wine NetworkManager gtk2 libpng12` | `xdotool x11-utils libmpv2 libarchive13 libvulkan1 mesa-vulkan-drivers wine network-manager libgtk2.0-0t64` |
 | Package | `cmake patchelf xz-devel libzstd-devel bzip2-devel lz4-devel zlib-ng-compat-devel mpv mpv-devel` | `cmake patchelf liblzma-dev libzstd-dev libbz2-dev liblz4-dev zlib1g-dev libmpv-dev mpv` |
 
 Nexus starts without any of the run packages. Each turns on one feature:
@@ -65,6 +65,12 @@ Nexus starts without any of the run packages. Each turns on one feature:
   (`x11-utils` on Debian). On KDE Plasma's Wayland session KWin does it over D-Bus, with nothing
   to install. On another Wayland desktop only games under XWayland come to the front.
 - libmpv plays trailers in the window. Without it, trailers open in the browser.
+- GTK 2 and libpng 1.2 run old Linux games' own launchers, which their start scripts open
+  (Frozenbyte's, for Trine 3 from GOG). The packages depend on them.
+- 32-bit libraries (the C library, X11, OpenGL, Vulkan, sound, fonts: the `.i686` packages)
+  run a game that brings its own 32-bit Wine. The rpm depends on them; the deb and Arch
+  packages don't, since those systems need the i386 architecture or the multilib repository
+  turned on first.
 - libarchive unpacks RAR, tar.xz, tar.bz2, tar.zst and ISO downloads. The release packages ship
   their own copy.
 - The Vulkan loader and a driver give the "This PC" check each card's Vulkan version.
@@ -125,6 +131,12 @@ package on Ubuntu as CI does. The AppImage needs
 | `make run-windowed` | `cargo run -p nexus-app -- --windowed` |
 | `make build` | `cargo build -p nexus-app --release` |
 | `make package` | `scripts/package.sh`: a release package in `dist/nexus-<os>-<arch>/` |
+| `make linux-packages` | `make package`, then the deb, rpm and Arch packages in `dist/packages/`, checked. Linux. It bundles libmpv and libarchive and checks the packages, so it needs, on Fedora: `sudo dnf install mpv-libs patchelf cmake xz-devel libzstd-devel bzip2-devel lz4-devel zlib-ng-compat-devel dpkg bsdtar zstd` and `cargo install --locked cargo-about --version 0.9.2 --features cli`; on Ubuntu, what `.github/actions/libmpv`, `libarchive` and `linux-packages` install. nfpm comes from `scripts/nfpm.sh`, the version CI pins |
+| `make appimage` | `make package`, then `dist/Nexus-x86_64.AppImage`. Linux; needs `LINUXDEPLOY` |
+| `make test-rpm` | `scripts/test-rpm.sh`: a quick rpm of this checkout in `dist/test-rpm/`, to try a change on this PC, such as the Nexus session. It builds the launcher and takes the rest from the latest release's Linux folder. Its version, `<version>^local.<UTC time>`, installs over that release, and the next release replaces it |
+| `make os-image` | The Nexus OS image as `localhost/nexus-os:minimal` (`OS_IMAGE`), with `sudo podman`. It bundles the latest release's rpm, or `RPM=<file>`, such as `make test-rpm`'s |
+| `make os-iso` | The USB stick, `nexus-os-x86_64.iso`, from that image ([os/README.md](../os/README.md#build-and-test-locally)) |
+| `make os-vm` | Starts the stick in QEMU with Secure Boot and a 64 GB disk to install on (needs `edk2-ovmf`) |
 | `make deny` | `cargo deny check` |
 | `make hooks-install` | `pre-commit install --hook-type pre-commit --hook-type pre-push` |
 | `make hooks-run` | `pre-commit run --all-files` |

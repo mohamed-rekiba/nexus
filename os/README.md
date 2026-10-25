@@ -138,35 +138,24 @@ settings.
 ## Build and test locally
 
 The images and the stick need podman as root (bootc-base-imagectl, rechunking and image-builder
-need real privileges, loop devices included). From the repository root:
+need real privileges, loop devices included); the scripts run it with sudo. `os.yml` runs the same
+scripts. From the repository root:
 
 ```bash
-# The nexus rpm: from the latest release, or a local one (packaging/linux/build-packages.sh) copied to os/nexus-rpm/.
-os/fetch-nexus.sh
-sudo podman build --cap-add=all --security-opt=label=disable --device /dev/fuse \
-  -f os/Containerfile -t localhost/nexus-os:minimal-build .
-sudo podman run --rm --privileged -v /var/lib/containers:/var/lib/containers quay.io/fedora/fedora-bootc:44 \
-  /usr/libexec/bootc-base-imagectl rechunk localhost/nexus-os:minimal-build ghcr.io/<owner>/nexus-os:minimal
-sudo podman run --rm --privileged -v /var/lib/containers:/var/lib/containers -v "$PWD:/src" -w /src \
-  -e CORE=ghcr.io/<owner>/nexus-os:minimal quay.io/fedora/fedora-bootc:44 os/build-iso.sh nexus-os-x86_64.iso
+os/fetch-nexus.sh          # the latest release's rpm into os/nexus-rpm/ (or copy a local one there)
+os/build-image.sh          # localhost/nexus-os:minimal
+os/make-iso.sh             # nexus-os-x86_64.iso from it
+os/run-vm.sh               # starts it in QEMU (below)
 ```
 
-Add `-e METHOD=xorriso` to the last command for the hand-made ISO.
+`make os-image`, `make os-iso` and `make os-vm` run them; `make os-image RPM=<file>` bundles a
+local rpm, such as `make test-rpm`'s.
 
-Boot the ISO in a UEFI VM as a USB stick, with Secure Boot, 6 GB of memory, and a disk to install
-on. With QEMU and Fedora's `edk2-ovmf`:
+`METHOD=xorriso os/make-iso.sh` makes the hand-made ISO.
 
-```bash
-qemu-img create -f qcow2 disk.qcow2 64G
-cp /usr/share/edk2/ovmf/OVMF_VARS.secboot.fd vars.fd
-qemu-system-x86_64 -enable-kvm -machine q35,smm=on -m 6G -smp 4 \
-  -global driver=cfi.pflash01,property=secure,value=on \
-  -drive if=pflash,format=raw,readonly=on,file=/usr/share/edk2/ovmf/OVMF_CODE.secboot.fd \
-  -drive if=pflash,format=raw,file=vars.fd \
-  -device qemu-xhci -drive if=none,id=stick,format=raw,file=nexus-os-x86_64.iso \
-  -device usb-storage,drive=stick,bootindex=1 \
-  -drive file=disk.qcow2,if=virtio -nic user,model=virtio
-```
+`os/run-vm.sh` boots the ISO in a UEFI VM as a USB stick, with Secure Boot, 6 GB of memory, and
+a 64 GB disk to install on (`os-vm.qcow2`, kept between starts; delete it to start over). It
+needs QEMU and Fedora's `edk2-ovmf`.
 
 The ISO from a test run of `os.yml` works too: its `nexus-os-iso` artifact. To check the
 partitioning install, give that disk an NTFS partition first and keep it in Anaconda's disk

@@ -16,6 +16,13 @@ for list in debs rpms arch; do
     declare -n files="$list"
     [ ${#files[@]} -le 1 ] || { echo "more than one $list package in $dir" >&2; exit 1; }
 done
+# The tools each kind of package needs, named for both kinds of system.
+need() { # <command> <what to install>
+    command -v "$1" > /dev/null || { echo "check-packages: no $1: install $2" >&2; exit 1; }
+}
+[ ${#debs[@]} -eq 0 ] || need dpkg-deb "dpkg (Fedora) or dpkg-dev"
+[ ${#rpms[@]} -eq 0 ] || { need rpm rpm; need bsdtar "bsdtar (Fedora) or libarchive-tools"; }
+[ ${#arch[@]} -eq 0 ] || need zstd zstd
 
 want=(
     usr/lib/nexus/nexus
@@ -30,10 +37,11 @@ want=(
     usr/share/wayland-sessions/nexus.desktop
     usr/share/icons/hicolor/512x512/apps/nexus.png
 )
-# What Nexus loads by name, which each package must depend on.
-deb_deps=(libasound2 libfontconfig1 libxkbcommon0 xdotool x11-utils)
-rpm_deps=(alsa-lib fontconfig libxkbcommon xdotool xprop)
-arch_deps=(alsa-lib fontconfig libxkbcommon xdotool xorg-xprop)
+# What Nexus loads by name, and what old Linux games' launchers need, which each package must
+# depend on.
+deb_deps=(libasound2 libfontconfig1 libxkbcommon0 xdotool x11-utils libgtk2.0-0)
+rpm_deps=(alsa-lib fontconfig libxkbcommon xdotool xprop gtk2 libpng12 'glibc(x86-32)' 'libX11(x86-32)' 'mesa-dri-drivers(x86-32)')
+arch_deps=(alsa-lib fontconfig libxkbcommon xdotool xorg-xprop gtk2)
 fail=0
 # Each check reads a listing of "MODE PATH" lines, PATH without its leading / or ./ and
 # trailing /, which normalise() makes.

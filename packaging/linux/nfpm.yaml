@@ -65,8 +65,13 @@ contents:
     expand: true
 
 # What Nexus links and loads at run time (sound, fonts, controllers, the window, Vulkan for This
-# PC), the tools it runs to bring games to the front (ps, xdotool, xprop), and, recommended, the
-# session's display servers and the tools of Settings → System (NetworkManager, BlueZ, pactl).
+# PC), the tools it runs to bring games to the front (ps, xdotool, xprop), what old Linux games'
+# own launchers need (GTK 2, and libpng 1.2 where the system has it: Trine 3's GOG start.sh runs
+# Frozenbyte's launcher), and, recommended, the session's display servers and the tools of
+# Settings → System (NetworkManager, BlueZ, pactl). Debian, Ubuntu and Arch have no libpng 1.2
+# package (Arch's is in the AUR). Only the rpm depends on the 32-bit libraries that a game's own
+# 32-bit Wine needs: Debian and Ubuntu need the i386 architecture added first, Arch the multilib
+# repository.
 overrides:
   deb:
     depends:
@@ -80,6 +85,7 @@ overrides:
       - procps
       - xdotool
       - x11-utils
+      - libgtk2.0-0t64 | libgtk2.0-0
     recommends:
       - gamescope
       - cage
@@ -99,6 +105,30 @@ overrides:
       - procps-ng
       - xdotool
       - xprop
+      - gtk2
+      - libpng12
+      # 32-bit libraries, for a game that brings its own 32-bit Wine (a portable Wine wrapper):
+      # the C library, X11 for its window, OpenGL and Vulkan, sound and fonts.
+      - glibc(x86-32)
+      - libgcc(x86-32)
+      - libX11(x86-32)
+      - libXext(x86-32)
+      - libXcomposite(x86-32)
+      - libXcursor(x86-32)
+      - libXfixes(x86-32)
+      - libXinerama(x86-32)
+      - libXi(x86-32)
+      - libXrandr(x86-32)
+      - libXrender(x86-32)
+      - libXxf86vm(x86-32)
+      - mesa-libGL(x86-32)
+      - mesa-dri-drivers(x86-32)
+      - mesa-vulkan-drivers(x86-32)
+      - vulkan-loader(x86-32)
+      - alsa-lib(x86-32)
+      - pulseaudio-libs(x86-32)
+      - freetype(x86-32)
+      - fontconfig(x86-32)
     recommends:
       - gamescope
       - cage
@@ -118,6 +148,7 @@ overrides:
       - procps-ng
       - xdotool
       - xorg-xprop
+      - gtk2
     # Arch's optional dependencies.
     suggests:
       - gamescope

@@ -120,9 +120,11 @@ make package        # a release build in dist/nexus-<os>-<arch>/
 | Windows PC games | [umu-launcher](#umu-launcher-for-windows-games) (runs them with Proton), or `wine` | [umu-launcher](#umu-launcher-for-windows-games), or `wine` | The game's Game Hub says to install one |
 | An old Windows game filling the screen at its own resolution (its Resolution setting) | `gamescope` | `gamescope` (Debian 12, backports for 13; Ubuntu where your release has it) | Play says to install it, or to set the game's Resolution back to Your screen |
 | Saved VPN connections in Settings | `NetworkManager` | `network-manager` | Only the VPNs already up show |
+| Old Linux games whose start script opens the game's own launcher (Trine 3 from GOG). The Nexus packages depend on these | `gtk2 libpng12` | `libgtk2.0-0t64` (no libpng 1.2 package) | The game closes right after it starts, with code 127 in its log |
+| A game that brings its own 32-bit Wine (a portable Wine wrapper's `start.sh`). The Nexus rpm depends on these | `glibc.i686 libgcc.i686 libX11.i686 libXext.i686 libXcomposite.i686 libXcursor.i686 libXfixes.i686 libXinerama.i686 libXi.i686 libXrandr.i686 libXrender.i686 libXxf86vm.i686 mesa-libGL.i686 mesa-dri-drivers.i686 mesa-vulkan-drivers.i686 vulkan-loader.i686 alsa-lib.i686 pulseaudio-libs.i686 freetype.i686 fontconfig.i686` | The same libraries for `i386`, after `sudo dpkg --add-architecture i386` | Its script says "There is a problem running Wine binary!", or Wine says no driver could be loaded |
 
-All of them on Fedora: `sudo dnf install xdotool xprop mpv-libs libarchive vulkan-loader mesa-vulkan-drivers wine gamescope NetworkManager`.
-On Debian and Ubuntu: `sudo apt-get install xdotool x11-utils libmpv2 libarchive13 libvulkan1 mesa-vulkan-drivers wine network-manager`.
+All of them on Fedora: `sudo dnf install xdotool xprop mpv-libs libarchive vulkan-loader mesa-vulkan-drivers wine gamescope NetworkManager gtk2 libpng12`.
+On Debian and Ubuntu: `sudo apt-get install xdotool x11-utils libmpv2 libarchive13 libvulkan1 mesa-vulkan-drivers wine network-manager libgtk2.0-0t64`.
 
 #### umu-launcher, for Windows games
 

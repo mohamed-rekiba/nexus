@@ -16,7 +16,8 @@ mkdir -p "$appdir/usr/bin/extensions"
 cp -R "$package/licenses/." "$appdir/usr/share/licenses/nexus/"
 cp "$package/LICENSE" "$appdir/usr/share/licenses/nexus/"
 cp "$package/README.md" "$appdir/usr/share/doc/nexus/"
-libmpv="$(ldconfig -p | awk '/libmpv\.so\.[0-9]/ {print $NF; exit}')"
+# awk reads to the end: stopping early would end ldconfig with SIGPIPE, which pipefail fails on.
+libmpv="$(ldconfig -p | awk '/libmpv\.so\.[0-9]/ && !found {print $NF; found = 1}')"
 
 # Runners have no FUSE: run linuxdeploy from its extracted files.
 export APPIMAGE_EXTRACT_AND_RUN=1

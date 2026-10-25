@@ -12,6 +12,8 @@
 # Needs, per system:
 #   macOS    cmake, and Homebrew's zstd, lz4 and dylibbundler
 #   Linux    cmake, patchelf, and liblzma-dev, libzstd-dev, libbz2-dev, liblz4-dev, zlib1g-dev
+#            (Debian, Ubuntu); xz-devel, libzstd-devel, bzip2-devel, lz4-devel, zlib-ng-compat-devel
+#            (Fedora)
 #   Windows  LIBARCHIVE_DIR: the DLLs and a licenses/ folder
 set -euo pipefail
 os="$1"
@@ -29,7 +31,12 @@ build() {
     local archive="$work/libarchive-$VERSION.tar.xz"
     curl -fsSL --retry 3 -o "$archive" \
         "https://github.com/libarchive/libarchive/releases/download/v$VERSION/libarchive-$VERSION.tar.xz"
-    echo "$SHA256  $archive" | shasum -a 256 -c - > /dev/null
+    # sha256sum on Linux, shasum on macOS.
+    if command -v sha256sum > /dev/null; then
+        echo "$SHA256  $archive" | sha256sum -c - > /dev/null
+    else
+        echo "$SHA256  $archive" | shasum -a 256 -c - > /dev/null
+    fi
     mkdir "$work/src"
     tar -xJf "$archive" -C "$work/src" --strip-components 1
     cmake -S "$work/src" -B "$work/build" -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON \
@@ -37,8 +44,9 @@ build() {
         -DENABLE_LIBXML2=OFF -DENABLE_EXPAT=OFF -DENABLE_OPENSSL=OFF -DENABLE_NETTLE=OFF \
         -DENABLE_MBEDTLS=OFF -DENABLE_LIBB2=OFF -DENABLE_ACL=OFF -DENABLE_XATTR=OFF \
         -DENABLE_ICONV=OFF -DENABLE_CNG=OFF -DENABLE_LZO=OFF -DENABLE_PCREPOSIX=OFF \
-        -DENABLE_PCRE2POSIX=OFF -DENABLE_LIBGCC=OFF > "$work/cmake.log" 2>&1
-    cmake --build "$work/build" -j 4 > "$work/build.log" 2>&1
+        -DENABLE_PCRE2POSIX=OFF -DENABLE_LIBGCC=OFF > "$work/cmake.log" 2>&1 \
+        || { tail -n 30 "$work/cmake.log" >&2; exit 1; }
+    cmake --build "$work/build" -j 4 > "$work/build.log" 2>&1 || { tail -n 30 "$work/build.log" >&2; exit 1; }
     built="$work/build/libarchive"
     cp "$work/src/COPYING" "$licences/COPYING"
 }
@@ -67,6 +75,9 @@ case "$os" in
         source="libarchive $VERSION, built from its release with zlib, bzip2, xz (the system's), zstd and lz4 (Homebrew's)"
         ;;
     linux)
+        for tool in cmake patchelf; do
+            command -v "$tool" > /dev/null || { echo "bundle-libarchive: install $tool" >&2; exit 1; }
+        done
         build
         cp -L "$built/libarchive.so.13" "$lib_dir/"
         # Its codecs, but not the C runtime or zlib, which every system has.
@@ -80,10 +91,26 @@ case "$os" in
             # shellcheck disable=SC2016 # $ORIGIN is for the loader, not the shell.
             [ -e "$copied" ] && patchelf --set-rpath '$ORIGIN' "$copied"
         done
-        for dep in liblzma5 libzstd1 libbz2-1.0 liblz4-1; do
-            cp "/usr/share/doc/$dep/copyright" "$licences/copyright.$dep"
-        done
-        source="libarchive $VERSION, built from its release with Ubuntu's xz, zstd, bzip2 and lz4 libraries"
+        # Debian's copyright files, unless rpm owns the codecs (Fedora, also with dpkg installed).
+        # The system's copy of a codec (ldd now finds the one beside libarchive).
+        codec=$(ldconfig -p | awk '$1 ~ /^liblzma\.so\./ && !found {print $NF; found = 1}')
+        if ! { command -v rpm > /dev/null && rpm -qf "$codec" > /dev/null 2>&1; }; then
+            for dep in liblzma5 libzstd1 libbz2-1.0 liblz4-1; do
+                cp "/usr/share/doc/$dep/copyright" "$licences/copyright.$dep"
+            done
+            source="libarchive $VERSION, built from its release with Ubuntu's xz, zstd, bzip2 and lz4 libraries"
+        else
+            # An rpm system (Fedora): each codec's licence files, as its package lists them.
+            for copied in "$lib_dir"/liblzma* "$lib_dir"/libzstd* "$lib_dir"/libbz2* "$lib_dir"/liblz4*; do
+                [ -e "$copied" ] || continue
+                owner=$(ldconfig -p | awk -v n="$(basename "$copied")" '$1 == n && !found {print $NF; found = 1}')
+                package=$(rpm -qf --queryformat '%{NAME}' "$owner")
+                rpm -qL "$package" | while read -r licence; do
+                    cp "$licence" "$licences/$(basename "$licence").$package"
+                done
+            done
+            source="libarchive $VERSION, built from its release with this system's xz, zstd, bzip2 and lz4 libraries"
+        fi
         ;;
     windows)
         : "${LIBARCHIVE_DIR:?set LIBARCHIVE_DIR to the libarchive DLLs from MSYS2}"

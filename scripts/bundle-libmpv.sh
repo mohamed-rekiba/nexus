@@ -6,7 +6,7 @@
 #
 # Needs, per system (the libmpv action in .github installs them):
 #   macOS    Homebrew's mpv and dylibbundler
-#   Linux    libmpv-dev, mpv and patchelf
+#   Linux    libmpv-dev, mpv and patchelf (Debian, Ubuntu); mpv-libs and patchelf (Fedora)
 #   Windows  LIBMPV_DIR: an unpacked shinchiro mpv-dev build (libmpv-2.dll)
 set -euo pipefail
 os="$1"
@@ -63,7 +63,14 @@ case "$os" in
         source="Homebrew's mpv formula, $version (https://formulae.brew.sh/formula/mpv)"
         ;;
     linux)
-        lib="$(ldconfig -p | awk '/libmpv\.so\.[0-9]/ {print $NF; exit}')"
+        # awk reads to the end: stopping early would end ldconfig with SIGPIPE, which pipefail fails on.
+        lib="$(ldconfig -p | awk '/libmpv\.so\.[0-9]/ && !found {print $NF; found = 1}')"
+        if [ -z "$lib" ]; then
+            echo "bundle-libmpv: no libmpv on this system: install libmpv-dev and mpv (Debian, Ubuntu)" \
+                "or mpv-libs (Fedora), or leave it out with NEXUS_NO_LIBMPV=1" >&2
+            exit 1
+        fi
+        command -v patchelf > /dev/null || { echo "bundle-libmpv: install patchelf" >&2; exit 1; }
         cp -L "$lib" "$lib_dir/"
         # Its libraries, but not the system's own: C runtime, graphics, sound and windowing.
         base='^(libc|libm|libdl|libpthread|librt|ld-linux|libstdc\+\+|libgcc_s|libX|libxcb|libGL|libEGL|libGLX|libdrm|libgbm|libwayland|libvulkan|libasound|libpulse|libudev|libdbus|libz|libexpat|libfontconfig|libfreetype)'
@@ -77,12 +84,23 @@ case "$os" in
             # shellcheck disable=SC2016 # $ORIGIN is for the loader, not the shell.
             patchelf --set-rpath '$ORIGIN' "$copied"
         done
-        version="$(mpv --version | head -n 1 | awk '{print $2}')"
-        fetch_licences "$version"
-        # Ubuntu's version, 7:4.4.2-0ubuntu0.22.04.1, is FFmpeg 4.4.2.
-        avcodec="$(dpkg-query -W -f='${Version}' 'libavcodec[0-9]*' 2> /dev/null | head -n 1)"
-        fetch_ffmpeg "n$(echo "$avcodec" | sed 's/^[0-9]*://; s/-.*//')"
-        source="Ubuntu's mpv and libmpv packages, $version (https://packages.ubuntu.com/source/jammy/mpv)"
+        # Which packages own the libraries: rpm's (Fedora) or dpkg's (Ubuntu). A Fedora with dpkg
+        # installed (for the deb check) is still an rpm system.
+        if ! { command -v rpm > /dev/null && rpm -qf "$lib" > /dev/null 2>&1; }; then
+            version="$(mpv --version | head -n 1 | awk '{print $2}')"
+            fetch_licences "$version"
+            # Ubuntu's version, 7:4.4.2-0ubuntu0.22.04.1, is FFmpeg 4.4.2.
+            avcodec="$(dpkg-query -W -f='${Version}' 'libavcodec[0-9]*' 2> /dev/null | head -n 1)"
+            fetch_ffmpeg "n$(echo "$avcodec" | sed 's/^[0-9]*://; s/-.*//')"
+            source="Ubuntu's mpv and libmpv packages, $version (https://packages.ubuntu.com/source/jammy/mpv)"
+        else
+            # An rpm system (Fedora): the versions of the packages that own the libraries.
+            version="$(rpm -qf --queryformat '%{VERSION}' "$lib")"
+            fetch_licences "$version"
+            avcodec="$(ldd "$lib" | awk '/libavcodec\.so/ && !found {print $3; found = 1}')"
+            fetch_ffmpeg "n$(rpm -qf --queryformat '%{VERSION}' "$avcodec")"
+            source="$(rpm -qf --queryformat '%{NAME}' "$lib") $version, this system's package"
+        fi
         ;;
     windows)
         : "${LIBMPV_DIR:?set LIBMPV_DIR to an unpacked mpv-dev build}"
