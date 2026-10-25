@@ -1,0 +1,617 @@
+// The theme contract: the data a theme shows (`Vm`) and what it can ask for (`Host`).
+// The host serves this file at `types.slint` in every theme. Themes import it; they never
+// ship their own copy.
+//
+// `Vm` is the core's view models (`AppView` in nexus-ui-api's vm.rs), field for field, with
+// the names kebab-cased. Text fields that hold JSON (`args`, `scope`) go back to the core
+// unchanged, inside a command's args.
+
+export struct Row { label: string, value: string }
+
+// A plugin's slot item. Render it with `accessible-role: text; accessible-label: label;`.
+// kind: badge | action | section | settings_panel
+// tone: neutral | info | success | warning | danger
+// style: primary | secondary
+export struct Slot {
+    slot: string,
+    plugin: string,
+    id: string,
+    label: string,
+    kind: string,
+    text: string,
+    // Badges: `text` for small places, such as a card.
+    short: string,
+    tone: string,
+    style: string,
+    icon: image,
+    rows: [Row],
+    action: string,
+    args: string,
+    scope: string,
+}
+
+// What can be done with a game, the same for every game, worked out by the core:
+// - `primary`: the main action, "play", "get" or "" for none. Installed games play; others
+//   are got. Uninstall is never the main action: offer it in the game's menu.
+// - `play`: the command Session Launch with the game's key starts it (a Catalog game: the
+//   installed game it is).
+// - `get`: its label, "Download" or "Install in Steam"; empty for nothing to get. With a
+//   `get-store` ("Steam"), the command Torrent Download of `get-release` asks the store, with
+//   no download sheet; without, the player picks a release on its Game Hub.
+// - `uninstall`: the key for the command UninstallGame, after asking; empty when it can't be.
+//   `uninstall-store`: the store that removes it ("Steam"), which asks again its own way.
+export struct GameActions {
+    primary: string,
+    play: bool,
+    get: string,
+    get-release: string,
+    get-store: string,
+    uninstall: string,
+    uninstall-store: string,
+}
+
+// `release-year` is 0 when the catalog doesn't know it.
+export struct GameCard {
+    key: string,
+    title: string,
+    platform: string,
+    // The system, as its plugin describes it: its full name ("PlayStation 5") and its color,
+    // transparent when the plugin gives none (draw the theme's neutral look).
+    system-name: string,
+    system-color: color,
+    cover: image,
+    // "loading" while the cover is on its way, "ready" once it shows, "none" when the game
+    // has no cover or it couldn't load.
+    cover-state: string,
+    selected: bool,
+    badges: [Slot],
+    release-year: int,
+    // Out of 5 from a store's catalog; 0 for none.
+    rating: float,
+    // For example "7.6 GB", once the game's details are in.
+    size: string,
+    // "Today", "Yesterday" or "3 days ago". Empty when the game never ran.
+    last-played: string,
+    // How many releases a catalog offers of the game; 0 for an installed game.
+    releases: int,
+    // For a game a catalog offers, how easy its best release is to download: good, low, none
+    // or unknown, and in words: "Good", "Low", "None", "Unknown". Empty for an installed game.
+    availability: string,
+    availability-text: string,
+    // The player hid this Catalog game: it shows only under the Catalog's "Hidden" filter.
+    hidden: bool,
+    // What can be done with it: the same on every card and the Game Hub.
+    can: GameActions,
+}
+
+// The library's games on one platform. `selected` is an index into `games`, or -1 when the
+// selected game is on another platform.
+export struct Group { platform: string, games: [GameCard], selected: int }
+
+// `groups` splits `games` by platform, in the order each platform first appears.
+// A Library filter: a system or a genre. `id` is what to filter by; empty is "All". After the
+// systems come "In-game" (id `ingame`) and, in the Catalog, "Installed" (id `installed`), each
+// when it has games or is on.
+export struct Filter { id: string, label: string, count: int, on: bool }
+
+// The Library, or the Catalog: `games` searched, filtered and sorted by the core, a page at a
+// time: `total` games match of `all` before the search and the filters, and `games` holds
+// the pages shown so far (the command LibraryMore or CatalogMore shows the next). `sort` is
+// title, played, size (largest first), smallest, rating, release (newest first), compat or
+// added. Change them with the commands LibrarySearch, LibrarySystem, LibraryGenre and
+// LibrarySort, or the Catalog ones.
+export struct Library { games: [GameCard], total: int, all: int, selected: int, systems: [Filter], genres: [Filter], sort: string, query: string }
+
+export struct Home { games: [GameCard], selected: int, loading: bool, groups: [Group], library: Library }
+
+// The community's result. `tested` is when it was last tested, such as "Sep 1, 2026"; empty
+// when the list doesn't say.
+export struct Compat { level: string, label: string, notes: string, tested: string }
+
+// One fact about a game, for example { id: "region", label: "Region", value: "Europe" }.
+// Known ids: region, age, version, title-id, content-id, folder.
+export struct GameFact { id: string, label: string, value: string }
+
+// One line of the Welcome checklist. `state` is waiting, working, done or failed.
+export struct BootStep { label: string, detail: string, state: string }
+
+// The start of a run: `ready` once the library is in; `welcome` on the first run, until the
+// player presses Start (the command Pref ["welcomed", true]).
+export struct Boot { ready: bool, welcome: bool, progress: float, status: string, steps: [BootStep], covers: [image] }
+
+// kind: toggle | number | text | choice
+// labels: what to call each of `choices`, "" where the plugin names none.
+export struct Field { key: string, label: string, help: string, kind: string, value: string, choices: [string], labels: [string] }
+
+export struct SettingsPanel { slot: Slot, fields: [Field] }
+
+// One release of a game a catalog offers. `size` like "7.6 GB" and `added` like "Oct 15, 2026",
+// empty when the catalog doesn't say; `new` when it was added in the last 14 days.
+// `download` is its download's state (see Torrent), empty for none, with its progress.
+// `system` is a PC release's system ("Linux", "Windows", "macOS"), and `not-here` why this
+// computer can't start it; both empty when there is nothing to say. `warning` is why it may
+// not install, such as a retail PS5 package; empty for none. `no-room` is why it doesn't fit
+// in the download folder; empty when it fits, the disk doesn't say, or it has a download.
+// `version-label` is its place by version, from the lowest: "Version 3 of 3 (newest)". `best`
+// is the release the game's card shows: the version the player has, then one with art, then
+// the highest version, then the one most people share. `seeders` and `leechers` are how many
+// people share and download it, and `counted` when ("Oct 7, 2026"), as the catalog counted
+// them: not live counts, empty when it has none. `availability` is good (3 or more seeders),
+// low (1 or 2), none (0) or unknown (no count), and `availability-text` that in words.
+// `store`: the store that installs it ("Steam"), for a release its store installs: its
+// Download asks the store (the command Torrent Download with no folder), with no download
+// sheet. Empty for a torrent.
+export struct Release { id: string, store: string, version: string, region: string, size: string, added: string, new: bool, description: string, system: string, not-here: string, warning: string, no-room: string, download: string, download-progress: float, version-label: string, best: bool, seeders: string, leechers: string, counted: string, availability: string, availability-text: string }
+
+// How one emulator's games run on this PC. level: good | slow | no | unknown. headline:
+// "Should run well", "May run slowly", "Won't start" or "Can't tell yet"; why: the reason.
+export struct Verdict { plugin: string, emulator: string, level: string, headline: string, why: string }
+
+// A download of a release a catalog offers. `state`: resolving (reading the torrent's files),
+// ready (its files are listed: the player starts it), checking, downloading, paused,
+// complete, failed or cancelled. `detail` is one line of sizes, speed and peers. `files` are
+// the first files, "path · size", of `file-count`. `actions`, in order, from: start, pause,
+// cancel, remove, stop-seeding, install, play, remove-unpacked, cancel-install (see "Torrent
+// actions" in docs/themes.md; play launches `game`; while it unpacks, cancel stops the
+// unpacking).
+// `install`: installing, done, failed or cancelled; empty before Install.
+// `unpack`: its archives, waiting, unpacking, unpacked, failed or cancelled; empty for none.
+// `waiting-vpn`: "Download only through a VPN" paused it; it starts again by itself once the
+// VPN is connected. `install-note`: what its emulator installs from, for the install sheet;
+// `install-folder`: the game folder the sheet offers (`~` for the home folder);
+// `install-error`: why the last Install didn't start.
+export struct Torrent {
+    id: string,
+    title: string,
+    version: string,
+    region: string,
+    state: string,
+    progress: float,
+    detail: string,
+    seeding: bool,
+    verifying: bool,
+    waiting-vpn: bool,
+    error: string,
+    files: [string],
+    file-count: int,
+    // "120 files · 1.5 GB · first 100 shown".
+    file-summary: string,
+    folder: string,
+    actions: [string],
+    install: string,
+    install-progress: float,
+    unpack: string,
+    unpack-progress: float,
+    game: string,
+    install-note: string,
+    install-folder: string,
+    install-error: string,
+    // For an install a store does ("Steam"): its state is queued, downloading or paused (or
+    // `install` installing), its one action `open-store` (the store's own Downloads page), and
+    // it has no folder to open. Empty for a torrent.
+    store: string,
+}
+
+export struct GameDetail {
+    key: string,
+    title: string,
+    platform: string,
+    // As a card's: the system's full name and color.
+    system-name: string,
+    system-color: color,
+    description: string,
+    // `description` on one line, cut after a word to at most 80 characters, with "…".
+    summary: string,
+    developer: string,
+    genres: [string],
+    cover: image,
+    background: image,
+    has-compat: bool,
+    compat: Compat,
+    badges: [Slot],
+    actions: [Slot],
+    sections: [Slot],
+    // What can be done with it: as on its card (Play, getting it, Uninstall in the menu).
+    can: GameActions,
+    // The game's own settings from its emulator: one panel, or none (the route game-settings).
+    settings: [SettingsPanel],
+    // What Play does first, for example "Play installs KytyPS5 first". Empty for nothing.
+    launch-hint: string,
+    running: bool,
+    // For example "7.6 GB". Empty when the plugin doesn't say.
+    size: string,
+    // From a store's catalog, when one describes the game. The logo is the game's name as a
+    // picture; `rating` is out of 5 from `ratings` players (0 for none); `release` is
+    // "Mar 12, 2024" and `year` "2024"; `age-rating` for example "PEGI 12".
+    has-logo: bool,
+    logo: image,
+    rating: float,
+    ratings: int,
+    // "4.4 · 3.2K ratings", or empty.
+    rating-text: string,
+    release: string,
+    year: string,
+    age-rating: string,
+    screenshots: [image],
+    store-url: string,
+    // How the game runs through a compatibility layer: who rates it (ProtonDB), the rating's
+    // word (for ProtonDB: platinum, gold, silver, bronze, borked, native or pending), and the
+    // game's page there. Empty for none.
+    layer-source: string,
+    layer-rating: string,
+    layer-url: string,
+    // How the game runs on this PC, from its emulator's needs. `has-this-pc` is false before
+    // the check, and when the system can't say. A game a catalog offers that doesn't fit in
+    // the download folder has level "no", headline "Not enough space" and why "10.0 GB free".
+    has-this-pc: bool,
+    this-pc: Verdict,
+    // Why the game won't start on this PC, such as "This PC can't run KytyPS5 games: No
+    // Vulkan 1.3"; empty when it can.
+    pc-warning: string,
+    // The player's own result after playing: ingame, menus, boots or nothing; empty for none.
+    your-result: string,
+    // The game has a folder to open, and a log of its last run.
+    has-folder: bool,
+    has-log: bool,
+    // The player hid this Catalog game (the command Library Hide).
+    hidden: bool,
+    // The community compatibility list's page; empty for none.
+    compat-page: string,
+    // The game's trailer, an https:// video address; empty for none.
+    trailer-url: string,
+    // The values of the facts with these ids, empty when the plugin gives none.
+    region: string,
+    age: string,
+    version: string,
+    facts: [GameFact],
+    // For example "4 hr 6 min". Empty when the game never ran.
+    played: string,
+    // "Today", "Yesterday" or "3 days ago". Empty when the game never ran.
+    last-played: string,
+    // For a game a catalog offers: its releases by version, highest first, the emulator that runs it, and
+    // where its downloads go (empty when the emulator can't install them). Empty for an
+    // installed game.
+    releases: [Release],
+    emulator: string,
+    download-folder: string,
+    // For a game a catalog offers, how easy its best release is to download, as in Release.
+    availability: string,
+    availability-text: string,
+    // Why the download the player last asked for here didn't start; empty when it did.
+    download-error: string,
+}
+
+
+// state: queued | downloading | verifying | done | failed
+export struct Download {
+    id: int,
+    plugin: string,
+    label: string,
+    progress: float,
+    progress-text: string,
+    state: string,
+    error: string,
+    can-pause: bool,
+    can-resume: bool,
+    can-cancel: bool,
+}
+
+
+export struct ThemeChoice { id: string, name: string, current: bool }
+
+// `text` is the folders joined with the system's path separator.
+// title: what to call it ("" for its name); help: a line about it, or "".
+// shown: `text` (or the default) as Settings shows it, with the home folder as ~.
+export struct Folder { name: string, title: string, help: string, text: string, shown: string, default: string, requested-by: string, write: bool }
+
+// system: the id of the system it plays ("PS5"), what LibrarySystem takes; "" for none.
+// system-name: its full name ("PlayStation 5"); "" for none.
+// icon, cover: the system's square icon and its wide picture, from the emulator plugin or the
+// theme's `[theme.systems.<system>]`; empty when neither has one.
+export struct Emulator {
+    plugin: string,
+    name: string,
+    system: string,
+    system-name: string,
+    icon: image,
+    cover: image,
+    status: string,
+    // It installs builds of its own. An emulator that only starts games (PC) has none.
+    has-builds: bool,
+    installed: [string],
+    available: [string],
+    update: string,
+    busy: bool,
+    panels: [Slot],
+    // Controller profiles, comma-separated. Empty when there are none.
+    controllers: string,
+}
+
+// kind: emulator | service (code that launches no games, such as a store's details) | theme.
+// enabled: the player has it on. note: a warning about it, or "" (one made for other systems
+// says which). version: the plugin's; build: an emulator's build in use, "" when none;
+// build-label: the build with the program's name once ("shadPS4 v.0.20.0"), "" when none.
+// has-builds: it installs builds of its own; an emulator that only starts games (PC) has none.
+export struct PluginRow { id: string, name: string, kind: string, version: string, status: string, enabled: bool, note: string, build: string, build-label: string, has-builds: bool }
+
+// One plugin's page. has-emulator: `emulator` holds its builds. sections: the plugin's blocks
+// in the `emulator.panel` slot, for an emulator and for a service. actions: the action slots
+// of `sections`, for one row each. current: a theme that is the one shown (its options are
+// `Vm.theme-options`). A plugin that is turned off has only `plugin`.
+export struct PluginPage { plugin: PluginRow, has-emulator: bool, emulator: Emulator, sections: [Slot], actions: [Slot], settings: [SettingsPanel], folders: [Folder], folders-after: int, current: bool }
+
+// One of the emulator's keyboard keys: the console's button and its keys.
+export struct KeyBinding { button: string, keys: string }
+
+// `state` is starting (until the game's window shows), running or stopping. `elapsed` is the
+// time played, for example "12 min". `in-front` is true while the game's window has the screen.
+// keymap: the emulator's keyboard keys; empty when the emulator lists none. emulator: the
+// program's name ("KytyPS5"); plugin: its plugin's id, as `Emulator.plugin`; page: the name of
+// its plugin's page, which has the keys ("PS5").
+export struct Running { session: int, key: string, title: string, plugin: string, emulator: string, page: string, state: string, elapsed: string, in-front: bool, keymap: [KeyBinding] }
+
+// A first play waits for the player to agree to install the emulator. `size` is in bytes,
+// 0 when the download's size isn't known.
+export struct InstallPrompt { plugin: string, emulator: string, version: string, game: string, size: float }
+
+// This PC, once `known`: "Apple M4 Max · 14 cores", "36 GB", one line per graphics card.
+export struct Hardware { known: bool, cpu: string, memory: string, graphics: [string], verdicts: [Verdict] }
+
+// One VPN, or where the system can't tell a VPN (macOS), one network with an address.
+// kind: WireGuard, OpenVPN, VPN or Network. switchable: the commands Vpn Connect and Vpn
+// Disconnect work on it.
+export struct VpnItem { name: string, kind: string, connected: bool, switchable: bool }
+
+// "Download only through a VPN". problem: why this system can't, such as "Not available on
+// Windows"; empty when it can. finds: the system tells VPNs from other networks; when it
+// can't, `vpns` lists every network with an address and the player picks the VPN's
+// (the command Vpn Choose). chosen: the picked VPN, empty for the first connected one. route: the
+// interface downloads go through now, empty while they wait or while `only` is off. error:
+// why the last connect, disconnect or import failed.
+export struct VpnSettings { problem: string, only: bool, finds: bool, can-import: bool, chosen: string, route: string, vpns: [VpnItem], error: string }
+
+// One backup in the backup folder. file: what the command Backup Restore takes. date: when it
+// was made, "Nov 9, 2026, 14:30 UTC". items: what it holds, such as "Saves, Keys and firmware".
+// before-restore: the backup a restore made of what was there before.
+export struct BackupFile { file: string, date: string, size: string, items: string, before-restore: bool }
+
+// Settings → Backup. folder: the backup folder, with the home folder as `~`. running: a backup
+// or a restore runs (restoring: a restore), `progress` from 0 to 1. status: what the last one
+// did, or why it failed (failed). restart: a restore finished, and Nexus starts again to finish
+// it. backups: newest first.
+// "Restore from another folder", a sheet over everything while open. shown: the folder, with
+// the home folder as `~`. parent: its parent's full path, empty at the top. crumbs: the folder's
+// path, one part each, from `~` or the top (the last is the folder). places: where it goes, each
+// with a full path for the command Backup Browse; kind: home | downloads | desktop | documents |
+// backups | drive | recent; detail: a drive's size, a recent folder's path. entries: the folders
+// with backups, the other folders, then the backups newest first, each with a full path for
+// Backup Browse or Backup RestoreFile; only those whose name holds `filter`. A folder's detail:
+// "2 backups", "empty", "can't be read", or empty. A backup's computer: the computer that made
+// it, empty when it doesn't say; newer: a newer Nexus made it and this one doesn't restore it.
+// hidden: hidden folders are listed. place: the index in places of the folder shown, -1 when
+// it is no place.
+export struct BrowseCrumb { name: string, path: string }
+export struct BrowsePlace { name: string, path: string, kind: string, detail: string }
+export struct BrowseEntry { name: string, path: string, folder: bool, detail: string, date: string, size: string, items: string, computer: string, newer: bool }
+export struct BackupBrowser { open: bool, shown: string, parent: string, crumbs: [BrowseCrumb], places: [BrowsePlace], place: int, entries: [BrowseEntry], hidden: bool, filter: string }
+
+// holds: what a backup holds on this computer now. large: the large items a backup takes only
+// when asked, empty when no plugin has one. default-folder: the folder when none is chosen.
+export struct Backup { folder: string, running: bool, restoring: bool, progress: float, status: string, failed: bool, restart: bool, backups: [BackupFile], holds: string, large: string, default-folder: string, browser: BackupBrowser }
+
+// The launcher's own update. state: off | idle | checking | current | available |
+// downloading | ready | failed. text: what to tell the player.
+export struct LauncherUpdate { state: string, current: string, version: string, text: string, method: string }
+
+// The machine's settings, from the system plugins (see `SystemVm` in nexus-ui-api). A part
+// whose `*-available` is false shows its `*-reason` instead of its controls. whole-screen:
+// Nexus is the whole screen (the Nexus session, Nexus OS): show the network, sound and
+// Bluetooth controls and Settings → System then. connection: none | wired | wifi. bars: 0-4.
+// os-update: "" (not Nexus OS) | current | checking | staged | failed. A job's kind: join |
+// scan | pair | install; state: running | done | failed; percent: 0-100, or -1 when unknown.
+export struct WifiItem { ssid: string, bars: int, secured: bool, saved: bool, active: bool }
+export struct AudioOutputItem { name: string, description: string, current: bool }
+export struct BluetoothItem { address: string, name: string, paired: bool, connected: bool }
+export struct DiskItem { path: string, size: string, windows: bool, usb: bool, model: string }
+export struct SystemJobItem { id: int, kind: string, target: string, state: string, percent: int, text: string, mok: bool, nvidia-later: bool }
+export struct System {
+    whole-screen: bool, nexus-os: bool, stick: bool,
+    network-available: bool, network-reason: string, connection: string, network-name: string, signal-bars: int,
+    wifi: [WifiItem],
+    audio-available: bool, audio-reason: string, volume: int, muted: bool, outputs: [AudioOutputItem],
+    bluetooth-available: bool, bluetooth-reason: string, bluetooth-on: bool, connected-devices: int,
+    devices: [BluetoothItem],
+    power-available: bool, power-reason: string, battery-shown: bool, battery-percent: int, battery-charging: bool,
+    os-update: string, os-update-text: string,
+    disks: [DiskItem], jobs: [SystemJobItem],
+}
+
+// The trailer playing in the window: `position` and `duration` in seconds.
+// A short message for the player. kind: info | success | error. art: the art of the game it
+// is about, or empty. opens: what clicking it opens (the command Notice Open), for example
+// "Open Downloads"; empty for nothing.
+export struct Notice { id: int, text: string, kind: string, art: image, opens: string }
+
+export struct Trailer { playing: bool, loading: bool, position: float, duration: float }
+
+// breakpoint: the name of the theme's first matching breakpoint. size: how big the player wants
+// everything drawn, from 0.8 to 1.4 (1 is the theme's own size): `Vm.scale`, or NEXUS_SCALE for
+// this run. `scale` is the screen's own pixel density.
+export struct Viewport { width: length, height: length, scale: float, size: float, aspect: float, breakpoint: string }
+
+// Everything the theme shows. The host sets it after every change; themes only read it.
+export global Vm {
+    // home | game-detail | catalog | downloads | settings | emulators | themes | plugin | game-settings | running
+    in-out property <string> screen: "home";
+    in-out property <string> game;
+    in-out property <bool> can-go-back;
+    in-out property <Home> home;
+    in-out property <bool> has-detail;
+    in-out property <GameDetail> detail;
+    // The games the catalogs offer to download, as the Library shows its games, with a New or
+    // Installed badge; newest added first.
+    in-out property <Library> catalog;
+    // Which copy of each catalog is in use, one line each.
+    in-out property <[string]> catalog-sources;
+    // How many releases the catalogs list, of every game.
+    in-out property <int> catalog-releases;
+    // When the list was updated ("Oct 19, 2026"): the newest count of a release's seeders,
+    // else the newest date a catalog gives. Empty when neither says.
+    in-out property <string> catalog-updated;
+    // The catalog plugins have not answered yet.
+    in-out property <bool> catalog-loading;
+    // A plugin that gives release catalogs is turned on. Without one there is no Catalog to
+    // open: hide the ways to it.
+    in-out property <bool> catalog-available;
+    // The catalog plugins' buttons for the Catalog screen (the `catalog.action` slot), such
+    // as a catalog refresh, and their badges, which say what the buttons did ("Refreshing…").
+    in-out property <[Slot]> catalog-actions;
+    in-out property <[Slot]> catalog-status;
+    in-out property <[Download]> downloads;
+    // The catalogs' downloads, newest first, and "Keep sharing finished downloads".
+    in-out property <[Torrent]> torrents;
+    in-out property <bool> seed-downloads: true;
+    // How many of the catalogs' downloads download (or read their files, or check) now, and
+    // how many share their finished files now.
+    in-out property <int> torrents-downloading;
+    in-out property <int> torrents-sharing;
+    // "Download only through a VPN", and the VPNs.
+    in-out property <VpnSettings> vpn;
+    // Settings → Backup.
+    in-out property <Backup> backup;
+    in-out property <[SettingsPanel]> settings;
+    in-out property <[Field]> theme-options;
+    in-out property <[ThemeChoice]> themes;
+    in-out property <[Folder]> folders;
+    in-out property <bool> sounds: true;
+    // The launcher's window fills the screen.
+    in-out property <bool> fullscreen: true;
+    // The launcher comes back to the front when a game closes.
+    in-out property <bool> return-on-exit: true;
+    // Emulator updates install by themselves, after the emulator's game closes.
+    in-out property <bool> auto-update: true;
+    // "Size of everything" as the player set it, from 0.8 to 1.4. What the theme draws at is
+    // `viewport.size`.
+    in-out property <float> scale: 1;
+    // This build can start when the player logs in (it is installed), whether it does, and
+    // why the system refused the last change (empty when it didn't).
+    in-out property <bool> can-start-at-login;
+    in-out property <bool> start-at-login;
+    in-out property <string> start-at-login-error;
+    // This PC, and how each emulator's games run on it.
+    in-out property <Hardware> hardware;
+    in-out property <LauncherUpdate> launcher-update;
+    // The machine's settings: network, sound, Bluetooth, battery, power, Nexus OS.
+    in-out property <System> system;
+    // The app plays trailers in the window (Host.play-trailer); without it, open them in the
+    // browser (Host.open-url).
+    in-out property <bool> can-play-trailers;
+    // A trailer is open: its state, and its newest frame.
+    in-out property <bool> has-trailer;
+    in-out property <Trailer> trailer;
+    in-out property <image> trailer-frame;
+    in-out property <bool> has-install-prompt;
+    in-out property <InstallPrompt> install-prompt;
+    in-out property <[Emulator]> emulators;
+    in-out property <[PluginRow]> plugins;
+    // `plugins` by kind: the Emulators list (emulators, then services) and the Themes list.
+    in-out property <[PluginRow]> emulator-plugins;
+    in-out property <[PluginRow]> theme-plugins;
+    // The plugin the Plugin screen shows.
+    in-out property <bool> has-plugin-page;
+    in-out property <PluginPage> plugin-page;
+    in-out property <Boot> boot;
+    // Home's art is loaded (or the boot waited long enough): the boot screen can go.
+    in-out property <bool> art-ready;
+    // Work going on in the background, for example "Downloading game art 3/40". Empty for none.
+    in-out property <string> task;
+    // The local time, for example "9:38 PM". Empty when the system doesn't say.
+    in-out property <string> clock;
+    in-out property <bool> has-running;
+    in-out property <Running> running;
+    // The text of `notice-cards`, newest last.
+    in-out property <[string]> notices;
+    // The notices, newest last: at most 3, as a new one drops the oldest.
+    in-out property <[Notice]> notice-cards;
+    // "How far did it get?" for a game that just closed: its title. Answer with the command
+    // ReportResult: ingame, menus, boots, nothing, or null for Not now.
+    in-out property <bool> has-result-prompt;
+    in-out property <string> result-prompt;
+    // The art of the game the newest notice is about; empty for none.
+    in-out property <image> notice-art;
+    // What clicking the newest notice opens, for example "Open Downloads"; empty for nothing.
+    in-out property <string> notice-opens;
+    in-out property <Viewport> viewport;
+    // pointer | gamepad | touch
+    in-out property <string> input-mode: "pointer";
+    // True while the host delivers a controller's button as a key press, false for a
+    // keyboard's: a theme tells the two apart with it (an on-screen keyboard opens for one).
+    in-out property <bool> pad-key;
+    // Goes up by one each time the player asks for the power menu with the pad (the PS, Xbox or
+    // Logitech button, held, with no game running; a hold over a game closes it): the theme opens
+    // it when this changes.
+    in-out property <int> power-menu;
+    // The connected controller's name, for example "DualSense Wireless Controller"; empty for none.
+    in-out property <string> pad-name;
+    // The monitors' names, and the one the player chose for the launcher ("" for the one it is on).
+    in-out property <[string]> monitors;
+    in-out property <string> monitor;
+}
+
+// What a theme can ask the host to do.
+//
+// `command` asks the core: the name of a command and its args as JSON, "" for none. The
+// commands, their args and examples are in docs/themes.md ("Host: what to ask for"); they are
+// the core's `Command` enum, read with serde. Build the args with `Json`, which escapes text.
+// A command whose args don't read is dropped, with a warning in the log.
+//
+//     Host.command("Back", "");
+//     Host.command("Select", Json.text(game.key));
+//     Host.command("Session", "{\"Launch\":" + Json.text(game.key) + "}");
+//
+// The other callbacks are the app's own: they never reach the core.
+export global Host {
+    callback command(string, string);
+    // A grid's name ("library", "catalog") and the indices of its first and last cards on
+    // screen: only the covers near them load.
+    callback grid-window(string, int, int);
+    // A theme id.
+    callback switch-theme(string);
+    // A sound name from the theme's `[theme.assets.sounds]`.
+    callback play-sound(string);
+    // Opens an https:// page, such as a game's store page, in the system's browser.
+    callback open-url(string);
+    // A game key: opens its folder, or its emulator log, with the system's opener.
+    callback open-game-folder(string);
+    callback open-game-log(string);
+    // A download's id: opens its folder with the system's opener, once the folder is on disk.
+    callback open-download-folder(string);
+    // The trailer player: an https:// video address to play; pause or go on; seconds to seek
+    // (back when negative); close.
+    callback play-trailer(string);
+    callback pause-trailer();
+    callback seek-trailer(float);
+    callback close-trailer();
+    // Closes the launcher.
+    callback quit();
+    // Closes the launcher and starts it again, for a downloaded launcher update to go in.
+    callback restart();
+    // The Nexus session on a desktop (whole-screen, not nexus-os): end it, back to the login
+    // screen.
+    callback log-out();
+}
+
+// Builds a command's args. `text` is a JSON string of `s`, escaped; `text-or-null` is null for
+// "" (an optional value left out); `flag` is true or false.
+export global Json {
+    public pure function text(s: string) -> string {
+        "\"" + s.replace-all("\\", "\\\\").replace-all("\"", "\\\"").replace-all("\n", "\\n")
+            .replace-all("\u{d}", "\\r").replace-all("\u{9}", "\\t") + "\""
+    }
+    public pure function text-or-null(s: string) -> string {
+        s == "" ? "null" : text(s)
+    }
+    public pure function flag(b: bool) -> string {
+        b ? "true" : "false"
+    }
+}

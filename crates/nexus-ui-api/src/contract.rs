@@ -1,0 +1,298 @@
+//! What a theme ships and what it can rely on.
+//!
+//! A theme stands alone. Its folder holds `theme.toml`, `shell.slint`, every
+//! `screens/<screen>.slint`, any other `.slint` files it wants, and asset files. The host serves these virtual
+//! files to every theme; themes import them and must not ship files with these names:
+//!
+//! - `types.slint`: the `Vm` global (data) and `Host` global (callbacks).
+//! - `tokens.slint`: the `Tokens` global, one property per design token.
+//! - `assets.slint`: the `Assets` global, one `image` per name in `[theme.assets.images]`.
+//!
+//! The host also serves the kit ([`KIT`]) under `kit/`, beneath the theme's own files: a theme
+//! that ships `kit/<name>.slint` replaces that kit file.
+//!
+//! Rules the host checks before compiling:
+//! - No `@image-url`: images come from `Assets`, view models, or slot icons.
+//! - No font imports: declare fonts in `[theme.assets.fonts]`.
+//! - A theme ships every screen. Each screen file exports its component under the name in
+//!   [`ScreenId::component`].
+//! - Rendered slot items set `accessible-role: text; accessible-label: <slot>.label;`.
+
+use std::fmt::Write;
+
+use crate::ScreenId;
+use crate::tokens::{TOKENS, TokenKind};
+
+/// The root of every theme. It exports `Shell`, which inherits `Window`.
+pub const SHELL_FILE: &str = "shell.slint";
+pub const SHELL_COMPONENT: &str = "Shell";
+
+pub const TYPES_FILE: &str = "types.slint";
+pub const TOKENS_FILE: &str = "tokens.slint";
+pub const ASSETS_FILE: &str = "assets.slint";
+/// The `Options` global: one property per theme option, holding its value.
+pub const OPTIONS_FILE: &str = "options.slint";
+
+/// Files the host serves. A theme that ships one of these is refused.
+pub const RESERVED_FILES: [&str; 4] = [TYPES_FILE, TOKENS_FILE, ASSETS_FILE, OPTIONS_FILE];
+
+/// The folder the kit is served under, beneath every theme's own files.
+pub const KIT_DIR: &str = "kit";
+
+/// The kit: behaviour and widgets drawn only from tokens, which every theme may import from
+/// `kit/<name>.slint`. A theme that ships a file at the same path replaces the kit's. Kit files
+/// import the host's files as `../types.slint` and each other by bare name.
+pub const KIT: &[(&str, &str)] = &[
+    ("backup-browser.slint", include_str!("../kit/backup-browser.slint")),
+    ("button.slint", include_str!("../kit/button.slint")),
+    ("commands.slint", include_str!("../kit/commands.slint")),
+    ("dialog.slint", include_str!("../kit/dialog.slint")),
+    ("downloads.slint", include_str!("../kit/downloads.slint")),
+    ("game-detail.slint", include_str!("../kit/game-detail.slint")),
+    ("game-menu.slint", include_str!("../kit/game-menu.slint")),
+    ("icon.slint", include_str!("../kit/icon.slint")),
+    ("install-os.slint", include_str!("../kit/install-os.slint")),
+    ("install-prompt.slint", include_str!("../kit/install-prompt.slint")),
+    ("keyboard.slint", include_str!("../kit/keyboard.slint")),
+    ("lingering.slint", include_str!("../kit/lingering.slint")),
+    ("list-item.slint", include_str!("../kit/list-item.slint")),
+    ("look.slint", include_str!("../kit/look.slint")),
+    ("notices.slint", include_str!("../kit/notices.slint")),
+    ("origin.slint", include_str!("../kit/origin.slint")),
+    ("plugin-list.slint", include_str!("../kit/plugin-list.slint")),
+    ("plugin.slint", include_str!("../kit/plugin.slint")),
+    ("power-menu.slint", include_str!("../kit/power-menu.slint")),
+    ("progress-bar.slint", include_str!("../kit/progress-bar.slint")),
+    ("result-prompt.slint", include_str!("../kit/result-prompt.slint")),
+    ("settings-layout.slint", include_str!("../kit/settings-layout.slint")),
+    ("settings-rows.slint", include_str!("../kit/settings-rows.slint")),
+    ("settings-sections.slint", include_str!("../kit/settings-sections.slint")),
+    ("sheet-frame.slint", include_str!("../kit/sheet-frame.slint")),
+    ("shot-viewer.slint", include_str!("../kit/shot-viewer.slint")),
+    ("slot-actions.slint", include_str!("../kit/slot-actions.slint")),
+    ("slot-badges.slint", include_str!("../kit/slot-badges.slint")),
+    ("slot-sections.slint", include_str!("../kit/slot-sections.slint")),
+    ("system-panel.slint", include_str!("../kit/system-panel.slint")),
+    ("trailer-player.slint", include_str!("../kit/trailer-player.slint")),
+    ("widgets.slint", include_str!("../kit/widgets.slint")),
+];
+
+/// The fixed contract file. See `contract/types.slint`.
+pub const TYPES_SLINT: &str = include_str!("../contract/types.slint");
+
+impl ScreenId {
+    pub fn file(self) -> String {
+        format!("screens/{}.slint", self.as_str())
+    }
+
+    pub fn component(self) -> &'static str {
+        match self {
+            Self::Home => "HomeScreen",
+            Self::GameDetail => "GameDetailScreen",
+            Self::Catalog => "CatalogScreen",
+            Self::Downloads => "DownloadsScreen",
+            Self::Settings => "SettingsScreen",
+            Self::Emulators => "EmulatorsScreen",
+            Self::Themes => "ThemesScreen",
+            Self::Plugin => "PluginScreen",
+            Self::GameSettings => "GameSettingsScreen",
+            Self::Running => "RunningScreen",
+        }
+    }
+}
+
+/// `tokens.slint`. `fonts` are absolute paths of font files to register; they are imported
+/// here because every theme imports this file.
+pub fn tokens_slint(fonts: &[String]) -> String {
+    let mut out = String::from("// Served by the host. Values come from the theme's tokens and options.\n");
+    for font in fonts {
+        let _ = writeln!(out, "import {font:?};");
+    }
+    out.push_str("export global Tokens {\n");
+    for t in TOKENS {
+        let kind = match t.kind {
+            TokenKind::Color => "color",
+            TokenKind::Length => "length",
+            TokenKind::Duration => "duration",
+            TokenKind::Int => "int",
+            TokenKind::Text => "string",
+        };
+        let _ = writeln!(out, "    in-out property <{kind}> {};", t.name);
+    }
+    out.push_str("}\n");
+    out
+}
+
+/// `options.slint` for the merged theme's options: a choice is its name as a `string`, a color
+/// option a `color`.
+pub fn options_slint(options: &std::collections::BTreeMap<String, crate::ThemeOption>) -> String {
+    let mut out = String::from("// Served by the host: the theme's option values.\nexport global Options {\n");
+    for (name, option) in options {
+        let kind = match option.kind {
+            crate::OptionKind::Choice { .. } => "string",
+            crate::OptionKind::Color { .. } => "color",
+        };
+        let _ = writeln!(out, "    in-out property <{kind}> {name};");
+    }
+    out.push_str("}\n");
+    out
+}
+
+/// `assets.slint` for the merged theme's image names.
+pub fn assets_slint<'a>(images: impl IntoIterator<Item = &'a String>) -> String {
+    let mut out = String::from("// Served by the host: the theme's images.\nexport global Assets {\n");
+    for name in images {
+        let _ = writeln!(out, "    in-out property <image> {name};");
+    }
+    out.push_str("    in-out property <bool> loaded;\n}\n");
+    out
+}
+
+/// Checks one theme `.slint` source against the rules above. `expected` is the component the
+/// file must export, for screen and component files.
+pub fn lint(source: &str, expected: Option<&str>) -> Result<(), String> {
+    let code = strip_comments(source);
+    if code.contains("@image-url") {
+        return Err("uses @image-url; declare the image in [theme.assets.images] and use Assets.<name>".into());
+    }
+    // Statements end with `;`, so an import split over several lines is still one piece.
+    for statement in code.split(';') {
+        let statement = statement.trim_start();
+        let is_import =
+            statement.strip_prefix("import").is_some_and(|rest| rest.starts_with([' ', '\t', '\n', '\r', '{', '"']));
+        let is_reexport = statement.starts_with("export {") || statement.starts_with("export *");
+        if !(is_import || is_reexport) {
+            continue;
+        }
+        let target = statement.rsplit('"').nth(1).unwrap_or_default();
+        if !target.ends_with(".slint") {
+            return Err(format!("imports {target:?}; only .slint files can be imported (declare fonts in theme.toml)"));
+        }
+    }
+    if let Some(name) = expected {
+        let exported = code.lines().any(|l| {
+            let l = l.trim();
+            l.starts_with(&format!("export component {name} ")) || l.starts_with(&format!("export component {name}{{"))
+        });
+        if !exported {
+            return Err(format!("must export component {name}"));
+        }
+    }
+    Ok(())
+}
+
+/// The source without `//` and `/* */` comments. String literals are kept as they are.
+fn strip_comments(source: &str) -> String {
+    let mut out = String::with_capacity(source.len());
+    let mut chars = source.chars().peekable();
+    let mut in_string = false;
+    while let Some(c) = chars.next() {
+        if in_string {
+            out.push(c);
+            match c {
+                '\\' => out.extend(chars.next()),
+                '"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match (c, chars.peek()) {
+            ('"', _) => {
+                in_string = true;
+                out.push(c);
+            }
+            ('/', Some('/')) => {
+                for c in chars.by_ref() {
+                    if c == '\n' {
+                        out.push('\n');
+                        break;
+                    }
+                }
+            }
+            ('/', Some('*')) => {
+                chars.next();
+                let mut last = ' ';
+                for c in chars.by_ref() {
+                    if last == '*' && c == '/' {
+                        break;
+                    }
+                    last = c;
+                }
+                out.push(' ');
+            }
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lint_refuses_disk_access_and_wrong_exports() {
+        assert!(lint("Image { source: @image-url(\"x.png\"); }", None).is_err());
+        assert!(lint("import \"fonts/a.ttf\";", None).is_err());
+        assert!(lint("import\n    \"/abs/a.ttf\";", None).is_err(), "an import split over lines");
+        assert!(lint("import /* hidden */ \"/abs/a.ttf\";", None).is_err());
+        assert!(lint("export * from \"/abs/a.ttf\";", None).is_err());
+        assert!(lint("// import \"x.ttf\";\nexport component A inherits Rectangle {}", None).is_ok(), "a comment");
+        assert!(
+            lint("export component A inherits Rectangle { Text { text: \"import \\\"x.ttf\\\"\"; } }", None).is_ok()
+        );
+        assert!(lint("import { Card } from \"../components/card.slint\";", None).is_ok());
+        assert!(lint("export component HomeScreen inherits Rectangle {}", Some("HomeScreen")).is_ok());
+        assert!(lint("export component Home inherits Rectangle {}", Some("HomeScreen")).is_err());
+    }
+
+    #[test]
+    fn kit_files_pass_the_theme_rules_and_draw_only_from_tokens() {
+        let hex = |code: &str| {
+            code.split('#').skip(1).any(|rest| {
+                let digits = rest.chars().take_while(char::is_ascii_hexdigit).count();
+                digits == 6 || digits == 8
+            })
+        };
+        for (name, source) in KIT {
+            assert!(name.ends_with(".slint"), "{name}");
+            lint(source, None).unwrap_or_else(|m| panic!("kit/{name}: {m}"));
+            assert!(!hex(&strip_comments(source)), "kit/{name} has a color that isn't a token");
+        }
+    }
+
+    #[test]
+    fn kit_files_import_only_the_host_s_files_and_each_other() {
+        for (name, source) in KIT {
+            let code = strip_comments(source);
+            for statement in
+                code.split(';').map(str::trim_start).filter(|s| s.starts_with("import") || s.starts_with("export {"))
+            {
+                let Some(target) = statement.rsplit('"').nth(1) else { continue };
+                let host_file = target.strip_prefix("../").is_some_and(|f| RESERVED_FILES.contains(&f));
+                let kit_file = KIT.iter().any(|(n, _)| *n == target);
+                assert!(host_file || kit_file, "kit/{name} imports {target:?}, which is a theme's file");
+            }
+        }
+    }
+
+    #[test]
+    fn every_kit_file_on_disk_is_served() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("kit");
+        let mut on_disk: Vec<String> =
+            std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        on_disk.sort();
+        let served: Vec<String> = KIT.iter().map(|(name, _)| (*name).to_owned()).collect();
+        assert_eq!(on_disk, served);
+    }
+
+    #[test]
+    fn generated_globals_list_every_token_and_image() {
+        let tokens = tokens_slint(&["/t/font.ttf".into()]);
+        assert!(tokens.starts_with("//") && tokens.contains("import \"/t/font.ttf\";"));
+        assert!(tokens.contains("in-out property <color> color-accent;"));
+        assert!(tokens.contains("in-out property <duration> motion-fast;"));
+        let assets = assets_slint(&["logo".to_string()]);
+        assert!(assets.contains("in-out property <image> logo;"));
+    }
+}
