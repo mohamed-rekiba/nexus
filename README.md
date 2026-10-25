@@ -118,7 +118,7 @@ make package        # a release build in dist/nexus-<os>-<arch>/
 | RAR, tar.xz, tar.bz2, tar.zst and ISO downloads (the release package ships it) | `libarchive` | `libarchive13` | Those archives don't unpack, and the error names the package |
 | The "This PC" check | `vulkan-loader mesa-vulkan-drivers` (or your GPU vendor's driver) | `libvulkan1 mesa-vulkan-drivers` | The check lists the graphics cards without their Vulkan version |
 | Windows PC games | [umu-launcher](#umu-launcher-for-windows-games) (runs them with Proton), or `wine` | [umu-launcher](#umu-launcher-for-windows-games), or `wine` | The game's Game Hub says to install one |
-| An old Windows game filling the screen at its own resolution (its Resolution setting) | `gamescope` | `gamescope` (Debian 12, backports for 13; Ubuntu where your release has it) | Play says to install it, or to set the game's Resolution back to Your screen |
+| An old game filling the screen at its own resolution (its Resolution setting) | `gamescope` | `gamescope` (Debian 12, backports for 13; Ubuntu where your release has it) | Play says to install it, or to set the game's Resolution back to Your screen |
 | Saved VPN connections in Settings | `NetworkManager` | `network-manager` | Only the VPNs already up show |
 | Old Linux games whose start script opens the game's own launcher (Trine 3 from GOG). The Nexus packages depend on these | `gtk2 libpng12` | `libgtk2.0-0t64` (no libpng 1.2 package) | The game closes right after it starts, with code 127 in its log |
 | A game that brings its own 32-bit Wine (a portable Wine wrapper's `start.sh`). The Nexus rpm depends on these | `glibc.i686 libgcc.i686 libX11.i686 libXext.i686 libXcomposite.i686 libXcursor.i686 libXfixes.i686 libXinerama.i686 libXi.i686 libXrandr.i686 libXrender.i686 libXxf86vm.i686 mesa-libGL.i686 mesa-dri-drivers.i686 mesa-vulkan-drivers.i686 vulkan-loader.i686 alsa-lib.i686 pulseaudio-libs.i686 freetype.i686 fontconfig.i686` | The same libraries for `i386`, after `sudo dpkg --add-architecture i386` | Its script says "There is a problem running Wine binary!", or Wine says no driver could be loaded |
@@ -131,8 +131,9 @@ On Debian and Ubuntu: `sudo apt-get install xdotool x11-utils libmpv2 libarchive
 Nexus runs a Windows game through [umu-launcher](https://github.com/Open-Wine-Components/umu-launcher)
 when it is installed, else through Wine. umu-launcher runs games with Proton (GE-Proton), the
 way Steam does, and downloads and updates Proton by itself: the first game takes a while to
-start while it does. A repack that brings its own 32-bit Wine needs it on a system without
-32-bit libraries, such as a default Fedora.
+start while it does. A repack that brings its own 32-bit Wine can't run its script on a system
+without 32-bit libraries, such as a default Fedora: pick its `.exe` in its Game settings
+(Starts) and it runs through umu-launcher.
 
 The easiest way: **Install umu-launcher** on the PC page (Emulators, then PC). Nexus installs
 the latest release's zipapp for itself, checked against the checksum GitHub lists, and
@@ -182,11 +183,11 @@ Run the same commands again to update it.
 `umu-run --help` answering means Nexus will find it. Nexus looks for it each time a Windows game
 starts, so there is no need to restart Nexus.
 
-#### gamescope, for old Windows games
+#### gamescope, for old games
 
-An old Windows game made for a small screen (800 × 600, say) can't change a Wayland screen's
+An old game made for a small screen (800 × 600, say), Windows or Linux, can't change a Wayland screen's
 resolution: it shows in a corner of a black screen. Set its **Resolution** in its Game Hub (its
-settings, "PC settings for this game") to the one it runs at: it then runs inside
+Game settings) to the one it runs at: it then runs inside
 [gamescope](https://github.com/ValveSoftware/gamescope), Valve's compositor from the Steam Deck,
 which scales it up to fill the screen. **Your screen**, the default, runs the game as it is.
 Install it with `sudo dnf install gamescope` on Fedora, `sudo apt-get install gamescope` on

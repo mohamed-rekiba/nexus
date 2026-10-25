@@ -93,11 +93,24 @@ impl Pc {
         serde_json::from_slice(&bytes).unwrap()
     }
 
-    /// The Game Hub's "Start with <file>" label for the game `emu-pc:Game`.
-    async fn next_start(&self) -> String {
-        self.test.core.dispatch(Command::OpenGame("emu-pc:Game".parse().unwrap())).await.unwrap();
+    /// The files the manifest of the game in `folder` lists, best first.
+    fn starts(&self, folder: &str) -> Vec<String> {
+        self.manifest(folder).starts.into_iter().map(|s| s.path).collect()
+    }
+
+    /// The game `emu-pc:<id>`'s Starts setting, as its Game Hub has it.
+    async fn starts_field(&self, id: &str) -> nexus_ui_api::FieldVm {
+        self.test.core.dispatch(Command::OpenGame(format!("emu-pc:{id}").parse().unwrap())).await.unwrap();
         let detail = self.test.core.view().detail.expect("the Game Hub is open");
-        detail.actions.iter().find(|a| a.id == "start-something-else").map(|a| a.text.clone()).unwrap_or_default()
+        let fields = detail.settings.into_iter().flat_map(|s| s.fields);
+        fields.into_iter().find(|f| f.key == "starts").expect("a Starts setting")
+    }
+
+    /// Sets the setting `key` of the game `emu-pc:<id>`.
+    async fn set(&self, id: &str, key: &str, value: &str) -> nexus_core::CoreResult<()> {
+        let scope = nexus_api::ConfigScope::Game(id.into());
+        let set = Command::SetConfigField { plugin: pc(), scope, key: key.into(), value: value.into() };
+        self.test.core.dispatch(set).await
     }
 
     fn titles(&self) -> Vec<(String, String)> {
@@ -127,9 +140,12 @@ async fn a_release_installs_from_its_download_with_its_start_script_and_shows_in
     let game = p.games.path().join("PC/Celeste");
     assert_eq!(std::fs::read(game.join("game/Content/levels.pak")).unwrap(), b"levels");
     let manifest = p.manifest("Celeste");
-    assert_eq!((manifest.name.as_str(), manifest.launch.as_str()), ("Celeste", "start.sh"));
-    let others: Vec<_> = manifest.alternatives.iter().map(|s| s.launch.as_str()).collect();
-    assert_eq!(others, ["game/Celeste.x86_64", "game/Celeste.exe"]);
+    assert_eq!((manifest.version, manifest.name.as_str()), (2, "Celeste"));
+    assert_eq!(
+        p.starts("Celeste"),
+        ["start.sh", "game/Celeste.x86_64", "game/Celeste.exe"],
+        "every file that starts it"
+    );
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -140,34 +156,80 @@ async fn a_release_installs_from_its_download_with_its_start_script_and_shows_in
 }
 
 #[tokio::test]
-async fn play_starts_the_script_in_its_folder_and_start_something_else_moves_to_the_next_choice() {
+async fn play_starts_the_script_in_its_folder_and_the_starts_setting_picks_another_file() {
     let p = boot(Platform::Linux).await;
     p.download(&[("Game/start.sh", b"#!/bin/sh\n"), ("Game/bin/game.x86_64", &elf())]);
     assert_eq!(p.install().await, "done");
     let game = p.games.path().join("PC/Game");
-    assert_eq!(p.next_start().await, "Start with game.x86_64", "it names the next file");
+    let key: nexus_api::GameKey = "emu-pc:Game".parse().unwrap();
 
-    p.test.core.dispatch(Command::Launch("emu-pc:Game".parse().unwrap())).await.unwrap();
+    // Game settings lists each file it can start, the start script first and chosen.
+    let field = p.starts_field("Game").await;
+    assert!(p.test.core.view().detail.unwrap().actions.iter().all(|a| a.id != "start-something-else"));
+    assert_eq!(field.choices, ["start.sh", "bin/game.x86_64"]);
+    assert_eq!(field.choice_labels, ["start.sh", "game.x86_64"], "each by its file name");
+    assert_eq!(field.value, "start.sh");
+    assert_eq!(field.help, "Play starts start.sh, from the game's folder.");
+
+    p.test.core.dispatch(Command::Launch(key.clone())).await.unwrap();
     let first = p.test.spawner.wait_for(1).await;
     assert_eq!(first.command.program, game.join("start.sh"));
     assert_eq!(first.command.cwd, game);
     first.exit(0);
 
-    let next = Command::RunAction {
-        plugin: pc(),
-        action: "start-something-else".into(),
-        game: Some("emu-pc:Game".parse().unwrap()),
-        args: serde_json::Value::Null,
-    };
-    p.test.core.dispatch(next).await.unwrap();
-    assert_eq!(p.manifest("Game").launch, "bin/game.x86_64");
-    assert_eq!(p.manifest("Game").alternatives[0].launch, "start.sh", "the script goes last");
-    assert_eq!(p.next_start().await, "Start with start.sh");
+    p.set("Game", "starts", "bin/game.x86_64").await.unwrap();
+    let field = p.starts_field("Game").await;
+    assert_eq!(field.value, "bin/game.x86_64");
+    assert_eq!(field.choices, ["start.sh", "bin/game.x86_64"], "the list keeps its order");
+    assert_eq!(field.help, "Play starts bin/game.x86_64, from the game's folder.", "the whole path");
     tokio::time::sleep(Duration::from_millis(50)).await;
-    p.test.core.dispatch(Command::Launch("emu-pc:Game".parse().unwrap())).await.unwrap();
+    p.test.core.dispatch(Command::Launch(key)).await.unwrap();
     let second = p.test.spawner.wait_for(2).await;
     assert_eq!(second.command.program, game.join("bin/game.x86_64"));
     assert_eq!(second.command.cwd, game.join("bin"));
+
+    assert!(p.set("Game", "starts", "missing.sh").await.is_err(), "only a file the game has");
+}
+
+#[tokio::test]
+async fn a_game_an_older_nexus_installed_starts_its_start_script_by_default() {
+    let p = boot(Platform::Linux).await;
+    // The first manifest: what Play started first, the .exe; the start scripts as other choices.
+    let game = p.games.path().join("PC/Game");
+    for script in ["ENG/start.sh", "RUS/start.sh"] {
+        std::fs::create_dir_all(game.join(script).parent().unwrap()).unwrap();
+        std::fs::write(game.join(script), b"#!/bin/sh\n").unwrap();
+    }
+    let manifest = serde_json::json!({ "version": 1, "name": "Game", "launch": "ENG/game.exe", "kind": "windows",
+        "alternatives": [{ "launch": "ENG/start.sh", "kind": "script" }, { "launch": "RUS/start.sh", "kind": "script" },
+            { "launch": "RUS/game.exe", "kind": "windows" }] });
+    std::fs::write(game.join(GAME_FILE), manifest.to_string()).unwrap();
+    p.test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+
+    let key: nexus_api::GameKey = "emu-pc:Game".parse().unwrap();
+    let field = p.starts_field("Game").await;
+    assert_eq!(field.value, "ENG/start.sh");
+    assert_eq!(field.choices, ["ENG/game.exe", "ENG/start.sh", "RUS/start.sh", "RUS/game.exe"], "in its order");
+    assert_eq!(field.choice_labels, ["ENG/game.exe", "ENG/start.sh", "RUS/start.sh", "RUS/game.exe"]);
+    p.test.core.dispatch(Command::Launch(key)).await.unwrap();
+    let run = p.test.spawner.wait_for(1).await.command;
+    assert_eq!(run.program, game.join(native("ENG/start.sh")));
+}
+
+#[tokio::test]
+async fn every_file_that_starts_a_game_can_be_picked_however_many_there_are() {
+    let p = boot(Platform::Linux).await;
+    let names: Vec<String> = (1..=12).map(|i| format!("Game/tools/tool{i:02}.x86_64")).collect();
+    let mut files: Vec<(&str, &[u8])> = vec![("Game/start.sh", b"#!/bin/sh\n")];
+    let program = elf();
+    files.extend(names.iter().map(|n| (n.as_str(), program.as_slice())));
+    p.download(&files);
+    assert_eq!(p.install().await, "done");
+    assert_eq!(p.starts("Game").len(), 13, "the start script and all 12 programs");
+    p.set("Game", "starts", "tools/tool12.x86_64").await.unwrap();
+    p.test.core.dispatch(Command::Launch("emu-pc:Game".parse().unwrap())).await.unwrap();
+    let run = p.test.spawner.wait_for(1).await.command;
+    assert_eq!(run.program, p.games.path().join(native("PC/Game/tools/tool12.x86_64")));
 }
 
 #[tokio::test]
@@ -356,7 +418,7 @@ fn elf32() -> Vec<u8> {
 }
 
 #[tokio::test]
-async fn a_portable_wine_game_this_system_can_t_run_starts_its_exe_through_proton() {
+async fn play_runs_the_start_script_as_it_is_even_beside_a_wine_this_system_can_t_run() {
     let test = FakeHost::new()
         .platform(Some(Platform::Linux))
         .runs_32bit(false)
@@ -364,6 +426,7 @@ async fn a_portable_wine_game_this_system_can_t_run_starts_its_exe_through_proto
         .boot_core()
         .await;
     let p = with_folders(test).await;
+    p.test.spawner.on_path("umu-run", Path::new("/usr/bin/umu-run"));
     // A portable Wine wrapper: its script starts the 32-bit Wine beside it.
     p.download(&[
         ("Pocket Tanks/start.sh", b"#!/usr/bin/env bash\n"),
@@ -371,18 +434,22 @@ async fn a_portable_wine_game_this_system_can_t_run_starts_its_exe_through_proto
         ("Pocket Tanks/game_info/data/pockettanks.exe", &exe()),
     ]);
     assert_eq!(p.install().await, "done");
-    assert_eq!(p.manifest("Pocket-Tanks").launch, "start.sh");
+    assert_eq!(p.starts("Pocket-Tanks"), ["start.sh", "game_info/data/pockettanks.exe"], "not its Wine");
     let launch = Command::Launch("emu-pc:Pocket-Tanks".parse().unwrap());
+    let game = p.games.path().join("PC/Pocket-Tanks");
 
-    let refused = p.test.core.dispatch(launch.clone()).await.unwrap_err().to_string();
-    assert!(refused.contains("32-bit") && refused.contains("install umu-launcher"), "{refused}");
+    // What Starts says, and nothing else: when it fails, the player picks another file.
+    p.test.core.dispatch(launch.clone()).await.unwrap();
+    let first = p.test.spawner.wait_for(1).await;
+    assert_eq!(first.command.program, game.join("start.sh"));
+    first.exit(1);
+    tokio::time::sleep(Duration::from_millis(50)).await;
 
-    p.test.spawner.on_path("umu-run", Path::new("/usr/bin/umu-run"));
+    p.set("Pocket-Tanks", "starts", "game_info/data/pockettanks.exe").await.unwrap();
     p.test.core.dispatch(launch).await.unwrap();
-    let run = p.test.spawner.wait_for(1).await.command;
+    let run = p.test.spawner.wait_for(2).await.command;
     assert_eq!(run.program, Path::new("umu-run"));
-    let exe = p.games.path().join(native("PC/Pocket-Tanks/game_info/data/pockettanks.exe"));
-    assert_eq!(run.args, [exe.display().to_string()]);
+    assert_eq!(run.args, [game.join(native("game_info/data/pockettanks.exe")).display().to_string()]);
     // With no 32-bit libraries, a 32-bit game's graphics come from the 64-bit ones.
     assert_eq!(run.env.get("PROTON_USE_WOW64").map(String::as_str), Some("1"));
 }
@@ -425,12 +492,18 @@ async fn a_windows_game_at_a_resolution_of_its_own_fills_the_screen_through_game
 }
 
 #[tokio::test]
-async fn a_native_game_has_no_resolution_setting() {
+async fn a_linux_game_at_a_resolution_of_its_own_runs_inside_gamescope_too() {
     let p = boot(Platform::Linux).await;
-    p.download(&[("Tux/tux.x86_64", &elf())]);
+    p.test.spawner.on_path("gamescope", Path::new("/usr/bin/gamescope"));
+    p.download(&[("Tux/start", b"./tux\n"), ("Tux/tux.x86_64", &elf())]);
     assert_eq!(p.install().await, "done");
-    p.test.core.dispatch(Command::OpenGame("emu-pc:Tux".parse().unwrap())).await.unwrap();
-    assert!(p.test.core.view().detail.unwrap().settings.is_empty());
+    p.set("Tux", "resolution", "1280x720").await.unwrap();
+    p.test.core.dispatch(Command::Launch("emu-pc:Tux".parse().unwrap())).await.unwrap();
+    let run = p.test.spawner.wait_for(1).await.command;
+    assert_eq!(run.program, Path::new("gamescope"));
+    let script = p.games.path().join(native("PC/Tux/start")).display().to_string();
+    let args: Vec<&str> = run.args.iter().map(String::as_str).collect();
+    assert_eq!(args, ["-f", "-w", "1280", "-h", "720", "--", "sh", &script], "a script without #! through sh");
 }
 
 #[tokio::test]
@@ -438,7 +511,9 @@ async fn on_windows_the_exe_runs_as_it_is_and_a_linux_game_says_it_can_t_run_her
     let p = boot(Platform::Windows).await;
     p.download(&[("Game/start.sh", b"#!/bin/sh\n"), ("Game/Game.exe", &exe())]);
     assert_eq!(p.install().await, "done");
-    assert_eq!(p.manifest("Game").launch, "Game.exe", "the one Windows can start");
+    assert_eq!(p.starts("Game"), ["start.sh", "Game.exe"]);
+    assert!(p.set("Game", "resolution", "800x600").await.is_err(), "gamescope is Linux's");
+    // Play starts the one Windows can start.
     p.test.core.dispatch(Command::Launch("emu-pc:Game".parse().unwrap())).await.unwrap();
     let run = p.test.spawner.wait_for(1).await;
     assert_eq!(run.command.program, p.games.path().join("PC/Game/Game.exe"));
@@ -457,7 +532,6 @@ async fn on_a_mac_a_release_with_a_script_and_an_exe_runs_the_exe_through_wine()
     let p = boot(Platform::Macos).await;
     p.download(&[("Game/start.sh", b"#!/bin/sh\n"), ("Game/Game.exe", &exe())]);
     assert_eq!(p.install().await, "done");
-    assert_eq!(p.manifest("Game").launch, "Game.exe");
     p.test.spawner.on_path("wine", Path::new("/opt/homebrew/bin/wine"));
     p.test.core.dispatch(Command::Launch("emu-pc:Game".parse().unwrap())).await.unwrap();
     let run = p.test.spawner.wait_for(1).await.command;
@@ -479,7 +553,7 @@ async fn the_release_s_packaging_comes_from_its_unpacked_folder_and_a_data_archi
     let game = p.games.path().join("PC/Repack");
     assert_eq!(std::fs::read(game.join("Hollow/data.bin")).unwrap(), b"data");
     assert!(!game.join("game.part1.rar").exists(), "the packaging isn't copied");
-    assert_eq!(p.manifest("Repack").launch, "Hollow/hollow.x86_64");
+    assert_eq!(p.starts("Repack")[0], "Hollow/hollow.x86_64");
 
     // A game whose data archive sits beside its program: the archive stays as it is.
     std::fs::remove_dir_all(p.packages.path().join("PC/torrent-abc")).unwrap();

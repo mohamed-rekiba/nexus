@@ -340,21 +340,32 @@ download it came from stays in Downloads.
 ## PC games
 
 The PC plugin is `emu-pc` (`plugins/emulators/pc`). It plays the console `PC` on Linux, macOS
-and Windows, with the capabilities catalog, launcher, slots and game installer. It has no
-settings, and its games have no settings.
+and Windows, with the capabilities catalog, launcher, slots, game installer and configurator.
+It has no settings of its own; each game has Starts, and on Linux a Resolution (see Game Hub).
+
+Its modules: `install.rs` (the install), `probe.rs` (what a file is, and the order of a game's
+files), `manifest.rs` (the manifest file and the default start), `library.rs` (the installed
+games, their details and Game Hub section), `launch.rs` (Play), `settings.rs` (a game's
+settings) and `runner.rs` (umu-launcher and Wine). `lib.rs` joins them.
 
 Permissions:
 
 - the games folder, with write; the packages folder, read only;
-- processes: `folder:games` (any file in a game folder), `system:umu-run`, `system:wine`,
-  `system:wine64` and `system:sh`.
+- processes: `folder:games` (any file in a game folder), the umu-launcher it installs,
+  `system:umu-run`, `system:wine`, `system:wine64`, `system:sh` and `system:gamescope`.
 
 ### Library
 
 Games install to `PC/` in the player's first game folder, or the folder picked on the install
-sheet. A game is a folder in `PC/` with a `.nexus-game.json` manifest (version 1): its name,
-what Play starts (`launch`, a path inside the folder), its kind, and up to 8 other choices
-(`alternatives`). The folder's name is the game's id. Search matches the name.
+sheet. A game is a folder in `PC/` with a `.nexus-game.json` manifest (version 2): its `name`,
+and `starts`, every file in it that can start the game, best first, each a `path` inside the
+folder and its `kind`. The manifest holds what the install found and doesn't change after. The
+folder's name is the game's id. Search matches the name.
+
+The first manifest (version 1: `launch`, `kind` and up to 8 `alternatives`) reads as the same
+list, `launch` first. A game with one is named by GOG's `data/noarch/gameinfo` (first line) or a
+portable Wine wrapper's `game_info/game_info.txt` beside its first file (sixth line) when it
+has one: it was installed before its name came from them.
 
 ### What a file is
 
@@ -387,19 +398,22 @@ Everything else is copied as it is. The files of a used set go where the archive
 torrent's own top folder is the game's folder, and the game's name comes from it, cleaned of
 release tags: "[GOG] Celeste (v1.4.0.0) [amd64] [Multi]" is "Celeste".
 
-The plugin then picks what Play starts. Each file gets a score:
+The plugin then lists every file that can start the game. The order compares, one after the
+other:
 
-1. a start script by its name (`start`, `start.sh`, `play.sh`, `run.sh`, …);
-2. an AppImage;
-3. a Mac program inside a `.app`;
-4. a Linux program, better when named after the game or ending in `.x86_64`;
-5. another script at the top or named after the game;
-6. a Windows `.exe`, worse for a launcher.
+1. helpers last: a name with `setup`, `install`, `update`, `config`, `crashhandler` and the like;
+2. what the file is: a start script by its name (`start`, `start.sh`, `play.sh`, `run.sh`, …),
+   an AppImage, a Mac program inside a `.app`, a Linux program, another Mac program, another
+   script, a Windows `.exe`;
+3. how deep it is: nearer the game's folder first;
+4. a 64-bit program before a 32-bit one;
+5. its path.
 
-Files nearer the top score higher. Helpers (setup, uninstallers, redistributables, crash
-reporters, libraries) and bundled runtimes (`lib/`, `wine/`, `runtime/`, `jre/`, …) are skipped.
-Play starts the best choice this system can run, else the best there is. The others are kept
-as alternatives.
+The game's name plays no part. Libraries (`.so`, `.dll`) and the programs in bundled runtimes'
+folders (`lib/`, `wine/`, `runtime/`, `jre/`, …) aren't listed. The order doesn't depend on the
+system; what Play starts by default does (see Game Hub). A GOG installer's `gameinfo` or a
+portable Wine wrapper's `game_info.txt` beside the first file names the game; neither decides
+what starts.
 
 On Linux and macOS the program flag is set again on scripts, AppImages and programs. A game
 whose folder exists already is refused: "<name> is already installed". A download with nothing
@@ -416,15 +430,20 @@ that starts a game is refused: "Nothing in this download starts a game".
 
 So on a Mac, a release with a start script and a `.exe` starts the `.exe` through Wine.
 
-`prepare` builds the launch:
+Play runs the file Starts chose, as it is: its kind decides how, and nothing else. Nexus never
+starts another file in its place. When the file fails (a wrapper's 32-bit Wine on a system
+without 32-bit libraries, say), the notice "closed right after it started" names its log, and
+the player picks another file in Starts. `prepare` builds the launch:
 
-- A program that runs directly starts from its own folder, which is the working folder.
+- The file starts from its own folder, which is the working folder.
 - A script without `#!` runs through `sh`.
 - An AppImage gets `APPIMAGE_EXTRACT_AND_RUN=1`, so it runs without FUSE.
-- A Windows game off Windows runs through the runner, with the `.exe` as its argument and its
-  own Wine prefix, `prefixes/<game id>` in the plugin's data folder (`WINEPREFIX`). With
+- A Windows program off Windows runs through the runner, with the `.exe` as its argument and
+  its own Wine prefix, `prefixes/<game id>` in the plugin's data folder (`WINEPREFIX`). With
   `umu-run`, `GAMEID=umu-default` and `PROTONPATH=GE-Proton`: umu downloads and updates Proton
-  by itself.
+  by itself. On a system without 32-bit libraries it also gets `PROTON_USE_WOW64=1`.
+- With a Resolution, all of it runs inside gamescope: `gamescope -f -w <width> -h <height> --`
+  and then the program and its arguments.
 
 A game this system can't start installs anyway. Play then fails with the reason, for example
 "Can't start Celeste: This is a Linux game: it can't run on Windows". Without a runner it is
@@ -436,9 +455,17 @@ it" on Linux, and "… install Wine to play it" on a Mac.
 - A "Starts" fact names the file Play starts.
 - A "PC" section has the rows "Starts" and "Runs". "Runs" is "As it is", "With Proton, through
   umu-launcher", "With Wine", the runner hint, or why it can't run here.
-- The action "Start with <file>" makes the first other choice what Play starts. The one it
-  replaces goes last. The label names the file, with its folder when the current one has the
-  same file name ("x86/game" next to "x86_64/game").
+- Every PC game has Game settings (the Game Hub's ⋯ menu). "Starts" lists each file it can
+  start, in the manifest's order. Each is named by its file name, with the nearest folder that
+  tells it apart when another file has the same name ("ENG/start.sh", "ENG/…/Ra2.exe"). The
+  line under the row gives the whole path of the file Play starts.
+- The default is the first start script by its name (`start.sh`, `run.sh`, …) that runs on
+  this system, else the first file that runs here, else the first file.
+- Picking another file is kept as the game's `starts` setting, and Play and the "Starts" fact
+  and row then use it. Only a file in the manifest can be picked. The manifest file doesn't
+  change. A `starts` setting that names a file the manifest no longer has is ignored.
+- On Linux, every game has a "Resolution" setting there too: "Your screen" (the default) or a
+  size, which runs it inside gamescope.
 - The game comes to the front, takes the pad and gives the launcher back as any game does (see
   [desktop.md](desktop.md#the-running-game)).
 

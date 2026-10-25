@@ -28,6 +28,11 @@ pub enum Probe {
 }
 
 impl Probe {
+    /// Whether it is a program: a Linux, Windows or Mac one, or an AppImage.
+    pub fn is_program(self) -> bool {
+        matches!(self, Probe::Elf { .. } | Probe::Exe | Probe::AppImage | Probe::MachO)
+    }
+
     /// Whether it should have the program flag (downloads drop it).
     pub fn runnable(self) -> bool {
         matches!(self, Probe::Elf { .. } | Probe::AppImage | Probe::Script | Probe::MachO)
@@ -147,7 +152,7 @@ pub fn system_name(platform: Platform) -> &'static str {
     }
 }
 
-/// Helpers that come with games but don't start them.
+/// Helpers that come with games but don't start them: listed last.
 fn helper(name: &str) -> bool {
     const WORDS: [&str; 22] = [
         "setup",
@@ -174,99 +179,103 @@ fn helper(name: &str) -> bool {
         "easyanticheat",
     ];
     let n = name.to_ascii_lowercase();
-    WORDS.iter().any(|w| n.contains(w)) || n.ends_with(".so") || n.contains(".so.") || n.ends_with(".dll")
+    WORDS.iter().any(|w| n.contains(w))
 }
 
-/// A game name's words, to prefer the program named after it.
-fn words(name: &str) -> Vec<String> {
-    name.to_lowercase().split(|c: char| !c.is_alphanumeric()).filter(|w| w.len() > 2).map(str::to_owned).collect()
+/// A library, which no one starts: not listed.
+fn library(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    n.ends_with(".so") || n.contains(".so.") || n.ends_with(".dll")
 }
 
-/// What starts a game, and the other choices, best first.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Choice {
-    pub launch: String,
-    pub kind: Kind,
-    pub alternatives: Vec<(String, Kind)>,
+/// Folders of runtimes a game brings (Wine, Proton, Steam's runtime, Java, libraries): their
+/// programs aren't listed.
+const RUNTIMES: [&str; 12] = [
+    "lib/",
+    "lib32/",
+    "lib64/",
+    "libs/",
+    "/wine/",
+    "wine/bin",
+    "files/bin",
+    "runtime/",
+    "dist/",
+    "mono/",
+    "jre/",
+    "java/",
+];
+
+/// The names a start script goes by.
+const START_NAMES: [&str; 8] =
+    ["start", "start.sh", "start-game.sh", "start_game.sh", "play.sh", "run.sh", "launch.sh", "game.sh"];
+
+/// Whether the file at `path` is named as a start script is (`start.sh`, `run.sh`, …).
+pub fn start_script(path: &str) -> bool {
+    START_NAMES.contains(&path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase().as_str())
 }
 
-/// What starts the game `name` on `platform`, from its files (paths from its folder) and what
-/// each is: the best one this system can start, else the best one there is. `None` when
-/// nothing in it starts a game.
-pub fn choose(files: &[(String, Probe)], name: &str, platform: Platform) -> Option<Choice> {
-    let name_words = words(name);
-    let has_x64 = files.iter().any(|(_, p)| *p == Probe::Elf { x64: true });
-    let mut scored: Vec<(i32, &str, Kind)> = Vec::new();
+/// Each of `paths` as people read it: its file name, and when another has the same file name,
+/// the nearest folder that tells them apart (`ENG/start.sh` beside `RUS/start.sh`,
+/// `ENG/…/Ra2.exe` beside `RUS/…/Ra2.exe`).
+pub fn short_names(paths: &[String]) -> Vec<String> {
+    let parts = |p: &str| p.rsplit('/').map(str::to_owned).collect::<Vec<_>>();
+    paths
+        .iter()
+        .map(|path| {
+            let mine = parts(path);
+            let twins: Vec<Vec<String>> =
+                paths.iter().filter(|o| *o != path).map(|o| parts(o)).filter(|o| o[0] == mine[0]).collect();
+            if twins.is_empty() {
+                return mine[0].clone();
+            }
+            match (1..mine.len()).find(|&i| twins.iter().all(|t| t.get(i) != Some(&mine[i]))) {
+                Some(1) => format!("{}/{}", mine[1], mine[0]),
+                Some(i) => format!("{}/…/{}", mine[i], mine[0]),
+                None => path.clone(),
+            }
+        })
+        .collect()
+}
+
+/// Every file of a game that can start it, from its files (paths from its folder) and what
+/// each is, best first. Helpers (setups, crash reporters) come last. Then by what the file
+/// is: a start script by its name, an AppImage, a Mac program in a `.app`, a Linux program,
+/// another Mac program, another script, a Windows program. Then nearer the game's folder
+/// first, a 64-bit program before a 32-bit one, and by path. Libraries and the programs of
+/// bundled runtimes (see [`RUNTIMES`]) aren't listed. Empty when nothing in it starts a game.
+pub fn rank(files: &[(String, Probe)]) -> Vec<(String, Kind)> {
+    /// A file's place in the list, compared field by field.
+    #[derive(PartialEq, Eq, PartialOrd, Ord)]
+    struct Place<'a> {
+        helper: bool,
+        order: u8,
+        depth: usize,
+        not_x64: bool,
+        path: &'a str,
+    }
+    let mut ranked: Vec<(Place, Kind)> = Vec::new();
     for (path, probe) in files {
-        let depth = path.matches('/').count() as i32;
         let file = path.rsplit('/').next().unwrap_or(path);
         let lower = file.to_ascii_lowercase();
         let dir_lower = path.to_ascii_lowercase();
-        // Bundled runtimes are tools, not the game: Wine, Proton, Steam's runtime, libraries.
-        const TOOLS: [&str; 12] = [
-            "lib/",
-            "lib32/",
-            "lib64/",
-            "libs/",
-            "/wine/",
-            "wine/bin",
-            "files/bin",
-            "runtime/",
-            "dist/",
-            "mono/",
-            "jre/",
-            "java/",
-        ];
-        if TOOLS.iter().any(|d| dir_lower.contains(d)) && !lower.starts_with("start") {
+        if library(file) || (RUNTIMES.iter().any(|d| dir_lower.contains(d)) && !start_script(file)) {
             continue;
         }
-        let named = name_words.iter().any(|w| lower.contains(w.as_str()));
-        const STARTS: [&str; 8] =
-            ["start", "start.sh", "start-game.sh", "start_game.sh", "play.sh", "run.sh", "launch.sh", "game.sh"];
-        let (score, kind) = match probe {
-            Probe::Script | Probe::Other if STARTS.contains(&lower.as_str()) => (100 - depth * 5, Kind::Script),
-            Probe::Script if lower.ends_with(".sh") && !helper(&lower) && (named || depth == 0) => {
-                (60 - depth * 5 + i32::from(named) * 5, Kind::Script)
-            }
-            Probe::AppImage => (90 - depth * 5, Kind::AppImage),
-            Probe::Elf { x64 } if !helper(&lower) => {
-                let mut s = 70 - depth * 5 + i32::from(named) * 10;
-                if lower.ends_with(".x86_64") || lower.ends_with(".x64") {
-                    s += 5;
-                }
-                if !x64 && has_x64 {
-                    s -= 20;
-                }
-                (s, Kind::Native)
-            }
-            // A Mac program: the one inside a `.app` first.
-            Probe::MachO if !helper(&lower) => {
-                let bundled = dir_lower.contains(".app/contents/macos/");
-                (if bundled { 85 - depth * 2 } else { 65 - depth * 5 } + i32::from(named) * 10, Kind::MacApp)
-            }
-            Probe::Exe if !helper(&lower) => {
-                let mut s = 30 - depth * 3 + i32::from(named) * 10;
-                if lower.contains("launcher") {
-                    s -= 5;
-                }
-                (s, Kind::Windows)
-            }
-            _ => continue,
+        let (order, kind, x64) = match probe {
+            Probe::Script | Probe::Other if START_NAMES.contains(&lower.as_str()) => (0, Kind::Script, true),
+            Probe::AppImage => (1, Kind::AppImage, true),
+            Probe::MachO if dir_lower.contains(".app/contents/macos/") => (2, Kind::MacApp, true),
+            Probe::Elf { x64 } => (3, Kind::Native, *x64),
+            Probe::MachO => (4, Kind::MacApp, true),
+            Probe::Script => (5, Kind::Script, true),
+            Probe::Exe => (6, Kind::Windows, true),
+            Probe::Other => continue,
         };
-        scored.push((score, path, kind));
+        let place = Place { helper: helper(file), order, depth: path.matches('/').count(), not_x64: !x64, path };
+        ranked.push((place, kind));
     }
-    // Best first; at a tie, the shorter path.
-    scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.len().cmp(&b.1.len())).then(a.1.cmp(b.1)));
-    let best = scored.iter().position(|(_, _, kind)| kind.runs_on(platform)).unwrap_or(0);
-    let (_, launch, kind) = *scored.get(best)?;
-    let alternatives = scored
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| *i != best)
-        .take(8)
-        .map(|(_, (_, path, kind))| (path.to_string(), *kind))
-        .collect();
-    Some(Choice { launch: launch.to_owned(), kind, alternatives })
+    ranked.sort_by(|a, b| a.0.cmp(&b.0));
+    ranked.into_iter().map(|(place, kind)| (place.path.to_owned(), kind)).collect()
 }
 
 /// A game's name from its release folder: "[GOG] Celeste (v1.4.0.0) [amd64] [Multi]" is
@@ -324,21 +333,6 @@ pub fn folder_name(name: &str) -> String {
     if s.is_empty() { "game".into() } else { s }
 }
 
-/// A start as people read it: its file name, with its folder when `other` (what it is told
-/// apart from) has the same file name (`bin/x86/game` and `bin/x86_64/game`).
-pub fn short_path(path: &str, other: &str) -> String {
-    let file = |p: &str| p.rsplit('/').next().unwrap_or(p).to_owned();
-    if file(path) != file(other) || !path.contains('/') {
-        return file(path);
-    }
-    let mut parts = path.rsplit('/');
-    let name = parts.next().unwrap_or_default();
-    match parts.next() {
-        Some(dir) => format!("{dir}/{name}"),
-        None => name.to_owned(),
-    }
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -386,44 +380,56 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn the_start_script_wins_and_a_windows_program_is_the_last_choice_on_linux() {
+    fn every_file_that_starts_the_game_is_listed_the_start_script_first() {
         let files = vec![
             ("start.sh".to_owned(), Probe::Script),
             ("game/Celeste.x86_64".to_owned(), Probe::Elf { x64: true }),
             ("game/Celeste.exe".to_owned(), Probe::Exe),
             ("game/lib64/libfmod.so".to_owned(), Probe::Elf { x64: true }),
             ("UnityCrashHandler64.exe".to_owned(), Probe::Exe),
+            ("Celeste.app/Contents/MacOS/Celeste".to_owned(), Probe::MachO),
+            ("readme.txt".to_owned(), Probe::Other),
         ];
-        let choice = choose(&files, "Celeste", Platform::Linux).unwrap();
-        assert_eq!((choice.launch.as_str(), choice.kind), ("start.sh", Kind::Script));
+        let paths: Vec<_> = rank(&files).into_iter().map(|(p, _)| p).collect();
         assert_eq!(
-            choice.alternatives,
-            [("game/Celeste.x86_64".to_owned(), Kind::Native), ("game/Celeste.exe".to_owned(), Kind::Windows)]
+            paths,
+            [
+                "start.sh",
+                "Celeste.app/Contents/MacOS/Celeste",
+                "game/Celeste.x86_64",
+                "game/Celeste.exe",
+                "UnityCrashHandler64.exe"
+            ],
+            "the helper last; no library or text file"
         );
+        assert!(rank(&[("readme.txt".to_owned(), Probe::Other)]).is_empty());
     }
 
     #[test]
-    fn each_system_picks_what_it_can_start() {
+    fn the_order_is_the_file_s_type_then_how_deep_it_is_whatever_its_name() {
         let files = vec![
-            ("start.sh".to_owned(), Probe::Script),
-            ("Game.exe".to_owned(), Probe::Exe),
-            ("Game.app/Contents/MacOS/Game".to_owned(), Probe::MachO),
+            ("Game.AppImage".to_owned(), Probe::AppImage),
+            ("bin/x86/game".to_owned(), Probe::Elf { x64: false }),
+            ("bin/x86_64/game".to_owned(), Probe::Elf { x64: true }),
+            ("Desktop Dungeons/desktopdungeons".to_owned(), Probe::Elf { x64: true }),
+            ("tools/build.sh".to_owned(), Probe::Script),
+            ("a/b/c/start.sh".to_owned(), Probe::Script),
+            ("wine/bin/wine".to_owned(), Probe::Elf { x64: false }),
         ];
-        assert_eq!(choose(&files, "Game", Platform::Linux).unwrap().kind, Kind::Script);
-        assert_eq!(choose(&files, "Game", Platform::Macos).unwrap().kind, Kind::MacApp);
-        assert_eq!(choose(&files, "Game", Platform::Windows).unwrap().kind, Kind::Windows);
-        let linux_and_windows = &files[..2];
+        let paths: Vec<_> = rank(&files).into_iter().map(|(p, _)| p).collect();
         assert_eq!(
-            choose(linux_and_windows, "Game", Platform::Macos).unwrap().launch,
-            "Game.exe",
-            "on a Mac the .exe through Wine, not the Linux script"
+            paths,
+            [
+                "a/b/c/start.sh",
+                "Game.AppImage",
+                "bin/x86_64/game",
+                "bin/x86/game",
+                "tools/build.sh",
+                "Desktop Dungeons/desktopdungeons"
+            ],
+            "a deep start script first; 64-bit before 32-bit; a name with a helper's word last; not its Wine"
         );
-        let linux_only = vec![("game.x86_64".to_owned(), Probe::Elf { x64: true })];
-        let choice = choose(&linux_only, "Game", Platform::Windows).unwrap();
-        assert_eq!(choice.kind, Kind::Native, "nothing here starts it: the best there is");
-        assert!(!choice.kind.runs_on(Platform::Windows));
-        assert_eq!(choice.kind.not_here(Platform::Windows), "This is a Linux game: it can't run on Windows");
-        assert_eq!(choose(&[("readme.txt".to_owned(), Probe::Other)], "Game", Platform::Linux), None);
+        assert_eq!(Kind::Native.not_here(Platform::Windows), "This is a Linux game: it can't run on Windows");
     }
 
     #[test]
@@ -438,10 +444,21 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_start_is_named_by_its_file_with_its_folder_when_the_other_has_the_same_file_name() {
-        assert_eq!(short_path("game/Celeste.x86_64", "start.sh"), "Celeste.x86_64");
-        assert_eq!(short_path("bin/x86/game", "bin/x86_64/game"), "x86/game");
-        assert_eq!(short_path("game", "bin/game"), "game");
-        assert_eq!(short_path("start.sh", "start.sh"), "start.sh");
+    fn a_start_is_named_by_its_file_with_the_folders_that_tell_it_apart() {
+        let paths = [
+            "ENG/start.sh",
+            "RUS/start.sh",
+            "ENG/data/gamemd.exe",
+            "bin/x86/game",
+            "bin/x86_64/game",
+            "ENG/game_info/data/Ra2.exe",
+            "RUS/game_info/data/Ra2.exe",
+        ];
+        let paths: Vec<String> = paths.iter().map(|p| p.to_string()).collect();
+        assert_eq!(
+            short_names(&paths),
+            ["ENG/start.sh", "RUS/start.sh", "gamemd.exe", "x86/game", "x86_64/game", "ENG/…/Ra2.exe", "RUS/…/Ra2.exe"]
+        );
+        assert!(start_script("data/noarch/start.sh") && start_script("Run.sh") && !start_script("game.exe"));
     }
 }
