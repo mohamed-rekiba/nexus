@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/mohamed-rekiba/nexus/compare/v0.3.0...v0.3.1) (2026-10-25)
+
+
+### Bug Fixes
+
+* a release row's Download button has a column of its own, and only the row shows focus ([4766733](https://github.com/mohamed-rekiba/nexus/commit/4766733482c8197a6d0d76666b698059142c0942))
+
 ## [0.3.0](https://github.com/mohamed-rekiba/nexus/compare/v0.2.6...v0.3.0) (2026-10-25)
 
 
