@@ -217,6 +217,116 @@ fn settings_system_opens_the_panels_and_restart_asks_again_first() {
 }
 
 #[test]
+fn in_the_nexus_session_log_out_asks_again_then_leaves_for_the_login_screen() {
+    let system = machine();
+    let mut host = shown(&system, Place { whole_screen: true, nexus_os: false, stick: false });
+    host.dispatch(Command::Navigate(nexus_core::Route::Settings));
+    settle(&mut host);
+    down_to(&mut host, "system-log-out");
+    let asked = |host: &Composed| host.requests.borrow().contains(&nexus_ui_host::UiRequest::LogOut);
+    host.first("system-log-out").invoke_accessible_default_action();
+    settle(&mut host);
+    assert_eq!(value(&host, "system-log-out"), "armed");
+    assert!(!asked(&host), "the first press only asks");
+    host.first("system-log-out").invoke_accessible_default_action();
+    assert!(asked(&host));
+}
+
+#[test]
+fn as_the_whole_screen_quit_is_restart_nexus_since_the_session_starts_it_again() {
+    for (place, row) in
+        [(Place { whole_screen: false, nexus_os: false, stick: false }, "quit"), (WHOLE_SCREEN, "restart-nexus")]
+    {
+        let system = machine();
+        let mut host = shown(&system, place);
+        host.dispatch(Command::Navigate(nexus_core::Route::Settings));
+        settle(&mut host);
+        down_to(&mut host, row);
+        assert_eq!(host.count(if row == "quit" { "restart-nexus" } else { "quit" }), 0, "{place:?}");
+        host.first(row).invoke_accessible_default_action();
+        assert!(host.requests.borrow().contains(&nexus_ui_host::UiRequest::Quit), "{place:?}");
+    }
+}
+
+#[test]
+fn on_nexus_os_there_is_no_log_out_its_session_would_only_start_again() {
+    let system = machine();
+    let mut host = shown(&system, WHOLE_SCREEN);
+    host.dispatch(Command::Navigate(nexus_core::Route::Settings));
+    settle(&mut host);
+    down_to(&mut host, "system-shut-down");
+    assert_eq!(host.count("system-log-out"), 0);
+}
+
+/// The power menu's items, in order.
+fn power_items(host: &Composed) -> Vec<String> {
+    i_slint_backend_testing::ElementHandle::find_by_accessible_label(host.instance(), "power-menu")
+        .filter_map(|e| e.accessible_value())
+        .map(|v| v.to_string())
+        .collect()
+}
+
+fn power_item(host: &mut Composed, label: &str) {
+    let found = i_slint_backend_testing::ElementHandle::find_by_accessible_label(host.instance(), "power-menu")
+        .find(|e| e.accessible_value().is_some_and(|v| v.starts_with(label)))
+        .unwrap_or_else(|| panic!("no {label} in the power menu"));
+    found.invoke_accessible_default_action();
+    settle(host);
+}
+
+fn ctrl_p(host: &mut Composed) {
+    let ctrl: slint::SharedString = slint::platform::Key::Control.into();
+    let window = host.instance().window();
+    window.dispatch_event(slint::platform::WindowEvent::KeyPressed { text: ctrl.clone() });
+    window.dispatch_event(slint::platform::WindowEvent::KeyPressed { text: "p".into() });
+    window.dispatch_event(slint::platform::WindowEvent::KeyReleased { text: "p".into() });
+    window.dispatch_event(slint::platform::WindowEvent::KeyReleased { text: ctrl });
+    host.pump();
+    settle(host);
+}
+
+#[test]
+fn holding_the_guide_button_opens_the_power_menu_with_log_out_in_the_nexus_session() {
+    let system = machine();
+    let mut host = shown(&system, Place { whole_screen: true, nexus_os: false, stick: false });
+    assert!(power_items(&host).is_empty());
+    host.ui.pad(nexus_ui_host::PadButton::GuideHeld).unwrap();
+    host.pump();
+    settle(&mut host);
+    assert_eq!(power_items(&host), ["Log out", "Restart Nexus", "Restart", "Shut down"]);
+    power_item(&mut host, "Log out");
+    assert!(host.requests.borrow().contains(&nexus_ui_host::UiRequest::LogOut), "Log out acts at once");
+}
+
+#[test]
+fn ctrl_p_opens_the_power_menu_and_shut_down_asks_again_first() {
+    let system = machine();
+    let mut host = shown(&system, WHOLE_SCREEN);
+    ctrl_p(&mut host);
+    assert_eq!(power_items(&host), ["Restart Nexus", "Restart", "Shut down"], "Nexus OS: no Log out");
+    power_item(&mut host, "Shut down");
+    assert_eq!(system.read(|m| m.shutdowns), 0, "the first press only asks");
+    assert!(power_items(&host).contains(&"Press again to shut down".to_owned()));
+    power_item(&mut host, "Press again to shut down");
+    host.pump();
+    settle(&mut host);
+    assert_eq!(system.read(|m| m.shutdowns), 1);
+}
+
+#[test]
+fn on_a_desktop_the_power_menu_only_quits_and_escape_closes_it() {
+    let system = machine();
+    let mut host = shown(&system, Place::default());
+    ctrl_p(&mut host);
+    assert_eq!(power_items(&host), ["Quit Nexus"]);
+    key(&mut host, slint::platform::Key::Escape);
+    assert!(power_items(&host).is_empty(), "closed");
+    ctrl_p(&mut host);
+    power_item(&mut host, "Quit Nexus");
+    assert!(host.requests.borrow().contains(&nexus_ui_host::UiRequest::Quit));
+}
+
+#[test]
 fn on_the_stick_welcome_leads_to_a_disk_a_firm_question_and_the_install() {
     let system = machine();
     system.with(|m| {

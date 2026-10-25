@@ -2925,6 +2925,25 @@ fn the_game_hub_s_facts_wrap_in_rows_of_three() {
 }
 
 #[test]
+fn as_the_whole_screen_the_game_menu_opens_nothing_outside_nexus() {
+    let home = tempfile::tempdir().unwrap();
+    let whole_screen = nexus_core::system::Place { whole_screen: true, nexus_os: false, stick: false };
+    let mut host = first_offer_on(
+        home.path(),
+        installing_emulator(),
+        |h| h.place(whole_screen),
+        serde_json::json!([{ "id": "1", "title": "Celeste [Wine]", "magnet": format!("magnet:?xt=urn:btih:{ASTRO_HASH}"),
+            "game_info": {}, "steam": { "appid": 504230, "short": "Help Madeline survive.", "protondb": "gold" } }]),
+    );
+    assert_eq!(values(&host, "protondb"), ["Gold"], "the tier still shows");
+    press(&mut host, "game-options", "Options");
+    let items = values(&host, "game-menu");
+    for outside in ["Open game folder", "View emulator log", "Compatibility list", "ProtonDB page"] {
+        assert!(!items.contains(&outside.to_owned()), "no file manager or browser is on screen: {items:?}");
+    }
+}
+
+#[test]
 fn a_game_without_a_protondb_tier_has_no_card_or_menu_item() {
     let home = tempfile::tempdir().unwrap();
     let mut host = astro_on_its_game_hub(home.path());

@@ -188,6 +188,10 @@ game doesn't have it:
 10. "Settings"
 11. "Uninstall", in red, when `Vm.detail.can-uninstall`
 
+When Nexus is the whole screen (the Nexus session, Nexus OS), the menu leaves out "Open game
+folder", "View emulator log", "Compatibility list" and "ProtonDB page": no file manager or
+browser is on screen to open them in.
+
 Rows are labelled `game-menu`. The focus opens on the first item off the Game Hub, and on the
 second in it. "Uninstall" asks in the same card: "Uninstall <title>?" (`uninstall-title`), "Its
 folder is deleted from your game folder. A download it came from stays in Downloads.", then
@@ -196,6 +200,20 @@ folder is deleted from your game folder. A download it came from stays in Downlo
 
 "Rate how it runs" opens the result prompt for that game. Open game folder and View emulator
 log name the game, never a path: the host resolves the folder through the plugin's grants.
+
+### The power menu
+
+Holding the PS, Xbox or Logitech button (`Vm.power-menu`) or Ctrl+P opens it over any screen
+(`components/power-menu.slint`); a tap still goes Home. While a game runs, the hold closes the
+game at once instead, and the menu doesn't open. Items, each `power-menu`:
+
+1. "Log out", when Nexus is the whole screen and not Nexus OS (`Host.log-out`)
+2. "Restart Nexus" when Nexus is the whole screen, else "Quit Nexus" (`Host.quit`)
+3. "Restart" and 4. "Shut down", when Nexus is the whole screen and the system can
+   (`Host.restart-pc`, `Host.shut-down-pc`)
+
+Restart and Shut down ask again: the first press turns the row red and says "Press again to
+restart" or "to shut down"; moving away cancels it. Up and down move, Enter picks, Escape closes.
 
 ### Game settings
 
@@ -257,9 +275,10 @@ automatically". Sections, in order:
 |---|---|
 | GAMES | One row per folder (`folder:<name>`, with `~` for the home folder), "Rescan game folders" (`rescan`) |
 | UPDATES | "Update automatically" (`auto-update`), "Nexus updates" (`launcher-update`: check, download, restart) |
-| LAUNCHER | "Full screen", "Size of everything" (80% to 140%), "Back to the launcher", "Interface sounds", "Start at login" (installed builds only), "Screen" (two monitors or more), "Quit Nexus" (red, hint "Ctrl+Q") |
+| LAUNCHER | "Full screen", "Size of everything" (80% to 140%), "Back to the launcher", "Interface sounds", "Start at login" (installed builds only), "Screen" (two monitors or more), "Quit Nexus" (`quit`, red, hint "Ctrl+Q"), or "Restart Nexus" (`restart-nexus`) when Nexus is the whole screen, where the session starts it again |
 | DOWNLOADS | "Download only through a VPN" (`vpn-only`), one row per VPN (`vpn`) or "Your VPN" (`vpn-none`), "Add a VPN" (`vpn-import`, Linux with NetworkManager), "Keep sharing finished downloads" (`seed-downloads`) |
 | THIS PC | "Checking this PC…", then "Processor", "Memory", one "Graphics" row per card, and one row per emulator ("KytyPS5 games: May run slowly · Integrated GPU") |
+| SYSTEM | When Nexus is the whole screen: "Internet", "Sound", "Bluetooth", Nexus OS's updates, "Install Nexus OS on this PC" (its USB stick), "Log out" (`system-log-out`, the Nexus session on a desktop only: Nexus OS's session would start again), "Restart" (`system-restart`) and "Shut down" (`system-shut-down`). Log out, Restart and Shut down ask again: the first press arms them, the second acts. |
 | ABOUT | The logo, "Nexus", "N plugins · M emulators", "Games from every emulator, in one place" |
 
 "Size of everything" moves a tenth at a time. Left and Right stop at the ends; Enter goes round.
@@ -341,6 +360,7 @@ The pad acts only while the launcher's window has the focus and no game is in fr
 | T | The trailer, outside the Library and the Catalog (where T types) |
 | Ctrl+D | Downloads |
 | Ctrl+Q | Quit |
+| Ctrl+P | The power menu |
 | Page Up, Page Down | Page the grid |
 | Delete | Close the newest notice |
 | A letter or digit in the grid | Start a search with it |

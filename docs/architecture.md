@@ -373,8 +373,9 @@ when "Back to the launcher" is on, calls `Launcher::on_exit`, publishes `Event::
 and runs an emulator update that waited for the game.
 
 While the game's window is in front, or the launcher's window doesn't have focus, `ThemeHost`
-drops every pad button but the PS (Guide) button, which sends `Command::ToggleFocus`. Per-system
-details: [reference/desktop.md](reference/desktop.md).
+drops every pad button but a hold of the PS (Guide) button, which sends `Command::Stop` for
+each running game, at once; a tap does nothing while a game runs. With no game running, a tap
+opens Home and a hold opens the power menu. Per-system details: [reference/desktop.md](reference/desktop.md).
 
 ## Library, metadata and catalogs
 

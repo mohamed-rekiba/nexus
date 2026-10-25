@@ -2241,6 +2241,11 @@ impl Core {
         !self.state().sessions.is_empty()
     }
 
+    /// The running games' sessions, to stop them.
+    pub fn running_sessions(&self) -> Vec<SessionId> {
+        self.state().sessions.keys().copied().collect()
+    }
+
     /// A game has the screen: the gamepad is the game's, not the launcher's. The desktop says
     /// which window is in front; when it can't, the last window the launcher showed counts.
     /// Cheap: it reads app state, so the UI can ask on every press.

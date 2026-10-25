@@ -5,7 +5,8 @@
 #
 # It starts gamescope full screen with Nexus in it, and Nexus opens games in the same gamescope.
 # If Nexus ends, or shows no window within NEXUS_WATCHDOG seconds, it starts again: the TV is
-# never left black. If gamescope can't drive the graphics card (two quick ends in a row), Nexus
+# never left black. When the player chose Log out, Nexus writes "log out" before it ends, and
+# the session ends with it, back to the login screen. If gamescope can't drive the graphics card (two quick ends in a row), Nexus
 # runs in cage instead, where Settings → This PC can say what's missing.
 #
 # Settings: /usr/share/nexus/session.conf, then /etc/nexus/session.conf (see session.conf).
@@ -35,7 +36,8 @@ rotate_log() {
 rotate_log
 note "session starting"
 
-# Tells Nexus nothing is behind it: it shows the system's settings and Restart and Shut down.
+# Tells Nexus nothing is behind it: it shows the system's settings, and Log out (on a desktop),
+# Restart and Shut down.
 export NEXUS_SESSION=1
 # Games and Nexus run on gamescope's X server, which Steam mode's focus needs. SDL (the
 # emulators), Qt and GTK are told so; games inherit this.
@@ -56,9 +58,16 @@ if command -v nm-online >/dev/null 2>&1; then
     nm-online -q -t "${NEXUS_WAIT_NETWORK:-5}" || note "no network yet; starting anyway"
 fi
 
-# Whether Nexus wrote "window shown" after byte $1 of the log.
-shown_since() {
-    tail -c +"$(($1 + 1))" "$log" 2>/dev/null | grep -qax 'window shown'
+# Whether Nexus wrote line $2 after byte $1 of the log.
+wrote_since() {
+    tail -c +"$(($1 + 1))" "$log" 2>/dev/null | grep -qax "$2"
+}
+shown_since() { wrote_since "$1" 'window shown'; }
+# The player chose Log out: the session ends instead of starting Nexus again.
+logged_out_since() {
+    wrote_since "$1" 'log out' || return 1
+    note "the player logged out"
+    exit 0
 }
 
 # Waits for the display server $1 (gamescope or cage) to end. True when the watchdog ended it.
@@ -104,15 +113,16 @@ while true; do
     if [ -z "$why" ]; then
         note "starting in gamescope"
         gamescope "${gamescope_args[@]}" -- "$bin" >>"$log" 2>&1 &
-        if watch $! "$mark" "" || [ $(($(date +%s) - started)) -lt 15 ]; then
+        if watch $! "$mark" ""; then
             failures=$((failures + 1))
         else
-            failures=0
+            logged_out_since "$mark"
+            if [ $(($(date +%s) - started)) -lt 15 ]; then failures=$((failures + 1)); else failures=0; fi
         fi
     elif command -v cage >/dev/null 2>&1; then
         note "$why; starting in a basic display (cage)"
         cage -s -- "$bin" >>"$log" 2>&1 &
-        watch $! "$mark" kiosk
+        watch $! "$mark" kiosk || logged_out_since "$mark"
     else
         note "$why, and cage isn't installed either"
         exit 1

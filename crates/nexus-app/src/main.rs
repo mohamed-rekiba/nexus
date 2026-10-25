@@ -733,6 +733,14 @@ fn run(args: Args) -> Result<(), String> {
                 RESTART.store(true, Ordering::SeqCst);
                 let _ = slint::quit_event_loop();
             }
+            // The Nexus session reads this line when Nexus ends, and ends too instead of
+            // starting it again.
+            UiRequest::LogOut => {
+                use std::io::Write;
+                let mut out = std::io::stdout();
+                let _ = writeln!(out, "log out").and_then(|()| out.flush());
+                let _ = slint::quit_event_loop();
+            }
             UiRequest::Trailer(request) => play_trailer(request),
             UiRequest::Render => schedule_render(),
             UiRequest::PlaySound(name) => {
@@ -818,6 +826,8 @@ fn run(args: Args) -> Result<(), String> {
     let mut placed_on = None;
     let mut monitor_flag = args.monitor.clone().map(|name| (name, core.monitor()));
     let mut announced = false;
+    // Under Gamescope the window shows only once it carries Gamescope's id (desktop.rs).
+    let mut claimed = std::env::var_os("GAMESCOPE_WAYLAND_DISPLAY").is_none();
     timer.start(slint::TimerMode::Repeated, Duration::from_millis(250), move || {
         let mut resized = false;
         let mut playing = false;
@@ -842,6 +852,9 @@ fn run(args: Args) -> Result<(), String> {
                 use std::io::Write;
                 let mut out = std::io::stdout();
                 let _ = writeln!(out, "window shown").and_then(|()| out.flush());
+            }
+            if announced && !claimed {
+                claimed = desktop::claim_gamescope();
             }
             resized = size != last_size;
             last_size = size;
