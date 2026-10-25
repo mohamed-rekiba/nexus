@@ -1,0 +1,811 @@
+//! What the core needs from the outside world. The app plugs in real ones; tests plug in fakes.
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::time::{Duration, Instant};
+
+use async_trait::async_trait;
+use futures::future::BoxFuture;
+use futures::stream::BoxStream;
+use futures::{FutureExt, StreamExt as _};
+use nexus_api::{HttpRequest, HttpResponse, PluginResult};
+use serde::{Deserialize, Serialize};
+
+pub use crate::process::{GroupTree, TokioSpawner};
+
+/// The time for the core: what time it is, and waits. Every timer in the core goes through
+/// it, so a test can move time instead of waiting for it.
+pub trait Clock: Send + Sync {
+    fn now(&self) -> Instant;
+
+    /// Ends `wait` from now.
+    fn sleep(&self, wait: Duration) -> BoxFuture<'static, ()>;
+
+    /// Ticks every `every`, the first one `every` from now. A tick that came late doesn't
+    /// bring the next ones closer.
+    fn interval(&self, every: Duration) -> BoxStream<'static, ()>;
+}
+
+impl dyn Clock + '_ {
+    /// Ends at `deadline`, or at once when it has passed.
+    pub fn sleep_until(&self, deadline: Instant) -> BoxFuture<'static, ()> {
+        self.sleep(deadline.saturating_duration_since(self.now()))
+    }
+
+    /// `work`'s result, or `None` when `limit` passed first. `work` is dropped then.
+    pub async fn timeout<T>(&self, limit: Duration, work: impl Future<Output = T>) -> Option<T> {
+        tokio::select! {
+            done = work => Some(done),
+            () = self.sleep(limit) => None,
+        }
+    }
+}
+
+/// Real time, from tokio's timers.
+pub struct TokioClock;
+
+impl Clock for TokioClock {
+    fn now(&self) -> Instant {
+        // Tokio's, not the system's: a runtime whose time a test paused gives the paused time.
+        tokio::time::Instant::now().into_std()
+    }
+
+    fn sleep(&self, wait: Duration) -> BoxFuture<'static, ()> {
+        tokio::time::sleep(wait).boxed()
+    }
+
+    fn interval(&self, every: Duration) -> BoxStream<'static, ()> {
+        let mut ticks = tokio::time::interval_at(tokio::time::Instant::now() + every, every);
+        ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        futures::stream::unfold(ticks, |mut ticks| async move {
+            ticks.tick().await;
+            Some(((), ticks))
+        })
+        .boxed()
+    }
+}
+
+/// The body of a download, from some offset.
+pub struct Body {
+    /// `true` when the server started at the requested offset. `false` means it sent the whole
+    /// file from byte 0.
+    pub resumed: bool,
+    /// The length of the whole file, if known.
+    pub total: Option<u64>,
+    pub chunks: BoxStream<'static, PluginResult<Vec<u8>>>,
+}
+
+/// What a download request got: the body, or a redirect to follow.
+pub enum Opened {
+    Body(Body),
+    /// The `Location` of a 3xx answer, as the server sent it (it may be relative).
+    Redirect(String),
+}
+
+/// Raw HTTP. It never follows redirects: the core checks every hop against the plugin's
+/// allowlist and follows them itself. Permission checks happen before a request gets here.
+#[async_trait]
+pub trait HttpTransport: Send + Sync {
+    /// A 3xx comes back as it is, with its `Location` header.
+    async fn send(&self, request: HttpRequest) -> PluginResult<HttpResponse>;
+
+    /// Starts a GET at byte `offset` (a Range request when `offset > 0`).
+    async fn open(&self, url: &str, offset: u64) -> PluginResult<Opened>;
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SpawnCommand {
+    pub program: PathBuf,
+    pub args: Vec<String>,
+    pub env: BTreeMap<String, String>,
+    pub cwd: PathBuf,
+    /// Where the program's output goes. `None` throws it away.
+    pub log: Option<PathBuf>,
+    /// It may outlive Nexus: a program that hands a game to another one can become that
+    /// program (`steam` becomes Steam's client when Steam wasn't running), which Nexus never
+    /// stops, not even when Nexus quits.
+    pub keep_running: bool,
+}
+
+impl SpawnCommand {
+    /// The command as one line for a POSIX shell: the folder, the environment values the
+    /// launcher sets, the program and its arguments. A player can paste it to run the game by hand.
+    pub fn shell_line(&self) -> String {
+        let mut words = vec!["cd".to_owned(), quote(&self.cwd.to_string_lossy()), "&&".to_owned()];
+        words.extend(self.env.iter().map(|(key, value)| format!("{key}={}", quote(value))));
+        words.push(quote(&self.program.to_string_lossy()));
+        words.extend(self.args.iter().map(|arg| quote(arg)));
+        words.join(" ")
+    }
+}
+
+/// A word as a POSIX shell reads it back: as it is when it holds only safe characters, else in
+/// single quotes.
+fn quote(word: &str) -> String {
+    let safe = |c: char| c.is_ascii_alphanumeric() || "-_./=:,+@%".contains(c);
+    if !word.is_empty() && word.chars().all(safe) {
+        word.to_owned()
+    } else {
+        format!("'{}'", word.replace('\'', r"'\''"))
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProcessExit {
+    pub code: Option<i32>,
+    pub success: bool,
+}
+
+/// A started program. On Unix it leads a process group of its own, so the programs it starts
+/// stop with it.
+#[async_trait]
+pub trait ProcessHandle: Send {
+    /// The system's id for the process, while it runs.
+    fn id(&self) -> Option<u32>;
+    async fn wait(&mut self) -> PluginResult<ProcessExit>;
+    /// Asks the program to close, as the system does at log out, so it can save first.
+    async fn terminate(&mut self) -> PluginResult<()>;
+    /// Stops the program, and the programs it started, at once. It also works after the program
+    /// ended, for what it left running.
+    async fn kill(&mut self) -> PluginResult<()>;
+}
+
+#[async_trait]
+pub trait ProcessSpawner: Send + Sync {
+    async fn spawn(&self, command: SpawnCommand) -> PluginResult<Box<dyn ProcessHandle>>;
+
+    /// Runs a program to its end with no input, and returns its standard output, at most
+    /// `limit` bytes. `None` when it was still running after `timeout`; it is stopped then.
+    async fn output(&self, command: SpawnCommand, timeout: Duration, limit: usize) -> PluginResult<Option<Vec<u8>>>;
+
+    /// A program's real path, found by file name on the system's `PATH`.
+    fn which(&self, name: &str) -> Option<PathBuf>;
+
+    /// Runs a program to its end with no input, handing each line of its output and errors to
+    /// `line`, and stops it when `cancelled` says so. Returns its exit code (-1 when a signal
+    /// ended it). By default it runs through [`ProcessSpawner::output`] and hands the lines
+    /// over at the end, which is enough for fakes.
+    async fn stream(
+        &self,
+        command: SpawnCommand,
+        line: &(dyn for<'a> Fn(&'a str) + Send + Sync),
+        _cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> PluginResult<i32> {
+        let out = self.output(command, Duration::from_secs(3600), usize::MAX).await?.unwrap_or_default();
+        String::from_utf8_lossy(&out).lines().for_each(line);
+        Ok(0)
+    }
+}
+
+/// Which program's window the player sees.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Front {
+    Launcher,
+    /// Another program's window, by process id.
+    Other(u32),
+    /// The system doesn't say, or the launcher may not ask (on macOS, without the
+    /// Accessibility permission).
+    Unknown,
+}
+
+/// The system's package manager, which installs the launcher's own deb, rpm or Arch package.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PackageManager {
+    Dnf,
+    Apt,
+    Pacman,
+}
+
+/// Why the package manager didn't install the launcher's package.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PackageError {
+    /// The player closed the password prompt, or wasn't allowed.
+    Cancelled,
+    /// The package manager's own error.
+    Failed(String),
+}
+
+/// The desktop's windows: which one is in front, and bringing one to the front. A game is
+/// its processes, as [`ProcessTree::members`] lists them.
+pub trait Windows: Send + Sync {
+    fn front(&self) -> Front;
+    /// Brings a window of one of the game's processes `ids` to the front. `false` when none has
+    /// a window yet, or the system refused.
+    fn show_game(&self, ids: &[u32]) -> bool;
+    /// Brings the launcher's window to the front.
+    fn show_launcher(&self);
+    /// Keeps the game of the processes `ids` on screen while it is in front, with the windows
+    /// it opened after it showed. The core calls it on each look at a game in front. A desktop
+    /// that shows only the windows it was told about (Gamescope) is told about the new ones;
+    /// elsewhere this does nothing, so the player's own window switches stay theirs.
+    fn keep_game(&self, _ids: &[u32]) {}
+    /// Whether one of the processes `ids` has a window. `None` when the system doesn't say.
+    fn has_window(&self, _ids: &[u32]) -> Option<bool> {
+        None
+    }
+    /// Whether a game whose windows all closed is over even while its processes run. True on
+    /// macOS, where a program keeps running after its last window closes. Elsewhere a game
+    /// ends when its processes do: a launcher's own window (a menu, a setup dialog) closes
+    /// before the game's opens.
+    fn window_close_ends_game(&self) -> bool {
+        false
+    }
+    /// Why games can't come to the front on this desktop, and the fix, for example a missing
+    /// tool or permission. `None` when nothing is missing. The core tells the player once a run.
+    fn problem(&self) -> Option<String> {
+        None
+    }
+}
+
+/// Windows the launcher can't see or change. The default until the app plugs in real ones.
+pub struct NoWindows;
+
+impl Windows for NoWindows {
+    fn front(&self) -> Front {
+        Front::Unknown
+    }
+
+    fn show_game(&self, _ids: &[u32]) -> bool {
+        false
+    }
+
+    fn show_launcher(&self) {}
+}
+
+/// The player's login session: starting the launcher when the player logs in, and the
+/// administrator prompt that installs the launcher's own package. Not a play session.
+pub trait LoginSession: Send + Sync {
+    /// Whether the launcher can start when the player logs in. `false` for a build that isn't
+    /// installed, such as `cargo run`'s: the system would start a program that moves.
+    fn can_start_at_login(&self) -> bool {
+        false
+    }
+    /// Starts the launcher when the player logs in (`on`), or stops that. The error says why
+    /// the system refused.
+    fn start_at_login(&self, _on: bool) -> Result<(), String> {
+        Err("this desktop can't start the launcher when you log in".into())
+    }
+    /// Installs the launcher's own package `file` with `manager`, asking for the administrator
+    /// password the system's way. Blocking: it returns once the package manager is done.
+    fn install_package(&self, _file: &Path, _manager: PackageManager) -> Result<(), PackageError> {
+        Err(PackageError::Failed("this system can't install packages".into()))
+    }
+}
+
+/// A session that can't start the launcher at login or install packages. The default until the
+/// app plugs in a real one.
+pub struct NoLoginSession;
+
+impl LoginSession for NoLoginSession {}
+
+/// The system's opener: what a click on a link or a file does.
+pub trait Opener: Send + Sync {
+    /// Opens `link` with the system's handler for it: an `https://` page in the browser, and
+    /// `steam://install/440` asks Steam to install a game, starting Steam on its own when it
+    /// isn't running. The caller checked the link (the core against the plugin's
+    /// `permissions.links`). The error says why it didn't open.
+    fn open_link(&self, _link: &str) -> Result<(), String> {
+        Err("this desktop can't open links".into())
+    }
+    /// Opens `path` with the system's opener: a folder in the file manager, a log in the text
+    /// viewer. The error says why it didn't open.
+    fn open_path(&self, _path: &Path) -> Result<(), String> {
+        Err("this desktop can't open files".into())
+    }
+}
+
+/// An opener that opens nothing. The default until the app plugs in a real one.
+pub struct NoOpener;
+
+impl Opener for NoOpener {}
+
+/// A running game's processes: the one the launcher started, the ones in its process group,
+/// and the ones a sandbox moved out of the group below them (Proton's pressure-vessel does).
+/// The app's adapter walks the system's process list; the core's default sees only the group.
+pub trait ProcessTree: Send + Sync {
+    /// The live processes of the game the launcher started as `root`, `root` among them while
+    /// it runs. Blocking: it may run a system tool.
+    fn members(&self, root: u32) -> Vec<u32>;
+    /// The processes whose command line has `text`, for a game another program started (see
+    /// `LaunchSpec::game_process`): each one not below another of them. Blocking. None by
+    /// default, where command lines can't be read.
+    fn find(&self, _text: &str) -> Vec<u32> {
+        Vec::new()
+    }
+    /// Asks the processes `ids` to close (`force`: kills them). Blocking.
+    fn end(&self, ids: &[u32], force: bool);
+}
+
+/// HTTP that always fails. The default until the app plugs in a real transport.
+pub struct NoNetwork;
+
+#[async_trait]
+impl HttpTransport for NoNetwork {
+    async fn send(&self, request: HttpRequest) -> PluginResult<HttpResponse> {
+        Err(nexus_api::PluginError::Network(format!("no network transport for {}", request.url)))
+    }
+
+    async fn open(&self, url: &str, _offset: u64) -> PluginResult<Opened> {
+        Err(nexus_api::PluginError::Network(format!("no network transport for {url}")))
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_command_reads_as_one_shell_line() {
+        let command = SpawnCommand {
+            program: "/Games/My Game/run.sh".into(),
+            args: vec!["--fullscreen".into(), "it's".into(), String::new()],
+            env: BTreeMap::from([("WINEPREFIX".to_owned(), "/data/prefixes/a b".to_owned())]),
+            cwd: "/Games/My Game".into(),
+            log: None,
+            keep_running: false,
+        };
+        assert_eq!(
+            command.shell_line(),
+            r#"cd '/Games/My Game' && WINEPREFIX='/data/prefixes/a b' '/Games/My Game/run.sh' --fullscreen 'it'\''s' ''"#
+        );
+    }
+}
+
+/// One graphics card.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Gpu {
+    pub name: String,
+    /// Its own memory in GB; `None` for memory it shares with the processor, or unknown.
+    pub memory_gb: Option<f32>,
+    /// A card of its own, not one built into the processor.
+    pub discrete: bool,
+    /// Built in, and its memory is the computer's own (Apple Silicon): as fast as a card of
+    /// its own can be, with the system's memory to use.
+    pub unified: bool,
+    /// The Vulkan version its driver supports, as (major, minor); `None` when unknown.
+    pub vulkan: Option<(u32, u32)>,
+}
+
+/// This computer, as far as the system says. Unknown parts are empty or `None`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Specs {
+    /// For example "AMD Ryzen 9 7950X".
+    pub cpu: String,
+    pub cores: u32,
+    pub threads: u32,
+    pub memory_gb: f32,
+    /// The processor has AVX2; `None` where the system can't say.
+    pub avx2: Option<bool>,
+    /// `None` when the graphics check couldn't run.
+    pub gpus: Option<Vec<Gpu>>,
+}
+
+/// What this computer has. Slow (it may run system tools): the core calls it off the UI
+/// thread, once a run.
+pub trait Hardware: Send + Sync {
+    fn specs(&self) -> Specs;
+    /// The free bytes on the disk that holds `path`, which must exist; `None` when the system
+    /// doesn't say. Quick: one system call.
+    fn free_bytes(&self, path: &std::path::Path) -> Option<u64>;
+    /// The game controllers connected now ([`nexus_api::Controllers`]). It may take a second:
+    /// call it off the async threads. None by default.
+    fn controllers(&self) -> Vec<nexus_api::Controller> {
+        Vec::new()
+    }
+    /// The computer's name on the network, such as "gaming-pc"; empty when the system doesn't
+    /// say. Quick. A backup keeps it, so a restore can say which computer made it.
+    fn computer_name(&self) -> String {
+        String::new()
+    }
+    /// The size in bytes of the disk that holds `path`, which must exist; `None` when the
+    /// system doesn't say. Quick: one system call.
+    fn disk_bytes(&self, _path: &std::path::Path) -> Option<u64> {
+        None
+    }
+}
+
+/// A computer the launcher can't look at. The default until the app plugs in a real one.
+pub struct NoHardware;
+
+impl Hardware for NoHardware {
+    fn specs(&self) -> Specs {
+        Specs::default()
+    }
+
+    fn free_bytes(&self, _: &std::path::Path) -> Option<u64> {
+        None
+    }
+}
+
+/// One file in a torrent, with `/` between the parts of its path.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TorrentFile {
+    pub path: String,
+    pub size: u64,
+}
+
+/// What a torrent holds, read from its metadata before any file downloads.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TorrentInfo {
+    pub name: String,
+    pub files: Vec<TorrentFile>,
+}
+
+/// What the BitTorrent engine is doing with a torrent now.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TransferState {
+    /// Checking the pieces already in the folder.
+    Checking,
+    /// Connected to the swarm: it downloads what is missing, and uploads what it has.
+    Live,
+    /// Talks to no peer. A torrent started paused stays so once its check is done.
+    Paused,
+    /// It stopped with an error.
+    Error,
+}
+
+/// A torrent as the engine sees it now: raw numbers, no decision. The core's phase rules
+/// read them (`torrents::phase`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct TorrentStats {
+    pub state: TransferState,
+    /// Every piece is in the folder and checked.
+    pub finished: bool,
+    /// Bytes checked or downloaded of `total`.
+    pub done: u64,
+    pub total: u64,
+    /// Bytes a second.
+    pub download_rate: u64,
+    pub upload_rate: u64,
+    pub peers: u32,
+    /// For [`TransferState::Error`].
+    pub error: String,
+}
+
+/// The upload limit while seeding, in bytes a second.
+pub const SEED_UPLOAD_LIMIT: u64 = 128 * 1024;
+
+/// BitTorrent. Torrents are named by their info hash, in lowercase hex.
+#[async_trait]
+pub trait Torrents: Send + Sync {
+    /// Reads the torrent's name and files from the swarm. Downloads no file.
+    async fn resolve(&self, magnet: &str) -> PluginResult<TorrentInfo>;
+    /// Starts the torrent into `folder`, checking the pieces already there first. A torrent
+    /// started `paused` stays paused after its check: it downloads nothing until
+    /// [`Torrents::unpause`]. One the engine already has, paused, goes on unless `paused`.
+    async fn start(&self, id: &str, magnet: &str, folder: &Path, paused: bool) -> PluginResult<()>;
+    /// Connects a paused torrent to the swarm. No error when it already is.
+    async fn unpause(&self, id: &str) -> PluginResult<()>;
+    /// Stops the torrent. Its files stay. No error when it isn't running.
+    async fn stop(&self, id: &str) -> PluginResult<()>;
+    /// What the engine reports for the torrent now; `None` when it isn't running. Reading it
+    /// changes nothing.
+    fn stats(&self, id: &str) -> Option<TorrentStats>;
+    /// The network interface that every connection uses from the next start; `None` for any.
+    /// A change closes the connections the torrents shared, so the core stops them first.
+    async fn route(&self, interface: Option<String>) -> PluginResult<()>;
+    /// Stops every torrent and closes the connections they shared. Their files stay.
+    async fn stop_all(&self) -> PluginResult<()>;
+}
+
+/// A host without BitTorrent. The default until the app plugs in a real one.
+pub struct NoTorrents;
+
+#[async_trait]
+impl Torrents for NoTorrents {
+    async fn resolve(&self, _magnet: &str) -> PluginResult<TorrentInfo> {
+        Err(nexus_api::PluginError::Unsupported("this build of Nexus can't download torrents".into()))
+    }
+    async fn start(&self, _id: &str, _magnet: &str, _folder: &Path, _paused: bool) -> PluginResult<()> {
+        Err(nexus_api::PluginError::Unsupported("this build of Nexus can't download torrents".into()))
+    }
+    async fn unpause(&self, _id: &str) -> PluginResult<()> {
+        Ok(())
+    }
+    async fn stop(&self, _id: &str) -> PluginResult<()> {
+        Ok(())
+    }
+    fn stats(&self, _id: &str) -> Option<TorrentStats> {
+        None
+    }
+    async fn route(&self, _interface: Option<String>) -> PluginResult<()> {
+        Ok(())
+    }
+    async fn stop_all(&self) -> PluginResult<()> {
+        Ok(())
+    }
+}
+
+/// A VPN, or on a system that can't tell VPNs from other networks, any network with an
+/// address: the system plugins' type.
+pub use nexus_api::Vpn;
+
+/// The VPNs on this computer, for "Download only through a VPN". Each call can run a system
+/// tool, so the core calls them off the UI thread.
+pub trait Network: Send + Sync {
+    /// Why downloads can't go only through a VPN here, for example "Not available on
+    /// Windows". `None` when they can.
+    fn problem(&self) -> Option<String> {
+        None
+    }
+    /// The system tells VPNs from other networks. When it can't (macOS), [`Network::vpns`]
+    /// lists every network with an address, and the player picks the one the VPN uses.
+    fn finds_vpns(&self) -> bool {
+        true
+    }
+    fn vpns(&self) -> Vec<Vpn>;
+    /// The system can add a VPN from a provider's file.
+    fn can_import(&self) -> bool {
+        false
+    }
+    /// Adds a VPN from a provider's file (WireGuard `.conf`, OpenVPN `.ovpn`) and connects
+    /// it. Returns its name.
+    fn import(&self, _file: &Path) -> Result<String, String> {
+        Err("this system can't add a VPN: connect it with the VPN's own app".into())
+    }
+    fn connect(&self, _name: &str) -> Result<(), String> {
+        Err("this system can't connect a VPN: use the VPN's own app".into())
+    }
+    fn disconnect(&self, _name: &str) -> Result<(), String> {
+        Err("this system can't disconnect a VPN: use the VPN's own app".into())
+    }
+}
+
+/// A host that can't see its VPNs. The default until the app plugs in a real one.
+pub struct NoVpn;
+
+impl Network for NoVpn {
+    fn problem(&self) -> Option<String> {
+        Some("This build of Nexus can't find VPNs".into())
+    }
+
+    fn vpns(&self) -> Vec<Vpn> {
+        Vec::new()
+    }
+}
+
+/// What an archive set is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ArchiveKind {
+    Rar,
+    #[serde(rename = "7z")]
+    SevenZ,
+    Zip,
+    Tar,
+    #[serde(rename = "tar.gz")]
+    TarGz,
+    #[serde(rename = "tar.xz")]
+    TarXz,
+    #[serde(rename = "tar.bz2")]
+    TarBz2,
+    #[serde(rename = "tar.zst")]
+    TarZst,
+    /// A disc image.
+    Iso,
+    /// A Windows cabinet.
+    Cab,
+    /// A GOG installer: a shell script with a zip at its end. The script never runs.
+    Gog,
+    /// A script installer that states its archive's size (Kron4ek's YAD installers): the
+    /// archive is its last bytes, from [`crate::embedded_archive`]. The script never runs.
+    Script,
+}
+
+/// How far an unpack is: `done` of `total` bytes written.
+pub type UnpackProgress = Arc<dyn Fn(u64, u64) + Send + Sync>;
+
+/// How an entry's path gets out of the unpack folder.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Escape {
+    /// Its path is absolute or climbs out with `..`.
+    Leaves,
+    /// It is a link whose target is absolute or climbs out with `..`.
+    LinksOut,
+    /// A link already on the disk sits where it would go.
+    ThroughLink,
+    /// Once the links on the disk are followed, its path is outside the folder.
+    LeavesThroughLink,
+}
+
+/// Why an archive didn't unpack. The core shows its text; an adapter picks a fallback reader
+/// by its variant, never by its text.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum ArchiveError {
+    #[error("This archive needs a password, which Nexus can't ask for")]
+    Password,
+    /// An entry's name, as the archive spells it, and how it gets out of the folder.
+    #[error("{}", escape_text(.entry, *.how))]
+    Escapes { entry: String, how: Escape },
+    /// The bytes the unpack needs, spare included, and the bytes the disk has.
+    #[error("This archive needs {} free, and the disk has {}", gigabytes(*.needed), gigabytes(*.free))]
+    NoRoom { needed: u64, free: u64 },
+    /// The reader can't read this archive: a format, a feature or a codec it lacks. Another
+    /// reader may.
+    #[error("{0}")]
+    Unsupported(String),
+    /// A library or program the archive needs isn't installed. The text says what to install.
+    #[error("{0}")]
+    Missing(String),
+    /// The archive is damaged, cut short, or changed while it was unpacked.
+    #[error("{0}")]
+    Corrupt(String),
+    /// Reading the parts or writing the folder failed.
+    #[error("{0}")]
+    Io(String),
+    #[error("The unpacking was cancelled")]
+    Cancelled,
+}
+
+fn escape_text(entry: &str, how: Escape) -> String {
+    match how {
+        Escape::Leaves => format!("{entry} leaves the folder"),
+        Escape::LinksOut => format!("{entry} links out of the folder"),
+        Escape::ThroughLink => format!("{entry} would write through a link"),
+        Escape::LeavesThroughLink => format!("{entry} leaves the folder through a link"),
+    }
+}
+
+fn gigabytes(bytes: u64) -> String {
+    format!("{:.1} GB", bytes as f64 / 1e9)
+}
+
+/// Unpacking archives. The work is blocking, so an adapter runs it off the async runtime.
+///
+/// An adapter lists the archive with its format readers, hands the listing to
+/// [`crate::plan_unpack`], and writes only what the plan holds. The safety rules live in the
+/// plan, so every adapter refuses the same archives.
+#[async_trait]
+pub trait Archives: Send + Sync {
+    /// Unpacks the archive cut into `parts` (in order) into the empty folder `into`, on a disk
+    /// with `free` bytes (`None` when the disk doesn't say). Before it writes anything it
+    /// refuses an archive that needs a password, an entry whose path leaves `into` (an absolute
+    /// path, `..`, or a link that points out), and an archive bigger than the free space. It
+    /// stops with [`ArchiveError::Cancelled`] soon after `cancel` is set.
+    async fn unpack(
+        &self,
+        kind: ArchiveKind,
+        parts: &[PathBuf],
+        into: &Path,
+        free: Option<u64>,
+        progress: UnpackProgress,
+        cancel: Arc<AtomicBool>,
+    ) -> Result<(), ArchiveError>;
+}
+
+/// A host that can't unpack archives. The default until the app plugs in a real one.
+pub struct NoArchives;
+
+#[async_trait]
+impl Archives for NoArchives {
+    async fn unpack(
+        &self,
+        _kind: ArchiveKind,
+        _parts: &[PathBuf],
+        _into: &Path,
+        _free: Option<u64>,
+        _progress: UnpackProgress,
+        _cancel: Arc<AtomicBool>,
+    ) -> Result<(), ArchiveError> {
+        Err(ArchiveError::Unsupported("this build of Nexus can't unpack archives".into()))
+    }
+}
+
+/// A system plugin's VPNs ([`nexus_api::VpnSettings`]) as the core's [`Network`] port: once one
+/// provides them, the core reads and switches its VPNs through it.
+pub(crate) struct PluginVpn(pub Arc<dyn nexus_api::VpnSettings>);
+
+impl Network for PluginVpn {
+    fn problem(&self) -> Option<String> {
+        self.0.problem()
+    }
+
+    fn finds_vpns(&self) -> bool {
+        self.0.finds_vpns()
+    }
+
+    fn vpns(&self) -> Vec<Vpn> {
+        self.0.vpns()
+    }
+
+    fn can_import(&self) -> bool {
+        self.0.can_import()
+    }
+
+    fn import(&self, file: &Path) -> Result<String, String> {
+        self.0.import(file)
+    }
+
+    fn connect(&self, name: &str) -> Result<(), String> {
+        self.0.connect(name)
+    }
+
+    fn disconnect(&self, name: &str) -> Result<(), String> {
+        self.0.disconnect(name)
+    }
+}
+
+/// Every port the app plugged in, built once at boot and split per subsystem: each subsystem
+/// gets only the ports it names (`TorrentPorts`, `SessionPorts`, and so on). The bundle also
+/// makes the VPN rule over the `Network` port: the kernel hands it to each plugin as its
+/// [`nexus_api::VpnGate`], and the torrents and VPN subsystems share it.
+///
+/// The kernel uses the HTTP, process, clock and VPN ports for the plugins' contexts and
+/// calls, and hands the bundle on to the core. Cheap to clone.
+#[derive(Clone)]
+pub(crate) struct Ports {
+    pub http: Arc<dyn HttpTransport>,
+    pub spawner: Arc<dyn ProcessSpawner>,
+    pub processes: Arc<dyn ProcessTree>,
+    pub windows: Arc<dyn Windows>,
+    pub login_session: Arc<dyn LoginSession>,
+    pub opener: Arc<dyn Opener>,
+    pub hardware: Arc<dyn Hardware>,
+    pub torrents: Arc<dyn Torrents>,
+    pub archives: Arc<dyn Archives>,
+    pub clock: Arc<dyn Clock>,
+    /// "Download only through a VPN", over the `Network` port the app plugged in until a
+    /// system plugin provides the VPNs.
+    pub vpn: crate::vpn::VpnRule,
+}
+
+impl Ports {
+    /// The torrents subsystem's ports.
+    pub fn torrents(&self) -> crate::torrents::TorrentPorts {
+        crate::torrents::TorrentPorts {
+            torrents: self.torrents.clone(),
+            hardware: self.hardware.clone(),
+            clock: self.clock.clone(),
+        }
+    }
+
+    /// The game installs subsystem's ports. It reaches the downloads it installs through
+    /// `downloads`, and gives a plugin's `begin` at most `call_timeout`.
+    pub fn installs(
+        &self,
+        downloads: Arc<dyn crate::game_installs::TorrentDownloads>,
+        call_timeout: Duration,
+    ) -> crate::game_installs::InstallPorts {
+        crate::game_installs::InstallPorts {
+            archives: self.archives.clone(),
+            hardware: self.hardware.clone(),
+            clock: self.clock.clone(),
+            downloads,
+            call_timeout,
+        }
+    }
+
+    /// The sessions subsystem's ports.
+    pub fn sessions(&self) -> crate::sessions::SessionPorts {
+        crate::sessions::SessionPorts {
+            spawner: self.spawner.clone(),
+            processes: self.processes.clone(),
+            windows: self.windows.clone(),
+            clock: self.clock.clone(),
+        }
+    }
+
+    /// The preferences subsystem's ports.
+    pub fn preferences(&self) -> crate::preferences::PrefPorts {
+        crate::preferences::PrefPorts { login_session: self.login_session.clone() }
+    }
+
+    /// The download manager's ports.
+    pub fn downloads(&self) -> crate::downloads::DownloadPorts {
+        crate::downloads::DownloadPorts {
+            http: self.http.clone(),
+            spawner: self.spawner.clone(),
+            clock: self.clock.clone(),
+        }
+    }
+
+    /// The launcher update subsystem's ports.
+    pub fn launcher_update(&self) -> crate::launcher_update::LauncherUpdatePorts {
+        crate::launcher_update::LauncherUpdatePorts {
+            http: self.http.clone(),
+            login_session: self.login_session.clone(),
+        }
+    }
+}
