@@ -294,7 +294,9 @@ pub(crate) async fn launch(core: &Core, game: GameKey) -> CoreResult<()> {
     let core = core.clone();
     tokio::spawn(async move {
         let exit = tokio::select! {
-            exit = process.wait() => exit.unwrap_or(ProcessExit { code: None, success: false }),
+            // A launcher that starts the game in the background ends first: the session lasts
+            // until the game ends too.
+            exit = process.wait_for_all() => exit.unwrap_or(ProcessExit { code: None, success: false }),
             _ = stop_rx => close(&core, process.as_mut()).await,
         };
         // What the game started and left running goes with it.
@@ -318,13 +320,14 @@ async fn close(core: &Core, process: &mut dyn crate::ProcessHandle) -> ProcessEx
     if let Err(e) = process.terminate().await {
         tracing::warn!(error = %e, "could not ask the game to close");
     }
-    if let Ok(Ok(exit)) = tokio::time::timeout(core.kernel().host().stop_grace, process.wait()).await {
+    if let Ok(Ok(exit)) = tokio::time::timeout(core.kernel().host().stop_grace, process.wait_for_all()).await {
         return exit;
     }
     tracing::info!("the game didn't close: killing it");
     if let Err(e) = process.kill().await {
         tracing::warn!(error = %e, "could not stop the game");
     }
+    // Only the program's own exit: what it left running is gone with the kill.
     process.wait().await.unwrap_or(killed)
 }
 

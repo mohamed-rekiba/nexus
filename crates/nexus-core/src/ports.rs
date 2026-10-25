@@ -85,6 +85,12 @@ pub trait ProcessHandle: Send {
     /// The system's id for the process, while it runs.
     fn id(&self) -> Option<u32>;
     async fn wait(&mut self) -> PluginResult<ProcessExit>;
+    /// Waits for the program, then for the programs it started and left running: a launcher
+    /// script that starts the game in the background ends before the game does. Returns the
+    /// program's own exit.
+    async fn wait_for_all(&mut self) -> PluginResult<ProcessExit> {
+        self.wait().await
+    }
     /// Asks the program to close, as the system does at log out, so it can save first.
     async fn terminate(&mut self) -> PluginResult<()>;
     /// Stops the program, and the programs it started, at once. It also works after the program
@@ -247,6 +253,21 @@ async fn signal_group(group: u32, signal: &str) -> PluginResult<()> {
     Ok(())
 }
 
+/// How often [`ProcessHandle::wait_for_all`] looks whether a process group still runs.
+#[cfg(unix)]
+const GROUP_EVERY: Duration = Duration::from_millis(500);
+
+/// Whether a process of the process group `group` still runs, by the system's `kill -0`.
+#[cfg(unix)]
+async fn group_runs(group: u32) -> bool {
+    let status = tokio::process::Command::new("kill")
+        .args(["-0", "--", &format!("-{group}")])
+        .stderr(std::process::Stdio::null())
+        .status()
+        .await;
+    status.is_ok_and(|s| s.success())
+}
+
 /// Runs `taskkill` on process `id` and the processes it started. Without `force`, it asks
 /// their windows to close.
 #[cfg(windows)]
@@ -302,6 +323,17 @@ impl ProcessHandle for TokioChild {
     async fn wait(&mut self) -> PluginResult<ProcessExit> {
         let status = self.0.wait().await.map_err(|e| nexus_api::PluginError::Other(e.to_string()))?;
         Ok(ProcessExit { code: status.code(), success: status.success() })
+    }
+
+    #[cfg(unix)]
+    async fn wait_for_all(&mut self) -> PluginResult<ProcessExit> {
+        let exit = self.wait().await?;
+        if let Some(id) = self.1 {
+            while group_runs(id).await {
+                tokio::time::sleep(GROUP_EVERY).await;
+            }
+        }
+        Ok(exit)
     }
 
     async fn terminate(&mut self) -> PluginResult<()> {
@@ -514,6 +546,31 @@ mod tests {
             }
         };
         tokio::time::timeout(Duration::from_secs(5), gone).await.expect("the script's program stopped too");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn wait_for_all_lasts_while_a_program_the_game_started_runs() {
+        let started = std::time::Instant::now();
+        // A launcher that starts the game in the background and ends.
+        let mut process = TokioSpawner.spawn(sh("sleep 0.7 & exit 0")).await.unwrap();
+
+        let exit = tokio::time::timeout(Duration::from_secs(5), process.wait_for_all()).await.unwrap().unwrap();
+
+        assert!(exit.success, "the launcher's exit");
+        assert!(started.elapsed() >= Duration::from_millis(600), "it lasted {:?}", started.elapsed());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn terminate_reaches_the_program_a_launcher_left_running() {
+        let mut process = TokioSpawner.spawn(sh("sleep 30 & exit 0")).await.unwrap();
+        let running = tokio::time::timeout(Duration::from_millis(300), process.wait_for_all()).await;
+        assert!(running.is_err(), "the game still runs after its launcher ended");
+
+        process.terminate().await.unwrap();
+
+        tokio::time::timeout(Duration::from_secs(5), process.wait_for_all()).await.expect("the game closed").unwrap();
     }
 
     #[tokio::test]

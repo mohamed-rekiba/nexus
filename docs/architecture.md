@@ -254,7 +254,8 @@ starts with a stand-in for each; the app plugs in the real ones; the test kit ha
 
 - `TokioSpawner` starts each game as the leader of its own process group on Unix; on Windows
   the "group" is the process and its children. `terminate` asks it to close (SIGTERM, or
-  `taskkill` without `/F`); `kill` ends the group.
+  `taskkill` without `/F`); `kill` ends the group. `wait_for_all` waits for the whole group on
+  Unix, so a launcher script that backgrounds the game doesn't end its session.
 - `Desktop` says which window is in front (`front`), brings a game's window up (`show_game`),
   brings the launcher back (`show_launcher`), and answers `is_game`, `has_window`, `problem`
   and start at login.

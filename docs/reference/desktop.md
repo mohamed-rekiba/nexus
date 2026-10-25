@@ -143,8 +143,15 @@ Stop asks the game to close first, so the emulator saves its caches:
 - on Windows, `taskkill /PID <pid> /T`.
 
 After `stop_grace` (4 s) a game that is still there is killed: `kill -KILL` to the group, or
-`taskkill /T /F`. When the game ends, by itself or by Stop, what it started and left running is
-killed the same way. On Windows a PowerShell walk by parent id then stops the processes created
+`taskkill /T /F`.
+
+On Unix the game ends when the last process of its group ends, not its first process. A start
+script that starts the game in the background and exits keeps the session until the game ends.
+Stop gives that game the same `stop_grace`. A program left running in the group, such as a
+daemon, keeps the session too, until the game's window closes or the player presses Stop.
+
+When the game ends, by itself or by Stop, what it started and left running is killed the same
+way. On Windows a PowerShell walk by parent id then stops the processes created
 since the game started, since `taskkill /T` only follows a running process.
 
 At the end:
