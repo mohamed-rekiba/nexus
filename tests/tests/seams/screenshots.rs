@@ -518,6 +518,50 @@ fn shoot_this_pc(window: &MinimalSoftwareWindow, out: &Path) {
     }
 }
 
+/// A Game Hub's releases as `default[-rtl]-releases.png`: long titles, New tags, a warning, and
+/// the keys on the second row. Each row's Download button ends at the same place.
+fn shoot_releases(window: &MinimalSoftwareWindow, out: &Path) {
+    use slint::platform::Key;
+    for (name, direction) in [("default", "ltr"), ("default-rtl", "rtl")] {
+        let home = tempfile::tempdir().unwrap();
+        let mut host = composed_on_current_platform(|h| {
+            h.home(home.path())
+                .plugin(offering_emulator("vulkan = \"1.3\""))
+                .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        });
+        host.ui.start().unwrap();
+        host.dispatch(Command::SetThemeOption { key: "direction".into(), value: direction.into() });
+        // The first two from this week: New.
+        let topic = |id: u32, flag: &str, version: &str, region: &str| {
+            let added = crate::releases::days_ago(if id <= 2 { 4 } else { 24 });
+            serde_json::json!({ "id": id.to_string(), "title": format!("[PS5] Astro Drift [{region} / {version} / {flag}]"),
+                "published_at": added,
+                "size": format!("{id}.4 GB"), "magnet": format!("magnet:?xt=urn:btih:{id:040x}"),
+                "game_info": { "name": "Astro Drift", "title_id": "PPSA01234", "version": version, "region": region } })
+        };
+        let catalog = serde_json::json!({ "complete": true, "translation": { "language": "en" }, "topic_count": 4,
+            "topics": [
+                topic(1, "fpkg", "1.000.010 (dated 30.03.2026)", "EU² / US² / JP² / AS² / INT(GLO)² / EU¹ / US¹ / JP¹ / AS¹"),
+                topic(2, "folder", "1.000.010 (dated 30.03.2026)", "EU¹ / US¹ / JP¹ / AS¹ / INT(GLO)¹"),
+                topic(3, "fpkg", "v01.000.000 (v01.000.010)", "EUR"),
+                topic(4, "folder", "v01.000.000 (v01.000.010)", "EUR"),
+            ] });
+        host.test.http.serve("https://xyz.dev/c/ps5.json", catalog.to_string());
+        host.dispatch(Command::SetConfig {
+            plugin: id("release-catalog"),
+            scope: nexus_api::ConfigScope::Emulator,
+            value: serde_json::json!({ "catalog_url": "https://xyz.dev/c" }),
+        });
+        host.catalogs_fetched();
+        host.dispatch(Command::RefreshLibrary);
+        host.dispatch(Command::OpenGame("release-catalog:emu-kyty/PPSA01234".parse().unwrap()));
+        host.load_images();
+        key(&mut host, Key::DownArrow);
+        key(&mut host, Key::DownArrow);
+        shoot(window, &out.join(format!("{name}-releases.png")));
+    }
+}
+
 /// The Library's genres in a narrow window, with the keys on the last chip, left to right and
 /// right to left, as `default[-rtl]-genres.png`: the row scrolls, and fades where chips hide.
 fn shoot_genres(window: &MinimalSoftwareWindow, out: &Path) {
@@ -857,6 +901,7 @@ macro_rules! shots {
 
 shots! {
     this_pc_screens => shoot_this_pc,
+    the_releases => shoot_releases,
     a_ps4_cover => shoot_ps4_cover,
     genres => shoot_genres,
     the_trailer => shoot_trailer,
