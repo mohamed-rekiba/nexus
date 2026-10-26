@@ -229,8 +229,8 @@ boot menu. On a PC with an NVIDIA card it gets NVIDIA's driver by itself. It nee
 that starts with UEFI.
 
 <!-- x-release-please-start-version -->
-The current version is Nexus OS 0.1.2:
-[its release](https://github.com/mohamed-rekiba/nexus/releases/tag/nexus-os-v0.1.2).
+The current version is Nexus OS 0.2.0:
+[its release](https://github.com/mohamed-rekiba/nexus/releases/tag/nexus-os-v0.2.0).
 <!-- x-release-please-end -->
 All Nexus OS releases are tagged `nexus-os-v…` on the
 [releases page](https://github.com/mohamed-rekiba/nexus/releases?q=nexus-os).
