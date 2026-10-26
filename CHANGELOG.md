@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/mohamed-rekiba/nexus/compare/v0.4.1...v0.5.0) (2026-10-26)
+
+
+### Features
+
+* **os:** the USB stick is named with its version, nexus-os-x86_64-&lt;version&gt;.iso ([bb95465](https://github.com/mohamed-rekiba/nexus/commit/bb9546590953e7789541545997c85b1652e096a8))
+
 ## [0.4.1](https://github.com/mohamed-rekiba/nexus/compare/v0.4.0...v0.4.1) (2026-10-26)
 
 
