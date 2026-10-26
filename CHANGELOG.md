@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/mohamed-rekiba/nexus/compare/v0.6.0...v0.6.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* **app:** build on Windows: opening a link needs the process imports there too ([2d880be](https://github.com/mohamed-rekiba/nexus/commit/2d880be1cb11586a6d66a0c08d0c0c6fdb5bae73))
+
 ## [0.6.0](https://github.com/mohamed-rekiba/nexus/compare/v0.5.0...v0.6.0) (2026-10-26)
 
 
