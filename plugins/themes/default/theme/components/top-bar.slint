@@ -289,10 +289,10 @@ export component TopBar inherits Rectangle {
 }
 
 // A face button's mark, drawn: the PlayStation symbols are in no font the theme ships. The
-// d-pad's pairs ("▲ ▼", "◀ ▶") are two filled arrows, drawn to fit the same round cap.
+// d-pad's pairs ("⮝  ⮟", "⮜  ⮞") are two filled arrows, drawn to fit the same round cap.
 export component PadGlyph inherits Path {
     in property <string> name;
-    property <bool> arrows: root.name == "▲ ▼" || root.name == "◀ ▶";
+    property <bool> arrows: root.name == "⮝  ⮟" || root.name == "⮜  ⮞";
     viewbox-width: 24;
     viewbox-height: 24;
     fill: root.arrows ? #ffffff : transparent;
@@ -303,12 +303,12 @@ export component PadGlyph inherits Path {
         : root.name == "○" ? "M12 3 A9 9 0 1 1 11.99 3 Z"
         : root.name == "△" ? "M12 3 L21 19 L3 19 Z"
         : root.name == "☰" ? "M3 5 H21 M3 12 H21 M3 19 H21"
-        : root.name == "▲ ▼" ? "M12 2 L19 10 L5 10 Z M12 22 L19 14 L5 14 Z"
-        : root.name == "◀ ▶" ? "M2 12 L10 5 L10 19 Z M22 12 L14 5 L14 19 Z"
+        : root.name == "⮝  ⮟" ? "M12 2 L19 10 L5 10 Z M12 22 L19 14 L5 14 Z"
+        : root.name == "⮜  ⮞" ? "M2 12 L10 5 L10 19 Z M22 12 L14 5 L14 19 Z"
         : "M4 4 H20 V20 H4 Z";
 }
 
-// The d-pad's pairs ("◀ ▶", "▲ ▼"): two filled arrows, each its own path at whole pixels and
+// The d-pad's pairs ("⮜  ⮞", "⮝  ⮟"): two filled arrows, each its own path at whole pixels and
 // placed as the other's mirror. Drawn as one path, their edges fall inside pixels at most sizes
 // and the renderer shades them unevenly: one arrow looks smaller.
 export component PadArrows inherits Rectangle {
@@ -385,7 +385,7 @@ export component Hints inherits Rectangle {
                     border-width: 1px;
                     border-color: #ffffff1f;
                     property <bool> glyph: root.pad && (h.pad == "✕" || h.pad == "○" || h.pad == "△" || h.pad == "□" || h.pad == "☰"
-                        || h.pad == "▲ ▼" || h.pad == "◀ ▶");
+                        || h.pad == "⮝  ⮟" || h.pad == "⮜  ⮞");
                     t := Text {
                         visible: !cap.glyph;
                         text: root.pad ? h.pad : h.key;
@@ -393,14 +393,14 @@ export component Hints inherits Rectangle {
                         font-weight: 700;
                         color: #ffffff;
                     }
-                    property <bool> arrows: h.pad == "▲ ▼" || h.pad == "◀ ▶";
+                    property <bool> arrows: h.pad == "⮝  ⮟" || h.pad == "⮜  ⮞";
                     if cap.glyph && !cap.arrows : PadGlyph { width: 14 * Look.px; height: 14 * Look.px; name: h.pad; }
                     if cap.glyph && cap.arrows : PadArrows {
                         width: Math.round(8 * Look.px / 1px) * 2px;
                         height: self.width;
                         x: (cap.width - self.width) / 2;
                         y: (cap.height - self.height) / 2;
-                        vertical: h.pad == "▲ ▼";
+                        vertical: h.pad == "⮝  ⮟";
                     }
                 }
             }
