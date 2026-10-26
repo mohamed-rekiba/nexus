@@ -414,6 +414,7 @@ impl Launcher for Play {
             args: vec![game.into()],
             env: Default::default(),
             cwd: None,
+            game_process: None,
         })
     }
 }

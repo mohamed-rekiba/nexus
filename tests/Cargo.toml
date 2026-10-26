@@ -13,6 +13,7 @@ license.workspace = true
 image.workspace = true
 emu-kyty.workspace = true
 emu-pc.workspace = true
+emu-steam.workspace = true
 playstation-store.workspace = true
 release-catalog.workspace = true
 emu-shadps4 = { workspace = true, features = ["fixtures"] }

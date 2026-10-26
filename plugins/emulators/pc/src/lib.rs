@@ -2,8 +2,8 @@
 //!
 //! - Install ([`install`]): from a download folder the host has unpacked. The manifest file in
 //!   the game's folder lists every file that can start it ([`manifest`]).
-//! - Library ([`library`]): the games in `PC/` of the player's game folders that have a
-//!   manifest file.
+//! - Library ([`library`]): the games in `PC/` of the player's game folders: installed ones,
+//!   and folders copied in by hand, which get their manifest file the first time.
 //! - Settings ([`settings`]): Starts, the file Play starts; on Linux a Resolution.
 //! - Play ([`launch`]): the file Starts chose, as it is; a Windows program off Windows through
 //!   umu-launcher (Proton) or Wine ([`runner`]). A release this system can't start installs
@@ -17,7 +17,8 @@ pub mod probe;
 mod runner;
 mod settings;
 
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 
 use nexus_api::*;
 
@@ -54,7 +55,7 @@ impl EmulatorPlugin for PcPlugin {
         let host = ctx.services().get::<HostInfo>();
         let platform = host.as_ref().and_then(|h| h.platform).or_else(Platform::current).unwrap_or(Platform::Linux);
         let runs_32bit = host.is_some_and(|h| h.runs_32bit);
-        let pc = Arc::new(Pc { ctx, platform, runs_32bit });
+        let pc = Arc::new(Pc { ctx, platform, runs_32bit, not_games: Mutex::default() });
         Ok(Provided {
             catalog: Some(pc.clone()),
             launcher: Some(pc.clone()),
@@ -73,4 +74,7 @@ struct Pc {
     platform: Platform,
     /// The host runs 32-bit Linux programs.
     runs_32bit: bool,
+    /// Folders in `PC/` with nothing that starts a game (`<root>/<folder>`): not probed again
+    /// this run.
+    not_games: Mutex<HashSet<String>>,
 }

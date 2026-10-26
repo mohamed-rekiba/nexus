@@ -60,7 +60,14 @@ impl Programs for HostPrograms {
         let path = self.locate(program)?.ok_or_else(|| PluginError::NotFound(format!("{program} isn't there")))?;
         let cwd = path.parent().map(ToOwned::to_owned).unwrap_or_else(|| self.data_dir.clone());
         let timeout = timeout.min(MAX_PROGRAM_TIME);
-        let command = SpawnCommand { program: path, args: args.to_vec(), env: Default::default(), cwd, log: None };
+        let command = SpawnCommand {
+            program: path,
+            args: args.to_vec(),
+            env: Default::default(),
+            cwd,
+            log: None,
+            keep_running: false,
+        };
         match self.spawner.output(command, timeout, MAX_PROGRAM_OUTPUT).await? {
             Some(mut out) => {
                 out.truncate(MAX_PROGRAM_OUTPUT);
@@ -93,7 +100,7 @@ impl Programs for HostPrograms {
         } else {
             (path, args.to_vec())
         };
-        let command = SpawnCommand { program, args, env: Default::default(), cwd, log: None };
+        let command = SpawnCommand { program, args, env: Default::default(), cwd, log: None, keep_running: false };
         self.spawner.stream(command, line, cancelled).await
     }
 }

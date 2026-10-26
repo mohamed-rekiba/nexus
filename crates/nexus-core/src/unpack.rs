@@ -207,6 +207,7 @@ async fn unpack_into(
                 env: Default::default(),
                 cwd: dir.clone(),
                 log: None,
+                keep_running: false,
             };
             let mut process = kernel.spawner().spawn(command).await.map_err(failed)?;
             let exit = match tokio::time::timeout(EXTRACT_TIMEOUT, process.wait()).await {

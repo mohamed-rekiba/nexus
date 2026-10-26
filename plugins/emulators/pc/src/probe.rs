@@ -324,6 +324,22 @@ pub fn clean_name(title: &str) -> String {
     if name.is_empty() { title.trim().to_owned() } else { name }
 }
 
+/// A game's name from a folder's or a file's: [`clean_name`], and a name in small letters
+/// ("cuphead_v1.3.4.run", "my_game") with a capital at each word.
+pub fn display_name(title: &str) -> String {
+    let name = clean_name(title);
+    if name.chars().any(char::is_uppercase) {
+        return name;
+    }
+    name.split(' ')
+        .map(|word| {
+            let mut letters = word.chars();
+            letters.next().map(|first| first.to_uppercase().chain(letters).collect()).unwrap_or_default()
+        })
+        .collect::<Vec<String>>()
+        .join(" ")
+}
+
 /// A folder name for a game: its name in safe characters.
 pub fn folder_name(name: &str) -> String {
     let s: String =

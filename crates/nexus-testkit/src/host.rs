@@ -49,6 +49,7 @@ impl FakeHost {
         host.shutdown_timeout = Duration::from_millis(200);
         host.stop_grace = Duration::from_millis(200);
         host.show_timeout = Duration::from_millis(500);
+        host.hand_over_timeout = Duration::from_millis(500);
         host.watch_every = Duration::from_millis(20);
         host.torrent_poll = Duration::from_millis(10);
         host.vpn_poll = Duration::from_millis(10);

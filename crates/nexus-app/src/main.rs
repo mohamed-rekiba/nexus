@@ -37,6 +37,7 @@ use slint_interpreter::ComponentHandle;
 use emu_kyty as _;
 use emu_pc as _;
 use emu_shadps4 as _;
+use emu_steam as _;
 use playstation_store as _;
 use release_catalog as _;
 use system_host as _;

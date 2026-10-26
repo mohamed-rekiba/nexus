@@ -47,6 +47,10 @@ pub struct SpawnCommand {
     pub cwd: PathBuf,
     /// Where the program's output goes. `None` throws it away.
     pub log: Option<PathBuf>,
+    /// It may outlive Nexus: a program that hands a game to another one can become that
+    /// program (`steam` becomes Steam's client when Steam wasn't running), which Nexus never
+    /// stops, not even when Nexus quits.
+    pub keep_running: bool,
 }
 
 impl SpawnCommand {
@@ -133,7 +137,7 @@ impl ProcessSpawner for TokioSpawner {
         let failed =
             |e: std::io::Error| nexus_api::PluginError::Other(format!("could not start {:?}: {e}", command.program));
         let mut process = tokio::process::Command::new(&command.program);
-        process.args(&command.args).envs(&command.env).current_dir(&command.cwd).kill_on_drop(true);
+        process.args(&command.args).envs(&command.env).current_dir(&command.cwd).kill_on_drop(!command.keep_running);
         process.stdin(std::process::Stdio::null());
         if let Some(log) = &command.log {
             if let Some(dir) = log.parent() {
@@ -423,6 +427,12 @@ pub trait ProcessTree: Send + Sync {
     /// The live processes of the game the launcher started as `root`, `root` among them while
     /// it runs. Blocking: it may run a system tool.
     fn members(&self, root: u32) -> Vec<u32>;
+    /// The processes whose command line has `text`, for a game another program started (see
+    /// `LaunchSpec::game_process`): each one not below another of them. Blocking. None by
+    /// default, where command lines can't be read.
+    fn find(&self, _text: &str) -> Vec<u32> {
+        Vec::new()
+    }
     /// Asks the processes `ids` to close (`force`: kills them). Blocking.
     fn end(&self, ids: &[u32], force: bool);
 }
@@ -479,7 +489,23 @@ mod tests {
             env: BTreeMap::new(),
             cwd: std::env::temp_dir(),
             log: None,
+            keep_running: false,
         }
+    }
+
+    /// A program that may become Steam's client outlives its handle, and so Nexus.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_program_that_may_outlive_nexus_isn_t_stopped_when_its_handle_goes() {
+        let mut command = sh("sleep 30");
+        command.keep_running = true;
+        let process = TokioSpawner.spawn(command).await.unwrap();
+        let id = process.id().unwrap().to_string();
+        drop(process);
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let alive = std::process::Command::new("kill").args(["-0", &id]).status().is_ok_and(|s| s.success());
+        let _ = std::process::Command::new("kill").args(["-KILL", &id]).status();
+        assert!(alive, "the program was stopped with its handle");
     }
 
     #[test]
@@ -490,6 +516,7 @@ mod tests {
             env: BTreeMap::from([("WINEPREFIX".to_owned(), "/data/prefixes/a b".to_owned())]),
             cwd: "/Games/My Game".into(),
             log: None,
+            keep_running: false,
         };
         assert_eq!(
             command.shell_line(),

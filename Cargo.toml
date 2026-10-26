@@ -12,6 +12,7 @@ members = [
     "plugins/emulators/kytyps5",
     "plugins/emulators/shadps4",
     "plugins/emulators/pc",
+    "plugins/emulators/steam",
     "plugins/services/playstation-store",
     "plugins/services/release-catalog",
     "plugins/system/host",
@@ -40,6 +41,7 @@ emulator-kit = { path = "plugins/shared/emulator-kit" }
 emu-kyty = { path = "plugins/emulators/kytyps5" }
 emu-shadps4 = { path = "plugins/emulators/shadps4" }
 emu-pc = { path = "plugins/emulators/pc" }
+emu-steam = { path = "plugins/emulators/steam" }
 playstation-store = { path = "plugins/services/playstation-store" }
 release-catalog = { path = "plugins/services/release-catalog" }
 system-host = { path = "plugins/system/host" }

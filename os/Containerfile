@@ -39,6 +39,8 @@ RUN set -eux; \
         libxkbcommon libxkbcommon-x11 libwayland-client libwayland-cursor libwayland-egl \
         alsa-lib pulseaudio-libs dbus-libs libuuid libcap libarchive mpv-libs yt-dlp \
         xdotool xprop \
+        # GameMode: Nexus runs PC games through gamemoderun (the player is in its group).
+        gamemode \
         # Not in Fedora's minimal set, but used: tar (the emulators' updates), lspci (Settings →
         # This PC names the graphics card), rpm-ostree (Settings → System's update status),
         # chrony (the clock: HTTPS needs the right time), mokutil (Universal Blue's key for NVIDIA).

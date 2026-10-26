@@ -1,12 +1,30 @@
-//! The library: the games in `PC/` of the player's game folders that have a manifest file,
-//! each named by its folder; their Game Hub details and section.
+//! The library: the games in `PC/` of the player's game folders, each by its folder; their
+//! Game Hub details and section.
+//!
+//! A game installed here has a manifest file. A folder the player copied in by hand gets one
+//! the first time the library sees it: its files are probed as an install probes them. A
+//! folder with nothing that starts a game is left as it is, and isn't probed again until the
+//! next run. A `cover.jpg`, `cover.png` or `cover.webp` in a game's folder is its cover.
 
 use nexus_api::serde_json::Value;
 use nexus_api::*;
 
+use emulator_kit::installs::Download;
+
 use crate::manifest::{self, GAME_FILE, GameManifest, Start};
 use crate::runner::Runner;
-use crate::{CONSOLE_FOLDER, GAMES, GOG_INFO, Pc, WRAPPER_INFO, WRAPPER_NAME_LINE, path, probe, settings};
+use crate::{CONSOLE_FOLDER, GAMES, GOG_INFO, Pc, WRAPPER_INFO, WRAPPER_NAME_LINE, install, path, probe, settings};
+
+/// A game's own cover, in its folder, in this order.
+const COVERS: [&str; 3] = ["cover.jpg", "cover.png", "cover.webp"];
+/// Where a game GOG's installer installed names itself, on its first line.
+const GOG_GAME_INFO: &str = "gameinfo";
+
+/// Whether the folder `name` in `PC/` is never a game: a hidden one, or one an install is still
+/// writing (`<name>.part`).
+fn skipped(name: &str) -> bool {
+    name.starts_with('.') || name.ends_with(".part")
+}
 
 /// An installed game: its folder's name is its id.
 #[derive(Clone, Debug)]
@@ -14,6 +32,8 @@ pub(crate) struct Game {
     pub id: String,
     pub dir: HostPath,
     pub manifest: GameManifest,
+    /// Its own cover, from its folder.
+    pub cover: Option<HostPath>,
 }
 
 impl Game {
@@ -22,7 +42,7 @@ impl Game {
             id: self.id.clone(),
             title: self.manifest.name.clone(),
             platform: "PC".into(),
-            cover: None,
+            cover: self.cover.clone().map(ImageSource::Folder),
             tags: Vec::new(),
             release_year: None,
             title_id: None,
@@ -51,7 +71,85 @@ impl Pc {
         {
             manifest.name = name;
         }
-        Some(Game { id: id.to_owned(), dir: game_dir, manifest })
+        let cover = self.own_cover(&game_dir).await;
+        Some(Game { id: id.to_owned(), dir: game_dir, manifest, cover })
+    }
+
+    /// The first of [`COVERS`] in the folder `dir`.
+    async fn own_cover(&self, dir: &HostPath) -> Option<HostPath> {
+        for name in COVERS {
+            let file = dir.join(name).ok()?;
+            if self.ctx.folders().exists(&file).await.unwrap_or(false) {
+                return Some(file);
+            }
+        }
+        None
+    }
+
+    /// The game a player copied into the folder `id` of `dir` by hand: its files probed as an
+    /// install probes them, and its manifest file written. `None` when nothing in it starts a
+    /// game; the folder isn't probed again this run.
+    async fn adopt(&self, dir: &HostPath, id: &str) -> Option<Game> {
+        let key = format!("{}/{}", dir.root, id);
+        let not_games = || self.not_games.lock().unwrap_or_else(|p| p.into_inner());
+        if not_games().contains(&key) {
+            return None;
+        }
+        let game_dir = dir.join(id).ok()?;
+        let Some((manifest, runnable)) = self.probe_folder(&game_dir, id).await else {
+            not_games().insert(key);
+            return None;
+        };
+        let folders = self.ctx.folders();
+        // A copy can lose the program flag, as a download does. Without it the game says so
+        // when it starts.
+        if self.platform != Platform::Windows {
+            for rel in &runnable {
+                let flagged = match game_dir.join(rel) {
+                    Ok(file) => folders.set_executable(&file).await,
+                    Err(e) => Err(e),
+                };
+                if let Err(e) = flagged {
+                    self.ctx.log().warn(&format!("{rel} in {id} couldn't be made a program: {e}"));
+                }
+            }
+        }
+        let written = match serde_json::to_vec_pretty(&manifest) {
+            Ok(bytes) => folders.write(&game_dir.join(GAME_FILE).ok()?, &bytes).await,
+            Err(e) => Err(PluginError::Other(e.to_string())),
+        };
+        if let Err(e) = written {
+            self.ctx.log().warn(&format!("{id} couldn't be added: {e}"));
+            return None;
+        }
+        self.ctx.log().info(&format!("added {} from the folder {id}", manifest.name));
+        let cover = self.own_cover(&game_dir).await;
+        Some(Game { id: id.to_owned(), dir: game_dir, manifest, cover })
+    }
+
+    /// What starts the game in `game_dir`, and its name: GOG's `gameinfo`, a portable Wine
+    /// wrapper's, else the folder's `id`. Also the files that should be programs.
+    async fn probe_folder(&self, game_dir: &HostPath, id: &str) -> Option<(GameManifest, Vec<String>)> {
+        let folders = self.ctx.folders();
+        let files = Download::scan(folders.as_ref(), game_dir).await.ok()??.files;
+        let mut probed = Vec::new();
+        for file in install::to_probe(&files) {
+            let head = folders.read_range(&file.path, 0, probe::HEAD).await.unwrap_or_default();
+            probed.push((file.rel.clone(), probe::probe(&head)));
+        }
+        let ranked = probe::rank(&probed);
+        let (first, _) = ranked.first()?;
+        let script_dir = first.rsplit_once('/').map_or(String::new(), |(dir, _)| format!("{dir}/"));
+        let name = match self.named_in(&game_dir.join(GOG_GAME_INFO).ok()?, 0).await {
+            Some(name) => name,
+            None => self
+                .named_in(&game_dir.join(&format!("{script_dir}{WRAPPER_INFO}")).ok()?, WRAPPER_NAME_LINE)
+                .await
+                .unwrap_or_else(|| probe::display_name(id)),
+        };
+        let runnable = probed.iter().filter(|(_, p)| p.runnable()).map(|(rel, _)| rel.clone()).collect();
+        let starts = ranked.into_iter().map(|(path, kind)| Start { path, kind }).collect();
+        Some((GameManifest::new(name, starts), runnable))
     }
 
     /// The name GOG's `gameinfo` or the wrapper's `game_info.txt` gives a game installed with
@@ -70,11 +168,14 @@ impl Pc {
         let mut out = Vec::new();
         for dir in self.pc_folders().await? {
             for entry in self.ctx.folders().list(&dir).await.unwrap_or_default() {
-                if entry.is_dir
-                    && let Some(game) = self.read_game(&dir, &entry.name).await
-                {
-                    out.push(game);
+                if !entry.is_dir || skipped(&entry.name) {
+                    continue;
                 }
+                let game = match self.read_game(&dir, &entry.name).await {
+                    Some(game) => Some(game),
+                    None => self.adopt(&dir, &entry.name).await,
+                };
+                out.extend(game);
             }
         }
         out.sort_by_cached_key(|g| g.manifest.name.to_lowercase());
@@ -83,9 +184,17 @@ impl Pc {
 
     /// The installed game `id`: the first game folder that has it.
     pub(crate) async fn game(&self, id: &str) -> PluginResult<Game> {
-        for dir in self.pc_folders().await? {
-            if let Some(game) = self.read_game(&dir, id).await {
+        let dirs = self.pc_folders().await?;
+        for dir in &dirs {
+            if let Some(game) = self.read_game(dir, id).await {
                 return Ok(game);
+            }
+        }
+        if !skipped(id) {
+            for dir in &dirs {
+                if let Some(game) = self.adopt(dir, id).await {
+                    return Ok(game);
+                }
             }
         }
         Err(PluginError::NotFound(id.into()))

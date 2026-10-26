@@ -1,7 +1,9 @@
 //! Play: the file the Starts setting chose, as it is. What the file is decides how it runs, and
 //! nothing else: a script as it is (through `sh` without `#!`), an AppImage without FUSE, a
 //! Linux or Mac program as it is, and a Windows program off Windows through umu-launcher
-//! (Proton) or Wine. With a Resolution of its own, the game runs inside gamescope.
+//! (Proton) or Wine. With a Resolution of its own, the game runs inside gamescope. On Linux with
+//! GameMode installed, the game runs through `gamemoderun`, which tunes the computer for it while
+//! it runs.
 
 use nexus_api::serde_json::Value;
 use nexus_api::*;
@@ -37,6 +39,7 @@ impl Pc {
             args: Vec::new(),
             env: Default::default(),
             cwd: Some(Location::Folder(folder)),
+            game_process: None,
         };
         match start.kind {
             // A script without `#!` (some repacks' `start`) runs with sh.
@@ -63,7 +66,22 @@ impl Pc {
         {
             self.inside_gamescope(width, height, &mut spec).await?;
         }
+        if self.platform == Platform::Linux {
+            self.through_gamemode(&mut spec).await;
+        }
         Ok(spec)
+    }
+
+    /// Runs `spec` through `gamemoderun` when GameMode is installed. GameMode then raises the
+    /// game's priority and the processor's speed while it runs; for a player in the `gamemode`
+    /// group, without a password.
+    async fn through_gamemode(&self, spec: &mut LaunchSpec) {
+        let gamemode = Location::System("gamemoderun".into());
+        if !matches!(self.ctx.programs().find(&gamemode).await, Ok(Some(_))) {
+            return;
+        }
+        let program = std::mem::replace(&mut spec.program, gamemode);
+        spec.args = std::iter::once(as_arg(program)).chain(std::mem::take(&mut spec.args)).collect();
     }
 
     /// Runs the Windows program `exe` through umu-launcher or Wine, in the game's own Wine

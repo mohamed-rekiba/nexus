@@ -1592,6 +1592,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "emu-steam"
+version = "0.5.0"
+dependencies = [
+ "nexus-api",
+]
+
+[[package]]
 name = "emulator-kit"
 version = "0.5.0"
 dependencies = [
@@ -4120,6 +4127,7 @@ dependencies = [
  "emu-kyty",
  "emu-pc",
  "emu-shadps4",
+ "emu-steam",
  "flate2",
  "futures",
  "gilrs",
@@ -4199,6 +4207,7 @@ dependencies = [
  "emu-kyty",
  "emu-pc",
  "emu-shadps4",
+ "emu-steam",
  "emulator-kit",
  "flate2",
  "futures",

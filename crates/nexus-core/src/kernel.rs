@@ -50,6 +50,9 @@ pub struct HostConfig {
     pub stop_grace: Duration,
     /// How long a started game has to show a window before the launcher stops waiting for it.
     pub show_timeout: Duration,
+    /// How long a game another program starts (a store's client) has to show its process: the
+    /// client may first have to start, sign in and update itself.
+    pub hand_over_timeout: Duration,
     /// How often a running game's processes and windows are read once it shows.
     pub watch_every: Duration,
     /// How many downloads run at once. The rest wait in a queue.
@@ -76,6 +79,7 @@ impl HostConfig {
             shutdown_timeout: Duration::from_secs(5),
             stop_grace: Duration::from_secs(4),
             show_timeout: Duration::from_secs(20),
+            hand_over_timeout: Duration::from_secs(120),
             watch_every: Duration::from_secs(1),
             max_downloads: 2,
             home: None,

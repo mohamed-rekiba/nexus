@@ -1062,7 +1062,7 @@ impl Launcher for Kyty {
                 }
             };
             let args = self.args_for(&binary, None, &settings, LaunchArg::path(found.dir)).await;
-            return Ok(LaunchSpec { program: binary, args, env: Default::default(), cwd });
+            return Ok(LaunchSpec { program: binary, args, env: Default::default(), cwd, game_process: None });
         }
         let tag = versions::state(&self.ctx)
             .await
@@ -1070,7 +1070,13 @@ impl Launcher for Kyty {
             .ok_or_else(|| PluginError::Precondition("install KytyPS5 first".into()))?;
         let program: Location = self.binary(&tag).await?.into();
         let args = self.args_for(&program, Some(&tag), &settings, LaunchArg::path(found.dir)).await;
-        Ok(LaunchSpec { program, args, env: Default::default(), cwd: Some(self.work_dir(&tag).await?.into()) })
+        Ok(LaunchSpec {
+            program,
+            args,
+            env: Default::default(),
+            cwd: Some(self.work_dir(&tag).await?.into()),
+            game_process: None,
+        })
     }
 }
 

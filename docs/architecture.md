@@ -41,7 +41,7 @@ nexus-app (the binary)         ──▶ nexus-ui-host, nexus-core, every built-
 | `crates/nexus-ui-host` | `ThemeSet` (finds themes, resolves `extends`) and `ThemeHost`: compiles a theme with `slint-interpreter`, binds the view models, loads images, turns gamepad buttons into keys, and swaps themes. |
 | `crates/nexus-app` | The binary. The event loop, render scheduling, the image loader, and the system adapters: `desktop.rs`, `processes.rs` (a running game's processes), `torrents.rs` (librqbit), `archives.rs` and `libarchive.rs`, `hardware.rs` and `gpu_probe.rs` (Vulkan), `trailer.rs` (libmpv), `gamepad.rs` (gilrs), `audio.rs` (rodio), `http.rs` (reqwest), `disk.rs`, `clock.rs`. |
 | `crates/nexus-testkit` | `FakeHost` (a real core over a temporary data folder), `StubPlugin`, fakes for every port, `SpanRecorder`, and `contract::emulator`, the capability contract checks. |
-| `plugins/emulators/*` | `emu-kyty` (KytyPS5, PS5), `emu-shadps4` (shadPS4, PS4), `emu-pc` (PC games). |
+| `plugins/emulators/*` | `emu-kyty` (KytyPS5, PS5), `emu-shadps4` (shadPS4, PS4), `emu-pc` (PC games), `emu-steam` (the games Steam installed, Linux). |
 | `plugins/services/*` | `playstation-store` (store art and details) and `release-catalog` (the Catalog's releases). |
 | `plugins/themes/default` | The built-in theme, id `default`. A crate only so its files are embedded in the binary. |
 | `plugins/shared/emulator-kit` | Code the emulators share: GitHub releases, build folders, game scans, package readers, install jobs. A library, not a plugin. |
@@ -258,8 +258,10 @@ starts with a stand-in for each; the app plugs in the real ones; the test kit ha
   `taskkill` without `/F`); `kill` ends the group.
 - `ProcessTree` lists a running game's processes (`members`): the one the launcher started, its
   process group, and what a sandbox moved out of the group below them (Proton's pressure-vessel
-  does). `end` asks them to close or kills them. It is the one place that knows which processes
-  are the game; the core and the desktop both work from its list.
+  does). `end` asks them to close or kills them. `find(text)` finds the processes with that text
+  in their command line, for a game another program started (Unix only: `ps -A -ww -o args=`). It
+  is the one place that knows which processes are the game; the core and the desktop both work
+  from its list.
 - `Desktop` says which window is in front (`front`), brings one of the game's processes' windows
   up (`show_game`), brings the launcher back (`show_launcher`), and answers `has_window`,
   `window_close_ends_game` (macOS only), `problem` and start at login.
@@ -375,6 +377,15 @@ desktop can't say what is in front (`Front::Unknown`), the last window the launc
 counts. Only where `window_close_ends_game` (macOS) does a window that was seen and is gone for
 three reads in a row stop the game: elsewhere a launcher's own menu closes before the game's
 window opens.
+
+A launch can hand the game to another program: `LaunchSpec.game_process` holds words of the
+game's own command line, as Steam's `SteamLaunch AppId=<id> ` (the Steam plugin). The program
+started here (`steam steam://rungameid/<id>`) is then left alone: reaped when it exits, never
+stopped. The module looks for the game with `ProcessTree::find` until `hand_over_timeout`
+(2 min: the client may first start and update itself); the first process found that wasn't
+there before the launch is the game's first, and the rest works as above. A game that never
+shows ends the session with a notice, and no play time; Stop before it shows ends it with
+nothing played.
 
 Stop asks the game's processes to close, waits up to `stop_grace` (4 s) for them, and kills what
 is left. When the game exits,

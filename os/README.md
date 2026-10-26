@@ -27,7 +27,7 @@ Each image also gets a dated tag (`minimal-20261024`) and, from an OS release, a
 | `files/usr/lib/nexus-os/` (made at build time) | `release`, the marker, holds `nexus --version`. `image` holds where the PC updates from. |
 | `files/usr/share/plymouth/themes/nexus-os/` | The boot screen: the Nexus logo, with Fedora's spinner images copied in at build time. |
 | `files/usr/share/polkit-1/rules.d/50-nexus-os.rules` | `player`, at the PC, manages the network and may start the update service ("check now"). |
-| `files/usr/lib/sysusers.d/`, `tmpfiles.d/` | The `player` user (uid 1000, no password) and its home. |
+| `files/usr/lib/sysusers.d/`, `tmpfiles.d/` | The `player` user (uid 1000, no password), in GameMode's `gamemode` group, and its home. |
 | `files/usr/libexec/nexus-os/update`, `files/usr/lib/systemd/system/nexus-os-update.*` | Daily, from 3 minutes after start (and every 15 minutes while offline): stage the next image, and the right one for the graphics card (an NVIDIA PC switches to `:minimal-nvidia`; with Secure Boot on, only once Universal Blue's key is enrolled, which it queues). Downloads only: Fedora's own timer, which restarts the PC, is masked. |
 | `files/usr/lib/bootc/{install,kargs.d}/` | XFS root, a quiet boot with the splash, and `systemd.gpt_auto=0` (otherwise the EFI partition is mounted over `/boot` and updates fail to finish). |
 | `files/usr/lib/bootupd/grub2-static/configs.d/` | The boot menu stays hidden unless Esc or Shift is held. |

@@ -13,8 +13,9 @@ install_note = "Installs a PC game from its folder, a GOG installer or an AppIma
 [permissions]
 # A game's own program, script or AppImage in the games folder; a Windows game through
 # umu-launcher (Proton), the one this plugin installs or the system's, or Wine; a start script
-# without `#!` through sh; on Linux, any game at a resolution of its own inside gamescope.
-process = ["folder:games", "umu/umu-run", "system:umu-run", "system:wine", "system:wine64", "system:sh", "system:gamescope"]
+# without `#!` through sh; on Linux, any game at a resolution of its own inside gamescope, and
+# through GameMode's gamemoderun when it is installed.
+process = ["folder:games", "umu/umu-run", "system:umu-run", "system:wine", "system:wine64", "system:sh", "system:gamescope", "system:gamemoderun"]
 # umu-launcher's latest release on GitHub's API, its download, and the CDN it redirects to.
 network = ["api.github.com", "github.com", "*.githubusercontent.com"]
 

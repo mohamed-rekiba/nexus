@@ -366,6 +366,11 @@ struct TreeState {
     stubborn: bool,
     /// Each `end`: the processes, and whether it killed them.
     ended: Vec<(Vec<u32>, bool)>,
+    /// Processes the test started on their own, as a store's client starts a game: id ->
+    /// command line.
+    started: std::collections::BTreeMap<u32, String>,
+    /// Those of them that ended.
+    gone: std::collections::BTreeSet<u32>,
 }
 
 impl FakeProcessTree {
@@ -374,9 +379,19 @@ impl FakeProcessTree {
         self.state.lock().unwrap().below.entry(root).or_default().push(id);
     }
 
+    /// Process `id` starts with `command_line`, not below anything Nexus started: a game a
+    /// store's client started.
+    pub fn start(&self, id: u32, command_line: &str) {
+        self.state.lock().unwrap().started.insert(id, command_line.into());
+    }
+
     /// Process `id` ended by itself.
     pub fn exit(&self, id: u32) {
-        for ids in self.state.lock().unwrap().below.values_mut() {
+        let mut state = self.state.lock().unwrap();
+        if state.started.remove(&id).is_some() {
+            state.gone.insert(id);
+        }
+        for ids in state.below.values_mut() {
             ids.retain(|i| *i != id);
         }
     }
@@ -395,7 +410,15 @@ impl FakeProcessTree {
 impl nexus_core::ProcessTree for FakeProcessTree {
     fn members(&self, root: u32) -> Vec<u32> {
         let state = self.state.lock().unwrap();
-        std::iter::once(root).chain(state.below.get(&root).cloned().unwrap_or_default()).collect()
+        let below = state.below.get(&root).cloned().unwrap_or_default();
+        // A process the test started is gone once it ends; whether the launcher's own runs is
+        // the fake handle's to say, and the core drops it once it exited.
+        let root = (!state.gone.contains(&root)).then_some(root);
+        root.into_iter().chain(below).collect()
+    }
+
+    fn find(&self, text: &str) -> Vec<u32> {
+        self.state.lock().unwrap().started.iter().filter(|(_, line)| line.contains(text)).map(|(id, _)| *id).collect()
     }
 
     fn end(&self, ids: &[u32], force: bool) {
@@ -404,6 +427,11 @@ impl nexus_core::ProcessTree for FakeProcessTree {
         if force || !state.stubborn {
             for below in state.below.values_mut() {
                 below.retain(|i| !ids.contains(i));
+            }
+            for id in ids {
+                if state.started.remove(id).is_some() {
+                    state.gone.insert(*id);
+                }
             }
         }
     }

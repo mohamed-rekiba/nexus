@@ -1,0 +1,23 @@
+id = "emu-steam"
+kind = "emulator"
+name = "Steam"
+version = "0.1.0"
+host_api = "^0.1"
+# Nexus finds a game Steam started by its command line, which only Linux's process list has.
+platforms = ["linux"]
+# No console: it installs nothing from the releases, so it doesn't share the PC's.
+capabilities = ["catalog", "launcher", "slots"]
+
+[permissions]
+# Steam starts the game: its own command, or the Flatpak's.
+process = ["system:steam", "system:flatpak"]
+# Steam's art for a game its cache doesn't have.
+network = ["*.steamstatic.com"]
+
+# Steam's folders: where Steam is, and its libraries on other drives. Read only. Until you map
+# it, each of these folders that exists is read.
+[[permissions.filesystem]]
+folder = "steam"
+title = "Steam libraries"
+help = "Steam's own folder and each Steam library on another drive. Separate folders with ;"
+default = ["~/.local/share/Steam", "~/.var/app/com.valvesoftware.Steam/.local/share/Steam", "~/.steam/steam"]

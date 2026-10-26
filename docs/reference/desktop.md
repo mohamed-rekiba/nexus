@@ -142,11 +142,35 @@ left, whatever its first process does.
 
 `game_in_front` is app state. `Core::game_in_front()` reads it and never asks the desktop.
 
+### A game another program starts
+
+A launch whose `LaunchSpec.game_process` is set hands the game over: Steam's plugin runs
+`steam steam://rungameid/<id>`, which asks Steam's client to start it, and exits (or, when Steam
+wasn't running, becomes the client). Then:
+
+- the program started here is never stopped, at Stop, at the end, or when Nexus quits
+  (`SpawnCommand.keep_running`): `steam` becomes Steam's client when Steam wasn't running;
+- before the launch starts anything, the core notes the processes that already have those words
+  (the same game started from Steam itself): they aren't this launch's game;
+- every 250 ms the module asks `ProcessTree::find` for the processes with those words in their
+  command line (`SteamLaunch AppId=<id> `: Steam's `reaper`, which runs the game and ends with
+  it), for up to `hand_over_timeout` (2 min, in `HostConfig`), and takes the first new one;
+- once found, that process is the game's first: the steps above follow it and the processes
+  below it, and the session ends when they are gone;
+- found never, the session ends with an error notice, "<title> didn't start: its game didn't
+  show up within 120 seconds", and no play time or result prompt;
+- Stop before it is found ends the session with nothing played: no notice, play time or result
+  prompt.
+
+`find` reads `ps -A -ww -o pid=,ppid=,args=` and returns each match whose parent doesn't match.
+Windows has no command lines in its process snapshot, so a handed-over game isn't found there.
+
 ### Stop and exit
 
 Stop asks the game to close first, so the emulator saves its caches:
 
-- on Unix, `kill -TERM` to the process group, and to each of the game's processes outside it;
+- on Unix, `kill -TERM` to the process group, and to each of the game's processes outside it
+  (for a handed-over game, to its processes only: the program started here is left alone);
 - on Windows, `taskkill /PID <pid> /T`, and `taskkill` for each of the game's processes.
 
 After `stop_grace` (4 s) what is still there is killed: `kill -KILL`, or `taskkill /F`.

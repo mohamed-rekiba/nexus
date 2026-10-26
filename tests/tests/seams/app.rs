@@ -32,6 +32,8 @@ struct FakeEmu {
     broken_catalog: bool,
     /// The newest build GitHub would list.
     latest: Arc<Mutex<String>>,
+    /// Its launch hands the game over to a process with this text in its command line.
+    game_process: Option<String>,
 }
 
 impl FakeEmu {
@@ -45,7 +47,14 @@ impl FakeEmu {
             exits: Arc::default(),
             broken_catalog: false,
             latest: Arc::new(Mutex::new("1.0".into())),
+            game_process: None,
         }
+    }
+
+    /// Its launch hands the game over, as `steam steam://rungameid/…` does.
+    fn handing_over(mut self, game_process: &str) -> Self {
+        self.game_process = Some(game_process.into());
+        self
     }
 
     fn storage(&self) -> Arc<dyn Storage> {
@@ -159,7 +168,13 @@ impl Launcher for FakeEmu {
         if let Some(scale) = config.get("scale") {
             env.insert("EMU_SCALE".into(), scale.to_string().into());
         }
-        Ok(LaunchSpec { program: build.path.join("emu").unwrap().into(), args: vec![game.into()], env, cwd: None })
+        Ok(LaunchSpec {
+            program: build.path.join("emu").unwrap().into(),
+            args: vec![game.into()],
+            env,
+            cwd: None,
+            game_process: self.game_process.clone(),
+        })
     }
     async fn on_exit(&self, game: &str, exit: &ExitInfo) -> PluginResult<()> {
         self.exits.lock().unwrap().push((game.into(), exit.clone()));
@@ -748,6 +763,104 @@ async fn stop_reaches_the_processes_a_sandbox_moved_out_of_the_game_s_group() {
     let ended = t.processes.ended();
     assert!(ended.first().is_some_and(|(ids, force)| ids.contains(&sandboxed) && !force), "asked first: {ended:?}");
     assert!(ended.iter().any(|(ids, force)| ids.contains(&sandboxed) && *force), "then killed: {ended:?}");
+}
+
+/// The command line Steam gives game 7's first process.
+const STEAM_GAME: &str = "reaper SteamLaunch AppId=7 -- /games/seven/run";
+
+#[tokio::test]
+async fn a_game_another_program_starts_runs_until_its_own_process_ends() {
+    let (t, _) = core_with(FakeEmu::new(vec!["A"]).handing_over("AppId=7 ")).await;
+    let mut events = t.core.events();
+    let (_, launcher) = play(&t).await;
+    // `steam steam://rungameid/7` hands the game to Steam and exits.
+    launcher.exit(0);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(t.core.view().running.is_some(), "waiting for the game");
+    let game = 9000;
+    t.processes.start(game, STEAM_GAME);
+    t.processes.add(game, game + 1);
+
+    tokio::time::sleep(Duration::from_millis(700)).await;
+    assert!(t.core.view().running.is_some(), "the game runs, past the time a game has to show");
+    until("the game's window came to the front", || t.desktop.shown().contains(&Shown::Game(game))).await;
+
+    t.processes.exit(game + 1);
+    t.processes.exit(game);
+    let exit = closed(&mut events).await;
+    assert!(exit.success, "{exit:?}");
+    assert!(launcher.signals().is_empty(), "Steam was left alone: {:?}", launcher.signals());
+}
+
+#[tokio::test]
+async fn stop_ends_the_game_another_program_started_and_leaves_that_program_running() {
+    let (t, _) = core_with(FakeEmu::new(vec!["A"]).handing_over("AppId=7 ")).await;
+    let mut events = t.core.events();
+    // Steam wasn't running: the launch started Steam's client, which stays.
+    let (session, steam) = play(&t).await;
+    let game = 9000;
+    t.processes.start(game, STEAM_GAME);
+    until("the game is in front", || t.core.game_in_front()).await;
+
+    t.core.dispatch(Command::Stop(session)).await.unwrap();
+    closed(&mut events).await;
+    assert_eq!(t.processes.ended().first(), Some(&(vec![game], false)), "the game was asked to close");
+    assert!(steam.signals().is_empty(), "Steam's client was left running: {:?}", steam.signals());
+}
+
+#[tokio::test]
+async fn a_game_another_program_never_starts_ends_with_a_notice() {
+    let (t, emu) = core_with(FakeEmu::new(vec!["A"]).handing_over("AppId=7 ")).await;
+    t.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    let mut events = t.core.events();
+    let (_, launcher) = play(&t).await;
+    launcher.exit(0);
+
+    let exit = closed(&mut events).await;
+    assert!(!exit.success, "{exit:?}");
+    let notices = t.core.view().notices;
+    assert!(notices.iter().any(|n| n.contains("A didn't start")), "{notices:?}");
+    assert_eq!(t.core.view().result_prompt, None, "nothing was played");
+    assert_eq!(emu.exits.lock().unwrap().len(), 1, "the plugin hears of it");
+}
+
+#[tokio::test]
+async fn stop_before_the_game_another_program_starts_shows_ends_with_nothing_played() {
+    let (t, _) = core_with(FakeEmu::new(vec!["A"]).handing_over("AppId=7 ")).await;
+    t.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    let mut events = t.core.events();
+    let (session, launcher) = play(&t).await;
+    // Steam is still starting, and the player gives up.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    t.core.dispatch(Command::Stop(session)).await.unwrap();
+
+    closed(&mut events).await;
+    let view = t.core.view();
+    assert!(view.notices.is_empty(), "the player stopped it: {:?}", view.notices);
+    assert_eq!(view.result_prompt, None, "nothing was played");
+    let stats = t.core.kernel().config().get(&["app", "playtime", "emu-a:G0"]);
+    assert!(stats.is_null(), "no play time: {stats}");
+    assert!(launcher.signals().is_empty(), "Steam was left alone");
+}
+
+#[tokio::test]
+async fn the_same_game_already_running_before_play_isn_t_taken_for_the_one_play_starts() {
+    let (t, _) = core_with(FakeEmu::new(vec!["A"]).handing_over("AppId=7 ")).await;
+    let mut events = t.core.events();
+    // Started from Steam itself, before Nexus.
+    t.processes.start(8000, STEAM_GAME);
+    let (_, launcher) = play(&t).await;
+    launcher.exit(0);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let game = 9000;
+    t.processes.start(game, STEAM_GAME);
+    until("the new game came to the front", || t.desktop.shown().contains(&Shown::Game(game))).await;
+
+    t.processes.exit(8000);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(t.core.view().running.is_some(), "the other one ending doesn't end this one");
+    t.processes.exit(game);
+    closed(&mut events).await;
 }
 
 #[tokio::test]

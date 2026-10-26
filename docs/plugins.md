@@ -13,6 +13,7 @@ The real plugins are the best examples, and this guide quotes them:
 | `plugins/emulators/kytyps5` (`emu-kyty`) | emulator | Every capability: builds from GitHub, settings, slots, a game installer |
 | `plugins/emulators/shadps4` (`emu-shadps4`) | emulator | The same, with an AppImage build and DLC into another program's folder |
 | `plugins/emulators/pc` (`emu-pc`) | emulator | The smallest emulator: no builds, games in host folders, programs on `PATH` |
+| `plugins/emulators/steam` (`emu-steam`) | emulator | No console: another program's library, read-only folders with a search default, and a launch that hands the game over (`game_process`) |
 | `plugins/services/playstation-store` | service | The smallest plugin: one `Metadata` capability and a cache in storage |
 | `plugins/services/release-catalog` | service | `Releases`, settings, slots, a background task, events, `shutdown` |
 | `plugins/shared/emulator-kit` | not a plugin | Shared code the emulators use |
@@ -411,6 +412,7 @@ The files are in `crates/nexus-api/src/`. What the built-in plugins provide:
 |---|---|
 | `emu-kyty`, `emu-shadps4` | catalog, downloader, installer, configurator, launcher, compatibility, slots, controllers, game_installer |
 | `emu-pc` | catalog, launcher, slots, game_installer |
+| `emu-steam` | catalog, launcher, slots |
 | `release-catalog` | releases, configurator, slots |
 | `playstation-store` | metadata |
 
@@ -454,6 +456,12 @@ then the game's on top.
 `System(name)` on `PATH`. A `LaunchArg` is text or `LaunchArg::path(location)`, which the host
 turns into a real path. A system program needs a `cwd`. The host spawns only what
 `permissions.process` allows.
+
+A program that hands the game to another one, as a store's client does, sets `game_process`:
+words of the game's own command line. The game is then that process and the ones below it, and
+the program started here is neither waited for nor stopped. The Steam plugin sets
+`SteamLaunch AppId=<id> `. See "A game another program starts" in
+[the desktop reference](reference/desktop.md).
 
 Fail with `PluginError::Precondition` and a sentence for the player when something must happen
 first ("install KytyPS5 first"); the Game Hub shows it.
