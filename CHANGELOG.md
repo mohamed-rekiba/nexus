@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.4.0](https://github.com/mohamed-rekiba/nexus/compare/v0.3.1...v0.4.0) (2026-10-26)
+
+
+### Features
+
+* unpack script installers that carry their game in an archive, with unar for a RAR libarchive can't read ([4ceb62e](https://github.com/mohamed-rekiba/nexus/commit/4ceb62e90e2a37a66fddfc72459331db9f08ad72))
+
+
+### Bug Fixes
+
+* a PC game keeps its start script, links and empty folders when it installs ([745eff4](https://github.com/mohamed-rekiba/nexus/commit/745eff41da41dd58197dc218df2dbd92fdd5c1ff))
+* after a restart, a finished download plays the game it installed instead of offering Install ([bb9a8c5](https://github.com/mohamed-rekiba/nexus/commit/bb9a8c539126604a3db700038c66e364a089ab9a))
+* nexus --supports answers system-settings and os-install, so the Nexus OS stick builds ([320b758](https://github.com/mohamed-rekiba/nexus/commit/320b7586549f4a62878d5ac0cdfcc83f7f8767ef))
+* the d-pad's ◀ ▶ and ▲ ▼ hints are the same size ([7381485](https://github.com/mohamed-rekiba/nexus/commit/7381485dccda56a9060911425bbc92316ad68b4c))
+
 ## [0.3.1](https://github.com/mohamed-rekiba/nexus/compare/v0.3.0...v0.3.1) (2026-10-25)
 
 
