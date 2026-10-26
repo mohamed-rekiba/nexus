@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/mohamed-rekiba/nexus/compare/v0.6.1...v0.6.2) (2026-10-26)
+
+
+### Bug Fixes
+
+* **app:** build on Windows: the login module names the process types in full ([f785932](https://github.com/mohamed-rekiba/nexus/commit/f78593238b8a17aab130f3d342ec2de8f1967285))
+
 ## [0.6.1](https://github.com/mohamed-rekiba/nexus/compare/v0.6.0...v0.6.1) (2026-10-26)
 
 
