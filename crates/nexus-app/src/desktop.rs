@@ -581,9 +581,9 @@ pub mod login {
     #[cfg(windows)]
     pub fn set(exe: &Path, on: bool) -> Result<(), String> {
         let reg = |args: &[&str]| -> Result<(), String> {
-            let out = Command::new("reg.exe")
+            let out = std::process::Command::new("reg.exe")
                 .args(args)
-                .stdin(Stdio::null())
+                .stdin(std::process::Stdio::null())
                 .output()
                 .map_err(|e| format!("reg.exe didn't run: {e}"))?;
             if out.status.success() {
