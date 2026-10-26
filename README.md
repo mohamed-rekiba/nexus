@@ -423,7 +423,7 @@ Command-line options (`nexus --help` lists them):
 | `--extensions <path>` | Another folder of third-party themes (default: `<data-dir>/extensions`) |
 | `--folder <name>=<path>` | Map a named folder, such as `games=/srv/games` (saved; repeat it for more) |
 | `--dev` | Reload a theme when its files change |
-| `--supports gamescope` | Exits 0, for a Gamescope session that checks the launcher |
+| `--supports <feature>` | Exits 0 when Nexus has the feature: `gamescope`, `system-settings`, `os-install` ([Nexus OS](docs/nexus-os.md#what-the-os-asks-of-nexus)) |
 
 ### Emulators
 
