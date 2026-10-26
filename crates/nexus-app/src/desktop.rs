@@ -19,7 +19,6 @@
 //! `~/Library/LaunchAgents` on macOS, and a value in the `Run` key of the registry on Windows,
 //! through `reg.exe`.
 
-#[cfg(unix)]
 use std::process::{Command, Stdio};
 
 use nexus_core::{Desktop, Front};
@@ -582,9 +581,9 @@ pub mod login {
     #[cfg(windows)]
     pub fn set(exe: &Path, on: bool) -> Result<(), String> {
         let reg = |args: &[&str]| -> Result<(), String> {
-            let out = std::process::Command::new("reg.exe")
+            let out = Command::new("reg.exe")
                 .args(args)
-                .stdin(std::process::Stdio::null())
+                .stdin(Stdio::null())
                 .output()
                 .map_err(|e| format!("reg.exe didn't run: {e}"))?;
             if out.status.success() {
