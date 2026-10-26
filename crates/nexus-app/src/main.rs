@@ -14,6 +14,7 @@ mod gpu_probe;
 mod hardware;
 mod http;
 mod libarchive;
+mod processes;
 #[cfg(test)]
 mod real_releases;
 mod torrents;
@@ -669,6 +670,7 @@ fn run(args: Args) -> Result<(), String> {
     let core = runtime.block_on(async {
         let (kernel, report) = Kernel::builder(host)
             .http(Arc::new(http::ReqwestTransport::new()?))
+            .processes(Arc::new(processes::SystemProcesses))
             .desktop(Arc::new(desktop::SystemDesktop { raise: Box::new(raise_launcher), login: login_program() }))
             .hardware(Arc::new(hardware::SystemHardware { data_dir: args.data_dir.clone() }))
             .torrents(Arc::new(torrents::RqbitTorrents::new(args.data_dir.join("torrents"), runtime.handle().clone())))

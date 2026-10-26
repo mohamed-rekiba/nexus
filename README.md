@@ -33,8 +33,8 @@ games. The tests also render every screen offscreen with made-up games
   build of your own.
 - **Themes**: switching the theme keeps the screen you are on, your selection, the downloads
   and a running game.
-- **Controller**: every screen works with a gamepad, a keyboard or a pointer. The PS (Guide)
-  button switches between a running game and the launcher.
+- **Controller**: every screen works with a gamepad, a keyboard or a pointer. Holding the PS
+  (Guide) button closes a running game, or opens the power menu when no game runs.
 - **VPN**: catalog downloads can be bound to your own VPN, and pause when it drops.
 - **Updates**: Nexus updates its emulators by itself, and updates itself from its GitHub
   releases.
@@ -389,7 +389,8 @@ game's menu asks again.
 | L1, R1 | Shift+Tab, Tab | The screen before and after |
 | L2, R2 | Page Up, Page Down | A page up or down |
 | Create (Share, View) | Delete | Close the newest notice |
-| PS (Guide) | | While a game runs: switch between the game and Nexus. Otherwise: back to Home |
+| PS (Guide) | | Hold: closes the running game, or with no game running opens the power menu. Tap: back to Home; nothing while a game runs |
+| | Ctrl+P | The power menu |
 | | Ctrl+Q | Quit |
 
 While a game is in front, the controller is the game's; Nexus takes it back only while its

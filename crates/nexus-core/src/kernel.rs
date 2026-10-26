@@ -22,8 +22,9 @@ use crate::guard::guarded;
 use crate::resolve::{dependency_ids, resolve};
 use crate::themes::DataThemeLoader;
 use crate::{
-    Archives, CoreError, CoreResult, Desktop, DirStorage, EventBus, Hardware, HttpTransport, LoadError, Network,
-    NoArchives, NoDesktop, NoHardware, NoNetwork, NoTorrents, NoVpn, ProcessSpawner, TokioSpawner, Torrents,
+    Archives, CoreError, CoreResult, Desktop, DirStorage, EventBus, GroupTree, Hardware, HttpTransport, LoadError,
+    Network, NoArchives, NoDesktop, NoHardware, NoNetwork, NoTorrents, NoVpn, ProcessSpawner, ProcessTree,
+    TokioSpawner, Torrents,
 };
 
 /// Settings for one run of the host.
@@ -49,6 +50,8 @@ pub struct HostConfig {
     pub stop_grace: Duration,
     /// How long a started game has to show a window before the launcher stops waiting for it.
     pub show_timeout: Duration,
+    /// How often a running game's processes and windows are read once it shows.
+    pub watch_every: Duration,
     /// How many downloads run at once. The rest wait in a queue.
     pub max_downloads: usize,
     /// The player's home folder, for folder defaults like `~/Games`.
@@ -73,6 +76,7 @@ impl HostConfig {
             shutdown_timeout: Duration::from_secs(5),
             stop_grace: Duration::from_secs(4),
             show_timeout: Duration::from_secs(20),
+            watch_every: Duration::from_secs(1),
             max_downloads: 2,
             home: None,
             torrent_poll: Duration::from_secs(1),
@@ -141,6 +145,7 @@ pub struct KernelBuilder {
     loaders: Vec<Arc<dyn Loader>>,
     http: Arc<dyn HttpTransport>,
     spawner: Arc<dyn ProcessSpawner>,
+    processes: Arc<dyn ProcessTree>,
     desktop: Arc<dyn Desktop>,
     hardware: Arc<dyn Hardware>,
     torrents: Arc<dyn Torrents>,
@@ -157,6 +162,7 @@ impl KernelBuilder {
             loaders: vec![Arc::new(DataThemeLoader)],
             http: Arc::new(NoNetwork),
             spawner: Arc::new(TokioSpawner),
+            processes: Arc::new(GroupTree),
             desktop: Arc::new(NoDesktop),
             hardware: Arc::new(NoHardware),
             torrents: Arc::new(NoTorrents),
@@ -228,6 +234,12 @@ impl KernelBuilder {
 
     pub fn spawner(mut self, spawner: Arc<dyn ProcessSpawner>) -> Self {
         self.spawner = spawner;
+        self
+    }
+
+    /// A running game's processes, beyond its process group.
+    pub fn processes(mut self, processes: Arc<dyn ProcessTree>) -> Self {
+        self.processes = processes;
         self
     }
 
@@ -347,6 +359,7 @@ struct Inner {
     config: Arc<ConfigService>,
     http: Arc<dyn HttpTransport>,
     spawner: Arc<dyn ProcessSpawner>,
+    processes: Arc<dyn ProcessTree>,
     desktop: Arc<dyn Desktop>,
     hardware: Arc<dyn Hardware>,
     torrents: Arc<dyn Torrents>,
@@ -377,6 +390,7 @@ impl Kernel {
             loaders,
             http,
             spawner,
+            processes,
             desktop,
             hardware,
             torrents,
@@ -484,6 +498,7 @@ impl Kernel {
                 config,
                 http,
                 spawner,
+                processes,
                 desktop,
                 hardware,
                 torrents,
@@ -521,6 +536,10 @@ impl Kernel {
 
     pub(crate) fn spawner(&self) -> &Arc<dyn ProcessSpawner> {
         &self.inner.spawner
+    }
+
+    pub(crate) fn processes(&self) -> &Arc<dyn ProcessTree> {
+        &self.inner.processes
     }
 
     pub(crate) fn desktop(&self) -> &Arc<dyn Desktop> {

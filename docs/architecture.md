@@ -29,7 +29,7 @@ nexus-app (the binary)         ──▶ nexus-ui-host, nexus-core, every built-
   VPNs, libmpv, gamepads, audio). The core reaches them through ports (see [Ports](#ports)).
 - The workspace denies `unsafe_code`. A few modules of `nexus-app` allow it, each with its
   reason on the same line: `clock.rs`, `desktop.rs` (Win32), `disk.rs`, `gamepad.rs`,
-  `gpu_probe.rs`, `libarchive.rs`, `trailer.rs` and `vpn.rs`.
+  `gpu_probe.rs`, `libarchive.rs`, `processes.rs` (Windows), `trailer.rs` and `vpn.rs`.
 
 ### The crates
 
@@ -39,7 +39,7 @@ nexus-app (the binary)         ──▶ nexus-ui-host, nexus-core, every built-
 | `crates/nexus-core` | The kernel and the app. Plugin lifecycle and registry (`Kernel`), the event bus (`EventBus`), settings (`ConfigService`), the app state and commands (`Core`, `AppState`, `Command`), view building (`view.rs`), HTTP downloads, torrents, unpacking, game installs, launches, VPN rules, catalogs, "This PC", the launcher update, and the port traits. |
 | `crates/nexus-ui-api` | The theme contract. View models (`vm.rs`: `AppView` and the rest), the theme manifest (`ThemeManifest`), design tokens, and `contract/types.slint` with the `Vm` and `Host` globals. No toolkit code. |
 | `crates/nexus-ui-host` | `ThemeSet` (finds themes, resolves `extends`) and `ThemeHost`: compiles a theme with `slint-interpreter`, binds the view models, loads images, turns gamepad buttons into keys, and swaps themes. |
-| `crates/nexus-app` | The binary. The event loop, render scheduling, the image loader, and the system adapters: `desktop.rs`, `torrents.rs` (librqbit), `archives.rs` and `libarchive.rs`, `hardware.rs` and `gpu_probe.rs` (Vulkan), `trailer.rs` (libmpv), `gamepad.rs` (gilrs), `audio.rs` (rodio), `http.rs` (reqwest), `disk.rs`, `clock.rs`. |
+| `crates/nexus-app` | The binary. The event loop, render scheduling, the image loader, and the system adapters: `desktop.rs`, `processes.rs` (a running game's processes), `torrents.rs` (librqbit), `archives.rs` and `libarchive.rs`, `hardware.rs` and `gpu_probe.rs` (Vulkan), `trailer.rs` (libmpv), `gamepad.rs` (gilrs), `audio.rs` (rodio), `http.rs` (reqwest), `disk.rs`, `clock.rs`. |
 | `crates/nexus-testkit` | `FakeHost` (a real core over a temporary data folder), `StubPlugin`, fakes for every port, `SpanRecorder`, and `contract::emulator`, the capability contract checks. |
 | `plugins/emulators/*` | `emu-kyty` (KytyPS5, PS5), `emu-shadps4` (shadPS4, PS4), `emu-pc` (PC games). |
 | `plugins/services/*` | `playstation-store` (store art and details) and `release-catalog` (the Catalog's releases). |
@@ -246,6 +246,7 @@ starts with a stand-in for each; the app plugs in the real ones; the test kit ha
 | --- | --- | --- | --- |
 | `HttpTransport` | `NoNetwork` | `http::ReqwestTransport` | `FakeHttp` |
 | `ProcessSpawner` | `TokioSpawner` (real; the app keeps it) | `TokioSpawner` | `FakeSpawner` |
+| `ProcessTree` | `GroupTree` (the process group alone) | `processes::SystemProcesses` | `FakeProcessTree` |
 | `Desktop` | `NoDesktop` | `desktop::SystemDesktop` | `FakeDesktop` |
 | `Hardware` | `NoHardware` | `hardware::SystemHardware` | `FakeHost::hardware` / `free_space` |
 | `Torrents` | `NoTorrents` | `torrents::RqbitTorrents` | `FakeTorrents` |
@@ -254,14 +255,17 @@ starts with a stand-in for each; the app plugs in the real ones; the test kit ha
 
 - `TokioSpawner` starts each game as the leader of its own process group on Unix; on Windows
   the "group" is the process and its children. `terminate` asks it to close (SIGTERM, or
-  `taskkill` without `/F`); `kill` ends the group. `wait_for_all` waits for the whole group on
-  Unix, so a launcher script that backgrounds the game doesn't end its session.
-- `Desktop` says which window is in front (`front`), brings a game's window up (`show_game`),
-  brings the launcher back (`show_launcher`), and answers `is_game`, `has_window`, `problem`
-  and start at login.
+  `taskkill` without `/F`); `kill` ends the group.
+- `ProcessTree` lists a running game's processes (`members`): the one the launcher started, its
+  process group, and what a sandbox moved out of the group below them (Proton's pressure-vessel
+  does). `end` asks them to close or kills them. It is the one place that knows which processes
+  are the game; the core and the desktop both work from its list.
+- `Desktop` says which window is in front (`front`), brings one of the game's processes' windows
+  up (`show_game`), brings the launcher back (`show_launcher`), and answers `has_window`,
+  `window_close_ends_game` (macOS only), `problem` and start at login.
 - `Hardware::specs` is slow (it runs system tools); the core calls it once a run, off the async
   threads. `free_bytes` gives a disk's free space.
-- Calls into `Desktop` and `Network` run in `spawn_blocking`.
+- Calls into `Desktop`, `ProcessTree` and `Network` run in `spawn_blocking`.
 
 ## State that persists
 
@@ -361,13 +365,19 @@ action `host:install-game` (`HOST_INSTALL_GAME`) installs a package the plugin l
 5. The process is spawned, a `Session` is added, `Event::ProcessStarted` is published, and the
    Running screen opens.
 
-`watch` then polls the `Desktop`: every 250 ms it tries `show_game` until the game has a
-window or `show_timeout` (20 s) passes. After that, every second, it reads `front` and
-`has_window`. It keeps `AppState.game_in_front` up to date, and when the game's window was seen
-and is gone for three reads in a row, it stops the game. When the desktop can't say what is in
-front (`Front::Unknown`), the last window the launcher showed counts.
+The running-game module (`crates/nexus-core/src/running.rs`) then owns the session until it
+ends. A game is its processes, as `ProcessTree::members` lists them, and it ends when none is
+left: a start script that starts the game in the background and exits keeps its session. On
+the way the module tries `show_game` every 250 ms until the game has a window or `show_timeout`
+(20 s) passes, then reads `front` and `has_window` every `watch_every` (1 s). It keeps
+`AppState.game_in_front` up to date; a window of any of the game's processes counts. When the
+desktop can't say what is in front (`Front::Unknown`), the last window the launcher showed
+counts. Only where `window_close_ends_game` (macOS) does a window that was seen and is gone for
+three reads in a row stop the game: elsewhere a launcher's own menu closes before the game's
+window opens.
 
-Stop asks the game to close and kills its group after `stop_grace` (4 s). When the game exits,
+Stop asks the game's processes to close, waits up to `stop_grace` (4 s) for them, and kills what
+is left. When the game exits,
 `finish` saves play time under `app.playtime` (sessions of 3 s or more), posts a notice with the
 log for a crash the player didn't cause, may ask how far the game got, brings the launcher back
 when "Back to the launcher" is on, calls `Launcher::on_exit`, publishes `Event::ProcessExited`,

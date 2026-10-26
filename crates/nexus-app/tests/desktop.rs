@@ -76,7 +76,7 @@ fn window_of(desktop: &SystemDesktop, helper: &Helper) -> Result<(), Outcome> {
     let id = helper.id();
     let mut answer = None;
     until(Duration::from_secs(20), || {
-        answer = desktop.has_window(id);
+        answer = desktop.has_window(&[id]);
         answer == Some(true)
     });
     match answer {
@@ -87,7 +87,7 @@ fn window_of(desktop: &SystemDesktop, helper: &Helper) -> Result<(), Outcome> {
 }
 
 fn in_front(desktop: &SystemDesktop, id: u32) -> bool {
-    matches!(desktop.front(), Front::Other(front) if desktop.is_game(id, front))
+    desktop.front() == Front::Other(id)
 }
 
 fn a_window_shown_comes_to_the_front(desktop: &SystemDesktop) -> Outcome {
@@ -100,7 +100,7 @@ fn a_window_shown_comes_to_the_front(desktop: &SystemDesktop) -> Outcome {
     }
     for helper in [&a, &b, &a] {
         let id = helper.id();
-        if !desktop.show_game(id) {
+        if !desktop.show_game(&[id]) {
             return Outcome::Fail(format!("show_game({id}) said no"));
         }
         if !until(Duration::from_secs(5), || in_front(desktop, id)) {
@@ -121,7 +121,7 @@ fn a_window_that_closed_is_gone_while_its_program_runs(desktop: &SystemDesktop) 
         return outcome;
     }
     let id = helper.id();
-    if !until(Duration::from_secs(10), || desktop.has_window(id) == Some(false)) {
+    if !until(Duration::from_secs(10), || desktop.has_window(&[id]) == Some(false)) {
         return Outcome::Fail(format!("helper {id} still has a window after it hid it"));
     }
     if !helper.running() {

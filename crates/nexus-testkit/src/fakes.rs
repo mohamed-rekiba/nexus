@@ -351,6 +351,64 @@ impl ProcessHandle for FakeProcess {
     }
 }
 
+/// A game's processes as the test says: the one the launcher started, and the ones the test
+/// adds below it, as a start script that starts the game in the background, or a sandbox.
+#[derive(Clone, Default)]
+pub struct FakeProcessTree {
+    state: Arc<Mutex<TreeState>>,
+}
+
+#[derive(Default)]
+struct TreeState {
+    /// The process the launcher started -> the processes below it.
+    below: std::collections::BTreeMap<u32, Vec<u32>>,
+    /// They don't close when asked, only when killed.
+    stubborn: bool,
+    /// Each `end`: the processes, and whether it killed them.
+    ended: Vec<(Vec<u32>, bool)>,
+}
+
+impl FakeProcessTree {
+    /// Process `id` runs below the game started as `root`.
+    pub fn add(&self, root: u32, id: u32) {
+        self.state.lock().unwrap().below.entry(root).or_default().push(id);
+    }
+
+    /// Process `id` ended by itself.
+    pub fn exit(&self, id: u32) {
+        for ids in self.state.lock().unwrap().below.values_mut() {
+            ids.retain(|i| *i != id);
+        }
+    }
+
+    /// The processes below a game don't close when asked to, only when killed.
+    pub fn stubborn(&self) {
+        self.state.lock().unwrap().stubborn = true;
+    }
+
+    /// Each `end` the core asked for: the processes, and whether it killed them.
+    pub fn ended(&self) -> Vec<(Vec<u32>, bool)> {
+        self.state.lock().unwrap().ended.clone()
+    }
+}
+
+impl nexus_core::ProcessTree for FakeProcessTree {
+    fn members(&self, root: u32) -> Vec<u32> {
+        let state = self.state.lock().unwrap();
+        std::iter::once(root).chain(state.below.get(&root).cloned().unwrap_or_default()).collect()
+    }
+
+    fn end(&self, ids: &[u32], force: bool) {
+        let mut state = self.state.lock().unwrap();
+        state.ended.push((ids.to_vec(), force));
+        if force || !state.stubborn {
+            for below in state.below.values_mut() {
+                below.retain(|i| !ids.contains(i));
+            }
+        }
+    }
+}
+
 /// What the host brought to the front.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shown {
@@ -373,6 +431,8 @@ pub struct FakeDesktop {
     login_refusal: Arc<Mutex<Option<String>>>,
     packages: Arc<Mutex<Vec<(std::path::PathBuf, nexus_core::PackageManager)>>>,
     package_refusal: Arc<Mutex<Option<nexus_core::PackageError>>>,
+    /// A game whose windows all closed is over, as on macOS.
+    window_ends_game: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Default for FakeDesktop {
@@ -387,6 +447,7 @@ impl Default for FakeDesktop {
             login_refusal: Arc::default(),
             packages: Arc::default(),
             package_refusal: Arc::default(),
+            window_ends_game: Arc::default(),
         }
     }
 }
@@ -404,6 +465,11 @@ impl FakeDesktop {
     /// Games have no window to show: none yet, or the player closed it.
     pub fn no_windows(&self) {
         self.windows.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// A game whose windows all closed is over, as on macOS, where a program outlives them.
+    pub fn windows_end_games(&self) {
+        self.window_ends_game.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// Games' windows show again, as when a slow game's window finally opens.
@@ -448,7 +514,8 @@ impl Desktop for FakeDesktop {
         *self.front.lock().unwrap()
     }
 
-    fn show_game(&self, id: u32) -> bool {
+    fn show_game(&self, ids: &[u32]) -> bool {
+        let Some(&id) = ids.first() else { return false };
         if !self.windows.load(std::sync::atomic::Ordering::SeqCst) {
             return false;
         }
@@ -477,8 +544,12 @@ impl Desktop for FakeDesktop {
         Ok(())
     }
 
-    fn has_window(&self, _id: u32) -> Option<bool> {
+    fn has_window(&self, _ids: &[u32]) -> Option<bool> {
         Some(self.windows.load(std::sync::atomic::Ordering::SeqCst))
+    }
+
+    fn window_close_ends_game(&self) -> bool {
+        self.window_ends_game.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     fn install_package(

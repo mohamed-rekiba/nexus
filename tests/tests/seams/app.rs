@@ -672,17 +672,82 @@ async fn a_started_game_comes_to_the_front_and_the_launcher_comes_back_when_it_c
 #[tokio::test]
 async fn a_game_whose_window_closed_is_stopped_and_the_launcher_comes_back() {
     let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
+    // On macOS a program can keep running after its last window closed.
+    t.desktop.windows_end_games();
     let mut events = t.core.events();
     let (_, process) = play(&t).await;
     until("the game is in front", || t.core.game_in_front()).await;
 
-    // On macOS a program can keep running after its last window closed.
     t.desktop.no_windows();
     closed(&mut events).await;
 
     assert_eq!(process.signals().first(), Some(&Signal::Terminate), "asked to close, as Stop does");
     assert_eq!(t.desktop.shown().last(), Some(&Shown::Launcher));
     assert!(t.core.view().notices.is_empty(), "the player closed it: no crash notice");
+}
+
+#[tokio::test]
+async fn a_launcher_s_own_window_closing_before_the_game_s_opens_leaves_the_game_running() {
+    let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (_, process) = play(&t).await;
+    until("the launcher's menu is in front", || t.core.game_in_front()).await;
+
+    // The player picked "Start Game": the menu closed, and the game takes a while to open.
+    t.desktop.no_windows();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(process.signals().is_empty(), "nothing stopped it: {:?}", process.signals());
+    assert!(t.core.view().running.is_some(), "the game keeps its session");
+}
+
+#[tokio::test]
+async fn a_game_a_start_script_left_running_keeps_the_session_until_it_ends() {
+    let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
+    let mut events = t.core.events();
+    let (_, process) = play(&t).await;
+    // The script starts the game in the background and exits.
+    let game = process.id + 1000;
+    t.processes.add(process.id, game);
+    process.exit(0);
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(t.core.view().running.is_some(), "the game still runs");
+    assert!(process.signals().is_empty(), "nothing was killed: {:?}", process.signals());
+
+    t.processes.exit(game);
+    let exit = closed(&mut events).await;
+    assert!(exit.success, "the script's own exit");
+}
+
+#[tokio::test]
+async fn the_window_in_front_is_the_game_s_when_a_process_below_it_owns_it() {
+    let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (_, process) = play(&t).await;
+    until("the game is in front", || t.core.game_in_front()).await;
+    // A sandbox's process, out of the game's group, draws the game.
+    let sandboxed = process.id + 1000;
+    t.processes.add(process.id, sandboxed);
+
+    t.desktop.set_front(Front::Launcher);
+    until("the launcher is in front", || !t.core.game_in_front()).await;
+    t.desktop.set_front(Front::Other(sandboxed));
+    until("the sandboxed window counts as the game's", || t.core.game_in_front()).await;
+}
+
+#[tokio::test]
+async fn stop_reaches_the_processes_a_sandbox_moved_out_of_the_game_s_group() {
+    let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
+    let mut events = t.core.events();
+    let (session, process) = play(&t).await;
+    let sandboxed = process.id + 1000;
+    t.processes.add(process.id, sandboxed);
+    t.processes.stubborn();
+
+    t.core.dispatch(Command::Stop(session)).await.unwrap();
+    closed(&mut events).await;
+
+    let ended = t.processes.ended();
+    assert!(ended.first().is_some_and(|(ids, force)| ids.contains(&sandboxed) && !force), "asked first: {ended:?}");
+    assert!(ended.iter().any(|(ids, force)| ids.contains(&sandboxed) && *force), "then killed: {ended:?}");
 }
 
 #[tokio::test]
@@ -842,7 +907,7 @@ async fn a_game_whose_window_the_desktop_never_saw_is_not_taken_for_closed() {
     until("the launcher stops waiting", || t.core.view().running.is_some_and(|r| r.state == "running")).await;
 
     // Longer than the window may be gone before the game counts as closed.
-    tokio::time::sleep(Duration::from_secs(4)).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
     assert!(process.signals().is_empty(), "the game keeps running: {:?}", process.signals());
     assert!(t.core.view().running.is_some(), "the game keeps running");
 }

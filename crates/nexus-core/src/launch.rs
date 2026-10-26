@@ -15,7 +15,7 @@ use serde_json::Value;
 use crate::app::{Route, Session};
 use crate::error::require;
 use crate::order::sort_by_order;
-use crate::{Core, CoreError, CoreResult, Desktop, DirStorage, Front, Kernel, ProcessExit, SpawnCommand, folders};
+use crate::{Core, CoreError, CoreResult, DirStorage, Kernel, SpawnCommand, folders, running};
 
 /// Wraps one plugin's middleware so its calls get the plugin's guard and span.
 struct Guarded {
@@ -257,7 +257,7 @@ pub(crate) async fn launch(core: &Core, game: GameKey) -> CoreResult<()> {
     keep_previous_log(&log);
     command.log = Some(log.clone());
     tracing::info!(plugin_id = %plugin, %game, log = %log.display(), "running: {}", command.shell_line());
-    let mut process =
+    let process =
         kernel.spawner().spawn(command).await.map_err(|error| CoreError::Plugin { plugin: plugin.clone(), error })?;
 
     let session = core.next_session();
@@ -280,12 +280,11 @@ pub(crate) async fn launch(core: &Core, game: GameKey) -> CoreResult<()> {
     tracing::info!(plugin_id = %plugin, %session, %game, ?pid, "game started");
     kernel.events().publish(Event::ProcessStarted { session, game: game.clone() });
     core.push(Route::Running(session));
-    tokio::spawn(watch(core.clone(), session));
     // Once a run, at the first game: what the desktop needs to do its part.
     if !core.inner.desktop_checked.swap(true, std::sync::atomic::Ordering::SeqCst) {
         let core = core.clone();
         tokio::spawn(async move {
-            if let Some(problem) = on_desktop(&core, |d| d.problem()).await {
+            if let Some(problem) = running::desktop_problem(&core).await {
                 core.notice(problem);
             }
         });
@@ -293,16 +292,7 @@ pub(crate) async fn launch(core: &Core, game: GameKey) -> CoreResult<()> {
 
     let core = core.clone();
     tokio::spawn(async move {
-        let exit = tokio::select! {
-            // A launcher that starts the game in the background ends first: the session lasts
-            // until the game ends too.
-            exit = process.wait_for_all() => exit.unwrap_or(ProcessExit { code: None, success: false }),
-            _ = stop_rx => close(&core, process.as_mut()).await,
-        };
-        // What the game started and left running goes with it.
-        if let Err(e) = process.kill().await {
-            tracing::warn!(error = %e, "could not stop what the game left running");
-        }
+        let exit = running::run(core.clone(), session, process, stop_rx).await;
         let exit = ExitInfo {
             code: exit.code,
             success: exit.success,
@@ -311,110 +301,6 @@ pub(crate) async fn launch(core: &Core, game: GameKey) -> CoreResult<()> {
         finish(&core, session, &game, exit, &launcher).await;
     });
     Ok(())
-}
-
-/// Asks the game to close, so the emulator saves its caches, and kills it if it is still
-/// there after the host's `stop_grace`.
-async fn close(core: &Core, process: &mut dyn crate::ProcessHandle) -> ProcessExit {
-    let killed = ProcessExit { code: None, success: false };
-    if let Err(e) = process.terminate().await {
-        tracing::warn!(error = %e, "could not ask the game to close");
-    }
-    if let Ok(Ok(exit)) = tokio::time::timeout(core.kernel().host().stop_grace, process.wait_for_all()).await {
-        return exit;
-    }
-    tracing::info!("the game didn't close: killing it");
-    if let Err(e) = process.kill().await {
-        tracing::warn!(error = %e, "could not stop the game");
-    }
-    // Only the program's own exit: what it left running is gone with the kill.
-    process.wait().await.unwrap_or(killed)
-}
-
-/// Runs a desktop call, which may run a helper program, off the async threads.
-async fn on_desktop<T: Send + 'static>(core: &Core, call: impl FnOnce(&dyn Desktop) -> T + Send + 'static) -> T {
-    let desktop = core.kernel().desktop().clone();
-    tokio::task::spawn_blocking(move || call(desktop.as_ref())).await.expect("desktop calls don't panic")
-}
-
-/// How often the launcher looks for a started game's window.
-const WATCH_EVERY: Duration = Duration::from_millis(250);
-/// How often, after that, it asks which window is in front. Each ask runs a helper program,
-/// so not too often.
-const FRONT_EVERY: Duration = Duration::from_secs(1);
-/// A game whose window was gone this many asks in a row was closed by the player: it is
-/// stopped. More than one, so a window that is remade (full screen on or off) doesn't count.
-const WINDOW_GONE_FOR: u32 = 3;
-
-/// Brings process `pid`'s window to the front; `false` without a process or a window.
-async fn show(core: &Core, pid: Option<u32>) -> bool {
-    match pid {
-        Some(pid) => on_desktop(core, move |d| d.show_game(pid)).await,
-        None => false,
-    }
-}
-
-/// Brings the game's window to the front as soon as it has one (the Running screen says
-/// "starting" until then), then keeps `game_in_front` up to date while the game runs.
-async fn watch(core: Core, session: SessionId) {
-    let deadline = Instant::now() + core.kernel().host().show_timeout;
-    let alive = |core: &Core| core.state().sessions.get(&session).filter(|s| !s.stopping).map(|s| s.pid);
-    // A window the desktop found: one it brought to the front, or one it saw later.
-    let mut had_window;
-    loop {
-        let Some(pid) = alive(&core) else { return };
-        let shown = show(&core, pid).await;
-        had_window = shown;
-        if shown || Instant::now() >= deadline {
-            // A desktop that can't say (Windows, or macOS without the Accessibility
-            // permission) can't show the game either; the game's own window took the screen
-            // as it opened, so the pad is the game's until the PS button.
-            let unknown = !shown && on_desktop(&core, |d| d.front()).await == Front::Unknown;
-            let mut state = core.state();
-            if let Some(s) = state.sessions.get_mut(&session) {
-                s.shown = true;
-                state.game_in_front |= shown || unknown;
-            }
-            drop(state);
-            core.changed();
-            break;
-        }
-        tokio::time::sleep(WATCH_EVERY).await;
-    }
-    // Only a game whose window was seen can lose it: a desktop that can't see the game's
-    // window (a Wayland window, which xdotool can't find) must not take it for closed.
-    let mut gone = 0;
-    while let Some(pid) = alive(&core) {
-        let (in_front, window) = on_desktop(&core, move |d| {
-            let in_front = match d.front() {
-                Front::Launcher => Some(false),
-                Front::Other(front) => Some(pid.is_some_and(|pid| d.is_game(pid, front))),
-                // The last window the launcher showed counts.
-                Front::Unknown => None,
-            };
-            (in_front, pid.and_then(|pid| d.has_window(pid)))
-        })
-        .await;
-        had_window |= window == Some(true);
-        gone = if had_window && window == Some(false) { gone + 1 } else { 0 };
-        if gone >= WINDOW_GONE_FOR {
-            tracing::info!(%session, "the game's window closed: stopping it");
-            if let Err(e) = stop(&core, session) {
-                tracing::warn!(error = %e, "could not stop the game");
-            }
-            return;
-        }
-        if let Some(in_front) = in_front {
-            let mut state = core.state();
-            let changed = state.game_in_front != in_front;
-            state.game_in_front = in_front;
-            drop(state);
-            if changed {
-                core.changed();
-            }
-        }
-        tokio::time::sleep(FRONT_EVERY).await;
-    }
 }
 
 async fn finish(
@@ -448,7 +334,7 @@ async fn finish(
         core.state().result_prompt = Some((game.clone(), ended.build));
     }
     if core.return_on_exit_on() {
-        on_desktop(core, |d| d.show_launcher()).await;
+        running::show_launcher(core).await;
     }
     if let Err(e) = core.kernel().guard(&game.plugin, "launcher.on_exit", launcher.on_exit(&game.local, &exit)).await {
         tracing::warn!(error = %e, "on_exit failed");
@@ -497,7 +383,7 @@ pub(crate) fn stop(core: &Core, session: SessionId) -> CoreResult<()> {
 
 pub(crate) async fn show_game(core: &Core, session: SessionId) -> CoreResult<()> {
     let pid = core.state().sessions.get(&session).ok_or(CoreError::UnknownSession(session))?.pid;
-    if !show(core, pid).await {
+    if !running::show(core, pid).await {
         return Err(CoreError::Invalid("the game has no window to show yet".into()));
     }
     core.state().game_in_front = true;
@@ -509,7 +395,7 @@ pub(crate) async fn show_game(core: &Core, session: SessionId) -> CoreResult<()>
 pub(crate) async fn toggle_focus(core: &Core) {
     let Some(session) = core.state().sessions.keys().next().copied() else { return };
     if game_in_front(core) {
-        on_desktop(core, |d| d.show_launcher()).await;
+        running::show_launcher(core).await;
         core.state().game_in_front = false;
         core.changed();
     } else if let Err(e) = show_game(core, session).await {

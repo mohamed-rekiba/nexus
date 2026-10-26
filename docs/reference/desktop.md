@@ -15,20 +15,23 @@ The app plugs in `SystemDesktop` (`crates/nexus-app/src/desktop.rs`). Tests plug
 | Call | Answer |
 |---|---|
 | `front()` | `Front::Launcher`, `Front::Other(pid)` or `Front::Unknown` |
-| `show_game(pid)` | Brings a window of the game's process group to the front. `false` when it has none yet, or the system refused |
+| `show_game(ids)` | Brings a window of one of the game's processes to the front. `false` when none has one yet, or the system refused |
 | `show_launcher()` | Brings the launcher's window to the front |
-| `is_game(pid, front)` | Whether process `front` is in the game's process group |
-| `has_window(pid)` | `Some(true)`, `Some(false)`, or `None` when the system doesn't say |
+| `has_window(ids)` | Whether one of the game's processes has a window: `Some(true)`, `Some(false)`, or `None` when the system doesn't say |
+| `window_close_ends_game()` | Whether a game whose windows closed is over while its processes run: true on macOS only |
 | `problem()` | A missing tool or permission, with the fix, or `None` |
 | `can_start_at_login()` | Whether this build can start at login |
 | `start_at_login(on)` | Writes or removes the system's entry; the error is the system's reason |
 
-A game's process group is the game's process and the programs it started. On macOS and Linux it
-is the Unix process group the game leads (`pgrep -g`). Windows has no process groups: there it
-is the game's process and every process below it, from a process snapshot
-(`CreateToolhelp32Snapshot`).
+The game's processes (`ids`) come from the `ProcessTree` port, which the app plugs in as
+`SystemProcesses` (`crates/nexus-app/src/processes.rs`). On macOS and Linux they are the Unix
+process group the game leads (`pgrep -g`) and every process below them (`ps -A -o pid=,ppid=`):
+a sandbox such as Proton's pressure-vessel starts its programs in a session of their own, out of
+the group. Windows has no process groups: there they are the game's process and every process
+below it, from a process snapshot (`CreateToolhelp32Snapshot`).
 
-The adapter only answers. The rules live once, in the core (`crates/nexus-core/src/launch.rs`).
+The adapters only answer. The rules live once, in the core's running-game module
+(`crates/nexus-core/src/running.rs`).
 
 ## How each system answers
 
@@ -115,23 +118,27 @@ fallback. On Gamescope it is what actually shows the launcher, since winit doesn
 - At the first game of a run, the core asks `problem()` once and shows the answer as an info
   notice (see [Notices](#notices)).
 
-### The watcher
+### The running game
 
-The watcher runs while the game runs:
+The running-game module runs while the game runs. The game ends when none of its processes is
+left, whatever its first process does.
 
-1. Every `WATCH_EVERY` (250 ms) it tries `show_game`. It stops trying once a window came up, or
-   after `show_timeout` (20 s, in `HostConfig`).
+1. Every 250 ms it tries `show_game`. It stops trying once a window came up, or after
+   `show_timeout` (20 s, in `HostConfig`).
 2. The session is then marked shown, and the Running screen leaves `starting`. `game_in_front`
    becomes true when the game came up. It also becomes true when the desktop can't say which
    window is in front (`Front::Unknown`): the game's window took the screen as it opened, so the
    pad stays with the game until the PS button.
-3. After that, every `FRONT_EVERY` (1 s) it asks `front()` and `has_window()`:
+3. After that, every `watch_every` (1 s, in `HostConfig`) it reads the game's processes, and
+   asks `front()` and `has_window()`:
    - `Launcher` sets `game_in_front` to false.
-   - `Other(pid)` sets it to whether that process is in the game's group.
+   - `Other(pid)` sets it to whether that process is one of the game's.
    - `Unknown` leaves it as it was: the last window the launcher showed counts.
-4. A game whose window was seen and is then gone for `WINDOW_GONE_FOR` (3) asks in a row is
-   stopped. Three, so a window that is remade (full screen on or off) doesn't count. A desktop
-   that never saw the window (`None`) never stops the game this way.
+4. Where `window_close_ends_game()` (macOS), a game whose window was seen and is then gone for
+   `WINDOW_GONE_FOR` (3) reads in a row is stopped. Three, so a window that is remade (full
+   screen on or off) doesn't count. A desktop that never saw the window (`None`) never stops the
+   game this way. Elsewhere a closed window stops nothing: a launcher's own menu or setup
+   window closes before the game's opens.
 
 `game_in_front` is app state. `Core::game_in_front()` reads it and never asks the desktop.
 
@@ -139,19 +146,17 @@ The watcher runs while the game runs:
 
 Stop asks the game to close first, so the emulator saves its caches:
 
-- on Unix, `kill -TERM` to the process group;
-- on Windows, `taskkill /PID <pid> /T`.
+- on Unix, `kill -TERM` to the process group, and to each of the game's processes outside it;
+- on Windows, `taskkill /PID <pid> /T`, and `taskkill` for each of the game's processes.
 
-After `stop_grace` (4 s) a game that is still there is killed: `kill -KILL` to the group, or
-`taskkill /T /F`.
+After `stop_grace` (4 s) what is still there is killed: `kill -KILL`, or `taskkill /F`.
 
-On Unix the game ends when the last process of its group ends, not its first process. A start
-script that starts the game in the background and exits keeps the session until the game ends.
-Stop gives that game the same `stop_grace`. A program left running in the group, such as a
-daemon, keeps the session too, until the game's window closes or the player presses Stop.
+A start script that starts the game in the background and exits keeps the session until the
+game ends. A program left running among the game's processes, such as a daemon, keeps the
+session too, until the player holds the PS button or presses Stop.
 
-When the game ends, by itself or by Stop, what it started and left running is killed the same
-way. On Windows a PowerShell walk by parent id then stops the processes created
+When the game ends, by itself or by Stop, what it started and left in its group is killed the
+same way. On Windows a PowerShell walk by parent id then stops the processes created
 since the game started, since `taskkill /T` only follows a running process.
 
 At the end:

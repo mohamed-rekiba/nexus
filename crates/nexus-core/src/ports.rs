@@ -85,12 +85,6 @@ pub trait ProcessHandle: Send {
     /// The system's id for the process, while it runs.
     fn id(&self) -> Option<u32>;
     async fn wait(&mut self) -> PluginResult<ProcessExit>;
-    /// Waits for the program, then for the programs it started and left running: a launcher
-    /// script that starts the game in the background ends before the game does. Returns the
-    /// program's own exit.
-    async fn wait_for_all(&mut self) -> PluginResult<ProcessExit> {
-        self.wait().await
-    }
     /// Asks the program to close, as the system does at log out, so it can save first.
     async fn terminate(&mut self) -> PluginResult<()>;
     /// Stops the program, and the programs it started, at once. It also works after the program
@@ -253,21 +247,6 @@ async fn signal_group(group: u32, signal: &str) -> PluginResult<()> {
     Ok(())
 }
 
-/// How often [`ProcessHandle::wait_for_all`] looks whether a process group still runs.
-#[cfg(unix)]
-const GROUP_EVERY: Duration = Duration::from_millis(500);
-
-/// Whether a process of the process group `group` still runs, by the system's `kill -0`.
-#[cfg(unix)]
-async fn group_runs(group: u32) -> bool {
-    let status = tokio::process::Command::new("kill")
-        .args(["-0", "--", &format!("-{group}")])
-        .stderr(std::process::Stdio::null())
-        .status()
-        .await;
-    status.is_ok_and(|s| s.success())
-}
-
 /// Runs `taskkill` on process `id` and the processes it started. Without `force`, it asks
 /// their windows to close.
 #[cfg(windows)]
@@ -325,17 +304,6 @@ impl ProcessHandle for TokioChild {
         Ok(ProcessExit { code: status.code(), success: status.success() })
     }
 
-    #[cfg(unix)]
-    async fn wait_for_all(&mut self) -> PluginResult<ProcessExit> {
-        let exit = self.wait().await?;
-        if let Some(id) = self.1 {
-            while group_runs(id).await {
-                tokio::time::sleep(GROUP_EVERY).await;
-            }
-        }
-        Ok(exit)
-    }
-
     async fn terminate(&mut self) -> PluginResult<()> {
         let Some(id) = self.1 else { return Ok(()) };
         #[cfg(unix)]
@@ -391,22 +359,25 @@ pub enum PackageError {
     Failed(String),
 }
 
-/// The desktop's windows: which one is in front, and bringing one to the front.
+/// The desktop's windows: which one is in front, and bringing one to the front. A game is
+/// its processes, as [`ProcessTree::members`] lists them.
 pub trait Desktop: Send + Sync {
     fn front(&self) -> Front;
-    /// Brings a window of process `id`, or of a process in its group, to the front. `false`
-    /// when it has no window yet, or the system refused.
-    fn show_game(&self, id: u32) -> bool;
+    /// Brings a window of one of the game's processes `ids` to the front. `false` when none has
+    /// a window yet, or the system refused.
+    fn show_game(&self, ids: &[u32]) -> bool;
     /// Brings the launcher's window to the front.
     fn show_launcher(&self);
-    /// Whether process `id` or a process in its group owns window `front`.
-    fn is_game(&self, id: u32, front: u32) -> bool {
-        id == front
-    }
-    /// Whether process `id`, or a process in its group, has a window. `None` when the system
-    /// doesn't say. On macOS a program can keep running after its last window closed.
-    fn has_window(&self, _id: u32) -> Option<bool> {
+    /// Whether one of the processes `ids` has a window. `None` when the system doesn't say.
+    fn has_window(&self, _ids: &[u32]) -> Option<bool> {
         None
+    }
+    /// Whether a game whose windows all closed is over even while its processes run. True on
+    /// macOS, where a program keeps running after its last window closes. Elsewhere a game
+    /// ends when its processes do: a launcher's own window (a menu, a setup dialog) closes
+    /// before the game's opens.
+    fn window_close_ends_game(&self) -> bool {
+        false
     }
     /// Why games can't come to the front on this desktop, and the fix, for example a missing
     /// tool or permission. `None` when nothing is missing. The core tells the player once a run.
@@ -438,11 +409,49 @@ impl Desktop for NoDesktop {
         Front::Unknown
     }
 
-    fn show_game(&self, _id: u32) -> bool {
+    fn show_game(&self, _ids: &[u32]) -> bool {
         false
     }
 
     fn show_launcher(&self) {}
+}
+
+/// A running game's processes: the one the launcher started, the ones in its process group,
+/// and the ones a sandbox moved out of the group below them (Proton's pressure-vessel does).
+/// The app's adapter walks the system's process list; the core's default sees only the group.
+pub trait ProcessTree: Send + Sync {
+    /// The live processes of the game the launcher started as `root`, `root` among them while
+    /// it runs. Blocking: it may run a system tool.
+    fn members(&self, root: u32) -> Vec<u32>;
+    /// Asks the processes `ids` to close (`force`: kills them). Blocking.
+    fn end(&self, ids: &[u32], force: bool);
+}
+
+/// The process group alone: `root` while its group has a live process (Unix), nothing on
+/// Windows, which has no process groups. The default until the app plugs in a real one. Once
+/// the first process exits the core drops `root`, so with this default a game ends with its
+/// first process: plug in the app's adapter to follow the group.
+pub struct GroupTree;
+
+impl ProcessTree for GroupTree {
+    fn members(&self, root: u32) -> Vec<u32> {
+        #[cfg(unix)]
+        {
+            let alive = std::process::Command::new("kill")
+                .args(["-0", "--", &format!("-{root}")])
+                .stderr(std::process::Stdio::null())
+                .status()
+                .is_ok_and(|s| s.success());
+            if alive { vec![root] } else { Vec::new() }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = root;
+            Vec::new()
+        }
+    }
+
+    fn end(&self, _ids: &[u32], _force: bool) {}
 }
 
 /// HTTP that always fails. The default until the app plugs in a real transport.
@@ -546,31 +555,6 @@ mod tests {
             }
         };
         tokio::time::timeout(Duration::from_secs(5), gone).await.expect("the script's program stopped too");
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn wait_for_all_lasts_while_a_program_the_game_started_runs() {
-        let started = std::time::Instant::now();
-        // A launcher that starts the game in the background and ends.
-        let mut process = TokioSpawner.spawn(sh("sleep 0.7 & exit 0")).await.unwrap();
-
-        let exit = tokio::time::timeout(Duration::from_secs(5), process.wait_for_all()).await.unwrap().unwrap();
-
-        assert!(exit.success, "the launcher's exit");
-        assert!(started.elapsed() >= Duration::from_millis(600), "it lasted {:?}", started.elapsed());
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn terminate_reaches_the_program_a_launcher_left_running() {
-        let mut process = TokioSpawner.spawn(sh("sleep 30 & exit 0")).await.unwrap();
-        let running = tokio::time::timeout(Duration::from_millis(300), process.wait_for_all()).await;
-        assert!(running.is_err(), "the game still runs after its launcher ended");
-
-        process.terminate().await.unwrap();
-
-        tokio::time::timeout(Duration::from_secs(5), process.wait_for_all()).await.expect("the game closed").unwrap();
     }
 
     #[tokio::test]
