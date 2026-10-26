@@ -562,6 +562,35 @@ fn shoot_releases(window: &MinimalSoftwareWindow, out: &Path) {
     }
 }
 
+/// The Library's header with a controller, as `default-pad-hints.png`, and its key hints cut
+/// out at four times the size as `default-pad-hints-zoom.png`: the d-pad's two pairs, ◀ ▶ and
+/// ▲ ▼, are the same size.
+fn shoot_pad_hints(window: &MinimalSoftwareWindow, out: &Path) {
+    use nexus_ui_host::PadButton;
+    let mut host = composed_on_current_platform(|h| h.plugin(games("emu-a", vec!["Alpha", "Beta"])));
+    host.ui.start().unwrap();
+    host.dispatch(Command::RefreshLibrary);
+    host.load_images();
+    let pad = |host: &mut Composed, button: PadButton| {
+        host.ui.pad(button).unwrap();
+        follow(host);
+        follow(host);
+    };
+    // Up to the Library tab, in, then up to its header.
+    for button in [PadButton::Up, PadButton::Right, PadButton::South, PadButton::Up] {
+        pad(&mut host, button);
+    }
+    let full = out.join("default-pad-hints.png");
+    shoot(window, &full);
+    let image = image::open(&full).unwrap();
+    let (w, h) = (image.width(), image.height());
+    let hints = image.crop_imm(w / 2, h - 90, w / 2, 90);
+    hints
+        .resize(hints.width() * 4, hints.height() * 4, image::imageops::FilterType::Nearest)
+        .save(out.join("default-pad-hints-zoom.png"))
+        .unwrap();
+}
+
 /// The Library's genres in a narrow window, with the keys on the last chip, left to right and
 /// right to left, as `default[-rtl]-genres.png`: the row scrolls, and fades where chips hide.
 fn shoot_genres(window: &MinimalSoftwareWindow, out: &Path) {
@@ -908,6 +937,7 @@ shots! {
     the_splash => shoot_splash,
     console_names => shoot_console_names,
     the_keyboard => shoot_keyboard,
+    the_pad_hints => shoot_pad_hints,
     the_system_controls => shoot_system,
 }
 
