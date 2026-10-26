@@ -195,6 +195,22 @@ pub struct PathGrant {
     /// A line under the title in Settings.
     #[serde(default)]
     pub help: Option<String>,
+    /// More folders, from a list in a default folder, while the player hasn't set the folder:
+    /// Steam's own folder lists its libraries on other drives.
+    #[serde(default)]
+    pub listed_in: Option<ListedFolders>,
+}
+
+/// Folders a file lists, read by the host: each value of `key` in `file` (a path in the
+/// folder), in Valve's text format (`"key" "value"`), that is an absolute path to a folder
+/// holding `holds`. `{ file = "steamapps/libraryfolders.vdf", key = "path", holds =
+/// "steamapps" }` are the libraries Steam lists. A listed folder is read only, as the grant.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ListedFolders {
+    pub file: String,
+    pub key: String,
+    pub holds: String,
 }
 
 /// A grant's `default`: one folder, or a list of places to look.
@@ -468,8 +484,33 @@ pub struct PluginManifest {
     /// The install sheet shows it. Empty when the plugin says nothing.
     #[serde(default)]
     pub install_note: String,
+    /// The system the plugin's games show under (`[system]`): what the Library's chips and a
+    /// card's badge call it, and its color. Themes draw it from this, not from the system's code.
+    #[serde(default)]
+    pub system: Option<SystemLook>,
     #[serde(flatten)]
     pub extra: toml::Table,
+}
+
+/// A system's look: `id` is the code a game's `platform` has (`PS5`, `PC`, `Steam`), `name` its
+/// full name ("PlayStation 5"), and `color` its color as `#rrggbb`. Without a color a theme
+/// draws the system in its neutral look.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SystemLook {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub color: Option<String>,
+}
+
+impl SystemLook {
+    /// `color` as red, green and blue; `None` without one, or when it isn't `#rrggbb`.
+    pub fn rgb(&self) -> Option<[u8; 3]> {
+        let hex = self.color.as_deref()?.strip_prefix('#').filter(|h| h.len() == 6)?;
+        let byte = |i: usize| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok();
+        Some([byte(0)?, byte(2)?, byte(4)?])
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]

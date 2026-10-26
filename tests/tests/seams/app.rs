@@ -257,6 +257,8 @@ async fn the_library_merges_every_catalog_sorted_by_title_with_badges() {
     assert_eq!(home.games[1].key, "emu-b:G0");
     assert_eq!(home.games[0].badges[0].label, "emu-a:region");
     assert_eq!(home.games[0].badges[0].text, "EU");
+    // No plugin here describes PS4: its code is its name, in the theme's neutral look.
+    assert_eq!(home.games[0].system, nexus_ui_api::GameSystemVm { name: "PS4".into(), color: None });
 }
 
 #[tokio::test]

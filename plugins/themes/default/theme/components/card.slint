@@ -45,7 +45,7 @@ export component Card inherits Rectangle {
                 source: root.game.cover;
                 state: root.game.cover-state;
                 title: root.game.title;
-                platform: root.game.platform;
+                system-color: root.game.system-color;
                 name-size: Math.max(15 * Look.px, parent.width * 0.11);
             }
             // The console, in its own colors.
@@ -55,9 +55,9 @@ export component Card inherits Rectangle {
                 width: console.preferred-width + (root.small ? 14 : 18) * Look.px;
                 height: (root.small ? 24 : 30) * Look.px;
                 border-radius: 8 * Look.px;
-                background: Look.console-fill(root.game.platform);
+                background: Look.console-fill(root.game.system-color);
                 border-width: 1px;
-                border-color: Look.console-edge(root.game.platform);
+                border-color: Look.console-edge(root.game.system-color);
                 accessible-role: text;
                 accessible-label: "card-console";
                 accessible-value: root.game.platform;
@@ -66,7 +66,7 @@ export component Card inherits Rectangle {
                     font-size: (root.small ? 14 : 17) * Look.px;
                     font-weight: 800;
                     letter-spacing: 0.5 * Look.px;
-                    color: Look.console-ink(root.game.platform);
+                    color: Look.console-ink(root.game.system-color);
                 }
             }
             // A Catalog game's eye: hides the game, or shows a hidden one again. On the focused
@@ -197,7 +197,7 @@ export component Card inherits Rectangle {
                 x: Look.rtl ? parent.width - self.width : 0;
                 width: parent.width - (root.offered ? count.preferred-width + 8 * Look.px : 0);
                 height: parent.height;
-                text: root.game.size != "" ? root.game.size : Look.system-name(root.game.platform);
+                text: root.game.size != "" ? root.game.size : Look.system-name(root.game.system-name);
                 font-size: (root.small ? 15 : 18) * Look.px;
                 font-weight: 500;
                 color: Tokens.color-text-muted;

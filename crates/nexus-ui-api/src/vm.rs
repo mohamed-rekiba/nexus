@@ -114,12 +114,22 @@ pub struct RowVm {
     pub value: String,
 }
 
+/// A game's system, as the plugin of that system describes it (`[system]` in its manifest).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GameSystemVm {
+    /// Its full name, "PlayStation 5"; the system's code when no plugin names it.
+    pub name: String,
+    /// Its color, red, green and blue; `None` draws it in the theme's neutral look.
+    pub color: Option<[u8; 3]>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct GameCardVm {
     /// The game's [`nexus_api::GameKey`] as text.
     pub key: String,
     pub title: String,
     pub platform: String,
+    pub system: GameSystemVm,
     pub cover: Option<ImageRef>,
     pub selected: bool,
     pub badges: Vec<SlotVm>,
@@ -211,6 +221,7 @@ pub struct GameDetailVm {
     pub key: String,
     pub title: String,
     pub platform: String,
+    pub system: GameSystemVm,
     pub description: String,
     /// `description` on one line, at most [`SUMMARY_CHARS`] characters, for Home.
     pub summary: String,

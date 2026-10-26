@@ -889,10 +889,26 @@ fn validate(host: &HostConfig, manifest: &PluginManifest, origin: Origin) -> Res
     {
         return Err(LoadError::Platform { supported: manifest.platforms.clone() });
     }
+    if let Some(system) = &manifest.system
+        && system.color.is_some()
+        && system.rgb().is_none()
+    {
+        return Err(LoadError::Invalid(format!(
+            "[system] color {:?}: write it as #rrggbb",
+            system.color.as_deref().unwrap_or_default()
+        )));
+    }
     for grant in &manifest.permissions.filesystem {
         if !nexus_api::PathGrant::valid_name(&grant.folder) {
             return Err(LoadError::Invalid(format!(
                 "folder name {:?}: use lowercase letters, digits and -",
+                grant.folder
+            )));
+        }
+        // The folders a file lists are read only: the file's writer, not the player, named them.
+        if grant.write && grant.listed_in.is_some() {
+            return Err(LoadError::Invalid(format!(
+                "folder {:?}: a folder with listed_in can't be written",
                 grant.folder
             )));
         }

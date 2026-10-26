@@ -208,9 +208,10 @@ network = ["m.np.playstation.com", "image.api.playstation.com"]
 | `requires` | `[requires]` with `vulkan` (`"1.3"`), `avx2`, and `[requires.recommended]` `cpu_threads`, `memory_gb`, `gpu_memory_gb`, `discrete_gpu`. The "This PC" check compares them with the computer. |
 | `keymap` | `[[keymap]]` entries of `button` and `keys`, in order. The launch splash and the emulator's page show them. |
 | `install_note` | One or two sentences the install sheet shows for an emulator with a game installer. |
+| `system` | `[system]`: the system the plugin's games show under. `id` is the code in their `platform` (`PS5`, `PC`, `Steam`), `name` its full name ("PlayStation 5"), and optional `color` as `#rrggbb` (another form doesn't load). Themes draw a game's system from these, not from its code: a plugin without one gets the theme's neutral look and its code as its name. |
 
 Sections for one kind only, such as `[theme]`, land in `extra` and are parsed by the crate that
-owns them. Unknown fields inside `permissions`, `requires` and `keymap` are errors.
+owns them. Unknown fields inside `permissions`, `requires`, `keymap` and `system` are errors.
 
 ### Permissions
 
@@ -230,6 +231,7 @@ checked too, so list the CDN a download redirects to. shadPS4 lists
 | `default` | Where it is until the player maps it: one path (`"~/Games"`), or a list to search, each one that exists in order (`["~/KytyPS5", "~/src/KytyPS5"]`). `~/` is the home folder. |
 | `default_on` | A per-system default: `default_on = { macos = "~/Library/Application Support/shadPS4" }`. |
 | `title`, `help` | What Settings and the plugin's page call the folder, and a line under it. |
+| `listed_in` | More folders that a file in a default folder lists, while the player hasn't mapped the folder: `{ file = "steamapps/libraryfolders.vdf", key = "path", holds = "steamapps" }` (Steam's libraries). The host reads the file (Valve's text: `"key" "value"`), and keeps each value that is an absolute path to a folder holding `holds`, once. Read-only: a grant with it and `write = true` doesn't load. |
 
 Plugins that ask for the same name share the player's mapping. Two names are the host's own,
 in `SHARED_FOLDERS`: `games` (`GAMES_FOLDER`, default `~/Games`) and `packages`

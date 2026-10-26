@@ -15,9 +15,17 @@ process = ["system:steam", "system:flatpak"]
 network = ["*.steamstatic.com"]
 
 # Steam's folders: where Steam is, and its libraries on other drives. Read only. Until you map
-# it, each of these folders that exists is read.
+# it, each of these folders that exists is read, and each library Steam lists in it (Steam's own
+# list, wherever the libraries are).
 [[permissions.filesystem]]
 folder = "steam"
 title = "Steam libraries"
-help = "Steam's own folder and each Steam library on another drive. Separate folders with ;"
+help = "Found by itself: Steam's folder and the libraries Steam lists. Set folders here only to read others. Separate folders with ;"
 default = ["~/.local/share/Steam", "~/.var/app/com.valvesoftware.Steam/.local/share/Steam", "~/.steam/steam"]
+listed_in = { file = "steamapps/libraryfolders.vdf", key = "path", holds = "steamapps" }
+
+# The system its games show under: what the Library and a card call it, and its color.
+[system]
+id = "Steam"
+name = "Steam"
+color = "#66c0f4"

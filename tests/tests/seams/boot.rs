@@ -167,6 +167,12 @@ async fn a_folder_grant_names_a_host_folder_never_a_path() {
     let host = FakeHost::new()
         .plugin(plugin("bad-name", "folder = \"/home\""))
         .plugin(plugin("named", "folder = \"pc-games\"\nwrite = true"))
+        // The folders another file lists are read only.
+        .plugin(plugin(
+            "listed-writable",
+            "folder = \"steam\"\nwrite = true\nlisted_in = { file = \"list.vdf\", key = \"path\", holds = \"steamapps\" }",
+        ))
+        .plugin(plugin("listed", "folder = \"steam\"\nlisted_in = { file = \"list.vdf\", key = \"path\", holds = \"steamapps\" }"))
         .boot()
         .await;
 
@@ -176,6 +182,28 @@ async fn a_folder_grant_names_a_host_folder_never_a_path() {
         "{report:?}"
     );
     assert_eq!(report.rejection(&id("named")), None);
+    assert!(
+        matches!(report.rejection(&id("listed-writable")), Some(LoadError::Invalid(m)) if m.contains("can't be written")),
+        "{report:?}"
+    );
+    assert_eq!(report.rejection(&id("listed")), None);
+}
+
+#[tokio::test]
+async fn a_system_s_color_is_written_as_rrggbb() {
+    let plugin = |id: &str, color: &str| {
+        StubPlugin::from_toml(&format!(
+            "id = \"{id}\"\nkind = \"emulator\"\nname = \"R\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+             [system]\nid = \"R\"\nname = \"Retro\"\ncolor = \"{color}\""
+        ))
+    };
+    let host = FakeHost::new().plugin(plugin("named-color", "red")).plugin(plugin("hex", "#ff8800")).boot().await;
+    let report = host.report();
+    assert!(
+        matches!(report.rejection(&id("named-color")), Some(LoadError::Invalid(m)) if m.contains("#rrggbb")),
+        "{report:?}"
+    );
+    assert_eq!(report.rejection(&id("hex")), None);
 }
 
 #[tokio::test]

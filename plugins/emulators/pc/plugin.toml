@@ -27,3 +27,9 @@ write = true
 # Downloads, which the host has unpacked. Read only.
 [[permissions.filesystem]]
 folder = "packages"
+
+# The system its games show under: what the Library and a card call it, and its color.
+[system]
+id = "PC"
+name = "PC"
+color = "#7ee2b0"

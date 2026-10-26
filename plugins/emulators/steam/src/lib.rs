@@ -19,6 +19,8 @@ use nexus_api::serde_json::Value;
 use nexus_api::*;
 
 const MANIFEST: &str = include_str!("../plugin.toml");
+/// What the Library calls the system of Steam's games: their own, beside PC, PS5 and PS4.
+const PLATFORM: &str = "Steam";
 /// The folder grant: Steam's folder and its libraries.
 const STEAM: &str = "steam";
 /// Where a Flatpak Steam keeps its folder: a game there starts through the Flatpak.
@@ -172,7 +174,7 @@ impl Steam {
         Ok(GameSummary {
             id: game.id.clone(),
             title: game.name.clone(),
-            platform: "PC".into(),
+            platform: PLATFORM.into(),
             cover: Some(self.art(&game.id, COVER).await?),
             tags: Vec::new(),
             release_year: None,

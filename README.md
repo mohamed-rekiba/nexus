@@ -206,9 +206,10 @@ Stop work as for any game, and Steam itself keeps running.
    `sudo usermod -aG gamemode $USER`. GameMode then tunes the computer for each game without a
    password. Nexus runs PC games through it by itself; for a Steam game, set its Launch Options
    in Steam (the game's Properties) to `gamemoderun %command%`.
-4. A Steam library on another drive: add its folder to **Steam libraries** in Settings, beside
-   Steam's own (`~/.local/share/Steam`). The Steam page in Emulators lists the libraries Steam
-   has and says which are missing.
+4. Nothing to set for your Steam libraries: Nexus reads Steam's folder and every library Steam
+   lists (`steamapps/libraryfolders.vdf`), on any drive. A library you add in Steam shows at the
+   next rescan (Settings, GAMES, **Rescan game folders**). **Steam libraries** in Settings is
+   only for reading other folders: once set, it replaces Steam's list.
 
 Steam may ask to sign in or update before the game starts. Nexus waits up to 2 minutes for the
 game, then says it didn't start. Steam Input may take the controller while Steam runs: turn it

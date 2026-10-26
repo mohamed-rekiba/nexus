@@ -102,6 +102,12 @@ async fn steam_meets_every_contract() {
 async fn the_games_steam_installed_show_with_steam_s_art_and_its_tools_don_t() {
     let s = boot().await;
     assert_eq!(s.titles(), ["Dota 2", "Portal 2"], "installed games, from every library; no Proton, no downloads");
+    // Steam's games are a system of their own in the Library, beside PC, PS5 and PS4, with the
+    // name and color the plugin's manifest gives them.
+    let chips: Vec<_> = s.test.core.view().home.library.systems.into_iter().map(|f| (f.label, f.count)).collect();
+    assert!(chips.contains(&("Steam".to_owned(), 2)), "{chips:?}");
+    let card = s.test.core.view().home.games.into_iter().next().unwrap();
+    assert_eq!(card.system, nexus_ui_api::GameSystemVm { name: "Steam".into(), color: Some([0x66, 0xc0, 0xf4]) });
 
     let cached = HostPath::new("steam", 0, RelPath::new("appcache/librarycache/570/library_600x900.jpg").unwrap());
     assert_eq!(s.cover("Dota 2"), Some(ImageRef::Folder { plugin: steam(), path: cached }), "from Steam's cache");
@@ -222,4 +228,65 @@ async fn a_flatpak_steam_s_library_on_another_drive_starts_through_the_flatpak_t
     test.core.dispatch(Command::Launch("emu-steam:620".parse().unwrap())).await.unwrap();
     let run = test.spawner.wait_for(1).await.command;
     assert_eq!(run.program, Path::new("flatpak"), "{:?}", run.args);
+}
+
+/// Steam at its default folder under `home`, listing `libraries` (and itself) as its libraries.
+fn steam_at_home(home: &Path, libraries: &[&Path]) -> PathBuf {
+    let root = home.join(".local/share/Steam");
+    let mut list = format!("\"libraryfolders\"\n{{\n\t\"0\"\n\t{{\n\t\t\"path\"\t\t\"{}\"\n\t}}\n", root.display());
+    for (i, library) in libraries.iter().enumerate() {
+        list.push_str(&format!("\t\"{}\"\n\t{{\n\t\t\"path\"\t\t\"{}\"\n\t}}\n", i + 1, library.display()));
+    }
+    list.push_str("}\n");
+    write(root.join("steamapps/libraryfolders.vdf"), list.as_bytes());
+    root
+}
+
+#[tokio::test]
+async fn the_libraries_steam_lists_are_read_with_nothing_set() {
+    let home = tempfile::tempdir().unwrap();
+    // Wherever the player put it: Steam's own list says.
+    let drive = tempfile::tempdir().unwrap();
+    write(
+        drive.path().join("steamapps/appmanifest_440.acf"),
+        acf(440, "Team Fortress 2", 4, "Team Fortress 2").as_bytes(),
+    );
+    // Listed, but not a Steam library: no `steamapps` in it.
+    let other = tempfile::tempdir().unwrap();
+    write(other.path().join("notes.txt"), b"x");
+    let root = steam_at_home(home.path(), &[drive.path(), other.path(), Path::new("relative/path")]);
+    write(root.join("steamapps/appmanifest_570.acf"), acf(570, "Dota 2", 4, "dota 2 beta").as_bytes());
+    let test = FakeHost::new()
+        .platform(Some(Platform::Linux))
+        .home(home.path())
+        .built_in(PluginByKind::emulator(SteamPlugin))
+        .boot_core()
+        .await;
+    test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+
+    let titles: Vec<_> = test.core.view().home.games.into_iter().map(|g| g.title).collect();
+    assert_eq!(titles, ["Dota 2", "Team Fortress 2"], "Steam's folder and the library on another drive");
+}
+
+#[tokio::test]
+async fn the_player_s_own_steam_libraries_setting_replaces_steam_s_list() {
+    let home = tempfile::tempdir().unwrap();
+    let drive = tempfile::tempdir().unwrap();
+    write(
+        drive.path().join("steamapps/appmanifest_440.acf"),
+        acf(440, "Team Fortress 2", 4, "Team Fortress 2").as_bytes(),
+    );
+    let root = steam_at_home(home.path(), &[drive.path()]);
+    write(root.join("steamapps/appmanifest_570.acf"), acf(570, "Dota 2", 4, "dota 2 beta").as_bytes());
+    let test = FakeHost::new()
+        .platform(Some(Platform::Linux))
+        .home(home.path())
+        .built_in(PluginByKind::emulator(SteamPlugin))
+        .boot_core()
+        .await;
+    test.core.dispatch(Command::SetFolders { name: "steam".into(), paths: vec![root] }).await.unwrap();
+    test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+
+    let titles: Vec<_> = test.core.view().home.games.into_iter().map(|g| g.title).collect();
+    assert_eq!(titles, ["Dota 2"], "only the folders the player set");
 }

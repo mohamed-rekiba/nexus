@@ -361,9 +361,15 @@ fn catalog(
     quiet: bool,
     requires: &str,
 ) -> StubPlugin {
+    // Its system as the real plugins describe theirs: PS5 neutral, PS4 blue.
+    let system = match platform {
+        "PS5" => "[system]\nid = \"PS5\"\nname = \"PlayStation 5\"\n",
+        "PS4" => "[system]\nid = \"PS4\"\nname = \"PlayStation 4\"\ncolor = \"#8fc2ff\"\n",
+        _ => "",
+    };
     StubPlugin::from_toml(&format!(
         "id = \"{plugin_id}\"\nkind = \"emulator\"\nname = \"{plugin_id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
-         capabilities = [\"catalog\", \"slots\"]\n[requires]\n{requires}"
+         capabilities = [\"catalog\", \"slots\"]\n{system}[requires]\n{requires}"
     ))
     .provides(move |_| {
         let games = Arc::new(Games { titles: titles.clone(), platform, details_fail, quiet });

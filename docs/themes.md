@@ -258,6 +258,12 @@ Recent additions to know about:
   folder inside a grant with `write = true`). Offer Uninstall then, and call
   `Host.uninstall-game(key)`, which deletes the installed game's folder and takes it out of the
   Library. The default theme puts it in the game's menu.
+- `GameCard.system-name` and `system-color` (and `GameDetail`'s) are the game's system as its
+  plugin describes it (`[system]` in the plugin's manifest): its full name, "PlayStation 5",
+  and its color. The color is transparent when the plugin gives none: draw the neutral look.
+  Draw systems from these, never from `platform`'s code, so a new plugin's games need no
+  change to the theme. The default theme makes the badge's fill, edge and text, and the art of
+  a game without a cover, from the one color.
 - `GameCard.uninstall` is the key of the installed game a card's Uninstall removes: the game
   itself, or for a Catalog card the installed game the offer is; empty for none. Pass it to
   `Host.uninstall-game(key)`, after asking.

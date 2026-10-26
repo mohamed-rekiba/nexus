@@ -33,6 +33,10 @@ export struct GameCard {
     key: string,
     title: string,
     platform: string,
+    // The system, as its plugin describes it: its full name ("PlayStation 5") and its color,
+    // transparent when the plugin gives none (draw the theme's neutral look).
+    system-name: string,
+    system-color: color,
     cover: image,
     // "loading" while the cover is on its way, "ready" once it shows, "none" when the game
     // has no cover or it couldn't load.
@@ -163,6 +167,9 @@ export struct GameDetail {
     key: string,
     title: string,
     platform: string,
+    // As a card's: the system's full name and color.
+    system-name: string,
+    system-color: color,
     description: string,
     // `description` on one line, cut after a word to at most 80 characters, with "…".
     summary: string,

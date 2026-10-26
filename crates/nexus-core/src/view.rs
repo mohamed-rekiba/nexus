@@ -259,12 +259,27 @@ fn can_uninstall(kernel: &Kernel, state: &AppState, key: &GameKey) -> bool {
     })
 }
 
+/// The system `platform` (`PS5`), as the plugin whose `[system]` it is describes it: its full
+/// name and color. Without one, the code is its name and it has no color.
+pub(crate) fn system_of(kernel: &Kernel, platform: &str) -> GameSystemVm {
+    let look = kernel
+        .order()
+        .iter()
+        .filter_map(|plugin| kernel.manifest(plugin).ok()?.system.as_ref())
+        .find(|look| look.id == platform);
+    match look {
+        Some(look) => GameSystemVm { name: look.name.clone(), color: look.rgb() },
+        None => GameSystemVm { name: platform.to_owned(), color: None },
+    }
+}
+
 fn card(kernel: &Kernel, core_state: &AppState, entry: &Entry) -> GameCardVm {
     let stats = crate::launch::play_stats(kernel, &entry.key);
     GameCardVm {
         key: entry.key.to_string(),
         title: entry.summary.title.clone(),
         platform: entry.summary.platform.clone(),
+        system: system_of(kernel, &entry.summary.platform),
         cover: cover_of(core_state, entry),
         selected: core_state.selected.as_ref() == Some(&entry.key),
         badges: core_state.badges.get(&entry.key).cloned().unwrap_or_default(),
@@ -1008,6 +1023,7 @@ fn detail_vm(core: &Core, kernel: &Kernel, state: &AppState, key: &GameKey) -> O
         key: key.to_string(),
         title: summary.title.clone(),
         platform: summary.platform.clone(),
+        system: system_of(kernel, &summary.platform),
         summary: summary_of(&line),
         description,
         developer,
