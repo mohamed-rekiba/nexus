@@ -14,8 +14,17 @@ use crate::manifest::{GAME_FILE, GameManifest, Start};
 use crate::probe::{self, Probe};
 use crate::{CONSOLE_FOLDER, GAMES, GOG_INFO, Pc, WRAPPER_INFO, WRAPPER_NAME_LINE, path};
 
-/// The most files of a release whose first bytes are read.
+/// The most files of a release whose first bytes are read: the nearest the game's folder, so a
+/// start script beside a bundled runtime's thousands of files is read.
 const PROBED: usize = 4000;
+
+/// `files`, nearest the game's folder first, at most [`PROBED`]: the ones to read.
+fn to_probe<'a>(files: impl IntoIterator<Item = &'a DownloadFile>) -> Vec<&'a DownloadFile> {
+    let mut files: Vec<&DownloadFile> = files.into_iter().collect();
+    files.sort_by(|a, b| (a.rel.matches('/').count(), &a.rel).cmp(&(b.rel.matches('/').count(), &b.rel)));
+    files.truncate(PROBED);
+    files
+}
 
 /// What a set's folder holds beside the set, among the release's own files.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -29,6 +38,10 @@ enum Beside {
 struct Plan {
     name: String,
     files: Vec<DownloadFile>,
+    /// The download's unpacked folder that alone is the game, from the download's folder: the
+    /// host may move it in whole, which keeps its links and empty folders (a bundled Proton's
+    /// libraries and Wine prefix need both).
+    whole: Option<String>,
 }
 
 /// A script installer's name without its ending (`.sh`, `.run`), at the download's top or one
@@ -124,7 +137,7 @@ impl Pc {
                 Beside::Script => {
                     let inside = format!("{unpacked_prefix}{name}/");
                     let mut holds_program = false;
-                    for f in download.files.iter().filter(|f| f.rel.starts_with(&inside)).take(PROBED) {
+                    for f in to_probe(download.files.iter().filter(|f| f.rel.starts_with(&inside))) {
                         if self.probe_file(f).await.is_program() {
                             holds_program = true;
                             break;
@@ -150,6 +163,7 @@ impl Pc {
         // The game's folder an installer's archive holds: its files go at the game's top, and
         // it names the game. A GOG installer's `data/noarch` keeps its shape.
         let mut installer_folder = None;
+        let mut whole = None;
         for name in &packaging {
             let inside = format!("{unpacked_prefix}{name}/");
             // An archive's files go where it was, in the game's folder.
@@ -162,6 +176,9 @@ impl Pc {
             let cut = folder.map_or(inside.len(), |folder| inside.len() + folder.len() + 1);
             if let Some(folder) = folder {
                 installer_folder.get_or_insert_with(|| folder.to_owned());
+            }
+            if packaging.len() == 1 && kept.is_empty() && at.is_empty() {
+                whole = Some(folder.map_or(inside.trim_end_matches('/').to_owned(), |f| format!("{inside}{f}")));
             }
             for f in unpacked {
                 files.push(DownloadFile { path: f.path.clone(), rel: format!("{at}{}", &f.rel[cut..]), size: f.size });
@@ -197,7 +214,7 @@ impl Pc {
                 .collect::<Vec<String>>()
                 .join(" ");
         }
-        Ok(Plan { name, files })
+        Ok(Plan { name, files, whole })
     }
 }
 
@@ -215,7 +232,7 @@ impl GameInstaller for Pc {
         })?;
         let plan = self.plan(&download).await?;
         let mut probed = Vec::new();
-        for f in plan.files.iter().take(PROBED) {
+        for f in to_probe(&plan.files) {
             probed.push((f.rel.clone(), self.probe_file(f).await));
         }
         let ranked = probe::rank(&probed);
@@ -240,12 +257,19 @@ impl GameInstaller for Pc {
         let manifest = GameManifest::new(name, ranked.into_iter().map(|(path, kind)| Start { path, kind }).collect());
         let runnable: Vec<String> = probed.iter().filter(|(_, p)| p.runnable()).map(|(rel, _)| rel.clone()).collect();
         let flags = self.platform != Platform::Windows;
+        let whole = plan.whole.as_deref().map(|rel| download.source.join(rel)).transpose()?;
         let mut tree = HostTree::of(folders.clone(), plan.files);
         let into = work.clone();
         installs::spawn(folders, work.clone(), job, move |writer, job| {
             use emulator_kit::fail::Error;
             let entries = tree.entries(&installs::cancel_check(job))?;
-            installs::write_tree(writer, &mut tree, &entries, "", &into, job)?;
+            // Moved in whole when the host allows; copied file by file otherwise.
+            if whole.as_ref().is_some_and(|from| job.take(from, &into)) {
+                let total = installs::tree_size(&entries, "");
+                job.progress(total, total);
+            } else {
+                installs::write_tree(writer, &mut tree, &entries, "", &into, job)?;
+            }
             let io = |call: std::pin::Pin<Box<dyn std::future::Future<Output = PluginResult<()>> + Send + '_>>| {
                 writer.runtime.block_on(call).map_err(|e| Error::msg(e.to_string()))
             };

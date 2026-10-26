@@ -612,6 +612,25 @@ async fn a_script_installer_s_archive_installs_as_the_game_named_by_its_folder()
 }
 
 #[tokio::test]
+async fn a_start_script_beside_thousands_of_files_is_still_found_and_can_run() {
+    let p = boot(Platform::Linux).await;
+    // A repack with its own Proton: its start script sorts after thousands of files.
+    let names: Vec<String> = (0..4100).map(|n| format!("Game/game/wine/files/lib/{n}.so")).collect();
+    let mut files: Vec<(&str, &[u8])> = names.iter().map(|n| (n.as_str(), &b"lib"[..])).collect();
+    files.push(("Game/game/bin/umu/umu-run", b"#!/usr/bin/env python3\n"));
+    files.push(("Game/start", b"#!/usr/bin/env bash\n"));
+    p.download(&files);
+    assert_eq!(p.install().await, "done");
+    assert_eq!(p.starts("Game")[0], "start", "the start script by its name, first");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(p.games.path().join("PC/Game/start")).unwrap().permissions().mode();
+        assert_eq!(mode & 0o100, 0o100, "it gets the program flag");
+    }
+}
+
+#[tokio::test]
 async fn a_gog_game_installed_before_shows_the_name_gog_gives_it() {
     let p = boot(Platform::Linux).await;
     let game = p.games.path().join("PC/world-of-goo-2-1-0-13120-81588");

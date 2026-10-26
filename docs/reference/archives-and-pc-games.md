@@ -383,7 +383,8 @@ flag:
 | Mach-O, 32 or 64 bit, or a universal binary | MachO | `macapp` |
 | `MZ` with a `PE\0\0` header | Exe | `windows` |
 
-At most 4000 files of a release are probed.
+At most 4000 files of a release are probed: the nearest the game's folder first, so a start
+script beside a bundled runtime's thousands of files is still found.
 
 ### Install
 
@@ -426,6 +427,11 @@ folders (`lib/`, `wine/`, `runtime/`, `jre/`, …) aren't listed. The order does
 system; what Play starts by default does (see Game Hub). A GOG installer's `gameinfo` or a
 portable Wine wrapper's `game_info.txt` beside the first file names the game; neither decides
 what starts.
+
+When one unpacked folder alone is the game, the host moves it into the games folder whole, on
+the same disk: links and empty folders stay, as a bundled Proton's libraries and Wine prefix need
+(Proton makes its drive links in the prefix's empty `dosdevices`). Otherwise the files are copied
+one by one, and a link arrives as a copy of what it points to.
 
 On Linux and macOS the program flag is set again on scripts, AppImages and programs. A game
 whose folder exists already is refused: "<name> is already installed". A download with nothing

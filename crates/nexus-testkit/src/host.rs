@@ -69,6 +69,12 @@ impl FakeHost {
         }
     }
 
+    /// The archives the host unpacks, to say what each holds before the core starts: a
+    /// download unpacks as soon as it finishes.
+    pub fn archives(&self) -> FakeArchives {
+        self.archives.clone()
+    }
+
     /// The computer the "This PC" check sees. Without it the check finds nothing.
     pub fn hardware(mut self, specs: nexus_core::Specs) -> Self {
         self.hardware = Some(specs);

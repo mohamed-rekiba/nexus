@@ -17,6 +17,9 @@ type Files = Vec<(String, Vec<u8>)>;
 struct State {
     /// The first part's file name -> what the archive holds.
     contents: BTreeMap<String, Files>,
+    /// The first part's file name -> its links (path, target) and empty folders, made on Unix.
+    links: BTreeMap<String, Vec<(String, String)>>,
+    folders: BTreeMap<String, Vec<String>>,
     /// The first part's file name -> why it fails.
     failures: BTreeMap<String, String>,
     /// Unpacks wait while this is set.
@@ -46,6 +49,14 @@ impl FakeArchives {
     pub fn holds(&self, first_part: &str, files: &[(&str, &[u8])]) {
         let files = files.iter().map(|(p, b)| (p.to_string(), b.to_vec())).collect();
         self.lock().contents.insert(first_part.to_owned(), files);
+    }
+
+    /// The archive whose first part is named `first_part` also holds these links, each to its
+    /// target, and these empty folders: a Wine prefix's `dosdevices`, a library's `.so` links.
+    pub fn also_holds(&self, first_part: &str, links: &[(&str, &str)], folders: &[&str]) {
+        let mut state = self.lock();
+        state.links.insert(first_part.to_owned(), links.iter().map(|(p, t)| (p.to_string(), t.to_string())).collect());
+        state.folders.insert(first_part.to_owned(), folders.iter().map(|f| f.to_string()).collect());
     }
 
     /// Unpacking the archive whose first part is named `first_part` fails with `why`.
@@ -109,6 +120,16 @@ impl Archives for FakeArchives {
             std::fs::write(&path, &bytes).map_err(|e| PluginError::Other(e.to_string()))?;
             done += bytes.len() as u64;
             progress(done, total);
+        }
+        let io = |e: std::io::Error| PluginError::Other(e.to_string());
+        for folder in self.lock().folders.get(&first).cloned().unwrap_or_default() {
+            std::fs::create_dir_all(into.join(folder)).map_err(io)?;
+        }
+        #[cfg(unix)]
+        for (path, target) in self.lock().links.get(&first).cloned().unwrap_or_default() {
+            let path = into.join(path);
+            std::fs::create_dir_all(path.parent().unwrap_or(into)).map_err(io)?;
+            std::os::unix::fs::symlink(target, path).map_err(io)?;
         }
         Ok(())
     }
