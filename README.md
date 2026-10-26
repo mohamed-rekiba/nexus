@@ -205,6 +205,21 @@ Accessibility permission for the app that starts Nexus, and optionally `brew ins
 **Windows**: the Visual Studio Build Tools, with "Desktop development with C++", to build.
 To run, nothing more; optionally `libmpv-2.dll` beside `nexus.exe` for trailers in the window.
 
+#### UMIP off, for some Windows repacks
+
+Some Windows repacks bypass the game's copy protection with a driver of their own: their
+`game` folder holds `driver_amd/SimpleSvm.sys` or `driver_intel/hyperkd.sys`, and their ReadMe
+asks you to turn off UMIP, a CPU feature. The ReadMe says which CPUs need it (Sonic
+Superstars': AMD after Zen 3, Intel after 8th gen). Without it the game closes as it starts.
+Nexus doesn't change how your system boots: add the kernel argument yourself, then restart.
+
+- Fedora: `sudo grubby --update-kernel=ALL --args="clearcpuid=514"`
+- Debian and Ubuntu: add `clearcpuid=514` to `GRUB_CMDLINE_LINUX_DEFAULT` in
+  `/etc/default/grub`, then `sudo update-grub`
+
+`grep -o clearcpuid=514 /proc/cmdline` prints it once it is on. To undo it on Fedora:
+`sudo grubby --update-kernel=ALL --remove-args="clearcpuid=514"`.
+
 ## Download Nexus OS
 
 Nexus OS turns a spare PC into a console: it starts straight into Nexus, with no desktop, no
