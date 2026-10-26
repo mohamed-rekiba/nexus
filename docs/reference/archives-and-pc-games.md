@@ -362,8 +362,8 @@ Permissions:
 
 Games install to `PC/` in the player's first game folder, or the folder picked on the install
 sheet. A game is a folder in `PC/` with a `.nexus-game.json` manifest (version 2): its `name`,
-and `starts`, every file in it that can start the game, best first, each a `path` inside the
-folder and its `kind`. The manifest holds what the install found and doesn't change after. The
+and `starts`, every file in it that can start the game, best first, each its `kind` and its
+`path` inside the folder. The manifest holds what the install found and doesn't change after. The
 folder's name is the game's id. Search matches the name.
 
 A folder the player copied into `PC/` by hand, with no manifest, gets one the first time the
@@ -426,7 +426,8 @@ it, or run the installer by hand". Nothing installs then.
 The plugin then lists every file that can start the game. The order compares, one after the
 other:
 
-1. helpers last: a name with `setup`, `install`, `update`, `config`, `crashhandler` and the like;
+1. helpers last: a name with `setup`, `install`, `update`, `config`, `crashhandler`, `dedicated`
+   (a game's own server) and the like;
 2. what the file is: a start script by its name (`start`, `start.sh`, `play.sh`, `run.sh`, …),
    an AppImage, a Mac program inside a `.app`, a Linux program, another Mac program, another
    script, a Windows `.exe`;

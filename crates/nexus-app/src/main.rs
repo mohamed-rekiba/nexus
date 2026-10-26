@@ -219,8 +219,8 @@ const DECODE_AT_ONCE: usize = 4;
 type Pixels = slint_interpreter::SharedPixelBuffer<slint_interpreter::Rgba8Pixel>;
 
 impl ImageLoader {
-    /// The smaller copy of an image at a size: `<hash>-thumb.jpg` or `<hash>-full.jpg`, and
-    /// `<hash>-cut-thumb.jpg` or `<hash>-cut-full.jpg` for one with a crop.
+    /// The smaller copy of an image at a size: `<hash>-card.jpg` or `<hash>-full.jpg`, and
+    /// `<hash>-cut-card.jpg` or `<hash>-cut-full.jpg` for one with a crop.
     fn thumb(&self, (image, size, crop): &nexus_ui_host::ImageKey) -> PathBuf {
         let mut hash = std::hash::DefaultHasher::new();
         std::hash::Hash::hash(&format!("{image:?}"), &mut hash);
@@ -297,7 +297,7 @@ fn sweep_thumbs(dir: &std::path::Path) {
     for entry in entries.flatten() {
         let name = entry.file_name();
         let kept = name.to_str().is_some_and(|name| {
-            let hash = name.strip_suffix("-thumb.jpg").or_else(|| name.strip_suffix("-full.jpg"));
+            let hash = name.strip_suffix("-card.jpg").or_else(|| name.strip_suffix("-full.jpg"));
             let hash = hash.map(|h| h.strip_suffix("-cut").unwrap_or(h));
             hash.is_some_and(|h| h.len() == 16 && h.bytes().all(|b| b.is_ascii_hexdigit()))
         });
@@ -965,8 +965,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("folder")).unwrap();
         let names = [
-            "0123456789abcdef-thumb.jpg",
+            "0123456789abcdef-card.jpg",
             "0123456789abcdef-full.jpg",
+            "0123456789abcdef-cut-card.jpg",
+            // Thumbnails from before they covered the card: too small.
+            "0123456789abcdef-thumb.jpg",
             "0123456789abcdef-cut-thumb.jpg",
             "0123456789abcdef.jpg",
             "0123456789abcdef-cut.jpg",
@@ -983,7 +986,7 @@ mod tests {
         left.sort();
         assert_eq!(
             left,
-            ["0123456789abcdef-cut-thumb.jpg", "0123456789abcdef-full.jpg", "0123456789abcdef-thumb.jpg", "folder"]
+            ["0123456789abcdef-card.jpg", "0123456789abcdef-cut-card.jpg", "0123456789abcdef-full.jpg", "folder"]
         );
         assert!(dir.join("folder/0123456789abcdef.jpg").exists(), "a folder is left as it is");
         std::fs::remove_dir_all(&dir).unwrap();

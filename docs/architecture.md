@@ -281,7 +281,7 @@ Linux, `~/Library/Application Support/nexus` on macOS, `%APPDATA%\nexus` on Wind
 | `plugins/<id>/` | Each plugin's `Storage`: emulator builds, the store's `catalog.json` cache, the release catalog's `fetched/`, `refreshed/` and `sources/`. |
 | `logs/<plugin>/<game>.log` | A running game's output. The run before stays as `<game>.previous.log`. |
 | `cache/net/` | Images fetched by URL, named by the SHA-256 of the URL. |
-| `cache/thumbs/` | Smaller JPEG copies of art: `<hash>-thumb.jpg`, `<hash>-full.jpg`, and `-cut-` variants. Other files there are removed at start. |
+| `cache/thumbs/` | Smaller JPEG copies of art: `<hash>-card.jpg` (enough to cover a 512 × 768 card), `<hash>-full.jpg` (fits 1920 × 1080), and `-cut-` variants. Other files there are removed at start. |
 | `torrents/<info hash>.torrent` | A torrent's metadata, so a restart doesn't ask the swarm again. |
 | `torrents/resume/` | librqbit's fastresume data: which pieces each torrent was checked to have. Its `session.json` (the list of torrents) is removed when a session starts; the core starts the ones it wants. |
 | `updates/` | A downloaded launcher update and its `ready.json`. |

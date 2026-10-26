@@ -154,8 +154,10 @@ pub fn system_name(platform: Platform) -> &'static str {
 
 /// Helpers that come with games but don't start them: listed last.
 fn helper(name: &str) -> bool {
-    const WORDS: [&str; 22] = [
+    const WORDS: [&str; 23] = [
         "setup",
+        // A game's own server, without its screen (`game-dedicated`).
+        "dedicated",
         "unins",
         "install",
         "redist",
@@ -446,6 +448,18 @@ pub(crate) mod tests {
             "a deep start script first; 64-bit before 32-bit; a name with a helper's word last; not its Wine"
         );
         assert_eq!(Kind::Native.not_here(Platform::Windows), "This is a Linux game: it can't run on Windows");
+    }
+
+    /// A game's dedicated server sorts first by name, but isn't the game.
+    #[test]
+    fn a_dedicated_server_comes_after_the_game() {
+        let files = vec![
+            ("game-linux64-dedicated".to_owned(), Probe::Elf { x64: true }),
+            ("game-linux64-glx".to_owned(), Probe::Elf { x64: true }),
+            ("game-linux64-sdl".to_owned(), Probe::Elf { x64: true }),
+        ];
+        let paths: Vec<_> = rank(&files).into_iter().map(|(p, _)| p).collect();
+        assert_eq!(paths, ["game-linux64-glx", "game-linux64-sdl", "game-linux64-dedicated"]);
     }
 
     #[test]

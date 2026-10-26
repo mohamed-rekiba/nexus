@@ -17,8 +17,8 @@ pub const MAX_GAME_FILE: u64 = 64 * 1024;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(crate = "nexus_api::serde")]
 pub struct Start {
-    pub path: String,
     pub kind: Kind,
+    pub path: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

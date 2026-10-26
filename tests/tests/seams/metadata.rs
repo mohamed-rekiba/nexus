@@ -55,7 +55,7 @@ async fn a_game_the_store_does_not_know_keeps_its_own_details() {
 }
 
 #[tokio::test]
-async fn the_library_filters_to_games_in_game_and_sorts_by_rating_and_release() {
+async fn the_library_has_no_in_game_filter_and_sorts_by_rating_and_release() {
     let t = FakeHost::new()
         .plugin(games("emu-a", vec!["Alpha", "Beta", "Gamma"]))
         .plugin(store("store", vec![("CUSA00000", 3.0, ""), ("CUSA00001", 4.8, "")], None, Duration::ZERO))
@@ -66,14 +66,12 @@ async fn the_library_filters_to_games_in_game_and_sorts_by_rating_and_release() 
         t.core.view().home.library.games.iter().map(|g| g.title.clone()).collect()
     };
 
-    // The player's own result: Beta reaches gameplay.
+    // The player's own result: Beta reaches gameplay. The Library has no "In-game" chip, and
+    // the filter, if it was on before, doesn't hide the player's games.
     t.core.kernel().config().set(&["app", "results", "emu-a:G1"], "ingame".into()).unwrap();
     t.core.dispatch(Command::LibrarySystem(Some(nexus_core::INGAME_FILTER.into()))).await.unwrap();
-    assert_eq!(titles(&t), ["Beta"]);
-    let chip = t.core.view().home.library.systems.into_iter().find(|f| f.id == nexus_core::INGAME_FILTER).unwrap();
-    assert!(chip.on && chip.count == 1, "{chip:?}");
-    // "All" clears it.
-    t.core.dispatch(Command::LibrarySystem(None)).await.unwrap();
+    let chips = t.core.view().home.library.systems;
+    assert!(chips.iter().all(|f| f.id != nexus_core::INGAME_FILTER), "{chips:?}");
     assert_eq!(titles(&t).len(), 3);
 
     // Top rated first; a game the store doesn't rate goes last.

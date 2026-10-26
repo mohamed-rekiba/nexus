@@ -392,8 +392,10 @@ fn grid<'a>(kernel: &Kernel, state: &'a AppState, catalog: bool) -> GridGames<'a
         }
     };
     let ingame = searched.iter().filter(|e| level(e) >= 4).count();
-    // Shown once a game has a result to filter by.
-    if ingame > 0 || view.ingame {
+    // The Catalog's only: the Library's games are the player's own. Shown once a game has a
+    // result to filter by.
+    let only_ingame = catalog && view.ingame;
+    if catalog && (ingame > 0 || view.ingame) {
         systems.push(FilterVm {
             id: crate::INGAME_FILTER.into(),
             label: "In-game".into(),
@@ -423,7 +425,7 @@ fn grid<'a>(kernel: &Kernel, state: &'a AppState, catalog: bool) -> GridGames<'a
     let in_system: Vec<&Entry> = searched
         .into_iter()
         .filter(|e| view.system.as_ref().is_none_or(|s| &e.summary.platform == s))
-        .filter(|e| !view.ingame || level(e) >= 4)
+        .filter(|e| !only_ingame || level(e) >= 4)
         .filter(|e| !catalog || !view.installed || installed(e))
         .collect();
     // The Library's chips are the store's genres; the Catalog's are the fixed genres.
