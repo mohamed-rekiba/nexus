@@ -9,6 +9,8 @@ VERSION := $(shell sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\
 # The Nexus OS image the os-* targets build and use, and the base they build it on.
 OS_IMAGE ?= localhost/nexus-os:minimal
 OS_BASE ?= quay.io/fedora/fedora-bootc:44
+# The USB stick os-iso makes and os-vm starts, named with Nexus OS's version.
+OS_ISO ?= nexus-os-x86_64-$(shell cat os/version.txt).iso
 
 help: ## List the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -55,11 +57,11 @@ os-image: ## The Nexus OS image as OS_IMAGE (os/build-image.sh, sudo); RPM=<file
 	else os/fetch-nexus.sh; fi
 	BASE=$(OS_BASE) os/build-image.sh $(OS_IMAGE)
 
-os-iso: ## The Nexus OS USB stick, nexus-os-x86_64.iso, from OS_IMAGE (os/make-iso.sh; make os-image first)
-	BASE=$(OS_BASE) os/make-iso.sh $(OS_IMAGE) nexus-os-x86_64.iso
+os-iso: ## The Nexus OS USB stick, OS_ISO, from OS_IMAGE (os/make-iso.sh; make os-image first)
+	BASE=$(OS_BASE) os/make-iso.sh $(OS_IMAGE) $(OS_ISO)
 
-os-vm: ## Start nexus-os-x86_64.iso in QEMU as a USB stick, with Secure Boot and a 64 GB disk (os/run-vm.sh)
-	os/run-vm.sh nexus-os-x86_64.iso
+os-vm: ## Start OS_ISO in QEMU as a USB stick, with Secure Boot and a 64 GB disk (os/run-vm.sh)
+	os/run-vm.sh $(OS_ISO)
 
 deny: ## Advisories, licences and sources of every dependency (needs cargo-deny)
 	cargo deny check

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.0](https://github.com/mohamed-rekiba/nexus/compare/v0.4.1...v0.5.0) (2026-10-26)
+
+
+### Features
+
+* **os:** the USB stick is named with its version, nexus-os-x86_64-&lt;version&gt;.iso ([bb95465](https://github.com/mohamed-rekiba/nexus/commit/bb9546590953e7789541545997c85b1652e096a8))
+
+## [0.4.1](https://github.com/mohamed-rekiba/nexus/compare/v0.4.0...v0.4.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* a game ends when its processes do, and Stop reaches the ones Proton's sandbox moved out ([ae8d613](https://github.com/mohamed-rekiba/nexus/commit/ae8d6137fdc21140392e072028b5e4d8fbde9c06))
+
 ## [0.4.0](https://github.com/mohamed-rekiba/nexus/compare/v0.3.1...v0.4.0) (2026-10-26)
 
 

@@ -7,8 +7,8 @@
 # The label must match root=live:CDLABEL=… below (and os/build-iso.sh's LABEL).
 label: "NEXUS-OS"
 grub2:
-  default: "0"
-  timeout: "5"
+  default: 0
+  timeout: 5
   entries:
     - name: "Nexus OS"
       linux: "/images/pxeboot/vmlinuz root=live:CDLABEL=NEXUS-OS rd.live.image rd.live.overlay.overlayfs=1 enforcing=0 quiet splash loglevel=3 rd.udev.log_level=3 systemd.show_status=auto vt.global_cursor_default=0"
