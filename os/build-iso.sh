@@ -15,7 +15,9 @@
 #                  xorriso: the hand-made ISO (squashfs, shim, GRUB, xorriso) with the same boot
 #                  menu, for when image-builder can't be used.
 #   IMAGE_BUILDER  the image-builder command (default: Fedora's image-builder package, installed here)
-#   WORK           a scratch folder (default: a new one in /var/tmp)
+#   WORK           a scratch folder (default: a new one in /var/tmp). image-builder keeps osbuild's
+#                  trees in it, and the stored image's overlay storage can't be made on overlayfs:
+#                  in a container, it must be a mounted folder (os/make-iso.sh mounts one).
 set -euo pipefail
 out=${1:?usage: os/build-iso.sh OUTPUT.iso}
 core=${CORE:-ghcr.io/mohamed-rekiba/nexus-os:minimal}
@@ -62,7 +64,7 @@ if [ "$method" = image-builder ]; then
     # /var/lib/containers/storage (the live system reads it at /run/rootfsbase/var/lib/containers/
     # storage, see os/live/files/etc/containers/storage.conf).
     rm -rf "$work/out"
-    "$IMAGE_BUILDER" build --output-dir "$work/out" --bootc-ref "$live" --bootc-default-fs ext4 \
+    "$IMAGE_BUILDER" build --cache "$work/store" --output-dir "$work/out" --bootc-ref "$live" --bootc-default-fs ext4 \
         --bootc-installer-payload-ref "$payload" bootc-generic-iso
     iso=$(find "$work/out" -name '*.iso' | head -1)
     [ -n "$iso" ] || { echo "error: image-builder made no ISO in $work/out" >&2; exit 1; }
