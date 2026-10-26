@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/mohamed-rekiba/nexus/compare/nexus-os-v0.1.1...nexus-os-v0.1.2) (2026-10-26)
+
+
+### Bug Fixes
+
+* **os:** the stick builds with osbuild's trees on the runner's disk ([4353b61](https://github.com/mohamed-rekiba/nexus/commit/4353b61305a9f3dd180e218d367f6779742fd22b))
+
 ## [0.1.1](https://github.com/mohamed-rekiba/nexus/compare/nexus-os-v0.1.0...nexus-os-v0.1.1) (2026-10-26)
 
 
