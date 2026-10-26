@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/mohamed-rekiba/nexus/compare/v0.4.0...v0.4.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* a game ends when its processes do, and Stop reaches the ones Proton's sandbox moved out ([ae8d613](https://github.com/mohamed-rekiba/nexus/commit/ae8d6137fdc21140392e072028b5e4d8fbde9c06))
+
 ## [0.4.0](https://github.com/mohamed-rekiba/nexus/compare/v0.3.1...v0.4.0) (2026-10-26)
 
 
