@@ -613,7 +613,15 @@ async fn a_script_installer_s_archive_installs_as_the_game_named_by_its_folder()
 
 #[tokio::test]
 async fn a_start_script_beside_thousands_of_files_is_still_found_and_can_run() {
-    let p = boot(Platform::Linux).await;
+    // The app's own call limit: copying thousands of real files takes over the tests' 500 ms on a
+    // busy CI runner.
+    let test = FakeHost::new()
+        .platform(Some(Platform::Linux))
+        .call_timeout(Duration::from_secs(30))
+        .built_in(PluginByKind::emulator(PcPlugin))
+        .boot_core()
+        .await;
+    let p = with_folders(test).await;
     // A repack with its own Proton: its start script sorts after thousands of files.
     let names: Vec<String> = (0..4100).map(|n| format!("Game/game/wine/files/lib/{n}.so")).collect();
     let mut files: Vec<(&str, &[u8])> = names.iter().map(|n| (n.as_str(), &b"lib"[..])).collect();
