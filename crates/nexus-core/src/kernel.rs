@@ -61,6 +61,10 @@ pub struct HostConfig {
     pub home: Option<PathBuf>,
     /// How often a running torrent's state is read.
     pub torrent_poll: Duration,
+    /// How often a store's installs (Steam's) are read while one runs, or for a minute after
+    /// Nexus asked the store to install; ten times as long otherwise, to see installs started in
+    /// the store itself.
+    pub store_poll: Duration,
     /// How often the VPN is checked while downloads go only through it.
     pub vpn_poll: Duration,
 }
@@ -84,6 +88,7 @@ impl HostConfig {
             max_downloads: 2,
             home: None,
             torrent_poll: Duration::from_secs(1),
+            store_poll: Duration::from_secs(2),
             vpn_poll: Duration::from_secs(2),
         }
     }

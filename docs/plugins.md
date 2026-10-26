@@ -498,6 +498,18 @@ For the Catalog's downloads to install, the emulator names its `console`, asks f
 says whether the list was `Fetched`, `Cached` or `Bundled`, and `problem` why a fetch didn't
 give it. Publish `RELEASES_CHANGED` when the lists change on their own.
 
+A catalog whose store installs its releases lists the installs the store is doing in
+`store_installs()`: each a `StoreInstall` with its release, title, phase (`Queued`,
+`Downloading`, `Paused`, `Installing`), bytes done of the total, and `open`, a link to the
+store's own Downloads page (allowed in `permissions.links`). The host reads them every
+`store_poll` (2 s) while one runs or for a minute after an Install, ten times as long
+otherwise; it shows each in Downloads, and when one ends it reads the Library and the catalogs
+again. The Steam plugin reads them from its app files: every app not fully installed.
+
+An emulator may describe its own games with `metadata`: the Steam plugin gives a Steam game
+(`platform` `Steam`, its app id as the title id) Steam's store's details, from
+`store.steampowered.com/api/appdetails`, kept a week in its storage.
+
 A game its store removes (Steam's) gives `GameDetails.uninstall_link`, `steam://uninstall/440`:
 Uninstall opens it, when `permissions.links` allows it, instead of deleting the game's folder.
 

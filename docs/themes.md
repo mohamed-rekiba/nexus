@@ -268,6 +268,9 @@ Recent additions to know about:
   Draw systems from these, never from `platform`'s code, so a new plugin's games need no
   change to the theme. The default theme makes the badge's fill, edge and text, and the art of
   a game without a cover, from the one color.
+- `Torrent.store` names the store doing an install ("Steam"): its card is the store's install
+  of a game, with the state `queued`, `downloading` or `paused` (or `install` `installing`),
+  one action, `open-store` (the store's own Downloads page), and no folder. Empty for a torrent.
 - `Release.store` names the store that installs a release ("Steam"); empty for a torrent. Its
   Download asks the store, with no download sheet: call `Host.download-release(key, id, "")`
   and stay on the Game Hub. The default theme's button says "Install in Steam".

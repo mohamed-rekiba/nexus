@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use nexus_api::serde_json::{self, Value};
 use nexus_api::*;
 
-use crate::{ART, COVER, HERO, LOGO, PLATFORM, STEAM, Steam, appinfo, path, vdf};
+use crate::{ART, COVER, HEADER, PLATFORM, STEAM, Steam, appinfo, path, vdf};
 
 /// The most bytes of a collections or users file read.
 const MAX_FILE: u64 = 8 * 1024 * 1024;
@@ -157,12 +157,12 @@ impl Steam {
                     store: format!("{INSTALL}{app}"),
                     hidden: game.hidden,
                     favorite: game.favorite,
+                    // Only what Steam's server has for every game: a guessed hero or logo is
+                    // missing for an older game (the Game Hub falls back to the header).
                     steam: Some(SteamInfo {
                         app_id: app.into(),
                         portrait: art(COVER),
-                        hero: art(HERO),
-                        logo: art(LOGO),
-                        header: art("header.jpg"),
+                        header: art(HEADER),
                         ..SteamInfo::default()
                     }),
                     ..Release::default()

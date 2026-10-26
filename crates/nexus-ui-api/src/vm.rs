@@ -490,6 +490,10 @@ pub struct TorrentVm {
     pub install_folder: String,
     /// Why the last Install didn't start; empty when it did.
     pub install_error: String,
+    /// The store doing it, for an install a store does ("Steam"): its id is `store:<plugin>:
+    /// <release>`, its state `queued`, `downloading` or `paused` (or `install` `installing`), and
+    /// its one action `open-store`, the store's own Downloads page. Empty for a torrent.
+    pub store: String,
 }
 
 /// One settings field, flattened from the plugin's JSON Schema.

@@ -232,6 +232,8 @@ pub enum TorrentAction {
     RemoveUnpacked,
     /// Stop the install of the download; what it wrote goes.
     CancelInstall,
+    /// A store's install: open the store's own Downloads page.
+    OpenStore,
 }
 
 /// The console a release is for, which names its folder: PS5 when the catalog doesn't say.
@@ -307,6 +309,27 @@ impl Core {
 
     /// The player asked to download `release` of the offered game `offer`: reads the torrent's
     /// files, and waits for the player to start it.
+    /// An action on the store's install `store` (`<plugin>:<release>`): only opening the store's
+    /// page; the store pauses and cancels its own.
+    async fn store_install_action(&self, store: &str, action: TorrentAction) -> CoreResult<()> {
+        let install = self
+            .state()
+            .store_installs
+            .iter()
+            .find(|(plugin, i)| format!("{plugin}:{}", i.release) == store)
+            .cloned()
+            .ok_or_else(|| CoreError::Invalid(format!("no install {store}")))?;
+        let (plugin, install) = install;
+        if action != TorrentAction::OpenStore {
+            return Err(CoreError::Invalid(format!("{} does that in its own Downloads", install.title)));
+        }
+        if !self.kernel().manifest(&plugin)?.permissions.allows_link(&install.open) {
+            return Err(CoreError::PermissionDenied { plugin, action: format!("open {}", install.open) });
+        }
+        let link = install.open.clone();
+        crate::running::blocking(self, move |desktop, _| desktop.open_link(&link)).await.map_err(CoreError::Invalid)
+    }
+
     /// A release its store installs: the store's link opens (`steam://install/440`), if the
     /// catalog plugin's manifest allows it, and the store takes it from there. Nothing downloads
     /// here; the game shows in the Library once the store installed it.
@@ -323,6 +346,8 @@ impl Core {
         crate::running::blocking(self, move |desktop, _| desktop.open_link(&link)).await.map_err(CoreError::Invalid)?;
         let store = crate::view::system_of(self.kernel(), &release.platform).name;
         tracing::info!(%offer, link = %release.store, "asked the store to install");
+        // The store writes its install down a moment later: its progress is read often for now.
+        self.state().store_watch_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(60));
         self.notice(format!("{store} is installing {}: it shows in your Library when it's done", release.title));
         self.changed();
         Ok(())
@@ -641,6 +666,9 @@ impl Core {
 
     /// Runs the player's action on a download.
     pub(crate) async fn torrent_action(&self, id: &str, action: TorrentAction) -> CoreResult<()> {
+        if let Some(store) = id.strip_prefix("store:") {
+            return self.store_install_action(store, action).await;
+        }
         let job =
             self.state().torrents.get(id).cloned().ok_or_else(|| CoreError::Invalid(format!("no download {id}")))?;
         let port = self.kernel().torrents().clone();

@@ -474,6 +474,11 @@ pub(crate) struct AppState {
     pub catalog_buttons: Vec<SlotVm>,
     /// The games the catalogs offer, newest first.
     pub offers: Vec<crate::releases::Offer>,
+    /// The installs stores are doing (Steam's), by the catalog plugin, as last read.
+    pub store_installs: Vec<(PluginId, nexus_api::StoreInstall)>,
+    /// Until when the stores' installs are read often: a minute after Nexus asked a store to
+    /// install, as the store writes its install down a moment later.
+    pub store_watch_until: Option<std::time::Instant>,
     /// The cover of the offer each installed game is, with the catalog plugin it is from: the
     /// game's art when it has none of its own (a PC game). Kept in `app.game_art`, so it stays
     /// with the catalog off.
@@ -603,6 +608,8 @@ impl Core {
             catalogs_read: false,
             catalog_buttons: Vec::new(),
             offers: Vec::new(),
+            store_installs: Vec::new(),
+            store_watch_until: None,
             asked: HashSet::new(),
             catalog_selected: None,
             catalog_grid: None,
@@ -637,6 +644,7 @@ impl Core {
         crate::system::schedule_refresh(&core);
         core.check_hardware();
         core.watch_catalogs();
+        core.watch_store_installs();
         core
     }
 
@@ -1236,7 +1244,7 @@ impl Core {
         out
     }
 
-    async fn refresh_library(&self) -> CoreResult<()> {
+    pub(crate) async fn refresh_library(&self) -> CoreResult<()> {
         {
             let mut state = self.state();
             state.loading = true;

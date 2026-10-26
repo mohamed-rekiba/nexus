@@ -1303,10 +1303,44 @@ fn downloads_vm(kernel: &Kernel, jobs: Vec<Job>, state: &AppState) -> DownloadsV
         })
         .collect();
     torrents.reverse();
+    // The installs stores do (Steam's), after the downloads: the same cards, with the store's
+    // own page as their one action.
+    torrents.extend(state.store_installs.iter().map(|(plugin, install)| store_install_vm(kernel, plugin, install)));
     let downloading = state.torrents.values().filter(|j| j.state.active()).count();
     let sharing = state.torrents.values().filter(|j| j.seeding).count();
     let seeding = kernel.config().get(&["app", "seed_downloads"]).as_bool().unwrap_or(true);
     DownloadsVm { jobs, torrents, seeding, downloading, sharing }
+}
+
+/// A store's install as a Downloads card: its phase and bytes, and the store's page.
+fn store_install_vm(kernel: &Kernel, plugin: &PluginId, install: &nexus_api::StoreInstall) -> TorrentVm {
+    use nexus_api::StorePhase as P;
+    let store = kernel
+        .manifest(plugin)
+        .ok()
+        .and_then(|m| m.system.as_ref().map(|s| s.name.clone()))
+        .unwrap_or_else(|| plugin.to_string());
+    let part =
+        if install.total > 0 { (install.done as f64 / install.total as f64).clamp(0.0, 1.0) as f32 } else { 0.0 };
+    let installing = install.phase == P::Installing;
+    TorrentVm {
+        id: format!("store:{plugin}:{}", install.release),
+        title: install.title.clone(),
+        state: match install.phase {
+            P::Queued => "queued",
+            P::Downloading | P::Installing => "downloading",
+            P::Paused => "paused",
+        }
+        .into(),
+        progress: if installing { 1.0 } else { part },
+        done: if installing { install.total } else { install.done },
+        total: install.total,
+        install: if installing { "installing".into() } else { String::new() },
+        install_progress: if installing { part } else { 0.0 },
+        actions: if install.open.is_empty() { Vec::new() } else { vec!["open-store".into()] },
+        store,
+        ..TorrentVm::default()
+    }
 }
 
 /// What `emulator` installs from, as its manifest says, then what the host does first.
@@ -1364,6 +1398,7 @@ fn torrent_vm(state: &AppState, owned: &Owned, j: &crate::torrents::TorrentJob) 
     }
     let unpack_error = (j.unpack.phase == U::Failed).then(|| j.unpack.error.clone()).filter(|e| !e.is_empty());
     TorrentVm {
+        store: String::new(),
         id: j.id.clone(),
         title: j.title.clone(),
         version: j.version.clone(),

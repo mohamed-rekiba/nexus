@@ -660,6 +660,7 @@ fn torrent(t: &nexus_ui_api::TorrentVm) -> Value {
         ("install-note", text(&t.install_note)),
         ("install-folder", text(&t.install_folder)),
         ("install-error", text(&t.install_error)),
+        ("store", text(&t.store)),
     ])
 }
 

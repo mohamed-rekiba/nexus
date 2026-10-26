@@ -471,6 +471,76 @@ impl Core {
         }
     }
 
+    /// Reads the stores' installs (Steam's) in the background: often while one runs or right
+    /// after Nexus asked a store to install, rarely otherwise.
+    pub(crate) fn watch_store_installs(&self) {
+        let weak = std::sync::Arc::downgrade(&self.inner);
+        let every = self.kernel().host().store_poll;
+        tokio::spawn(async move {
+            loop {
+                let Some(inner) = weak.upgrade() else { return };
+                let core = Core { inner };
+                core.refresh_store_installs().await;
+                let busy = {
+                    let state = core.state();
+                    !state.store_installs.is_empty()
+                        || state.store_watch_until.is_some_and(|until| std::time::Instant::now() < until)
+                };
+                drop(core);
+                tokio::time::sleep(if busy { every } else { every * 10 }).await;
+            }
+        });
+    }
+
+    /// Asks each catalog plugin for its store's installs. One that is gone has ended: the
+    /// Library and the catalogs are read again, and an install that left its game installed
+    /// says so.
+    pub(crate) async fn refresh_store_installs(&self) {
+        let kernel = self.kernel();
+        let mut now = Vec::new();
+        for (plugin, provided) in self.providers(Capability::Releases).await {
+            let Some(releases) = provided.releases else { continue };
+            match kernel.guard(&plugin, "releases.store_installs", releases.store_installs()).await {
+                Ok(installs) => now.extend(installs.into_iter().map(|i| (plugin.clone(), i))),
+                Err(e) => tracing::warn!(error = %e, "could not read a store's installs"),
+            }
+        }
+        let ended: Vec<(PluginId, nexus_api::StoreInstall)> = {
+            let state = self.state();
+            if state.store_installs == now {
+                return;
+            }
+            let still =
+                |p: &PluginId, i: &nexus_api::StoreInstall| now.iter().any(|(q, j)| q == p && j.release == i.release);
+            state.store_installs.iter().filter(|(p, i)| !still(p, i)).cloned().collect()
+        };
+        // The game is in the Library before its card leaves Downloads.
+        if !ended.is_empty() {
+            if let Err(e) = Box::pin(self.refresh_library()).await {
+                tracing::warn!(error = %e, "could not read the Library again");
+            }
+            self.refresh_releases().await;
+        }
+        self.state().store_installs = now;
+        if !ended.is_empty() {
+            for (plugin, install) in &ended {
+                let installed = {
+                    let state = self.state();
+                    let owned = crate::view::Owned::new(&state);
+                    state.offers.iter().any(|o| {
+                        &o.entry.key.plugin == plugin
+                            && o.releases.iter().any(|r| r.id == install.release)
+                            && crate::view::installed_game(&state, &owned, o).is_some()
+                    })
+                };
+                if installed {
+                    self.notice(format!("{} is installed", install.title));
+                }
+            }
+        }
+        self.changed();
+    }
+
     /// The offer `key` names, if it is one.
     pub(crate) fn offer(&self, key: &GameKey) -> Option<Offer> {
         self.state().offers.iter().find(|o| &o.entry.key == key).cloned()

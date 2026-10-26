@@ -482,3 +482,126 @@ async fn uninstall_asks_steam_to_uninstall_its_game() {
     let notices = s.test.core.view().notices;
     assert!(notices.iter().any(|n| n.contains("Steam is uninstalling Dota 2")), "{notices:?}");
 }
+
+#[tokio::test]
+async fn a_game_steam_has_no_art_cached_for_gets_only_art_steam_s_server_has() {
+    let s = boot().await;
+    let provided = s.test.core.kernel().provided(&steam()).await.unwrap();
+    let catalog = provided.catalog.unwrap();
+    // Portal 2 has nothing in Steam's cache: an older game may have no hero or logo on the
+    // server either, but every game has its cover and header there.
+    let details = catalog.details("620").await.unwrap();
+    let header = "https://cdn.cloudflare.steamstatic.com/steam/apps/620/header.jpg";
+    assert_eq!(details.background, Some(ImageSource::Url(header.into())), "the header, not a guessed hero");
+    assert_eq!(catalog.artwork("620", ArtworkKind::Logo).await.unwrap(), None, "no logo to guess at");
+
+    // Its Catalog release says the same.
+    collections(s.root.path(), "[620]", "[]", "[]");
+    let releases = provided.releases.unwrap();
+    let list = releases.releases(&Console::new("Steam").unwrap()).await.unwrap().unwrap();
+    let steam = list.releases[0].steam.clone().unwrap();
+    assert_eq!((steam.hero.as_str(), steam.logo.as_str(), steam.header.as_str()), ("", "", header));
+}
+
+/// Team Fortress 2's app file in `root`, as Steam writes it while it installs: `flags`, and
+/// bytes downloaded and written into place of 1000 each.
+fn installing_tf2(root: &Path, flags: u32, downloaded: u32, staged: u32) {
+    let acf = format!(
+        "\"AppState\"\n{{\n\t\"appid\"\t\t\"440\"\n\t\"name\"\t\t\"Team Fortress 2\"\n\t\"StateFlags\"\t\t\"{flags}\"\n\t\
+         \"installdir\"\t\t\"Team Fortress 2\"\n\t\"BytesToDownload\"\t\t\"1000\"\n\t\"BytesDownloaded\"\t\t\"{downloaded}\"\n\t\
+         \"BytesToStage\"\t\t\"1000\"\n\t\"BytesStaged\"\t\t\"{staged}\"\n}}\n"
+    );
+    write(root.join("steamapps/appmanifest_440.acf"), acf.as_bytes());
+}
+
+/// The Downloads card of Steam's install of Team Fortress 2, once `done` says it is the one.
+async fn steam_card(s: &Steam, done: impl Fn(&nexus_ui_api::TorrentVm) -> bool) -> nexus_ui_api::TorrentVm {
+    for _ in 0..300 {
+        let cards = s.test.core.view().downloads.torrents;
+        if let Some(card) = cards.into_iter().find(|t| t.id == "store:emu-steam:steam-440")
+            && done(&card)
+        {
+            return card;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("no such card: {:?}", s.test.core.view().downloads.torrents);
+}
+
+#[tokio::test]
+async fn steam_s_install_shows_in_downloads_until_the_game_is_installed() {
+    let s = boot().await;
+    collections(s.root.path(), "[440]", "[]", "[]");
+    write(s.root.path().join("appcache/appinfo.vdf"), &app_cache(&[(440, "Team Fortress 2")]));
+    // Steam downloads it: a quarter there.
+    installing_tf2(s.library.path(), 1026 | (1 << 20), 250, 0);
+
+    let card = steam_card(&s, |t| t.state == "downloading" && t.install.is_empty()).await;
+    assert_eq!((card.title.as_str(), card.store.as_str(), card.progress), ("Team Fortress 2", "Steam", 0.25));
+    assert_eq!(card.actions, ["open-store"], "Steam pauses and cancels its own");
+    s.test
+        .core
+        .dispatch(Command::Torrent { id: card.id.clone(), action: nexus_core::TorrentAction::OpenStore })
+        .await
+        .unwrap();
+    assert_eq!(s.test.desktop.links(), ["steam://open/downloads"]);
+
+    // Downloaded: Steam writes it into place.
+    installing_tf2(s.library.path(), 1026 | (1 << 21), 1000, 500);
+    let card = steam_card(&s, |t| t.install == "installing").await;
+    assert_eq!(card.install_progress, 0.5);
+
+    // Installed: the card goes, and the game is in the Library.
+    installing_tf2(s.library.path(), 4, 1000, 1000);
+    std::fs::create_dir_all(s.library.path().join("steamapps/common/Team Fortress 2")).unwrap();
+    let tf2_card = |s: &Steam| s.test.core.view().downloads.torrents.into_iter().any(|t| t.id.ends_with("steam-440"));
+    for _ in 0..300 {
+        if !tf2_card(&s) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(!tf2_card(&s), "{:?}", s.test.core.view().downloads.torrents);
+    let titles: Vec<_> = s.test.core.view().home.games.into_iter().map(|g| g.title).collect();
+    assert!(titles.contains(&"Team Fortress 2".to_owned()), "{titles:?}");
+    let notices = s.test.core.view().notices;
+    assert!(notices.iter().any(|n| n == "Team Fortress 2 is installed"), "{notices:?}");
+}
+
+#[tokio::test]
+async fn a_steam_game_s_hub_has_steam_s_screenshots_words_and_trailer_kept_a_week() {
+    let s = boot().await;
+    let details = serde_json::json!({ "570": { "success": true, "data": {
+        "name": "Dota 2", "short_description": "Every day, millions of players battle.",
+        "developers": ["Valve"], "genres": [{"description": "Action"}, {"description": "Strategy"}],
+        "release_date": {"date": "Jul 9, 2013"},
+        "screenshots": [{"path_full": "https://shared.akamai.steamstatic.com/ss_1.jpg"},
+                        {"path_full": "https://shared.akamai.steamstatic.com/ss_2.jpg"}],
+        "movies": [{"hls_h264": "https://video.akamai.steamstatic.com/570/hls.m3u8"}] } } });
+    let url = "https://store.steampowered.com/api/appdetails?appids=570&l=english";
+    s.test.http.serve(url, details.to_string());
+    // Booting asked before Steam answered: nothing was kept, and the next look asks again.
+    s.test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    let dota: GameKey = "emu-steam:570".parse().unwrap();
+
+    let mut hub = None;
+    for _ in 0..300 {
+        s.test.core.dispatch(Command::OpenGame(dota.clone())).await.unwrap();
+        hub = s.test.core.view().detail.filter(|d| !d.screenshots.is_empty());
+        if hub.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let hub = hub.unwrap_or_else(|| panic!("no details; sent {:?}", s.test.http.sent()));
+    assert_eq!(hub.screenshots.len(), 2);
+    assert_eq!(hub.description, "Every day, millions of players battle.");
+    assert_eq!(hub.genres, ["Action", "Strategy"]);
+    assert_eq!(hub.trailer_url, "https://video.akamai.steamstatic.com/570/hls.m3u8");
+
+    // Kept: once it answered, Steam isn't asked again.
+    let asked = s.test.http.sent().iter().filter(|u| *u == url).count();
+    s.test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    s.test.core.dispatch(Command::OpenGame(dota)).await.unwrap();
+    assert_eq!(s.test.http.sent().iter().filter(|u| *u == url).count(), asked, "{:?}", s.test.http.sent());
+}

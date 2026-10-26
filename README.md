@@ -211,12 +211,19 @@ Stop work as for any game, and Steam itself keeps running.
    next rescan (Settings, GAMES, **Rescan game folders**). **Steam libraries** in Settings is
    only for reading other folders: once set, it replaces Steam's list.
 
+A Steam game's Game Hub has Steam's store's words, genres, developer, release date,
+screenshots and trailer, kept a week; its cover and background are Steam's own files on this
+PC when Steam has them.
+
 Your Steam library is in the Catalog, under **Steam**: the games in your Steam collections
 (Favorites, and the ones you made), read from Steam's own files on this PC, with no key and
 no account to set. A game in Steam's Hidden collection shows only under the Catalog's
 **Hidden** filter; a favorite says **Favorite**, an installed one **Installed**. **Install in
-Steam** opens Steam's install dialog for the game, and Steam installs it: it shows in the
-Library once it's done. A game you never put in a collection isn't in those files, so it isn't
+Steam** opens Steam's install dialog for the game, and Steam installs it: Downloads shows its
+progress ("Downloading in Steam", then "Installing in Steam"), with **Open in Steam** for
+Steam's own Downloads page, and the game shows in the Library once it's done. An install you
+start in Steam itself shows in Downloads too. **Uninstall**, in a Steam game's menu, asks Steam,
+which confirms in its own dialog. A game you never put in a collection isn't in those files, so it isn't
 listed.
 
 Steam may ask to sign in or update before the game starts. Nexus waits up to 2 minutes for the

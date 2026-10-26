@@ -52,6 +52,7 @@ impl FakeHost {
         host.hand_over_timeout = Duration::from_millis(500);
         host.watch_every = Duration::from_millis(20);
         host.torrent_poll = Duration::from_millis(10);
+        host.store_poll = Duration::from_millis(10);
         host.vpn_poll = Duration::from_millis(10);
         Self {
             host,

@@ -13,6 +13,7 @@
 
 mod appinfo;
 mod owned;
+mod store;
 mod vdf;
 
 use std::collections::BTreeSet;
@@ -32,14 +33,29 @@ const FLATPAK_FOLDER: &str = "/.var/app/com.valvesoftware.Steam/";
 const FLATPAK_APP: &str = "com.valvesoftware.Steam";
 /// Steam's image server, for art its cache doesn't have.
 const ART: &str = "https://cdn.cloudflare.steamstatic.com/steam/apps";
-/// Steam's art files for a game: its cover, the Game Hub's background, its logo.
+/// Steam's art files for a game: its cover, the Game Hub's background, its logo, and the store's
+/// wide header. Steam's server has the cover and the header of every game, but an older game
+/// may have no hero or logo there: those come from Steam's cache only.
 const COVER: &str = "library_600x900.jpg";
 const HERO: &str = "library_hero.jpg";
 const LOGO: &str = "logo.png";
+const HEADER: &str = "header.jpg";
 /// The most bytes of an app manifest or library list read.
 const MAX_FILE: u64 = 256 * 1024;
-/// `StateFlags`' bit for a game whose files are all there.
+/// `StateFlags`' bits (Steam's `EAppState`): all its files are there; its update is paused;
+/// it downloads; it writes the download into place (staging, then committing).
 const FULLY_INSTALLED: u64 = 4;
+const UPDATE_PAUSED: u64 = 512;
+const DOWNLOADING: u64 = 1 << 20;
+const STAGING: u64 = 1 << 21;
+const COMMITTING: u64 = 1 << 22;
+/// The link that opens Steam's own Downloads page.
+const DOWNLOADS: &str = "steam://open/downloads";
+
+/// An app file's `StateFlags`.
+fn flags(app: &vdf::Block) -> u64 {
+    app.text("StateFlags").and_then(|f| f.parse().ok()).unwrap_or(0)
+}
 /// Steamworks Common Redistributables: a tool, whatever its name.
 const REDISTRIBUTABLES: &str = "228980";
 
@@ -69,6 +85,7 @@ impl EmulatorPlugin for SteamPlugin {
             catalog: Some(steam.clone()),
             launcher: Some(steam.clone()),
             releases: Some(steam.clone()),
+            metadata: Some(steam.clone()),
             slots: Some(steam),
             ..Provided::default()
         })
@@ -113,9 +130,10 @@ impl Steam {
         vdf::parse(&String::from_utf8_lossy(&bytes))
     }
 
-    /// Every installed game of every library, by name; a game in two of them (Steam's folder
+    /// Every app file of every library: its `AppState` keys, its library's `steamapps` folder,
+    /// and whether that library is a Flatpak Steam's. An app in two libraries (Steam's folder
     /// both as itself and as `~/.steam/steam`) once.
-    async fn games(&self) -> PluginResult<Vec<Game>> {
+    async fn apps(&self) -> PluginResult<Vec<(vdf::Block, HostPath, bool)>> {
         let mut seen = BTreeSet::new();
         let mut out = Vec::new();
         for library in self.libraries().await? {
@@ -125,25 +143,73 @@ impl Steam {
                     continue;
                 }
                 let Some(file) = self.read_vdf(&apps.join(&entry.name)?).await else { continue };
-                let Some(app) = file.block("AppState") else { continue };
-                let (Some(id), Some(name), Some(dir)) = (app.text("appid"), app.text("name"), app.text("installdir"))
-                else {
-                    continue;
-                };
-                let flags = app.text("StateFlags").and_then(|f| f.parse::<u64>().ok()).unwrap_or(0);
-                if flags & FULLY_INSTALLED == 0 || is_tool(id, name) || !seen.insert(id.to_owned()) {
+                let Some(app) = file.block("AppState").cloned() else { continue };
+                let (Some(id), Some(name)) = (app.text("appid"), app.text("name")) else { continue };
+                if is_tool(id, name) || !seen.insert(id.to_owned()) {
                     continue;
                 }
-                out.push(Game {
-                    id: id.to_owned(),
-                    name: name.to_owned(),
-                    dir: apps.join(&format!("common/{dir}"))?,
-                    size: app.text("SizeOnDisk").and_then(|s| s.parse().ok()).filter(|s| *s > 0),
-                    flatpak: library.path.contains(FLATPAK_FOLDER),
-                });
+                out.push((app, apps.clone(), library.path.contains(FLATPAK_FOLDER)));
             }
         }
+        Ok(out)
+    }
+
+    /// Every fully installed game, by name.
+    async fn games(&self) -> PluginResult<Vec<Game>> {
+        let mut out = Vec::new();
+        for (app, apps, flatpak) in self.apps().await? {
+            let (Some(id), Some(name), Some(dir)) = (app.text("appid"), app.text("name"), app.text("installdir"))
+            else {
+                continue;
+            };
+            if flags(&app) & FULLY_INSTALLED == 0 {
+                continue;
+            }
+            out.push(Game {
+                id: id.to_owned(),
+                name: name.to_owned(),
+                dir: apps.join(&format!("common/{dir}"))?,
+                size: app.text("SizeOnDisk").and_then(|s| s.parse().ok()).filter(|s| *s > 0),
+                flatpak,
+            });
+        }
         out.sort_by_cached_key(|g| g.name.to_lowercase());
+        Ok(out)
+    }
+
+    /// The games Steam is installing: every app not fully installed yet, with its phase and
+    /// bytes from its app file.
+    pub(crate) async fn installing(&self) -> PluginResult<Vec<StoreInstall>> {
+        let mut out = Vec::new();
+        for (app, _, _) in self.apps().await? {
+            let state = flags(&app);
+            if state & FULLY_INSTALLED != 0 {
+                continue;
+            }
+            let (Some(id), Some(name)) = (app.text("appid"), app.text("name")) else { continue };
+            let bytes = |key: &str| app.text(key).and_then(|n| n.parse::<u64>().ok()).unwrap_or(0);
+            let (got, to_get) = (bytes("BytesDownloaded"), bytes("BytesToDownload"));
+            let (staged, to_stage) = (bytes("BytesStaged"), bytes("BytesToStage"));
+            let downloaded = to_get > 0 && got >= to_get;
+            let (phase, done, total) = if state & UPDATE_PAUSED != 0 {
+                (StorePhase::Paused, got, to_get)
+            } else if downloaded || state & (STAGING | COMMITTING) != 0 {
+                (StorePhase::Installing, staged, to_stage)
+            } else if got > 0 || state & DOWNLOADING != 0 {
+                (StorePhase::Downloading, got, to_get)
+            } else {
+                (StorePhase::Queued, got, to_get)
+            };
+            out.push(StoreInstall {
+                release: format!("steam-{id}"),
+                title: name.to_owned(),
+                phase,
+                done,
+                total,
+                open: DOWNLOADS.into(),
+            });
+        }
+        out.sort_by(|a, b| a.title.cmp(&b.title));
         Ok(out)
     }
 
@@ -152,10 +218,23 @@ impl Steam {
         games.into_iter().find(|g| g.id == id).ok_or_else(|| PluginError::NotFound(id.into()))
     }
 
-    /// Steam's art `file` ([`COVER`], [`HERO`], [`LOGO`]) for game `id`: from a library's cache, as Steam
-    /// keeps it since 2024 (`librarycache/<id>/…`, at times one folder deeper) or before
-    /// (`librarycache/<id>_…`), else from Steam's server.
-    async fn art(&self, id: &str, file: &str) -> PluginResult<ImageSource> {
+    /// Game `id`'s art of `kind`: Steam's cached file, else the server's when every game has it
+    /// there. The cover is the cached or the server's [`COVER`]; the background the cached
+    /// [`HERO`], else the server's [`HEADER`]; the logo only the cached [`LOGO`]. `None` for an
+    /// icon, and for a logo Steam hasn't cached.
+    async fn art(&self, id: &str, kind: ArtworkKind) -> PluginResult<Option<ImageSource>> {
+        let server = |file: &str| Some(ImageSource::Url(format!("{ART}/{id}/{file}")));
+        Ok(match kind {
+            ArtworkKind::Cover => self.cached(id, COVER).await?.or_else(|| server(COVER)),
+            ArtworkKind::Background => self.cached(id, HERO).await?.or_else(|| server(HEADER)),
+            ArtworkKind::Logo => self.cached(id, LOGO).await?,
+            ArtworkKind::Icon => None,
+        })
+    }
+
+    /// Steam's art `file` for game `id` in a library's cache, as Steam keeps it since 2024
+    /// (`librarycache/<id>/…`, at times one folder deeper) or before (`librarycache/<id>_…`).
+    async fn cached(&self, id: &str, file: &str) -> PluginResult<Option<ImageSource>> {
         let folders = self.ctx.folders();
         for library in self.libraries().await? {
             let cache = HostPath::new(STEAM, library.root, path("appcache/librarycache")?);
@@ -168,11 +247,11 @@ impl Steam {
             }
             for place in places {
                 if folders.exists(&place).await.unwrap_or(false) {
-                    return Ok(ImageSource::Folder(place));
+                    return Ok(Some(ImageSource::Folder(place)));
                 }
             }
         }
-        Ok(ImageSource::Url(format!("{ART}/{id}/{file}")))
+        Ok(None)
     }
 
     async fn summary(&self, game: &Game) -> PluginResult<GameSummary> {
@@ -180,7 +259,7 @@ impl Steam {
             id: game.id.clone(),
             title: game.name.clone(),
             platform: PLATFORM.into(),
-            cover: Some(self.art(&game.id, COVER).await?),
+            cover: self.art(&game.id, ArtworkKind::Cover).await?,
             tags: Vec::new(),
             release_year: None,
             // The app id: the Catalog's Steam game of the same id is this one, installed.
@@ -255,7 +334,7 @@ impl Catalog for Steam {
             developer: None,
             genres: Vec::new(),
             size_bytes: game.size,
-            background: Some(self.art(&game.id, HERO).await?),
+            background: self.art(&game.id, ArtworkKind::Background).await?,
             facts: Vec::new(),
             folder: Some(game.dir),
             also: Vec::new(),
@@ -265,13 +344,7 @@ impl Catalog for Steam {
     }
 
     async fn artwork(&self, id: &str, kind: ArtworkKind) -> PluginResult<Option<ImageSource>> {
-        let file = match kind {
-            ArtworkKind::Cover => COVER,
-            ArtworkKind::Background => HERO,
-            ArtworkKind::Logo => LOGO,
-            ArtworkKind::Icon => return Ok(None),
-        };
-        Ok(Some(self.art(id, file).await?))
+        self.art(id, kind).await
     }
 }
 
@@ -283,6 +356,10 @@ impl Releases for Steam {
             return Ok(None);
         }
         Ok(Some(self.library_releases().await?))
+    }
+
+    async fn store_installs(&self) -> PluginResult<Vec<StoreInstall>> {
+        self.installing().await
     }
 }
 

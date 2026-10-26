@@ -182,6 +182,10 @@ export struct Torrent {
     install-note: string,
     install-folder: string,
     install-error: string,
+    // For an install a store does ("Steam"): its state is queued, downloading or paused (or
+    // `install` installing), its one action `open-store` (the store's own Downloads page), and
+    // it has no folder to open. Empty for a torrent.
+    store: string,
 }
 
 export struct GameDetail {
