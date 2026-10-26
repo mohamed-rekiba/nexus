@@ -6,7 +6,7 @@
 # Runs in a privileged Fedora bootc container with the minimal image in its container storage,
 # from the repository root:
 #   podman run --rm --privileged -v /var/lib/containers:/var/lib/containers -v "$PWD:/src" -w /src \
-#     quay.io/fedora/fedora-bootc:44 os/build-iso.sh nexus-os-x86_64.iso
+#     quay.io/fedora/fedora-bootc:44 os/build-iso.sh nexus-os-x86_64-0.2.0.iso
 # Settings, from the environment:
 #   CORE           the minimal image to start from and to store (default
 #                  ghcr.io/mohamed-rekiba/nexus-os:minimal; a test build passes its :minimal-test)

@@ -137,7 +137,7 @@ package on Ubuntu as CI does. The AppImage needs
 | `make appimage` | `make package`, then `dist/Nexus-x86_64.AppImage`. Linux; needs `LINUXDEPLOY` |
 | `make test-rpm` | `scripts/test-rpm.sh`: a quick rpm of this checkout in `dist/test-rpm/`, to try a change on this PC, such as the Nexus session. It builds the launcher and takes the rest from the latest release's Linux folder. Its version, `<version>^local.<UTC time>`, installs over that release, and the next release replaces it |
 | `make os-image` | The Nexus OS image as `localhost/nexus-os:minimal` (`OS_IMAGE`), with `sudo podman`. It bundles the latest release's rpm, or `RPM=<file>`, such as `make test-rpm`'s |
-| `make os-iso` | The USB stick, `nexus-os-x86_64.iso`, from that image ([os/README.md](../os/README.md#build-and-test-locally)) |
+| `make os-iso` | The USB stick, `nexus-os-x86_64-<version>.iso`, from that image ([os/README.md](../os/README.md#build-and-test-locally)) |
 | `make os-vm` | Starts the stick in QEMU with Secure Boot and a 64 GB disk to install on (needs `edk2-ovmf`) |
 | `make deny` | `cargo deny check` |
 | `make hooks-install` | `pre-commit install --hook-type pre-commit --hook-type pre-push` |

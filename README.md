@@ -235,28 +235,43 @@ The current version is Nexus OS 0.1.2:
 All Nexus OS releases are tagged `nexus-os-v…` on the
 [releases page](https://github.com/mohamed-rekiba/nexus/releases?q=nexus-os).
 
-The release has one ISO, `nexus-os-x86_64.iso`, to write to a USB stick of 8 GB or more. When
-the ISO is over 2 GiB it comes in parts (`nexus-os-x86_64.iso.part-aa`, `-ab`, …): download them
-all and join them into the ISO.
+The release has one ISO, named with its version (`nexus-os-x86_64-0.1.1.iso`), to write to a USB
+stick of 8 GB or more. When the ISO is over 2 GiB it comes in parts
+(`nexus-os-x86_64-0.1.1.iso.part-aa`, `-ab`, …): download them all and join them into the ISO.
 
 - Linux and macOS:
 
   ```sh
-  cat nexus-os-x86_64.iso.part-* > nexus-os-x86_64.iso
+  cat nexus-os-x86_64-0.1.1.iso.part-* > nexus-os-x86_64-0.1.1.iso
   ```
 
 - Windows (Command Prompt), naming every part in order:
 
   ```bat
-  copy /b nexus-os-x86_64.iso.part-aa + nexus-os-x86_64.iso.part-ab nexus-os-x86_64.iso
+  copy /b nexus-os-x86_64-0.1.1.iso.part-aa + nexus-os-x86_64-0.1.1.iso.part-ab nexus-os-x86_64-0.1.1.iso
   ```
 
-Then check the ISO against `nexus-os-x86_64.iso.sha256` (each part also has its own `.sha256`):
+Then check the ISO against `nexus-os-x86_64-0.1.1.iso.sha256` (each part also has its own
+`.sha256`):
 
-- Linux: `sha256sum -c nexus-os-x86_64.iso.sha256`
-- macOS: `shasum -a 256 -c nexus-os-x86_64.iso.sha256`
-- Windows (PowerShell): `Get-FileHash nexus-os-x86_64.iso`, and compare it with the file's
+- Linux: `sha256sum -c nexus-os-x86_64-0.1.1.iso.sha256`
+- macOS: `shasum -a 256 -c nexus-os-x86_64-0.1.1.iso.sha256`
+- Windows (PowerShell): `Get-FileHash nexus-os-x86_64-0.1.1.iso`, and compare it with the file's
   first word.
+
+To try the ISO in a virtual machine first, on Fedora, from a clone of this repository:
+
+```sh
+sudo dnf install qemu-kvm qemu-img edk2-ovmf
+os/run-vm.sh path/to/nexus-os-x86_64-0.1.1.iso
+```
+
+<!-- x-release-please-end -->
+
+It starts the ISO as a USB stick in a UEFI virtual machine with Secure Boot, and gives it an
+empty 64 GB disk (`os-vm.qcow2`) to install on, kept between starts. The stick stays attached
+after an install: to start the installed system, run the same command and choose the disk in
+the VM's boot menu (press Esc while it starts). [os/README.md](os/README.md) has what to check.
 
 Write it to the USB stick with [balenaEtcher](https://etcher.balena.io): choose the ISO, the USB
 stick, then **Flash**. Start the PC from the stick (its boot menu key is usually F12, F11, F8 or

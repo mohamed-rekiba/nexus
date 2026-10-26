@@ -13,8 +13,9 @@ name: Nexus OS
 #   tag and tagged with the version, then the stick is built, attached to the draft release,
 #   and the release is published, never as the latest: Nexus's updater reads the latest
 #   release, which stays a Nexus one.
-# - The stick is one file, or 1500 MB parts when it's over 2 GiB (GitHub's limit for a release
-#   file), each with a .sha256. It's also this run's `nexus-os-iso` artifact.
+# - The stick is one file, nexus-os-x86_64-<version>.iso (os/version.txt; a test run's ends
+#   -test.iso), or 1500 MB parts when it's over 2 GiB (GitHub's limit for a release file), each
+#   with a .sha256. It's also this run's `nexus-os-iso` artifact.
 # - Test mode (by hand on a branch, the default): the images go under -test tags
 #   (:minimal-test), which no PC follows, and the stick is only kept as an artifact for a few
 #   days.
@@ -252,17 +253,20 @@ jobs:
           # The very image the minimal job pushed, whatever was pushed since.
           core="ghcr.io/$owner/nexus-os@$DIGEST"
           sudo podman pull "$core"
-          os/make-iso.sh "$core" out/nexus-os-x86_64.iso
+          # nexus-os-x86_64-0.2.0.iso; a test run's is nexus-os-x86_64-0.2.0-test.iso.
+          iso="nexus-os-x86_64-$(cat os/version.txt)$SUFFIX.iso"
+          echo "ISO=$iso" >> "$GITHUB_ENV"
+          os/make-iso.sh "$core" "out/$iso"
 
       - name: Checksums, and parts when it's over 2 GiB
         working-directory: out
         run: |
-          iso=nexus-os-x86_64.iso
+          iso=$ISO
           sha256sum "$iso" > "$iso.sha256"
           size=$(stat -c %s "$iso")
           echo "ISO: $size bytes"
           # GitHub release files must be under 2 GiB: a larger ISO goes as 1500 MB parts
-          # (nexus-os-x86_64.iso.part-aa, -ab, …), which the README shows how to join.
+          # (nexus-os-x86_64-0.2.0.iso.part-aa, -ab, …), which the README shows how to join.
           if [ "$size" -gt 2147483648 ]; then
             split -b 1500M "$iso" "$iso.part-"
             rm "$iso"

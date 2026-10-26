@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Starts the Nexus OS USB stick in QEMU, as a USB stick, in a UEFI VM with Secure Boot, 6 GB of
 # memory and a 64 GB disk to install on. `make os-vm` runs it:
-#   os/run-vm.sh [ISO]       default nexus-os-x86_64.iso
+#   os/run-vm.sh [ISO]       default nexus-os-x86_64-<version>.iso (the version from os/version.txt)
 # The disk (os-vm.qcow2) and the firmware's variables (os-vm-vars.fd) are made the first time
-# and kept, so an install survives the next start; delete them to start over. Needs QEMU and
-# Fedora's edk2-ovmf.
+# and kept, so an install survives the next start; delete them to start over. Needs Fedora's
+# qemu-kvm, qemu-img and edk2-ovmf.
 set -euo pipefail
-iso=${1:-nexus-os-x86_64.iso}
+iso=${1:-nexus-os-x86_64-$(cat os/version.txt).iso}
 ovmf=/usr/share/edk2/ovmf
 [ -f os-vm.qcow2 ] || qemu-img create -f qcow2 os-vm.qcow2 64G
 [ -f os-vm-vars.fd ] || cp "$ovmf/OVMF_VARS.secboot.fd" os-vm-vars.fd

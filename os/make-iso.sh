@@ -2,12 +2,13 @@
 # Builds the Nexus OS USB stick from a minimal image in root's container storage: it runs
 # os/build-iso.sh in a privileged Fedora bootc container, from the repository root. os.yml and
 # `make os-iso` run it:
-#   os/make-iso.sh [IMAGE] [OUTPUT]   default localhost/nexus-os:minimal, nexus-os-x86_64.iso
+#   os/make-iso.sh [IMAGE] [OUTPUT]   default localhost/nexus-os:minimal, nexus-os-x86_64-<version>.iso
+#   (the version from os/version.txt)
 # BASE: the Fedora bootc image to run in (default quay.io/fedora/fedora-bootc:44). METHOD goes
 # to build-iso.sh (xorriso for the hand-made ISO).
 set -euo pipefail
 core=${1:-localhost/nexus-os:minimal}
-out=${2:-nexus-os-x86_64.iso}
+out=${2:-nexus-os-x86_64-$(cat os/version.txt).iso}
 base=${BASE:-quay.io/fedora/fedora-bootc:44}
 podman=(podman)
 sudo=()

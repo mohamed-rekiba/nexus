@@ -12,7 +12,7 @@ There are two images and one USB stick:
 |---|---|---|
 | Minimal edition ([Containerfile](Containerfile), [files/](files/)) | Fedora's smallest bootable system, gamescope and Nexus: no desktop | `ghcr.io/<owner>/nexus-os:minimal` |
 | NVIDIA edition ([nvidia/](nvidia/)) | The minimal edition plus NVIDIA's driver, as layers on top | `:minimal-nvidia` (only for NVIDIA PCs) |
-| USB stick ([live/](live/), [build-iso.sh](build-iso.sh)) | Nexus OS started from the stick: try it, or install it by erasing a disk or with your own partitions | `nexus-os-x86_64.iso` in each `nexus-os-v*` release |
+| USB stick ([live/](live/), [build-iso.sh](build-iso.sh)) | Nexus OS started from the stick: try it, or install it by erasing a disk or with your own partitions | `nexus-os-x86_64-<version>.iso` in each `nexus-os-v*` release |
 
 Each image also gets a dated tag (`minimal-20261024`) and, from an OS release, a version tag
 (`minimal-0.2.0`).
@@ -144,7 +144,7 @@ scripts. From the repository root:
 ```bash
 os/fetch-nexus.sh          # the latest release's rpm into os/nexus-rpm/ (or copy a local one there)
 os/build-image.sh          # localhost/nexus-os:minimal
-os/make-iso.sh             # nexus-os-x86_64.iso from it
+os/make-iso.sh             # nexus-os-x86_64-<version>.iso from it (os/version.txt)
 os/run-vm.sh               # starts it in QEMU (below)
 ```
 
@@ -155,11 +155,25 @@ local rpm, such as `make test-rpm`'s.
 
 `os/run-vm.sh` boots the ISO in a UEFI VM as a USB stick, with Secure Boot, 6 GB of memory, and
 a 64 GB disk to install on (`os-vm.qcow2`, kept between starts; delete it to start over). It
-needs QEMU and Fedora's `edk2-ovmf`.
+needs three Fedora packages:
 
-The ISO from a test run of `os.yml` works too: its `nexus-os-iso` artifact. To check the
-partitioning install, give that disk an NTFS partition first and keep it in Anaconda's disk
-screen. A VM has no GPU Vulkan, so Nexus shows in cage there, and draws slowly; nor has it Wi-Fi
+```bash
+sudo dnf install qemu-kvm qemu-img edk2-ovmf
+```
+
+The ISO from a test run of `os.yml` works too: its `nexus-os-iso` artifact, with `-test` after
+the version (`nexus-os-x86_64-0.2.0-test.iso`). Over 2 GiB it comes in parts, as on a release;
+join them and check the ISO first:
+
+```bash
+iso=nexus-os-x86_64-0.2.0-test.iso
+cat "$iso".part-* > "$iso"
+sha256sum -c "$iso.sha256"
+os/run-vm.sh "$iso"
+```
+
+To check the partitioning install, give that disk an NTFS partition first and keep it in
+Anaconda's disk screen. A VM has no GPU Vulkan, so Nexus shows in cage there, and draws slowly; nor has it Wi-Fi
 or Bluetooth. Those controls are tested on a PC from the stick, or on a desktop with
 `NEXUS_SESSION=1` ([development.md](../docs/development.md)).
 

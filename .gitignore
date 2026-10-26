@@ -1,7 +1,7 @@
 target/
 node_modules/
 # Nexus OS stick builds (os/build-iso.sh), the rpm the image bundles, and make os-vm's disks.
-/nexus-os-x86_64.iso*
+/nexus-os-*.iso*
 /.iso-work/
 /os/nexus-rpm/
 /os-vm.qcow2
