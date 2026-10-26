@@ -571,6 +571,29 @@ async fn a_finished_pc_download_installs_and_shows_in_the_library() {
     assert!(games.contains(&"PC Penguins".to_owned()), "{games:?}");
 }
 
+#[tokio::test]
+async fn after_a_restart_a_pc_download_s_card_still_plays_the_game_it_installed() {
+    let (topic, elf) = penguins();
+    let (t, _home) = downloaded("PC", topic, &[("Penguins/penguins.x86_64", &elf)], |h, _| h).await;
+    act(&t, TorrentAction::Install).await;
+    assert_eq!(installed(&t).await.install, "done");
+
+    // The next start: the install's record is gone, and a PC game has no title id.
+    let again = nexus_core::Core::start(t.kernel.clone()).await;
+    again.dispatch(Command::RefreshLibrary).await.unwrap();
+    catalogs_fetched(&again).await;
+    let card = || again.view().downloads.torrents.into_iter().next().unwrap();
+    for _ in 0..200 {
+        if !card().game.is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let card = card();
+    assert!(!card.game.is_empty(), "the installed game: {card:?}");
+    assert!(card.actions.contains(&"play".to_owned()), "Play, not Install: {:?}", card.actions);
+}
+
 fn penguins() -> (serde_json::Value, Vec<u8>) {
     let mut elf = vec![0u8; 0x200];
     elf[..4].copy_from_slice(b"\x7fELF");

@@ -1194,6 +1194,7 @@ fn downloads_vm(kernel: &Kernel, jobs: Vec<Job>, state: &AppState) -> DownloadsV
     });
     let jobs = installs.chain(downloads).collect();
     let home = kernel.host().home.as_ref().and_then(|h| h.to_str()).map(str::to_owned);
+    let owned = Owned::new(state);
     let mut torrents: Vec<TorrentVm> = state
         .torrents
         .values()
@@ -1203,7 +1204,7 @@ fn downloads_vm(kernel: &Kernel, jobs: Vec<Job>, state: &AppState) -> DownloadsV
             install_folder: crate::torrents::install_folder(kernel, &j.emulator, None)
                 .map(|(_, path)| short_home(&path.display().to_string(), home.as_deref()))
                 .unwrap_or_default(),
-            ..torrent_vm(state, j)
+            ..torrent_vm(state, &owned, j)
         })
         .collect();
     torrents.reverse();
@@ -1227,18 +1228,19 @@ fn bytes_label(bytes: u64) -> String {
     if gb >= 1.0 { format!("{gb:.1} GB") } else { format!("{:.0} MB", bytes as f64 / 1e6) }
 }
 
-fn torrent_vm(state: &AppState, j: &crate::torrents::TorrentJob) -> TorrentVm {
+fn torrent_vm(state: &AppState, owned: &Owned, j: &crate::torrents::TorrentJob) -> TorrentVm {
     use crate::torrents::TorrentState as S;
     let install = state.game_installs.values().rev().find(|g| g.plugin == j.emulator && g.source == j.source);
     let installing = install.is_some_and(|g| g.phase == crate::game_installs::GamePhase::Installing);
     let installed = install.is_some_and(|g| g.phase == crate::game_installs::GamePhase::Done);
-    // The installed game: the emulator's game with the offer's title id, else the one with the
-    // title its install reported (a PC game has no title id).
-    let title_id = state.offers.iter().find(|o| o.entry.key == j.offer).and_then(|o| o.entry.summary.title_id.clone());
-    let ours = |e: &&crate::app::Entry| e.key.plugin == j.emulator;
-    let by_id = title_id
-        .and_then(|t| state.library.iter().filter(ours).find(|e| e.summary.title_id.as_deref() == Some(t.as_str())));
-    let game = by_id.or_else(|| installed_from(state, j)).map(|e| e.key.to_string()).unwrap_or_default();
+    // The installed game: the one this download's install reported, else the offer's, as its
+    // Catalog card finds it (by title id, or by name: a PC game has no title id). The install's
+    // record is gone after a restart.
+    let offer = state.offers.iter().find(|o| o.entry.key == j.offer);
+    let game = installed_from(state, j)
+        .or_else(|| offer.and_then(|o| installed_game(state, owned, o)))
+        .map(|e| e.key.to_string())
+        .unwrap_or_default();
     use crate::archives::UnpackPhase as U;
     let unpacking = j.unpack.phase == U::Unpacking;
     let mut actions: Vec<&str> = Vec::new();
