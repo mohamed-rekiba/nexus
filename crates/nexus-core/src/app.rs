@@ -814,6 +814,8 @@ impl Core {
             Command::UpdateEmulator { plugin } => self.update(&plugin).await,
             Command::UninstallEmulator { plugin, version } => self.uninstall(&plugin, &version).await,
             Command::Launch(game) => {
+                // A Catalog offer's Play starts the installed game it is.
+                let game = crate::view::played_game(&self.state(), &game);
                 let result = crate::launch::launch(self, game.clone()).await;
                 // The player pressed Play: say why nothing started.
                 if let Err(error) = &result {
@@ -1774,6 +1776,7 @@ impl Core {
 
     async fn uninstall_game(&self, game: &GameKey) -> CoreResult<()> {
         let also;
+        let link;
         let (folder, title) = {
             let state = self.state();
             if state.sessions.values().any(|s| &s.game == game) {
@@ -1789,9 +1792,29 @@ impl Core {
             let details = state.details.get(game).and_then(|d| d.details.as_ref());
             let folder = details.and_then(|d| d.folder.clone());
             also = details.map(|d| d.also.clone()).unwrap_or_default();
+            // A store's game: the store removes it (Steam asks in its own dialog).
+            link = details.and_then(|d| Some((d.uninstall_link.clone()?, d.summary.platform.clone())));
             let title = state.library.iter().find(|e| &e.key == game).map(|e| e.summary.title.clone());
             (folder, title.unwrap_or_else(|| game.local.clone()))
         };
+        if let Some((link, platform)) = link {
+            let allowed = self.inner.kernel.manifest(&game.plugin)?.permissions.allows_link(&link);
+            if !allowed {
+                return Err(CoreError::PermissionDenied {
+                    plugin: game.plugin.clone(),
+                    action: format!("open {link}"),
+                });
+            }
+            let opening = link.clone();
+            crate::running::blocking(self, move |desktop, _| desktop.open_link(&opening))
+                .await
+                .map_err(CoreError::Invalid)?;
+            let store = crate::view::system_of(&self.inner.kernel, &platform).name;
+            tracing::info!(%game, %link, "asked the store to uninstall");
+            self.notice(format!("{store} is uninstalling {title}: it leaves your Library when it's done"));
+            self.changed();
+            return Ok(());
+        }
         let folder = folder.ok_or_else(|| CoreError::Invalid(format!("{title} has no folder to delete")))?;
         let folders = game_folders(&self.inner.kernel, game)
             .ok_or_else(|| CoreError::Invalid(format!("{title} has no folder to delete")))?;

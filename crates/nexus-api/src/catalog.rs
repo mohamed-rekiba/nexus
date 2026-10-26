@@ -80,6 +80,11 @@ pub struct GameDetails {
     /// uninstalling the game deletes them with its folder.
     #[serde(default)]
     pub also: Vec<crate::HostPath>,
+    /// For a game its store installs and removes (Steam's): the link that asks the store to
+    /// uninstall it, for example `steam://uninstall/440`. Uninstall opens it instead of deleting
+    /// `folder`; the plugin's `permissions.links` must allow it.
+    #[serde(default)]
+    pub uninstall_link: Option<String>,
 }
 
 /// One fact about a game: "Region: Europe". Themes know these ids: `region`, `age`

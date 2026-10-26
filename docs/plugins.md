@@ -251,6 +251,10 @@ install into a folder named for the console inside the first `games` folder (`PS
 
 An empty list means the plugin may not start anything.
 
+**`links`**: links the host may open for the plugin with the system's handler, by how they
+start: `["steam://install/"]`. A release's `store` link opens only when one of them starts it,
+and only when it is one line of plain characters.
+
 **`long_running`** and **`polkit`**, system plugins only: entries of `process` (`system:<name>`)
 that may run with no time limit, their output read line by line (`Programs::stream`), and that
 may run as the administrator through `pkexec`. Each must also be in `process`; the host refuses
@@ -494,12 +498,23 @@ For the Catalog's downloads to install, the emulator names its `console`, asks f
 says whether the list was `Fetched`, `Cached` or `Bundled`, and `problem` why a fetch didn't
 give it. Publish `RELEASES_CHANGED` when the lists change on their own.
 
+A game its store removes (Steam's) gives `GameDetails.uninstall_link`, `steam://uninstall/440`:
+Uninstall opens it, when `permissions.links` allows it, instead of deleting the game's folder.
+
+A release a store installs has an empty `torrent` and a `store` link instead
+(`steam://install/440`): the Game Hub's Install opens that link, which the plugin's
+`permissions.links` must allow, and downloads nothing. `hidden` puts the game under the
+Catalog's "Hidden" filter, as if the player hid it in Nexus (Steam's Hidden collection);
+`favorite` gives its card a "Favorite" badge. An emulator may provide `releases` for its own
+console: the Steam plugin's console is `Steam`, and its list is the player's Steam library.
+
 `Vm.catalog-available` in the theme contract is true only while a plugin with `releases` is
 turned on. A `releases` plugin may have a boolean setting `show_hidden_filter`: when one sets it
 to `false`, the Catalog has no "Hidden" filter.
 
-The Game Catalog gives no list for a console whose `show_<console>` setting (`show_ps5`) is
-`false`. Its settings schema names one such toggle for each console an emulator turned on
+An emulator that provides `releases` itself is its console's only catalog: the core asks no
+other plugin for that console (the Steam plugin's console, `Steam`). The Game Catalog gives no
+list for a console whose `show_<console>` setting (`show_ps5`) is `false`. Its settings schema names one such toggle for each console an emulator turned on
 plays. The library is the emulator's, so that console's installed games stay.
 
 ### Metadata (services)

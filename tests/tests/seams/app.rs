@@ -96,6 +96,7 @@ impl Catalog for FakeEmu {
         Ok(GameDetails {
             folder: None,
             also: Vec::new(),
+            uninstall_link: None,
             summary,
             description: "A game.".into(),
             developer: Some("Dev".into()),

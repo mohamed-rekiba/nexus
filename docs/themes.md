@@ -254,19 +254,23 @@ Recent additions to know about:
 - `Vm.catalog-available` is true while a plugin that gives release catalogs is turned on.
   Without one there is no Catalog: the core refuses to open it, and a theme hides the ways to
   it. The default theme hides Search, and its shoulder buttons skip the Catalog.
-- `GameDetail.can-uninstall` is true when the game's folder is one its emulator may delete (a
-  folder inside a grant with `write = true`). Offer Uninstall then, and call
-  `Host.uninstall-game(key)`, which deletes the installed game's folder and takes it out of the
-  Library. The default theme puts it in the game's menu.
+- **A game's actions**, `GameCard.can` and `GameDetail.can` (`GameActions`), are worked out by
+  the core, the same for every game of every plugin, Library or Catalog: draw them, don't work
+  them out. `primary` is the main action: `play` when it is installed (`Host.launch(key)`; a
+  Catalog game starts the installed game it is), else `get` (its label in `get`: "Download"
+  opens its Game Hub's releases; with a `get-store`, "Install in Steam",
+  `Host.download-release(key, get-release, "")` asks the store). `uninstall` is the key to pass
+  to `Host.uninstall-game` after asking; `uninstall-store` names the store that then asks its
+  own way. Uninstall is never the main action: the default theme puts it in the game's menu.
 - `GameCard.system-name` and `system-color` (and `GameDetail`'s) are the game's system as its
   plugin describes it (`[system]` in the plugin's manifest): its full name, "PlayStation 5",
   and its color. The color is transparent when the plugin gives none: draw the neutral look.
   Draw systems from these, never from `platform`'s code, so a new plugin's games need no
   change to the theme. The default theme makes the badge's fill, edge and text, and the art of
   a game without a cover, from the one color.
-- `GameCard.uninstall` is the key of the installed game a card's Uninstall removes: the game
-  itself, or for a Catalog card the installed game the offer is; empty for none. Pass it to
-  `Host.uninstall-game(key)`, after asking.
+- `Release.store` names the store that installs a release ("Steam"); empty for a torrent. Its
+  Download asks the store, with no download sheet: call `Host.download-release(key, id, "")`
+  and stay on the Game Hub. The default theme's button says "Install in Steam".
 - `GameCard.hidden` and `GameDetail.hidden` say the player hid a Catalog game. Call
   `Host.hide-game(key, hidden)` to hide one or show it again. A hidden game leaves the Catalog,
   but for the systems row's "Hidden" filter (id `hidden`), which shows only hidden games. The

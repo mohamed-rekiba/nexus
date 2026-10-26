@@ -240,6 +240,14 @@ pub(crate) fn installed_offers(state: &AppState) -> Vec<InstalledOffer> {
         .collect()
 }
 
+/// The game Play starts for `key`: for a Catalog offer the player has installed, the installed
+/// game it is; else `key` itself.
+pub(crate) fn played_game(state: &AppState, key: &GameKey) -> GameKey {
+    let owned = Owned::new(state);
+    let offer = state.offers.iter().find(|o| &o.entry.key == key);
+    offer.and_then(|o| installed_game(state, &owned, o)).map(|g| g.key.clone()).unwrap_or_else(|| key.clone())
+}
+
 /// A catalog's Steam data for `key`: an offer's own, or for an installed game, the offer's it
 /// is.
 fn steam_for(state: &AppState, key: &GameKey) -> Option<(PluginId, nexus_api::GameMetadata)> {
@@ -290,8 +298,66 @@ fn card(kernel: &Kernel, core_state: &AppState, entry: &Entry) -> GameCardVm {
         releases: 0,
         availability: String::new(),
         hidden: false,
-        uninstall: if can_uninstall(kernel, core_state, &entry.key) { entry.key.to_string() } else { String::new() },
+        // A Library game's; `offer_card` gives an offer's.
+        can: game_actions(kernel, core_state, &entry.key, None),
     }
+}
+
+/// What can be done with the game `key`: a Library game (`offer` is `None`), or a Catalog
+/// offer with the installed game it is, if any. The one place the rules live:
+///
+/// - Play: it is installed (an offer: the installed game it is), and that game's plugin can
+///   start games. A missing emulator is no reason to hide it: Play installs the emulator first.
+/// - Get: an offer that isn't installed. A release its store installs asks the store
+///   ("Install in Steam"); a torrent's game downloads, from a release the player picks.
+/// - Uninstall: the installed game, by its store's link when its plugin gives one and may open
+///   it, else by deleting its folder when its plugin may.
+/// - The main action: Play, else Get, else none. Uninstall is never the main one.
+pub(crate) fn game_actions(
+    kernel: &Kernel,
+    state: &AppState,
+    key: &GameKey,
+    offer: Option<(&crate::releases::Offer, Option<&Entry>)>,
+) -> GameActionsVm {
+    let installed: Option<&GameKey> = match offer {
+        None => Some(key),
+        Some((_, game)) => game.map(|g| &g.key),
+    };
+    let manifest = |plugin: &PluginId| kernel.manifest(plugin).ok();
+    let play =
+        installed.is_some_and(|k| manifest(&k.plugin).is_some_and(|m| m.capabilities.contains(&Capability::Launcher)));
+    let mut actions = GameActionsVm { play, ..GameActionsVm::default() };
+    if let Some(game) = installed {
+        let details = state.details.get(game).and_then(|d| d.details.as_ref());
+        let link = details.and_then(|d| d.uninstall_link.as_deref());
+        let store_removes = link.is_some_and(|l| manifest(&game.plugin).is_some_and(|m| m.permissions.allows_link(l)));
+        if store_removes {
+            let platform = details.map(|d| d.summary.platform.as_str()).unwrap_or_default();
+            actions.uninstall = game.to_string();
+            actions.uninstall_store = system_of(kernel, platform).name;
+        } else if can_uninstall(kernel, state, game) {
+            actions.uninstall = game.to_string();
+        }
+    }
+    if let Some((offer, None)) = offer {
+        match offer.releases.iter().find(|r| !r.store.is_empty()) {
+            Some(release) => {
+                actions.get_store = system_of(kernel, &release.platform).name;
+                actions.get = format!("Install in {}", actions.get_store);
+                actions.get_release = release.id.clone();
+            }
+            None if !offer.releases.is_empty() => actions.get = "Download".into(),
+            None => {}
+        }
+    }
+    actions.primary = if actions.play {
+        "play".into()
+    } else if !actions.get.is_empty() {
+        "get".into()
+    } else {
+        String::new()
+    };
+    actions
 }
 
 /// The genres a store's catalog gives the game.
@@ -352,7 +418,10 @@ fn grid<'a>(kernel: &Kernel, state: &'a AppState, catalog: bool) -> GridGames<'a
     let hidden = if catalog { crate::Core::hidden_games(kernel) } else { Default::default() };
     let hidden_filter = catalog && crate::Core::hidden_filter_on(kernel);
     let only_hidden = hidden_filter && view.hidden;
-    let is_hidden = |e: &Entry| hidden.contains(&e.key.to_string());
+    // Hidden by the player in Nexus, or in the game's store (Steam's Hidden collection).
+    let store_hidden =
+        |e: &Entry| offers.get(&e.key).is_some_and(|o| !o.releases.is_empty() && o.releases.iter().all(|r| r.hidden));
+    let is_hidden = |e: &Entry| catalog && (hidden.contains(&e.key.to_string()) || store_hidden(e));
     let hidden_count = entries.iter().filter(|e| is_hidden(e)).count();
     let entries: Vec<&Entry> = entries.into_iter().filter(|e| is_hidden(e) == only_hidden).collect();
     // How many games there are before the search and the filters: hidden ones count nowhere.
@@ -801,13 +870,17 @@ fn offer_card(
     card.size_bytes = best.size_bytes;
     card.availability = crate::releases::availability(best.seeders).into();
     card.releases = offer.releases.len();
+    let installed = installed_game(state, owned, offer);
+    card.can = game_actions(kernel, state, &offer.entry.key, Some((offer, installed)));
+    // A game its store installs has no torrent to be available.
+    if offer.releases.iter().any(|r| !r.store.is_empty()) {
+        card.availability = String::new();
+    }
     let plugin = &offer.entry.key.plugin;
-    // A card for an installed game uninstalls that game, not the offer.
-    card.uninstall = installed_game(state, owned, offer)
-        .filter(|game| can_uninstall(kernel, state, &game.key))
-        .map(|game| game.key.to_string())
-        .unwrap_or_default();
-    if installed_game(state, owned, offer).is_some() {
+    if offer.releases.iter().any(|r| r.favorite) {
+        card.badges.push(badge(plugin, "favorite", "Favorite", Tone::Info));
+    }
+    if installed.is_some() {
         card.badges.push(badge(plugin, "installed", "Installed", Tone::Success));
     } else if offer.releases.iter().any(|r| crate::releases::is_new(&r.added, today)) {
         card.badges.push(badge(plugin, "new", "New", Tone::Info));
@@ -936,8 +1009,10 @@ fn detail_vm(core: &Core, kernel: &Kernel, state: &AppState, key: &GameKey) -> O
     let owned = Owned::new(state);
     let has_installer = manifest.is_some_and(|m| m.capabilities.contains(&Capability::Installer));
     let installed = state.emulators.get(&key.plugin).is_some_and(|e| !e.installed.is_empty());
-    // A missing emulator is no reason to hide Play: Play asks to install it first.
-    let can_launch = manifest.is_some_and(|m| m.capabilities.contains(&Capability::Launcher));
+    // A Catalog offer plays as the installed game it is, and not at all before it is installed.
+    let installed_as = offer.and_then(|o| installed_game(state, &owned, o));
+    let played = installed_as.map(|g| &g.key).unwrap_or(key);
+    let can = game_actions(kernel, state, key, offer.map(|o| (o, installed_as)));
     let needs_emulator = has_installer && !installed;
     // The program, not the console: "Launches with the KytyPS5 emulator".
     let name = manifest.map(|m| m.emulator_name().to_owned()).unwrap_or_default();
@@ -1046,17 +1121,16 @@ fn detail_vm(core: &Core, kernel: &Kernel, state: &AppState, key: &GameKey) -> O
         has_folder: details.folder.as_ref().and_then(|f| crate::app::resolve_game_folder(kernel, key, f)).is_some(),
         has_log: crate::launch::log_path(kernel, key).is_file(),
         hidden: crate::Core::hidden_games(kernel).contains(&key.to_string()),
-        can_uninstall: can_uninstall(kernel, state, key),
         compat_page: d.compat_page.clone(),
         trailer_url: meta.map(|(_, m)| m.trailer.clone()).unwrap_or_default(),
         compat: d.compat.clone(),
         badges: state.badges.get(key).cloned().unwrap_or_default(),
         actions: d.actions.clone(),
         sections: d.sections.clone(),
-        can_launch,
+        can: can.clone(),
         settings: d.settings.iter().cloned().collect(),
-        launch_hint: if can_launch && needs_emulator { format!("Play installs {name} first") } else { String::new() },
-        running: state.sessions.values().any(|s| &s.game == key),
+        launch_hint: if can.play && needs_emulator { format!("Play installs {name} first") } else { String::new() },
+        running: state.sessions.values().any(|s| &s.game == played),
         size_bytes: details.size_bytes,
         facts: details.facts.clone(),
         played_secs: stats.secs,
@@ -1066,8 +1140,10 @@ fn detail_vm(core: &Core, kernel: &Kernel, state: &AppState, key: &GameKey) -> O
             .map(|o| {
                 let today = crate::releases::today();
                 let best = &best_release(state, &owned, o).id;
-                // By version, highest first; of one version, the newest upload first.
-                let mut ordered: Vec<&nexus_api::Release> = o.releases.iter().collect();
+                // By version, highest first; of one version, the newest upload first. A release
+                // its store installs is no use once the game is installed.
+                let mut ordered: Vec<&nexus_api::Release> =
+                    o.releases.iter().filter(|r| r.store.is_empty() || installed_as.is_none()).collect();
                 ordered.sort_by_cached_key(|r| std::cmp::Reverse(crate::releases::version_key(&r.version)));
                 let count = ordered.len();
                 ordered
@@ -1085,6 +1161,7 @@ fn detail_vm(core: &Core, kernel: &Kernel, state: &AppState, key: &GameKey) -> O
                         counted_at: r.counted_at.clone(),
                         availability: crate::releases::availability(r.seeders).into(),
                         id: r.id.clone(),
+                        store: if r.store.is_empty() { String::new() } else { system_of(kernel, &r.platform).name },
                         version: r.version.clone(),
                         region: r.region.clone(),
                         size_bytes: r.size_bytes,

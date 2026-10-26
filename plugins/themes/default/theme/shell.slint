@@ -327,17 +327,17 @@ export component Shell inherits Window {
             ]
             : Vm.has-trailer ? [
                 { pad: "✕", key: "Enter", label: Vm.trailer.playing ? "Pause" : "Play" },
-                { pad: "◀ ▶", key: "← →", label: "10 s" },
+                { pad: "⮜  ⮞", key: "← →", label: "10 s" },
                 { pad: "○", key: "Esc", label: "Close" },
             ]
             : Viewer.open ? [
-                { pad: "◀ ▶", key: "← →", label: "Move" },
+                { pad: "⮜  ⮞", key: "← →", label: "Move" },
                 { pad: "○", key: "Esc", label: "Close" },
             ]
             : root.grid-header ? [
-                { pad: "◀ ▶", key: "← →", label: "Move" },
+                { pad: "⮜  ⮞", key: "← →", label: "Move" },
                 { pad: "✕", key: "Enter", label: "Choose" },
-                { pad: "▲ ▼", key: "↑ ↓", label: "Rows" },
+                { pad: "⮝  ⮟", key: "↑ ↓", label: "Rows" },
                 { pad: "○", key: "Esc", label: "Back" },
             ]
             : root.home && Nav.zone == "tabs" ? [
@@ -364,18 +364,18 @@ export component Shell inherits Window {
                 { pad: "○", key: "Esc", label: "Not now" },
             ]
             : Vm.screen == "game-detail" && root.trailer-key ? [
-                { pad: "✕", key: "Enter", label: Hub.shots ? "View" : Vm.detail.can-launch && Hub.focus == 0 ? "Play" : "Select" },
+                { pad: "✕", key: "Enter", label: Hub.shots ? "View" : Vm.detail.can.play && Hub.focus == 0 ? "Play" : "Select" },
                 { pad: "○", key: "Esc", label: "Back" },
                 { pad: "□", key: "T", label: "Trailer" },
                 { pad: "☰", key: "Menu", label: "Options" },
             ]
             : Vm.screen == "game-detail" ? [
-                { pad: "✕", key: "Enter", label: Hub.shots ? "View" : Vm.detail.can-launch && Hub.focus == 0 ? "Play" : "Select" },
+                { pad: "✕", key: "Enter", label: Hub.shots ? "View" : Vm.detail.can.play && Hub.focus == 0 ? "Play" : "Select" },
                 { pad: "○", key: "Esc", label: "Back" },
                 { pad: "☰", key: "Menu", label: "Options" },
             ]
             : Vm.screen == "downloads" && Dl.removing ? [
-                { pad: "▲ ▼", key: "↑ ↓", label: "Choose" },
+                { pad: "⮝  ⮟", key: "↑ ↓", label: "Choose" },
                 { pad: "✕", key: "Enter", label: Dl.remove-focus == 0 ? "Remove" : Dl.remove-focus == 1 ? "Delete files" : "Not now" },
                 { pad: "○", key: "Esc", label: "Not now" },
             ]
@@ -384,8 +384,8 @@ export component Shell inherits Window {
                 { pad: "○", key: "Esc", label: "Not now" },
             ]
             : Vm.screen == "downloads" && Dl.rows > 0 ? [
-                { pad: "▲ ▼", key: "↑ ↓", label: "Move" },
-                { pad: "◀ ▶", key: "← →", label: "Buttons" },
+                { pad: "⮝  ⮟", key: "↑ ↓", label: "Move" },
+                { pad: "⮜  ⮞", key: "← →", label: "Buttons" },
                 { pad: "✕", key: "Enter", label: "Select" },
                 { pad: "○", key: "Esc", label: "Back" },
             ]

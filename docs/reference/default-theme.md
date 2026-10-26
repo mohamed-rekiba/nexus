@@ -101,11 +101,11 @@ filters, sorts and pages them.
   the game from the Catalog, or shows it again (`Host.hide-game`). The Game Hub of a Catalog game
   has the same as a "Hide" or "Show" button (`hub-hide`), and its menu has "Hide from the
   Catalog" or "Show in the Catalog", the pad's way.
-- **The card's button**, on the focused or pointed card, above its badges: "Uninstall"
-  (`card-uninstall`, valued "Uninstall <title>") when `GameCard.uninstall` names a game, which
-  asks "Uninstall <title>?" as the game's menu does (`GameMenu.ask-uninstall`); else, on a
-  Catalog card, "Download" (`card-download`), which opens the Game Hub with the keys on its
-  first release.
+- **The card's button**, on the focused or pointed card, above its badges: the game's main
+  action (`GameCard.can.primary`), the same on every card. "Play" (`card-play`, valued "Play
+  <title>") for an installed game, which starts it; else getting it (`card-get`): "Download",
+  which opens the Game Hub with the keys on its first release, or "Install in Steam", which asks
+  Steam at once. Uninstall is never the card's button: it is in the game's menu.
 - **Genres.** "GENRE", "All genres", then each genre. The row scrolls sideways; a fading edge
   means more chips past it (`genres-more-start`, `genres-more-end`).
 - **Count** (`default-count`). The Library: "N games". The Catalog: "2 games · 3 releases", or
@@ -188,7 +188,7 @@ game doesn't have it:
 8. "Compatibility list"
 9. "ProtonDB page"
 10. "Settings"
-11. "Uninstall", in red, when `Vm.detail.can-uninstall`
+11. "Uninstall", in red, when `Vm.detail.can.uninstall` names a game
 
 When Nexus is the whole screen (the Nexus session, Nexus OS), the menu leaves out "Open game
 folder", "View emulator log", "Compatibility list" and "ProtonDB page": no file manager or
@@ -455,7 +455,7 @@ in the far corner on screens and in the near corner over side sheets, mirrored r
 It hides over the Library and Catalog views (unless a menu or sheet is open), over a playing
 trailer whose controls have faded, and over the splash's game keys.
 
-The hints draw the pad's signs: ✕ (blue), ○ (pink), △, □, ☰, "▲ ▼", "◀ ▶" and "R1". Each hint
+The hints draw the pad's signs: ✕ (blue), ○ (pink), △, □, ☰, "⮝  ⮟", "⮜  ⮞" and "R1". Each hint
 also carries a keyboard name ("Enter", "Esc", "Tab", "T", "Menu", "← →", "↑ ↓"), shown when
 `Vm.input-mode` isn't `gamepad`. The default theme starts in `gamepad` mode (the first of its
 `input` list), and only a pad press sets the mode, so the pad signs show.

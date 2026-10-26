@@ -326,8 +326,11 @@ Cancel never deletes files. It stops the download, which reads "Cancelled · the
 
 ## Uninstalling a game
 
-The game's menu has "Uninstall", last and in red, when the Game Hub's details say
-`can_uninstall`:
+The game's menu has "Uninstall", last and in red, when the game's actions (`can.uninstall`,
+see "A game's actions" in [themes.md](../themes.md)) name a game to remove. Its store removes
+it when the game's details give an `uninstall_link` its plugin may open (Steam's
+`steam://uninstall/<id>`, which asks in Steam's own dialog). Else Nexus deletes its folder,
+when:
 
 - the game's details name its folder;
 - that folder is not one of the player's folders itself;

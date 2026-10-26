@@ -120,7 +120,7 @@ export global Nav {
     // start) and Game Hub otherwise; then the store page when there is one, and the game's
     // menu ("⋯") once its details are in.
     out property <bool> store: root.has-detail && Vm.detail.store-url != "";
-    out property <int> hub-action: root.playing ? 2 : root.has-detail && Vm.detail.can-launch ? 1 : 0;
+    out property <int> hub-action: root.playing ? 2 : root.has-detail && Vm.detail.can.play ? 1 : 0;
     out property <int> store-action: root.hub-action + 1;
     out property <int> actions: root.hub-action + 1 + (root.store ? 1 : 0) + (root.has-detail ? 1 : 0);
 
@@ -300,7 +300,7 @@ export global Nav {
                 Host.play-sound("back");
                 Host.stop(Vm.running.session);
             }
-        } else if (root.has-detail && Vm.detail.can-launch) {
+        } else if (root.has-detail && Vm.detail.can.play) {
             Host.launch(Vm.detail.key);
         }
     }

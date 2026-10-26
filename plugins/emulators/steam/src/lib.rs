@@ -11,6 +11,8 @@
 //!   `reaper SteamLaunch AppId=<id> -- …`, and the host follows that process
 //!   (`LaunchSpec::game_process`).
 
+mod appinfo;
+mod owned;
 mod vdf;
 
 use std::collections::BTreeSet;
@@ -19,6 +21,8 @@ use nexus_api::serde_json::Value;
 use nexus_api::*;
 
 const MANIFEST: &str = include_str!("../plugin.toml");
+/// The link that asks Steam to uninstall a game: its uninstall dialog.
+const UNINSTALL: &str = "steam://uninstall/";
 /// What the Library calls the system of Steam's games: their own, beside PC, PS5 and PS4.
 const PLATFORM: &str = "Steam";
 /// The folder grant: Steam's folder and its libraries.
@@ -64,6 +68,7 @@ impl EmulatorPlugin for SteamPlugin {
         Ok(Provided {
             catalog: Some(steam.clone()),
             launcher: Some(steam.clone()),
+            releases: Some(steam.clone()),
             slots: Some(steam),
             ..Provided::default()
         })
@@ -178,7 +183,8 @@ impl Steam {
             cover: Some(self.art(&game.id, COVER).await?),
             tags: Vec::new(),
             release_year: None,
-            title_id: None,
+            // The app id: the Catalog's Steam game of the same id is this one, installed.
+            title_id: Some(game.id.clone()),
             content_id: None,
         })
     }
@@ -253,6 +259,8 @@ impl Catalog for Steam {
             facts: Vec::new(),
             folder: Some(game.dir),
             also: Vec::new(),
+            // Steam removes its games: Uninstall asks it to, as Steam's own menu does.
+            uninstall_link: Some(format!("{UNINSTALL}{}", game.id)),
         })
     }
 
@@ -264,6 +272,17 @@ impl Catalog for Steam {
             ArtworkKind::Icon => return Ok(None),
         };
         Ok(Some(self.art(id, file).await?))
+    }
+}
+
+#[async_trait]
+impl Releases for Steam {
+    /// The player's Steam library for the Catalog: the games in their Steam collections.
+    async fn releases(&self, console: &Console) -> PluginResult<Option<ReleaseList>> {
+        if !console.as_str().eq_ignore_ascii_case(PLATFORM) {
+            return Ok(None);
+        }
+        Ok(Some(self.library_releases().await?))
     }
 }
 

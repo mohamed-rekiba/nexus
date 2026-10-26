@@ -73,6 +73,15 @@ pub struct Release {
     pub format: String,
     /// The release topic's pictures, `https://` addresses. The first one is the cover.
     pub image_urls: Vec<String>,
+    /// A release a store installs, not a torrent: the link that asks the store to, for
+    /// example `steam://install/440`. Its Install opens the link (the plugin's manifest must
+    /// allow it in `permissions.links`) instead of downloading. Empty for a torrent.
+    pub store: String,
+    /// The player hid the game in its store (Steam's Hidden collection): the Catalog shows it
+    /// only under its "Hidden" filter, as a game the player hid in Nexus.
+    pub hidden: bool,
+    /// The player marked the game a favorite in its store: its card says so.
+    pub favorite: bool,
 }
 
 /// What Steam says about a release's game. Text is empty, and an address is empty, when

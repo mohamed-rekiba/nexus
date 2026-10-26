@@ -307,6 +307,27 @@ impl Core {
 
     /// The player asked to download `release` of the offered game `offer`: reads the torrent's
     /// files, and waits for the player to start it.
+    /// A release its store installs: the store's link opens (`steam://install/440`), if the
+    /// catalog plugin's manifest allows it, and the store takes it from there. Nothing downloads
+    /// here; the game shows in the Library once the store installed it.
+    async fn install_in_store(&self, offer: &GameKey, release: &nexus_api::Release) -> CoreResult<()> {
+        let plugin = &offer.plugin;
+        let allowed = self.kernel().manifest(plugin)?.permissions.allows_link(&release.store);
+        if !allowed {
+            return Err(CoreError::PermissionDenied {
+                plugin: plugin.clone(),
+                action: format!("open {}", release.store),
+            });
+        }
+        let link = release.store.clone();
+        crate::running::blocking(self, move |desktop, _| desktop.open_link(&link)).await.map_err(CoreError::Invalid)?;
+        let store = crate::view::system_of(self.kernel(), &release.platform).name;
+        tracing::info!(%offer, link = %release.store, "asked the store to install");
+        self.notice(format!("{store} is installing {}: it shows in your Library when it's done", release.title));
+        self.changed();
+        Ok(())
+    }
+
     pub(crate) async fn download_release(
         &self,
         offer: &GameKey,
@@ -320,6 +341,9 @@ impl Core {
             .find(|r| r.id == release)
             .cloned()
             .ok_or_else(|| CoreError::Invalid(format!("no release {release} of {offer}")))?;
+        if !release.store.is_empty() {
+            return self.install_in_store(offer, &release).await;
+        }
         if self.state().torrents.contains_key(&release.id) {
             return Ok(());
         }

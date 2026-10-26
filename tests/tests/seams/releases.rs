@@ -297,6 +297,26 @@ async fn a_console_turned_off_in_the_catalog_s_settings_offers_nothing_and_its_g
 }
 
 #[tokio::test]
+async fn a_console_whose_emulator_lists_its_own_releases_has_no_other_catalog() {
+    // Steam's library comes from the Steam plugin, which lists its own console's releases: the
+    // console catalog is asked nothing for it.
+    let t = FakeHost::new()
+        .platform(Some(nexus_api::Platform::Linux))
+        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(nexus_api::PluginByKind::emulator(emu_steam::SteamPlugin))
+        .plugin(games("emu-a", vec![]).console("PS5"))
+        .boot_core()
+        .await;
+    t.core.dispatch(Command::Navigate(nexus_core::Route::Catalog)).await.unwrap();
+    t.core.dispatch(Command::Navigate(nexus_core::Route::Settings)).await.unwrap();
+    let view = t.core.view();
+    let panel = view.settings.panels.iter().find(|p| p.slot.plugin == id("release-catalog")).unwrap();
+    let keys: Vec<_> = panel.fields.iter().map(|f| f.key.clone()).collect();
+    assert!(keys.contains(&"show_ps5".to_owned()) && !keys.contains(&"show_steam".to_owned()), "{keys:?}");
+    assert!(t.http.sent().is_empty(), "nothing fetched for Steam: {:?}", t.http.sent());
+}
+
+#[tokio::test]
 async fn the_catalog_s_console_toggles_follow_the_emulators_turned_on() {
     let t = FakeHost::new()
         .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
@@ -446,7 +466,8 @@ async fn an_offer_opens_on_its_releases_newest_first() {
     assert_eq!(detail.description, "Racer 1.05.", "the newest release's words");
     let versions: Vec<(&str, bool)> = detail.releases.iter().map(|r| (r.version.as_str(), r.new)).collect();
     assert_eq!(versions, [("1.05", true), ("1.00", false)]);
-    assert!(!detail.can_launch, "a game to download doesn't play");
+    assert!(!detail.can.play, "a game to download doesn't play");
+    assert_eq!((detail.can.primary.as_str(), detail.can.get.as_str()), ("get", "Download"), "it downloads");
     assert!(detail.facts.iter().any(|f| f.id == "region" && f.value == "EUR"));
 }
 

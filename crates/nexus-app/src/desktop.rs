@@ -498,6 +498,27 @@ impl Desktop for SystemDesktop {
             }
         }
     }
+
+    fn open_link(&self, link: &str) -> Result<(), String> {
+        let (program, args): (&str, Vec<&str>) = if cfg!(target_os = "macos") {
+            ("open", vec![link])
+        } else if cfg!(windows) {
+            ("cmd", vec!["/C", "start", "", link])
+        } else {
+            ("xdg-open", vec![link])
+        };
+        // Not waited for: without a desktop's own opener, xdg-open runs the handler itself, and
+        // `steam` may become Steam's client and keep running. Reaped in the background.
+        let mut opener = Command::new(program)
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|e| format!("couldn't open the link ({program}): {e}"))?;
+        std::thread::spawn(move || opener.wait());
+        Ok(())
+    }
 }
 
 /// The package manager's command that installs a local package file, which follows it.

@@ -290,3 +290,195 @@ async fn the_player_s_own_steam_libraries_setting_replaces_steam_s_list() {
     let titles: Vec<_> = test.core.view().home.games.into_iter().map(|g| g.title).collect();
     assert_eq!(titles, ["Dota 2"], "only the folders the player set");
 }
+
+/// Steam's app cache (`appcache/appinfo.vdf`, version 0x29) naming each app of `apps`.
+fn app_cache(apps: &[(u32, &str)]) -> Vec<u8> {
+    let table = ["appinfo", "common", "name"];
+    let mut out = Vec::new();
+    out.extend(0x0756_4429u32.to_le_bytes());
+    out.extend(1u32.to_le_bytes());
+    out.extend(0u64.to_le_bytes());
+    for (id, name) in apps {
+        // appinfo { common { name "…" } }, keys by their place in the table.
+        let mut keys = vec![0];
+        keys.extend(0u32.to_le_bytes());
+        keys.push(0);
+        keys.extend(1u32.to_le_bytes());
+        keys.push(1);
+        keys.extend(2u32.to_le_bytes());
+        keys.extend(name.as_bytes());
+        keys.extend([0, 8, 8, 8]);
+        out.extend(id.to_le_bytes());
+        out.extend((60 + keys.len() as u32).to_le_bytes());
+        out.extend([0u8; 60]);
+        out.extend(keys);
+    }
+    out.extend(0u32.to_le_bytes());
+    let offset = out.len() as u64;
+    out[8..16].copy_from_slice(&offset.to_le_bytes());
+    out.extend((table.len() as u32).to_le_bytes());
+    for t in table {
+        out.extend(t.as_bytes());
+        out.push(0);
+    }
+    out
+}
+
+/// The player's Steam collections in `root`: Favorites, Hidden and one of their own.
+fn collections(root: &Path, favorite: &str, hidden: &str, own: &str) {
+    let entry = |id: &str, added: &str| {
+        let value = format!(r#"{{"id":"{id}","name":"{id}","added":{added},"removed":[]}}"#);
+        serde_json::json!([format!("user-collections.{id}"), { "key": format!("user-collections.{id}"), "value": value }])
+    };
+    let list = serde_json::json!([entry("favorite", favorite), entry("hidden", hidden), entry("uc-coop", own)]);
+    let dir = root.join("userdata/1234/config/cloudstorage");
+    write(dir.join("cloud-storage-namespace-1.json"), list.to_string().as_bytes());
+    write(dir.join("cloud-storage-namespaces.json"), b"[[1,\"1\"]]");
+}
+
+/// The Catalog's games: title and badges' text.
+fn catalog(s: &Steam) -> Vec<(String, Vec<String>)> {
+    let games = s.test.core.view().catalog.games.games;
+    games.into_iter().map(|g| (g.title, g.badges.into_iter().map(|b| b.text).collect())).collect()
+}
+
+/// The Catalog open, once it shows `n` games.
+async fn open_catalog(s: &Steam, n: usize) {
+    s.test.core.dispatch(Command::Navigate(nexus_core::Route::Catalog)).await.unwrap();
+    for _ in 0..200 {
+        if s.test.core.view().catalog.games.games.len() >= n {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("the Catalog never showed {n} games: {:?}", catalog(s));
+}
+
+#[tokio::test]
+async fn the_catalog_shows_the_player_s_steam_library_with_hidden_games_under_hidden() {
+    let s = boot().await;
+    // Dota 2 and Portal 2 are installed; Team Fortress 2 isn't; 2500 is hidden, and Steam's
+    // cache doesn't name it.
+    collections(s.root.path(), "[570, 440]", "[2500]", "[620]");
+    write(
+        s.root.path().join("appcache/appinfo.vdf"),
+        &app_cache(&[(440, "Team Fortress 2"), (570, "Dota 2"), (620, "Portal 2")]),
+    );
+    open_catalog(&s, 3).await;
+
+    assert_eq!(
+        catalog(&s),
+        [
+            ("Dota 2".to_owned(), vec!["Favorite".to_owned(), "Installed".to_owned()]),
+            ("Portal 2".to_owned(), vec!["Installed".to_owned()]),
+            ("Team Fortress 2".to_owned(), vec!["Favorite".to_owned()]),
+        ],
+        "the player's library, without what they hid"
+    );
+    let chips: Vec<_> = s.test.core.view().catalog.games.systems.into_iter().map(|f| f.label).collect();
+    assert!(chips.contains(&"Steam".to_owned()), "{chips:?}");
+
+    s.test.core.dispatch(Command::CatalogSystem(Some("hidden".into()))).await.unwrap();
+    assert_eq!(catalog(&s), [("Steam app 2500".to_owned(), vec![])], "Hidden shows it, by its number");
+}
+
+#[tokio::test]
+async fn install_asks_steam_to_install_the_game_and_downloads_nothing() {
+    let s = boot().await;
+    collections(s.root.path(), "[440]", "[]", "[]");
+    write(s.root.path().join("appcache/appinfo.vdf"), &app_cache(&[(440, "Team Fortress 2")]));
+    open_catalog(&s, 1).await;
+    let key: GameKey = s.test.core.view().catalog.games.games[0].key.parse().unwrap();
+    s.test.core.dispatch(Command::OpenGame(key.clone())).await.unwrap();
+    let release = s.test.core.view().detail.unwrap().releases.remove(0);
+    assert_eq!(release.store, "Steam", "its Game Hub says Steam installs it");
+
+    s.test.core.dispatch(Command::DownloadRelease { offer: key, release: release.id, folder: None }).await.unwrap();
+    assert_eq!(s.test.desktop.links(), ["steam://install/440"]);
+    assert!(s.test.core.view().downloads.jobs.is_empty(), "nothing downloads");
+    let notices = s.test.core.view().notices;
+    assert!(notices.iter().any(|n| n.contains("Steam is installing Team Fortress 2")), "{notices:?}");
+}
+
+#[tokio::test]
+async fn a_steam_game_s_hub_installs_it_until_it_is_installed_and_then_plays_it() {
+    let s = boot().await;
+    s.test.spawner.on_path("steam", Path::new("/usr/bin/steam"));
+    // Dota 2 is installed, Team Fortress 2 isn't.
+    collections(s.root.path(), "[570, 440]", "[]", "[]");
+    write(s.root.path().join("appcache/appinfo.vdf"), &app_cache(&[(440, "Team Fortress 2"), (570, "Dota 2")]));
+    open_catalog(&s, 2).await;
+    let offer = |title: &str| -> GameKey {
+        let games = s.test.core.view().catalog.games.games;
+        games.into_iter().find(|g| g.title == title).unwrap().key.parse().unwrap()
+    };
+
+    s.test.core.dispatch(Command::OpenGame(offer("Team Fortress 2"))).await.unwrap();
+    let hub = s.test.core.view().detail.unwrap();
+    assert!(!hub.can.play, "not installed: no Play");
+    assert_eq!(hub.releases.iter().map(|r| r.store.as_str()).collect::<Vec<_>>(), ["Steam"], "Install in Steam");
+
+    let dota = offer("Dota 2");
+    s.test.core.dispatch(Command::OpenGame(dota.clone())).await.unwrap();
+    let hub = s.test.core.view().detail.unwrap();
+    assert!(hub.can.play, "installed: Play");
+    assert!(hub.releases.is_empty(), "nothing to install: {:?}", hub.releases);
+    s.test.core.dispatch(Command::Launch(dota)).await.unwrap();
+    let run = s.test.spawner.wait_for(1).await.command;
+    assert_eq!(run.args, ["-silent", "steam://rungameid/570"], "Play starts the installed game");
+}
+
+#[tokio::test]
+async fn every_game_s_actions_follow_one_rule_on_its_card_and_its_game_hub() {
+    let s = boot().await;
+    // Dota 2 is installed, Team Fortress 2 isn't.
+    collections(s.root.path(), "[570, 440]", "[]", "[]");
+    write(s.root.path().join("appcache/appinfo.vdf"), &app_cache(&[(440, "Team Fortress 2"), (570, "Dota 2")]));
+    let dota: GameKey = "emu-steam:570".parse().unwrap();
+    // Its details say how it uninstalls.
+    s.test.core.dispatch(Command::OpenGame(dota.clone())).await.unwrap();
+    open_catalog(&s, 2).await;
+    let view = s.test.core.view();
+    let card =
+        |games: &[nexus_ui_api::GameCardVm], title: &str| games.iter().find(|g| g.title == title).unwrap().clone();
+    let library = card(&view.home.games, "Dota 2");
+    let installed = card(&view.catalog.games.games, "Dota 2");
+    let not_installed = card(&view.catalog.games.games, "Team Fortress 2");
+
+    let plays = nexus_ui_api::GameActionsVm {
+        primary: "play".into(),
+        play: true,
+        uninstall: dota.to_string(),
+        uninstall_store: "Steam".into(),
+        ..Default::default()
+    };
+    let gets = nexus_ui_api::GameActionsVm {
+        primary: "get".into(),
+        get: "Install in Steam".into(),
+        get_release: "steam-440".into(),
+        get_store: "Steam".into(),
+        ..Default::default()
+    };
+    assert_eq!(library.can, plays, "a Library game: Play, and Steam uninstalls it");
+    assert_eq!(installed.can, plays, "its Catalog card: the same, for the installed game it is");
+    assert_eq!(not_installed.can, gets, "not installed: get it from Steam");
+    assert_eq!(not_installed.availability, "", "no torrent to be available");
+
+    // Each Game Hub says the same as the game's card.
+    for card in [library, installed, not_installed] {
+        s.test.core.dispatch(Command::OpenGame(card.key.parse().unwrap())).await.unwrap();
+        assert_eq!(s.test.core.view().detail.unwrap().can, card.can, "{}", card.key);
+    }
+}
+
+#[tokio::test]
+async fn uninstall_asks_steam_to_uninstall_its_game() {
+    let s = boot().await;
+    let dota: GameKey = "emu-steam:570".parse().unwrap();
+    s.test.core.dispatch(Command::OpenGame(dota.clone())).await.unwrap();
+    s.test.core.dispatch(Command::UninstallGame(dota)).await.unwrap();
+    assert_eq!(s.test.desktop.links(), ["steam://uninstall/570"]);
+    assert!(s.root.path().join("steamapps/common/dota 2 beta").is_dir(), "Steam removes it, not Nexus");
+    let notices = s.test.core.view().notices;
+    assert!(notices.iter().any(|n| n.contains("Steam is uninstalling Dota 2")), "{notices:?}");
+}

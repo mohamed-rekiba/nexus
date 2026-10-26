@@ -27,7 +27,7 @@ export global Hub {
     in-out property <bool> read-end;
     out property <bool> has-reading: Vm.detail.sections.length > 0 || Vm.detail.description != "";
     // How many buttons come before the plugin's actions.
-    out property <int> play: !Vm.detail.can-launch ? 0 : Vm.detail.running ? 2 : 1;
+    out property <int> play: !Vm.detail.can.play ? 0 : Vm.detail.running ? 2 : 1;
     out property <int> buttons: root.play + Vm.detail.actions.length;
     // The store page's button, after the others; then the trailer's, then the game's menu.
     out property <bool> store: Vm.detail.store-url != "";
@@ -49,7 +49,10 @@ export global Hub {
     // A release's row was picked: a release with no download asks first; one with a download
     // opens Downloads.
     public function pick-release(index: int) {
-        if (Vm.detail.releases[index].download == "") {
+        // Its store installs it: no sheet, the store asks its own questions.
+        if (Vm.detail.releases[index].store != "") {
+            Host.download-release(Vm.detail.key, Vm.detail.releases[index].id, "");
+        } else if (Vm.detail.releases[index].download == "") {
             root.consent = index;
             root.consent-focus = 0;
             root.folder = "";
@@ -388,7 +391,8 @@ component ReleaseRow inherits Rectangle {
         h: 54 * Look.px;
         icon: root.d == "" ? "download" : "";
         primary: root.d == "";
-        text: root.d == "" ? "Download"
+        text: root.release.store != "" ? "Install in " + root.release.store
+            : root.d == "" ? "Download"
             : root.d == "downloading" ? "Downloading " + Math.round(root.release.download-progress * 100) + "%"
             : root.d == "complete" ? "Downloaded"
             : root.d == "paused" ? "Paused"
@@ -788,7 +792,7 @@ export component GameDetailScreen inherits Rectangle {
                 height: 76 * Look.px;
                 padding-top: 4 * Look.px;
                 padding-bottom: 4 * Look.px;
-                if Vm.detail.can-launch : Pill {
+                if Vm.detail.can.play : Pill {
                     text: Vm.detail.running ? "Resume" : "Play";
                     icon: "play";
                     primary: true;
@@ -799,7 +803,7 @@ export component GameDetailScreen inherits Rectangle {
                         if (Vm.detail.running) { Host.show-game(Vm.running.session); } else { Host.launch(Vm.detail.key); }
                     }
                 }
-                if Vm.detail.can-launch && Vm.detail.running : Pill {
+                if Vm.detail.can.play && Vm.detail.running : Pill {
                     text: "Stop";
                     icon: "stop";
                     danger: true;

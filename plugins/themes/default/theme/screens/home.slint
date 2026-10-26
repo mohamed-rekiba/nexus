@@ -171,7 +171,7 @@ component HeroView inherits Rectangle {
                 accessible-label: "default-stop";
                 clicked => { Nav.action = 1; Nav.activate(); }
             }
-            if root.data.game && !root.data.playing && Nav.has-detail && Vm.detail.can-launch : Pill {
+            if root.data.game && !root.data.playing && Nav.has-detail && Vm.detail.can.play : Pill {
                 text: "Play";
                 icon: "play";
                 primary: true;

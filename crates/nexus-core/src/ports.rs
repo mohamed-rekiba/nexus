@@ -403,6 +403,12 @@ pub trait Desktop: Send + Sync {
     fn install_package(&self, _file: &Path, _manager: PackageManager) -> Result<(), PackageError> {
         Err(PackageError::Failed("this system can't install packages".into()))
     }
+    /// Opens `link` with the system's handler for it, as a click on it would: `steam://install/440`
+    /// asks Steam to install a game, starting Steam on its own when it isn't running. The core
+    /// checked the link against the plugin's `permissions.links`. The error says why it didn't.
+    fn open_link(&self, _link: &str) -> Result<(), String> {
+        Err("this desktop can't open links".into())
+    }
 }
 
 /// A desktop the launcher can't see or change. The default until the app plugs in a real one.

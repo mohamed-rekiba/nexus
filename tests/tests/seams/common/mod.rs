@@ -272,6 +272,7 @@ impl Catalog for Games {
         Ok(GameDetails {
             folder: None,
             also: Vec::new(),
+            uninstall_link: None,
             description: if self.quiet { String::new() } else { format!("About {}", summary.title) },
             summary,
             developer: None,

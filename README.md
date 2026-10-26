@@ -211,6 +211,14 @@ Stop work as for any game, and Steam itself keeps running.
    next rescan (Settings, GAMES, **Rescan game folders**). **Steam libraries** in Settings is
    only for reading other folders: once set, it replaces Steam's list.
 
+Your Steam library is in the Catalog, under **Steam**: the games in your Steam collections
+(Favorites, and the ones you made), read from Steam's own files on this PC, with no key and
+no account to set. A game in Steam's Hidden collection shows only under the Catalog's
+**Hidden** filter; a favorite says **Favorite**, an installed one **Installed**. **Install in
+Steam** opens Steam's install dialog for the game, and Steam installs it: it shows in the
+Library once it's done. A game you never put in a collection isn't in those files, so it isn't
+listed.
+
 Steam may ask to sign in or update before the game starts. Nexus waits up to 2 minutes for the
 game, then says it didn't start. Steam Input may take the controller while Steam runs: turn it
 off for a game in Steam if both read the controller.

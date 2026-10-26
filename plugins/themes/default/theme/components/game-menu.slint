@@ -37,7 +37,7 @@ export global GameMenu {
         { id: "settings", label: "Settings", icon: "gear", on: true },
         { id: "hide", label: Vm.detail.hidden ? "Show in the Catalog" : "Hide from the Catalog",
             icon: Vm.detail.hidden ? "eye" : "eye-off", on: Vm.detail.releases.length > 0 },
-        { id: "uninstall", label: "Uninstall", icon: "close", on: Vm.detail.can-uninstall },
+        { id: "uninstall", label: "Uninstall", icon: "close", on: Vm.detail.can.uninstall != "" },
     ];
     // Index 0 is the Game Hub; 1 to `actions` the emulator's actions; then `items`.
     out property <int> count: 1 + root.actions + root.items.length;
@@ -64,7 +64,7 @@ export global GameMenu {
     }
     // The answer to "Uninstall …?": 0 uninstalls, 1 is Not now. Either closes the menu.
     public function answer(choice: int) {
-        if (choice == 0) { Host.uninstall-game(root.uninstall-key != "" ? root.uninstall-key : root.game); }
+        if (choice == 0) { Host.uninstall-game(root.uninstall-key != "" ? root.uninstall-key : Vm.detail.can.uninstall); }
         root.close();
         Host.play-sound(choice == 0 ? "select" : "back");
     }

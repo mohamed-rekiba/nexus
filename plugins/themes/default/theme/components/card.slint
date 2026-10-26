@@ -4,7 +4,6 @@ import { Tokens } from "../tokens.slint";
 import { Look } from "look.slint";
 import { FocusRing, Cover } from "widgets.slint";
 import { Nav } from "nav.slint";
-import { GameMenu } from "game-menu.slint";
 import { SlotBadges } from "slot-badges.slint";
 
 // A Library card, as the old launcher's: its 2:3 cover with the console on top, how it runs and its
@@ -94,28 +93,31 @@ export component Card inherits Rectangle {
                     clicked => { Host.hide-game(root.game.key, !root.game.hidden); }
                 }
             }
-            // Uninstall for an installed game (in the Catalog, the game the offer is), else
-            // Download for a game a catalog offers: its Game Hub, with the keys on its
-            // releases. On the focused or pointed card, above the badges.
-            if root.game.uninstall != "" || root.offered : pill := Rectangle {
-                property <bool> removes: root.game.uninstall != "";
+            // The game's main action, the same for every game (`GameCard.can`): Play when it
+            // is installed, else getting it (Download, or Install in its store). Uninstall is in
+            // the game's menu. On the focused or pointed card, above the badges.
+            if root.game.can.primary != "" : pill := Rectangle {
+                property <bool> plays: root.game.can.primary == "play";
+                property <string> label: self.plays ? "Play" : root.game.can.get;
                 x: (parent.width - self.width) / 2;
                 y: parent.height - self.height - (root.small ? 44 : 52) * Look.px;
                 width: action-row.preferred-width;
                 height: (root.small ? 32 : 38) * Look.px;
                 border-radius: self.height / 2;
-                background: act.has-hover ? (self.removes ? Tokens.color-danger : #ffffff) : #000000c0;
+                background: act.has-hover ? #ffffff : #000000c0;
                 border-width: 1px;
                 border-color: #ffffff40;
                 opacity: root.lit || act.has-hover ? 1 : 0;
                 animate opacity { duration: Tokens.motion-fast; }
                 accessible-role: button;
-                accessible-label: self.removes ? "card-uninstall" : "card-download";
-                accessible-value: (self.removes ? "Uninstall " : "Download ") + root.game.title;
+                accessible-label: self.plays ? "card-play" : "card-get";
+                accessible-value: self.label + " " + root.game.title;
                 accessible-action-default => { self.act(); }
                 function act() {
-                    if (self.removes) {
-                        GameMenu.ask-uninstall(root.game.uninstall, root.game.title);
+                    if (self.plays) {
+                        Host.launch(root.game.key);
+                    } else if (root.game.can.get-store != "") {
+                        Host.download-release(root.game.key, root.game.can.get-release, "");
                     } else {
                         Nav.to-releases = true;
                         root.activated();
@@ -130,15 +132,15 @@ export component Card inherits Rectangle {
                         width: 16 * Look.px;
                         height: 16 * Look.px;
                         y: (parent.height - self.height) / 2;
-                        name: pill.removes ? "close" : "download";
-                        color: act.has-hover && !pill.removes ? #000000 : #ffffff;
+                        name: pill.plays ? "play" : "download";
+                        color: act.has-hover ? #000000 : #ffffff;
                     }
                     Text {
-                        text: pill.removes ? "Uninstall" : "Download";
+                        text: pill.label;
                         font-size: (root.small ? 14 : 16) * Look.px;
                         font-weight: 600;
                         vertical-alignment: center;
-                        color: act.has-hover && !pill.removes ? #000000 : #ffffff;
+                        color: act.has-hover ? #000000 : #ffffff;
                     }
                 }
                 act := TouchArea { mouse-cursor: pointer; clicked => { parent.act(); } }
@@ -209,7 +211,8 @@ export component Card inherits Rectangle {
                 accessible-value: self.text;
             }
             count := Text {
-                visible: root.offered;
+                // A store's game has no torrents: no availability, and no releases to count.
+                visible: root.offered && root.game.availability != "";
                 x: Look.rtl ? 0 : parent.width - self.width;
                 height: parent.height;
                 text: Look.releases(root.game.releases);

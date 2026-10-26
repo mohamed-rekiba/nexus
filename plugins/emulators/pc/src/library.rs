@@ -251,6 +251,7 @@ impl Catalog for Pc {
             facts: vec![GameFact::new("starts", "Starts", &start.path)],
             folder: Some(game.dir),
             also: Vec::new(),
+            uninstall_link: None,
         })
     }
 

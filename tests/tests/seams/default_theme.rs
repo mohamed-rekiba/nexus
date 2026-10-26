@@ -3436,29 +3436,38 @@ fn penguins_installed(host: &mut Composed) -> String {
 }
 
 #[test]
-fn a_card_uninstalls_its_game_after_asking_and_then_offers_the_download() {
+fn an_installed_game_s_card_plays_it_its_menu_uninstalls_it_and_then_its_card_downloads_it() {
     let home = tempfile::tempdir().unwrap();
     let mut host = penguins_downloaded(home.path());
     penguins_installed(&mut host);
     let folder = home.path().join("Games/PC/Penguins");
     host.dispatch(Command::Navigate(nexus_core::Route::Catalog));
     settle(&mut host);
-    let uninstall = values(&host, "card-uninstall");
-    assert_eq!(uninstall.len(), 1, "the installed game's card: {uninstall:?}");
-    assert!(uninstall[0].starts_with("Uninstall "), "{uninstall:?}");
+    // Installed: the card's main action is Play, as on every installed game's card.
+    let play = values(&host, "card-play");
+    assert_eq!(play.len(), 1, "the installed game's card: {play:?}");
+    assert!(play[0].starts_with("Play "), "{play:?}");
+    assert!(values(&host, "card-uninstall").is_empty(), "Uninstall is never the card's button");
 
-    press(&mut host, "card-uninstall", &uninstall[0]);
+    // Uninstall is in the game's menu, on its Game Hub, and asks first.
+    let card = host.core().view().catalog.games.games.into_iter().find(|g| g.title.contains("Penguins")).unwrap();
+    host.dispatch(Command::OpenGame(card.key.parse().unwrap()));
+    settle(&mut host);
+    press(&mut host, "game-options", "Options");
+    press(&mut host, "game-menu", "Uninstall");
     let asked = values(&host, "uninstall-title");
     assert_eq!(asked.len(), 1, "it asks first");
     assert!(folder.is_dir(), "nothing deleted yet");
     press(&mut host, "uninstall-choice", "Uninstall");
     assert!(!folder.exists(), "its folder is deleted");
     settle(&mut host);
+    host.dispatch(Command::Navigate(nexus_core::Route::Catalog));
+    settle(&mut host);
 
-    assert!(values(&host, "card-uninstall").is_empty());
-    let download = values(&host, "card-download");
+    assert!(values(&host, "card-play").is_empty());
+    let download = values(&host, "card-get");
     assert!(!download.is_empty() && download.iter().all(|d| d.starts_with("Download ")), "{download:?}");
-    press(&mut host, "card-download", &download[0]);
+    press(&mut host, "card-get", &download[0]);
     assert_eq!(host.core().view().screen, nexus_ui_api::ScreenId::GameDetail, "its Game Hub, to pick a release");
 }
 

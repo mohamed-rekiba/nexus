@@ -420,6 +420,12 @@ impl Core {
         for (service, provided) in self.providers(Capability::Releases).await {
             let Some(releases) = provided.releases else { continue };
             for (emulator, console) in &emulators {
+                // An emulator that lists its own console's releases (Steam's library) gets no
+                // other catalog for it.
+                let own_list = kernel.manifest(emulator).is_ok_and(|m| m.capabilities.contains(&Capability::Releases));
+                if own_list && emulator != &service {
+                    continue;
+                }
                 match kernel.guard(&service, "releases.releases", releases.releases(console)).await {
                     Ok(Some(list)) => {
                         copies.push(CatalogCopy { service: service.clone(), emulator: emulator.clone(), list })
@@ -523,6 +529,7 @@ impl Core {
                 facts,
                 folder: None,
                 also: Vec::new(),
+                uninstall_link: None,
             }),
             ..Detail::default()
         }

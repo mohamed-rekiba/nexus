@@ -28,6 +28,25 @@ export struct Slot {
     scope: string,
 }
 
+// What can be done with a game, the same for every game, worked out by the core:
+// - `primary`: the main action, "play", "get" or "" for none. Installed games play; others
+//   are got. Uninstall is never the main action: offer it in the game's menu.
+// - `play`: Host.launch(the game's key) starts it (a Catalog game: the installed game it is).
+// - `get`: its label, "Download" or "Install in Steam"; empty for nothing to get. With a
+//   `get-store` ("Steam"), Host.download-release(key, get-release, "") asks the store, with no
+//   download sheet; without, the player picks a release on its Game Hub.
+// - `uninstall`: the key to pass to Host.uninstall-game after asking; empty when it can't be.
+//   `uninstall-store`: the store that removes it ("Steam"), which asks again its own way.
+export struct GameActions {
+    primary: string,
+    play: bool,
+    get: string,
+    get-release: string,
+    get-store: string,
+    uninstall: string,
+    uninstall-store: string,
+}
+
 // `release-year` is 0 when the catalog doesn't know it.
 export struct GameCard {
     key: string,
@@ -58,9 +77,8 @@ export struct GameCard {
     availability-text: string,
     // The player hid this Catalog game: it shows only under the Catalog's "Hidden" filter.
     hidden: bool,
-    // The key of the installed game the card's Uninstall removes (`Host.uninstall-game`): the
-    // game itself, or for a Catalog card the installed game it is. Empty for none.
-    uninstall: string,
+    // What can be done with it: the same on every card and the Game Hub.
+    can: GameActions,
 }
 
 // The library's games on one platform. `selected` is an index into `games`, or -1 when the
@@ -117,7 +135,10 @@ export struct SettingsPanel { slot: Slot, fields: [Field] }
 // people share and download it, and `counted` when ("Oct 7, 2026"), as the catalog counted
 // them: not live counts, empty when it has none. `availability` is good (3 or more seeders),
 // low (1 or 2), none (0) or unknown (no count), and `availability-text` that in words.
-export struct Release { id: string, version: string, region: string, size: string, added: string, new: bool, description: string, system: string, not-here: string, warning: string, no-room: string, download: string, download-progress: float, version-label: string, best: bool, seeders: string, leechers: string, counted: string, availability: string, availability-text: string }
+// `store`: the store that installs it ("Steam"), for a release its store installs: its
+// Download asks the store (Host.download-release with no folder), with no download sheet. Empty
+// for a torrent.
+export struct Release { id: string, store: string, version: string, region: string, size: string, added: string, new: bool, description: string, system: string, not-here: string, warning: string, no-room: string, download: string, download-progress: float, version-label: string, best: bool, seeders: string, leechers: string, counted: string, availability: string, availability-text: string }
 
 // How one emulator's games run on this PC. level: good | slow | no | unknown. headline:
 // "Should run well", "May run slowly", "Won't start" or "Can't tell yet"; why: the reason.
@@ -182,7 +203,8 @@ export struct GameDetail {
     badges: [Slot],
     actions: [Slot],
     sections: [Slot],
-    can-launch: bool,
+    // What can be done with it: as on its card (Play, getting it, Uninstall in the menu).
+    can: GameActions,
     // The game's own settings from its emulator: one panel, or none (Host.open-game-settings).
     settings: [SettingsPanel],
     // What Play does first, for example "Play installs KytyPS5 first". Empty for nothing.
@@ -222,8 +244,6 @@ export struct GameDetail {
     // The game has a folder to open, and a log of its last run.
     has-folder: bool,
     has-log: bool,
-    // Its folder is one its emulator may delete: the game's menu offers Uninstall.
-    can-uninstall: bool,
     // The player hid this Catalog game (`Host.hide-game`).
     hidden: bool,
     // The community compatibility list's page; empty for none.

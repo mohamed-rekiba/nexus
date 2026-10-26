@@ -420,6 +420,7 @@ pub fn read(bytes: &[u8]) -> Result<ReleaseList, String> {
             audio_languages: text(info, "audio_languages"),
             format: text(info, "format"),
             image_urls: texts(info, "image_urls").into_iter().filter(|url| url.starts_with("https://")).collect(),
+            ..Release::default()
         });
     }
     let updated =

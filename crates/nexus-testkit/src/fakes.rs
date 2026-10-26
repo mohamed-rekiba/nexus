@@ -461,6 +461,8 @@ pub struct FakeDesktop {
     package_refusal: Arc<Mutex<Option<nexus_core::PackageError>>>,
     /// A game whose windows all closed is over, as on macOS.
     window_ends_game: Arc<std::sync::atomic::AtomicBool>,
+    /// Each link the core opened.
+    links: Arc<Mutex<Vec<String>>>,
 }
 
 impl Default for FakeDesktop {
@@ -476,6 +478,7 @@ impl Default for FakeDesktop {
             packages: Arc::default(),
             package_refusal: Arc::default(),
             window_ends_game: Arc::default(),
+            links: Arc::default(),
         }
     }
 }
@@ -534,6 +537,11 @@ impl FakeDesktop {
     /// existed then), in order.
     pub fn packages(&self) -> Vec<(std::path::PathBuf, nexus_core::PackageManager)> {
         self.packages.lock().unwrap().clone()
+    }
+
+    /// Each link the core opened, in order.
+    pub fn links(&self) -> Vec<String> {
+        self.links.lock().unwrap().clone()
     }
 }
 
@@ -599,5 +607,10 @@ impl Desktop for FakeDesktop {
         if *front != Front::Unknown {
             *front = Front::Launcher;
         }
+    }
+
+    fn open_link(&self, link: &str) -> Result<(), String> {
+        self.links.lock().unwrap().push(link.to_owned());
+        Ok(())
     }
 }

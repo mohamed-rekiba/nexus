@@ -171,6 +171,11 @@ pub struct Permissions {
     /// polkit (`pkexec`), which asks the player when its rules say so.
     #[serde(default)]
     pub polkit: Vec<String>,
+    /// Links the host may open for the plugin with the system's handler, by how they start:
+    /// `steam://install/` lets a release's `store` link ask Steam to install a game. Empty means
+    /// none.
+    #[serde(default)]
+    pub links: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -303,6 +308,13 @@ fn part_matches(rule: &str, part: &str) -> bool {
 }
 
 impl Permissions {
+    /// Whether the plugin may have the host open `link`: it starts with one of `links`, and is
+    /// one line of plain characters.
+    pub fn allows_link(&self, link: &str) -> bool {
+        let plain = !link.is_empty() && link.chars().all(|c| c.is_ascii_graphic());
+        plain && self.links.iter().any(|prefix| !prefix.is_empty() && link.starts_with(prefix.as_str()))
+    }
+
     /// The grant for a named folder, if the manifest asks for it.
     pub fn folder(&self, name: &str) -> Option<&PathGrant> {
         self.filesystem.iter().find(|g| g.folder == name)
@@ -534,6 +546,18 @@ impl PluginManifest {
 
 #[cfg(test)]
 mod tests {
+
+    /// The links a plugin may have the host open: only those its manifest lists, by how they
+    /// start, and on one line.
+    #[test]
+    fn a_link_opens_only_as_the_manifest_allows() {
+        let permissions = Permissions { links: vec!["steam://install/".into()], ..Permissions::default() };
+        assert!(permissions.allows_link("steam://install/440"));
+        assert!(!permissions.allows_link("steam://run/440"));
+        assert!(!permissions.allows_link("steam://install/440\nrm"));
+        assert!(!permissions.allows_link("steam://install/ 440"));
+        assert!(!Permissions::default().allows_link("steam://install/440"));
+    }
     use super::*;
 
     const KYTY: &str = r#"
