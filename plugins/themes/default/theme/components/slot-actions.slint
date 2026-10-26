@@ -13,7 +13,8 @@ export component SlotActions inherits HorizontalLayout {
 
     for item[i] in root.items : Pill {
         text: item.text;
-        icon: item.style == "primary" ? "play" : "check";
+        // No icon on the others: a tick read as "already chosen".
+        icon: item.style == "primary" ? "play" : "";
         primary: item.style == "primary";
         focused: root.focused == i;
         dim: root.focused >= 0 && root.focused != i;

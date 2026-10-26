@@ -57,7 +57,7 @@ case "$os" in
         cp assets/nexus.ico "$out/nexus.ico"
         ;;
 esac
-cp "target/release/$exe" "$bin/"
+cp "${CARGO_TARGET_DIR:-target}/release/$exe" "$bin/"
 licences="$resources/licenses"
 mkdir -p "$licences"
 # The fonts the default theme carries in the binary.
@@ -70,7 +70,7 @@ elif [ -n "${CI:-}" ]; then
     echo "cargo-about is missing: the package would ship without the crates' licences" >&2
     exit 1
 else
-    echo "warning: no cargo-about, so no THIRD-PARTY.md (cargo install --locked cargo-about)" >&2
+    echo "warning: no cargo-about, so no THIRD-PARTY.md (cargo install --locked cargo-about --version 0.9.2 --features cli)" >&2
 fi
 
 if [ "${NEXUS_NO_LIBMPV:-}" != 1 ]; then

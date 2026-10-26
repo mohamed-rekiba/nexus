@@ -14,6 +14,7 @@ mod gpu_probe;
 mod hardware;
 mod http;
 mod libarchive;
+mod processes;
 #[cfg(test)]
 mod real_releases;
 mod torrents;
@@ -56,7 +57,8 @@ nexus [options]
                       Map a named host folder, such as games=/srv/games (saved; repeat
                       for more folders under one name)
   --supports <feature>
-                      Exit 0 when this launcher has the feature (gamescope), else 1
+                      Exit 0 when this launcher has the feature (gamescope,
+                      system-settings, os-install), else 1
   --version           Show the version, on one line
   --help              Show this help
 
@@ -106,11 +108,15 @@ fn version_line() -> String {
     format!("nexus {}", env!("CARGO_PKG_VERSION"))
 }
 
-/// Whether this launcher has `feature`, for `--supports`. `gamescope`: it runs in a Gamescope
-/// session and sets the window ids Gamescope shows. A launcher that doesn't know the option
-/// exits with an error, so a session can tell the two apart.
+/// Whether this launcher has `feature`, for `--supports` (docs/nexus-os.md):
+/// - `gamescope`: it runs in a Gamescope session and sets the window ids Gamescope shows;
+/// - `system-settings`: Settings → System for Nexus OS;
+/// - `os-install`: the stick's welcome and install screens, which the stick's build checks.
+///
+/// A launcher that doesn't know the option exits with an error, so a session can tell the two
+/// apart.
 fn supports(feature: &str) -> bool {
-    feature == "gamescope"
+    matches!(feature, "gamescope" | "system-settings" | "os-install")
 }
 
 /// The size of everything from `NEXUS_SCALE`, for this run: a number, which the theme host
@@ -664,6 +670,7 @@ fn run(args: Args) -> Result<(), String> {
     let core = runtime.block_on(async {
         let (kernel, report) = Kernel::builder(host)
             .http(Arc::new(http::ReqwestTransport::new()?))
+            .processes(Arc::new(processes::SystemProcesses))
             .desktop(Arc::new(desktop::SystemDesktop { raise: Box::new(raise_launcher), login: login_program() }))
             .hardware(Arc::new(hardware::SystemHardware { data_dir: args.data_dir.clone() }))
             .torrents(Arc::new(torrents::RqbitTorrents::new(args.data_dir.join("torrents"), runtime.handle().clone())))
@@ -943,8 +950,10 @@ mod tests {
     }
 
     #[test]
-    fn the_launcher_supports_gamescope_and_nothing_else() {
+    fn the_launcher_supports_gamescope_the_os_s_settings_and_its_install() {
         assert!(super::supports("gamescope"));
+        assert!(super::supports("system-settings"));
+        assert!(super::supports("os-install"), "the stick's build checks it");
         assert!(!super::supports("wayland"));
         assert!(!super::supports(""));
     }

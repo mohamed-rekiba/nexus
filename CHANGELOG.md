@@ -1,5 +1,46 @@
 # Changelog
 
+## [0.4.0](https://github.com/mohamed-rekiba/nexus/compare/v0.3.1...v0.4.0) (2026-10-26)
+
+
+### Features
+
+* unpack script installers that carry their game in an archive, with unar for a RAR libarchive can't read ([4ceb62e](https://github.com/mohamed-rekiba/nexus/commit/4ceb62e90e2a37a66fddfc72459331db9f08ad72))
+
+
+### Bug Fixes
+
+* a PC game keeps its start script, links and empty folders when it installs ([745eff4](https://github.com/mohamed-rekiba/nexus/commit/745eff41da41dd58197dc218df2dbd92fdd5c1ff))
+* after a restart, a finished download plays the game it installed instead of offering Install ([bb9a8c5](https://github.com/mohamed-rekiba/nexus/commit/bb9a8c539126604a3db700038c66e364a089ab9a))
+* nexus --supports answers system-settings and os-install, so the Nexus OS stick builds ([320b758](https://github.com/mohamed-rekiba/nexus/commit/320b7586549f4a62878d5ac0cdfcc83f7f8767ef))
+* the d-pad's ◀ ▶ and ▲ ▼ hints are the same size ([7381485](https://github.com/mohamed-rekiba/nexus/commit/7381485dccda56a9060911425bbc92316ad68b4c))
+
+## [0.3.1](https://github.com/mohamed-rekiba/nexus/compare/v0.3.0...v0.3.1) (2026-10-25)
+
+
+### Bug Fixes
+
+* a release row's Download button has a column of its own, and only the row shows focus ([4766733](https://github.com/mohamed-rekiba/nexus/commit/4766733482c8197a6d0d76666b698059142c0942))
+
+## [0.3.0](https://github.com/mohamed-rekiba/nexus/compare/v0.2.6...v0.3.0) (2026-10-25)
+
+
+### ⚠ BREAKING CHANGES
+
+* rewrite the PC plugin: Play starts the file the game's Starts setting picks
+
+### Features
+
+* a power menu, and the PS, Xbox or Logitech button closes the running game ([21ba27e](https://github.com/mohamed-rekiba/nexus/commit/21ba27ec179611cc2cf451bca7ea474bd3cb7ec4))
+* rewrite the PC plugin: Play starts the file the game's Starts setting picks ([7ba759f](https://github.com/mohamed-rekiba/nexus/commit/7ba759f99b8f6ab7a68069426abaa77ca03767a5))
+* the Nexus session: Nexus shows in its gamescope, Log out, and Restart Nexus in place of Quit ([8b83c32](https://github.com/mohamed-rekiba/nexus/commit/8b83c32c6729cacf5a36d8c242e5667a1b3a4138))
+
+
+### Bug Fixes
+
+* a game's session lasts until its whole process group ends, so a launcher script that backgrounds the game doesn't kill it ([c8f1bef](https://github.com/mohamed-rekiba/nexus/commit/c8f1beff04907a93ed793c0ef83f3d376ea1dfd8))
+* cut a bare version or a date off PC titles, so installed PC games find their covers ([129972d](https://github.com/mohamed-rekiba/nexus/commit/129972d1a5d806dbc24acb3e9065d756ae3dfa96))
+
 ## [0.2.6](https://github.com/mohamed-rekiba/nexus/compare/v0.2.5...v0.2.6) (2026-10-24)
 
 

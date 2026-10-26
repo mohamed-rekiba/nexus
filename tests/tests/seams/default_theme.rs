@@ -2969,6 +2969,48 @@ fn a_ps5_package_says_on_its_row_and_its_sheet_that_it_may_not_install() {
 }
 
 #[test]
+fn every_release_s_download_button_ends_at_the_same_place_inside_its_row() {
+    use slint::platform::Key;
+    let home = tempfile::tempdir().unwrap();
+    let region = "EU² / US² / JP² / AS² / INT(GLO)² / EU¹ / US¹ / JP¹ / AS¹ / INT(GLO)¹ / EUR / USA / JPN / ASIA";
+    let mut host = first_offer_with(
+        home.path(),
+        serde_json::json!([
+            { "id": "1", "title": "[PS5] Astro [long / fpkg]", "size": "1 GB",
+              "magnet": format!("magnet:?xt=urn:btih:{ASTRO_HASH}"),
+              "game_info": { "name": "Astro", "title_id": "PPSA01234",
+                "version": "1.000.010 (dated 30.03.2026) and a long note on what this version is", "region": region } },
+            { "id": "2", "title": "[PS5] Astro [EUR / v01.00]", "size": "2 GB",
+              "magnet": "magnet:?xt=urn:btih:d23fe1c06bba254a9dc9f519b335aa7c1367a88b",
+              "game_info": { "name": "Astro", "title_id": "PPSA01234", "version": "v01.00", "region": "EUR" } },
+        ]),
+    );
+    let releases = host.core().view().detail.expect("a Game Hub").releases;
+    assert_eq!(releases.len(), 2);
+    let end = |e: &i_slint_backend_testing::ElementHandle| e.absolute_position().x + e.size().width;
+    let mut ends = Vec::new();
+    for release in &releases {
+        let row = host.first(&format!("release-{}", release.id));
+        let button =
+            i_slint_backend_testing::ElementHandle::find_by_accessible_label(host.instance(), "release-download")
+                .find(|e| e.accessible_value().as_deref() == Some(release.id.as_str()))
+                .unwrap_or_else(|| {
+                    panic!("a download button for {}: {:?}", release.id, values(&host, "release-download"))
+                });
+        assert!(end(&button) <= end(&row), "release {}'s button ends in its row", release.id);
+        ends.push(end(&button));
+    }
+    assert!((ends[0] - ends[1]).abs() < 1.0, "the buttons end at the same place: {ends:?}");
+
+    // One highlight: the focused row, not its button too.
+    key(&mut host, Key::DownArrow);
+    let row = host.first(&format!("release-{}", releases[0].id));
+    assert_eq!(row.accessible_item_selected(), Some(true), "the row has the keys");
+    let button = host.first("release-download");
+    assert_eq!(button.accessible_item_selected(), Some(false), "its button isn't drawn as focused too");
+}
+
+#[test]
 fn the_game_hub_scrolls_to_the_focused_release() {
     let home = tempfile::tempdir().unwrap();
     // Eight versions of one game: more rows than the window shows.

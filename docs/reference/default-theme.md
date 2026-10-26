@@ -156,11 +156,13 @@ from the card or tile it opened from, or fades in when that place isn't known (t
   (`hub-store`, opens the store page in the browser), "Trailer" (`hub-trailer`) and "Options"
   (`game-options`). The launch hint goes under them.
 - **Releases** (for a game a catalog offers): "RELEASES · RUNS WITH <EMULATOR>", one row per
-  release (`release-<id>`): version, region and, for a PC release, its system; its place by
+  release (`release-<id>`): a New tag for one from the last 14 days, then version, region and,
+  for a PC release, its system, on one line that ends in "…" when it is too long; its place by
   version, size and when the catalog got it (`release-version`); "Availability:"
   (`release-availability`) and "5 seeders · 1 leecher" (`release-peers`); why it can't run here
-  (`release-not-here`) or a warning (`release-warning`), in the warning colour. Its button
-  (`release-download`) reads "Download", "Downloading N%", "Downloaded", "Paused", "Failed" or "In
+  (`release-not-here`) or a warning (`release-warning`), after an alert mark in the warning
+  colour. Its button (`release-download`) has a column of its own at the far end, the same width
+  on every row, and reads "Download", "Downloading N%", "Downloaded", "Paused", "Failed" or "In
   Downloads".
 - **Fact cards**, three to a row: "COMPATIBILITY · <TESTED>" or "YOUR RESULT"; "ON THIS PC · <WHY>"
   (`on-this-pc`, green good, warning colour slow, red no); "PLAYED"; "SIZE"; "PROTONDB"
@@ -440,7 +442,7 @@ change.
 | Top bar tab | A white rounded outline; a round button turns white |
 | System or genre chip | A 3 px border, white, or the accent on the active chip |
 | Search box | A white border and a blue glow |
-| Settings row, release row | A 3 px white border (red for danger) |
+| Settings row, release row | A 3 px white border (red for danger); a release row's button stays as it is |
 | Screenshot | A white border, grown to 1.04 |
 | Menu, sort and sheet answers | A white fill (red for danger) |
 

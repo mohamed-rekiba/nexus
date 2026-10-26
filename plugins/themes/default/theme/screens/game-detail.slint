@@ -6,6 +6,7 @@ import { Origin } from "../components/nav.slint";
 import { Viewer } from "../components/shot-viewer.slint";
 import { Trailers } from "../components/trailer-player.slint";
 import { Button } from "../components/button.slint";
+import { Icon } from "../components/icon.slint";
 import { SlotActions } from "../components/slot-actions.slint";
 import { SlotSections } from "../components/slot-sections.slint";
 import { BackButton, Chip, Cover, Kicker, Pill, Shimmer } from "../components/widgets.slint";
@@ -219,9 +220,39 @@ component ThisPcFact inherits Rectangle {
     }
 }
 
+// A note on a release's row, such as why it may not install: an alert mark, then the text,
+// which wraps. The mark goes on the reading side.
+component Note inherits Rectangle {
+    in property <string> text;
+    property <length> mark: 18 * Look.px;
+    property <length> indent: root.mark + 8 * Look.px;
+    height: note.preferred-height;
+    accessible-role: AccessibleRole.text;
+    accessible-value: root.text;
+    Icon {
+        x: Look.rtl ? root.width - root.mark : 0;
+        y: (Math.min(root.height, 22 * Look.px) - self.height) / 2;
+        width: root.mark;
+        height: root.mark;
+        name: "alert";
+        color: Tokens.color-warning;
+    }
+    note := Text {
+        x: Look.rtl ? 0 : root.indent;
+        width: root.width - root.indent;
+        text: root.text;
+        font-size: 16 * Look.px;
+        color: Tokens.color-warning;
+        wrap: word-wrap;
+        horizontal-alignment: Look.rtl ? right : left;
+    }
+}
+
 // One release of a game a catalog offers: its version and region; its place by version, its
 // size and when the catalog got it; how easy it is to download, with the catalog's counts of
-// seeders and leechers. A New tag marks one from the last 14 days.
+// seeders and leechers. A New tag before the version marks one from the last 14 days. The
+// Download button has a column of its own at the far end, the same on every row; a title too
+// long for the rest ends in "…".
 component ReleaseRow inherits Rectangle {
     in property <Release> release;
     in property <bool> focused;
@@ -230,6 +261,17 @@ component ReleaseRow inherits Rectangle {
     callback reveal(length, length);
     changed focused => { if (root.focused) { root.reveal(self.absolute-position.y, self.height); } }
     property <string> d: root.release.download;
+    property <length> pad: 22 * Look.px;
+    property <length> gap: 20 * Look.px;
+    // The Download button's column: wide enough for "Downloading 100%".
+    property <length> slot: 260 * Look.px;
+    property <length> text-width: Math.max(0px, root.width - 2 * root.pad - root.gap - root.slot);
+    property <string> title: (root.release.version != "" ? "Version " + root.release.version : "Release")
+        + (root.release.region != "" ? " · " + root.release.region : "")
+        + (root.release.system != "" ? " · " + root.release.system : "");
+    property <string> peers: root.release.seeders + (root.release.seeders == "1" ? " seeder" : " seeders")
+        + (root.release.leechers != ""
+            ? " · " + root.release.leechers + (root.release.leechers == "1" ? " leecher" : " leechers") : "");
     // The place of a part `x` from the start side, `w` wide, in a line `span` wide.
     pure function at(x: length, w: length, span: length) -> length { Look.rtl ? span - x - w : x }
     height: Math.max(84 * Look.px, lines.preferred-height + 24 * Look.px);
@@ -241,125 +283,122 @@ component ReleaseRow inherits Rectangle {
     accessible-role: text;
     accessible-label: "release-" + root.release.id;
     accessible-value: root.release.version + " " + root.release.region;
-    HorizontalLayout {
-        padding-left: 22 * Look.px;
-        padding-right: 22 * Look.px;
-        spacing: 16 * Look.px;
-        alignment: Look.rtl ? end : start;
-        lines := VerticalLayout {
-            alignment: center;
-            spacing: 6 * Look.px;
-            Text {
-                text: (root.release.version != "" ? "Version " + root.release.version : "Release")
-                    + (root.release.region != "" ? " · " + root.release.region : "")
-                    + (root.release.system != "" ? " · " + root.release.system : "");
+    accessible-item-selected: root.focused;
+    lines := VerticalLayout {
+        x: root.at(root.pad, root.text-width, root.width);
+        y: (root.height - self.height) / 2;
+        width: root.text-width;
+        height: self.preferred-height;
+        spacing: 6 * Look.px;
+        // The New tag, then the version and region.
+        heading := Rectangle {
+            property <length> tag-width: root.release.new ? tag.preferred-width + 12 * Look.px : 0px;
+            height: Math.max(name.preferred-height, root.release.new ? tag.height : 0px);
+            tag := Chip {
+                visible: root.release.new;
+                x: root.at(0, self.width, heading.width);
+                y: (parent.height - self.height) / 2;
+                width: self.preferred-width;
+                height: 30 * Look.px;
+                text: "New";
+                dot: Look.tone("info");
+            }
+            name := Text {
+                x: root.at(heading.tag-width, self.width, heading.width);
+                width: heading.width - heading.tag-width;
+                height: parent.height;
+                text: root.title;
                 font-size: 21 * Look.px;
                 font-weight: 600;
                 color: Tokens.color-text;
+                vertical-alignment: center;
+                overflow: elide;
                 horizontal-alignment: Look.rtl ? right : left;
             }
-            Text {
-                text: (root.release.version-label != "" ? root.release.version-label + " · " : "")
-                    + (root.release.size != "" ? root.release.size : "Size unknown")
-                    + (root.release.added != "" ? " · added " + root.release.added : "");
+        }
+        Text {
+            text: (root.release.version-label != "" ? root.release.version-label + " · " : "")
+                + (root.release.size != "" ? root.release.size : "Size unknown")
+                + (root.release.added != "" ? " · added " + root.release.added : "");
+            font-size: 16 * Look.px;
+            color: Tokens.color-text-muted;
+            overflow: elide;
+            horizontal-alignment: Look.rtl ? right : left;
+            accessible-role: text;
+            accessible-label: "release-version";
+            accessible-value: root.release.version-label;
+        }
+        // "Availability: Good", then the catalog's counts.
+        if root.release.availability != "" : avail := Rectangle {
+            height: 22 * Look.px;
+            avail-name := Text {
+                x: root.at(0, self.width, avail.width);
+                height: parent.height;
+                text: "Availability:";
+                font-size: 16 * Look.px;
+                color: Look.text3;
+                vertical-alignment: center;
+            }
+            avail-level := Text {
+                x: root.at(avail-name.width + 6 * Look.px, self.width, avail.width);
+                height: parent.height;
+                text: root.release.availability-text;
+                font-size: 16 * Look.px;
+                font-weight: 600;
+                color: Look.availability-color(root.release.availability);
+                vertical-alignment: center;
+                accessible-role: text;
+                accessible-label: "release-availability";
+                accessible-value: self.text;
+            }
+            if root.release.seeders != "" : Text {
+                x: root.at(avail-name.width + avail-level.width + 12 * Look.px, self.width, avail.width);
+                height: parent.height;
+                text: "·";
                 font-size: 16 * Look.px;
                 color: Tokens.color-text-muted;
-                horizontal-alignment: Look.rtl ? right : left;
-                accessible-role: text;
-                accessible-label: "release-version";
-                accessible-value: root.release.version-label;
+                vertical-alignment: center;
             }
-            // "Availability: Good", then the catalog's counts.
-            if root.release.availability != "" : avail := Rectangle {
-                height: 22 * Look.px;
-                avail-name := Text {
-                    x: root.at(0, self.width, avail.width);
-                    height: parent.height;
-                    text: "Availability:";
-                    font-size: 16 * Look.px;
-                    color: Look.text3;
-                    vertical-alignment: center;
-                }
-                avail-level := Text {
-                    x: root.at(avail-name.width + 6 * Look.px, self.width, avail.width);
-                    height: parent.height;
-                    text: root.release.availability-text;
-                    font-size: 16 * Look.px;
-                    font-weight: 600;
-                    color: Look.availability-color(root.release.availability);
-                    vertical-alignment: center;
-                    accessible-role: text;
-                    accessible-label: "release-availability";
-                    accessible-value: self.text;
-                }
-                if root.release.seeders != "" : Text {
-                    x: root.at(avail-name.width + avail-level.width + 12 * Look.px, self.width, avail.width);
-                    height: parent.height;
-                    text: "·";
-                    font-size: 16 * Look.px;
-                    color: Tokens.color-text-muted;
-                    vertical-alignment: center;
-                }
-                if root.release.seeders != "" : Text {
-                    x: root.at(avail-name.width + avail-level.width + 26 * Look.px, self.width, avail.width);
-                    height: parent.height;
-                    text: root.release.seeders + (root.release.seeders == "1" ? " seeder" : " seeders")
-                        + (root.release.leechers != ""
-                            ? " · " + root.release.leechers + (root.release.leechers == "1" ? " leecher" : " leechers") : "");
-                    font-size: 16 * Look.px;
-                    color: Tokens.color-text-muted;
-                    vertical-alignment: center;
-                    accessible-role: text;
-                    accessible-label: "release-peers";
-                    accessible-value: root.release.seeders + (root.release.seeders == "1" ? " seeder" : " seeders")
-                        + (root.release.leechers != ""
-                            ? " · " + root.release.leechers + (root.release.leechers == "1" ? " leecher" : " leechers") : "");
-                }
-            }
-            if root.release.not-here != "" : Text {
-                text: root.release.not-here;
+            if root.release.seeders != "" : Text {
+                x: root.at(avail-name.width + avail-level.width + 26 * Look.px, self.width, avail.width);
+                height: parent.height;
+                text: root.peers;
                 font-size: 16 * Look.px;
-                color: Tokens.color-warning;
+                color: Tokens.color-text-muted;
+                vertical-alignment: center;
                 accessible-role: text;
-                accessible-label: "release-not-here";
-                accessible-value: root.release.not-here;
-                horizontal-alignment: Look.rtl ? right : left;
-            }
-            if root.release.warning != "" : Text {
-                text: root.release.warning;
-                font-size: 16 * Look.px;
-                color: Tokens.color-warning;
-                accessible-role: text;
-                accessible-label: "release-warning";
-                accessible-value: root.release.warning;
-                horizontal-alignment: Look.rtl ? right : left;
+                accessible-label: "release-peers";
+                accessible-value: root.peers;
             }
         }
-        if root.release.new : VerticalLayout {
-            alignment: center;
-            Chip { text: "New"; dot: Look.tone("info"); }
+        if root.release.not-here != "" : Note {
+            text: root.release.not-here;
+            accessible-label: "release-not-here";
         }
-        Rectangle { horizontal-stretch: 1; }
-        VerticalLayout {
-            alignment: center;
-            Pill {
-                h: 54 * Look.px;
-                icon: root.d == "" ? "download" : "";
-                primary: root.d == "";
-                focused: root.focused;
-                text: root.d == "" ? "Download"
-                    : root.d == "downloading" ? "Downloading " + Math.round(root.release.download-progress * 100) + "%"
-                    : root.d == "complete" ? "Downloaded"
-                    : root.d == "paused" ? "Paused"
-                    : root.d == "failed" ? "Failed"
-                    : "In Downloads";
-                accessible-role: button;
-                accessible-label: "release-download";
-                accessible-value: root.release.id;
-                accessible-action-default => { root.picked(); }
-                clicked => { root.picked(); }
-            }
+        if root.release.warning != "" : Note {
+            text: root.release.warning;
+            accessible-label: "release-warning";
         }
+    }
+    // One highlight: the row's ring, not the button's too.
+    Pill {
+        x: root.at(root.width - root.pad - root.slot, root.slot, root.width);
+        y: (root.height - self.height) / 2;
+        width: root.slot;
+        h: 54 * Look.px;
+        icon: root.d == "" ? "download" : "";
+        primary: root.d == "";
+        text: root.d == "" ? "Download"
+            : root.d == "downloading" ? "Downloading " + Math.round(root.release.download-progress * 100) + "%"
+            : root.d == "complete" ? "Downloaded"
+            : root.d == "paused" ? "Paused"
+            : root.d == "failed" ? "Failed"
+            : "In Downloads";
+        accessible-role: button;
+        accessible-label: "release-download";
+        accessible-value: root.release.id;
+        accessible-action-default => { root.picked(); }
+        clicked => { root.picked(); }
     }
 }
 

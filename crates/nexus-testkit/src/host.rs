@@ -6,7 +6,7 @@ use nexus_api::PluginByKind;
 use nexus_core::{BootReport, Core, HostConfig, Kernel, KernelBuilder, Loader};
 use tempfile::TempDir;
 
-use crate::{FakeArchives, FakeDesktop, FakeHttp, FakeNetwork, FakeSpawner, FakeTorrents, StubPlugin};
+use crate::{FakeArchives, FakeDesktop, FakeHttp, FakeNetwork, FakeProcessTree, FakeSpawner, FakeTorrents, StubPlugin};
 
 /// Builds a real core over a temporary data folder, with fake HTTP and fake processes.
 pub struct FakeHost {
@@ -17,6 +17,7 @@ pub struct FakeHost {
     loaders: Vec<Arc<dyn Loader>>,
     http: FakeHttp,
     spawner: FakeSpawner,
+    processes: FakeProcessTree,
     desktop: FakeDesktop,
     torrents: FakeTorrents,
     network: FakeNetwork,
@@ -48,6 +49,7 @@ impl FakeHost {
         host.shutdown_timeout = Duration::from_millis(200);
         host.stop_grace = Duration::from_millis(200);
         host.show_timeout = Duration::from_millis(500);
+        host.watch_every = Duration::from_millis(20);
         host.torrent_poll = Duration::from_millis(10);
         host.vpn_poll = Duration::from_millis(10);
         Self {
@@ -58,6 +60,7 @@ impl FakeHost {
             loaders: Vec::new(),
             http: FakeHttp::default(),
             spawner: FakeSpawner::default(),
+            processes: FakeProcessTree::default(),
             desktop: FakeDesktop::default(),
             torrents: FakeTorrents::default(),
             network: FakeNetwork::default(),
@@ -67,6 +70,12 @@ impl FakeHost {
             disks: Vec::new(),
             first_run: false,
         }
+    }
+
+    /// The archives the host unpacks, to say what each holds before the core starts: a
+    /// download unpacks as soon as it finishes.
+    pub fn archives(&self) -> FakeArchives {
+        self.archives.clone()
     }
 
     /// The computer the "This PC" check sees. Without it the check finds nothing.
@@ -194,6 +203,7 @@ impl FakeHost {
         let mut builder = Kernel::builder(self.host)
             .http(Arc::new(self.http.clone()))
             .spawner(Arc::new(self.spawner.clone()))
+            .processes(Arc::new(self.processes.clone()))
             .desktop(Arc::new(self.desktop.clone()))
             .torrents(Arc::new(self.torrents.clone()))
             .network(Arc::new(self.network.clone()))
@@ -215,12 +225,13 @@ impl FakeHost {
     }
 
     pub async fn boot(self) -> TestHost {
+        let processes = self.processes.clone();
         let torrents = self.torrents.clone();
         let network = self.network.clone();
         let archives = self.archives.clone();
         let (builder, dir, http, spawner, desktop) = self.into_builder();
         let (kernel, report) = builder.boot().await;
-        TestHost { kernel, report, http, spawner, desktop, torrents, network, archives, _dir: dir }
+        TestHost { kernel, report, http, spawner, processes, desktop, torrents, network, archives, _dir: dir }
     }
 
     /// Boots the kernel and starts the app on it.
@@ -254,6 +265,8 @@ pub struct TestHost {
     pub report: BootReport,
     pub http: FakeHttp,
     pub spawner: FakeSpawner,
+    /// The running games' processes, beyond the one each started.
+    pub processes: FakeProcessTree,
     pub desktop: FakeDesktop,
     pub torrents: FakeTorrents,
     pub network: FakeNetwork,

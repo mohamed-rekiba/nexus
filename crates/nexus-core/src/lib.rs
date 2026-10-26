@@ -24,6 +24,7 @@ mod prefetch;
 mod programs;
 mod releases;
 mod resolve;
+mod running;
 mod storage;
 pub mod system;
 mod themes;
@@ -35,16 +36,17 @@ mod vpn;
 pub use app::{
     Command, Core, GRID_PAGE, Grid, HIDDEN_FILTER, INGAME_FILTER, INSTALLED_FILTER, MAX_SCALE, MIN_SCALE, Route,
 };
+pub use archives::embedded_archive;
 pub use bus::EventBus;
 pub use config::ConfigService;
 pub use downloads::{Job, JobPhase};
 pub use error::{CoreError, CoreResult, LoadError};
 pub use kernel::{BootReport, HostConfig, Kernel, KernelBuilder, Loader, Origin, PluginInfo, PluginStatus, Rejection};
 pub use ports::{
-    ArchiveKind, Archives, Body, Desktop, Front, Gpu, Hardware, HttpTransport, Network, NoArchives, NoDesktop,
-    NoHardware, NoNetwork, NoTorrents, NoVpn, Opened, PackageError, PackageManager, ProcessExit, ProcessHandle,
-    ProcessSpawner, SEED_UPLOAD_LIMIT, SpawnCommand, Specs, TokioSpawner, TorrentFile, TorrentInfo, TorrentPhase,
-    TorrentStart, TorrentStatus, Torrents, UnpackProgress, Vpn,
+    ArchiveKind, Archives, Body, Desktop, Front, Gpu, GroupTree, Hardware, HttpTransport, Network, NoArchives,
+    NoDesktop, NoHardware, NoNetwork, NoTorrents, NoVpn, Opened, PackageError, PackageManager, ProcessExit,
+    ProcessHandle, ProcessSpawner, ProcessTree, SEED_UPLOAD_LIMIT, SpawnCommand, Specs, TokioSpawner, TorrentFile,
+    TorrentInfo, TorrentPhase, TorrentStart, TorrentStatus, Torrents, UnpackProgress, Vpn,
 };
 pub use storage::DirStorage;
 pub use themes::{DataTheme, DirFiles};

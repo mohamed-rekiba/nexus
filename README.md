@@ -33,8 +33,8 @@ games. The tests also render every screen offscreen with made-up games
   build of your own.
 - **Themes**: switching the theme keeps the screen you are on, your selection, the downloads
   and a running game.
-- **Controller**: every screen works with a gamepad, a keyboard or a pointer. The PS (Guide)
-  button switches between a running game and the launcher.
+- **Controller**: every screen works with a gamepad, a keyboard or a pointer. Holding the PS
+  (Guide) button closes a running game, or opens the power menu when no game runs.
 - **VPN**: catalog downloads can be bound to your own VPN, and pause when it drops.
 - **Updates**: Nexus updates its emulators by itself, and updates itself from its GitHub
   releases.
@@ -116,21 +116,25 @@ make package        # a release build in dist/nexus-<os>-<arch>/
 | The same on KDE Plasma (Wayland) | Nothing: KWin, over D-Bus | Nothing | |
 | Trailers in the window | `mpv-libs` | `libmpv2` | Trailers open in the browser |
 | RAR, tar.xz, tar.bz2, tar.zst and ISO downloads (the release package ships it) | `libarchive` | `libarchive13` | Those archives don't unpack, and the error names the package |
+| A RAR libarchive can't read: a RAR 5 with a big dictionary, as in some script installers (Cuphead's). The Nexus packages recommend it | `unar` | `unar` | Its unpacking fails, and the error says to install unar |
 | The "This PC" check | `vulkan-loader mesa-vulkan-drivers` (or your GPU vendor's driver) | `libvulkan1 mesa-vulkan-drivers` | The check lists the graphics cards without their Vulkan version |
 | Windows PC games | [umu-launcher](#umu-launcher-for-windows-games) (runs them with Proton), or `wine` | [umu-launcher](#umu-launcher-for-windows-games), or `wine` | The game's Game Hub says to install one |
-| An old Windows game filling the screen at its own resolution (its Resolution setting) | `gamescope` | `gamescope` (Debian 12, backports for 13; Ubuntu where your release has it) | Play says to install it, or to set the game's Resolution back to Your screen |
+| An old game filling the screen at its own resolution (its Resolution setting) | `gamescope` | `gamescope` (Debian 12, backports for 13; Ubuntu where your release has it) | Play says to install it, or to set the game's Resolution back to Your screen |
 | Saved VPN connections in Settings | `NetworkManager` | `network-manager` | Only the VPNs already up show |
+| Old Linux games whose start script opens the game's own launcher (Trine 3 from GOG). The Nexus packages depend on these | `gtk2 libpng12` | `libgtk2.0-0t64` (no libpng 1.2 package) | The game closes right after it starts, with code 127 in its log |
+| A game that brings its own 32-bit Wine (a portable Wine wrapper's `start.sh`). The Nexus rpm depends on these | `glibc.i686 libgcc.i686 libX11.i686 libXext.i686 libXcomposite.i686 libXcursor.i686 libXfixes.i686 libXinerama.i686 libXi.i686 libXrandr.i686 libXrender.i686 libXxf86vm.i686 mesa-libGL.i686 mesa-dri-drivers.i686 mesa-vulkan-drivers.i686 vulkan-loader.i686 alsa-lib.i686 pulseaudio-libs.i686 freetype.i686 fontconfig.i686` | The same libraries for `i386`, after `sudo dpkg --add-architecture i386` | Its script says "There is a problem running Wine binary!", or Wine says no driver could be loaded |
 
-All of them on Fedora: `sudo dnf install xdotool xprop mpv-libs libarchive vulkan-loader mesa-vulkan-drivers wine gamescope NetworkManager`.
-On Debian and Ubuntu: `sudo apt-get install xdotool x11-utils libmpv2 libarchive13 libvulkan1 mesa-vulkan-drivers wine network-manager`.
+All of them on Fedora: `sudo dnf install xdotool xprop mpv-libs libarchive vulkan-loader mesa-vulkan-drivers wine gamescope NetworkManager gtk2 libpng12 unar`.
+On Debian and Ubuntu: `sudo apt-get install xdotool x11-utils libmpv2 libarchive13 libvulkan1 mesa-vulkan-drivers wine network-manager libgtk2.0-0t64 unar`.
 
 #### umu-launcher, for Windows games
 
 Nexus runs a Windows game through [umu-launcher](https://github.com/Open-Wine-Components/umu-launcher)
 when it is installed, else through Wine. umu-launcher runs games with Proton (GE-Proton), the
 way Steam does, and downloads and updates Proton by itself: the first game takes a while to
-start while it does. A repack that brings its own 32-bit Wine needs it on a system without
-32-bit libraries, such as a default Fedora.
+start while it does. A repack that brings its own 32-bit Wine can't run its script on a system
+without 32-bit libraries, such as a default Fedora: pick its `.exe` in its Game settings
+(Starts) and it runs through umu-launcher.
 
 The easiest way: **Install umu-launcher** on the PC page (Emulators, then PC). Nexus installs
 the latest release's zipapp for itself, checked against the checksum GitHub lists, and
@@ -180,11 +184,11 @@ Run the same commands again to update it.
 `umu-run --help` answering means Nexus will find it. Nexus looks for it each time a Windows game
 starts, so there is no need to restart Nexus.
 
-#### gamescope, for old Windows games
+#### gamescope, for old games
 
-An old Windows game made for a small screen (800 × 600, say) can't change a Wayland screen's
+An old game made for a small screen (800 × 600, say), Windows or Linux, can't change a Wayland screen's
 resolution: it shows in a corner of a black screen. Set its **Resolution** in its Game Hub (its
-settings, "PC settings for this game") to the one it runs at: it then runs inside
+Game settings) to the one it runs at: it then runs inside
 [gamescope](https://github.com/ValveSoftware/gamescope), Valve's compositor from the Steam Deck,
 which scales it up to fill the screen. **Your screen**, the default, runs the game as it is.
 Install it with `sudo dnf install gamescope` on Fedora, `sudo apt-get install gamescope` on
@@ -200,6 +204,21 @@ Accessibility permission for the app that starts Nexus, and optionally `brew ins
 
 **Windows**: the Visual Studio Build Tools, with "Desktop development with C++", to build.
 To run, nothing more; optionally `libmpv-2.dll` beside `nexus.exe` for trailers in the window.
+
+#### UMIP off, for some Windows repacks
+
+Some Windows repacks bypass the game's copy protection with a driver of their own: their
+`game` folder holds `driver_amd/SimpleSvm.sys` or `driver_intel/hyperkd.sys`, and their ReadMe
+asks you to turn off UMIP, a CPU feature. The ReadMe says which CPUs need it (Sonic
+Superstars': AMD after Zen 3, Intel after 8th gen). Without it the game closes as it starts.
+Nexus doesn't change how your system boots: add the kernel argument yourself, then restart.
+
+- Fedora: `sudo grubby --update-kernel=ALL --args="clearcpuid=514"`
+- Debian and Ubuntu: add `clearcpuid=514` to `GRUB_CMDLINE_LINUX_DEFAULT` in
+  `/etc/default/grub`, then `sudo update-grub`
+
+`grep -o clearcpuid=514 /proc/cmdline` prints it once it is on. To undo it on Fedora:
+`sudo grubby --update-kernel=ALL --remove-args="clearcpuid=514"`.
 
 ## Download Nexus OS
 
@@ -370,7 +389,8 @@ game's menu asks again.
 | L1, R1 | Shift+Tab, Tab | The screen before and after |
 | L2, R2 | Page Up, Page Down | A page up or down |
 | Create (Share, View) | Delete | Close the newest notice |
-| PS (Guide) | | While a game runs: switch between the game and Nexus. Otherwise: back to Home |
+| PS (Guide) | | Hold: closes the running game, or with no game running opens the power menu. Tap: back to Home; nothing while a game runs |
+| | Ctrl+P | The power menu |
 | | Ctrl+Q | Quit |
 
 While a game is in front, the controller is the game's; Nexus takes it back only while its
@@ -419,7 +439,7 @@ Command-line options (`nexus --help` lists them):
 | `--extensions <path>` | Another folder of third-party themes (default: `<data-dir>/extensions`) |
 | `--folder <name>=<path>` | Map a named folder, such as `games=/srv/games` (saved; repeat it for more) |
 | `--dev` | Reload a theme when its files change |
-| `--supports gamescope` | Exits 0, for a Gamescope session that checks the launcher |
+| `--supports <feature>` | Exits 0 when Nexus has the feature: `gamescope`, `system-settings`, `os-install` ([Nexus OS](docs/nexus-os.md#what-the-os-asks-of-nexus)) |
 
 ### Emulators
 

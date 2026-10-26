@@ -359,22 +359,25 @@ pub enum PackageError {
     Failed(String),
 }
 
-/// The desktop's windows: which one is in front, and bringing one to the front.
+/// The desktop's windows: which one is in front, and bringing one to the front. A game is
+/// its processes, as [`ProcessTree::members`] lists them.
 pub trait Desktop: Send + Sync {
     fn front(&self) -> Front;
-    /// Brings a window of process `id`, or of a process in its group, to the front. `false`
-    /// when it has no window yet, or the system refused.
-    fn show_game(&self, id: u32) -> bool;
+    /// Brings a window of one of the game's processes `ids` to the front. `false` when none has
+    /// a window yet, or the system refused.
+    fn show_game(&self, ids: &[u32]) -> bool;
     /// Brings the launcher's window to the front.
     fn show_launcher(&self);
-    /// Whether process `id` or a process in its group owns window `front`.
-    fn is_game(&self, id: u32, front: u32) -> bool {
-        id == front
-    }
-    /// Whether process `id`, or a process in its group, has a window. `None` when the system
-    /// doesn't say. On macOS a program can keep running after its last window closed.
-    fn has_window(&self, _id: u32) -> Option<bool> {
+    /// Whether one of the processes `ids` has a window. `None` when the system doesn't say.
+    fn has_window(&self, _ids: &[u32]) -> Option<bool> {
         None
+    }
+    /// Whether a game whose windows all closed is over even while its processes run. True on
+    /// macOS, where a program keeps running after its last window closes. Elsewhere a game
+    /// ends when its processes do: a launcher's own window (a menu, a setup dialog) closes
+    /// before the game's opens.
+    fn window_close_ends_game(&self) -> bool {
+        false
     }
     /// Why games can't come to the front on this desktop, and the fix, for example a missing
     /// tool or permission. `None` when nothing is missing. The core tells the player once a run.
@@ -406,11 +409,49 @@ impl Desktop for NoDesktop {
         Front::Unknown
     }
 
-    fn show_game(&self, _id: u32) -> bool {
+    fn show_game(&self, _ids: &[u32]) -> bool {
         false
     }
 
     fn show_launcher(&self) {}
+}
+
+/// A running game's processes: the one the launcher started, the ones in its process group,
+/// and the ones a sandbox moved out of the group below them (Proton's pressure-vessel does).
+/// The app's adapter walks the system's process list; the core's default sees only the group.
+pub trait ProcessTree: Send + Sync {
+    /// The live processes of the game the launcher started as `root`, `root` among them while
+    /// it runs. Blocking: it may run a system tool.
+    fn members(&self, root: u32) -> Vec<u32>;
+    /// Asks the processes `ids` to close (`force`: kills them). Blocking.
+    fn end(&self, ids: &[u32], force: bool);
+}
+
+/// The process group alone: `root` while its group has a live process (Unix), nothing on
+/// Windows, which has no process groups. The default until the app plugs in a real one. Once
+/// the first process exits the core drops `root`, so with this default a game ends with its
+/// first process: plug in the app's adapter to follow the group.
+pub struct GroupTree;
+
+impl ProcessTree for GroupTree {
+    fn members(&self, root: u32) -> Vec<u32> {
+        #[cfg(unix)]
+        {
+            let alive = std::process::Command::new("kill")
+                .args(["-0", "--", &format!("-{root}")])
+                .stderr(std::process::Stdio::null())
+                .status()
+                .is_ok_and(|s| s.success());
+            if alive { vec![root] } else { Vec::new() }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = root;
+            Vec::new()
+        }
+    }
+
+    fn end(&self, _ids: &[u32], _force: bool) {}
 }
 
 /// HTTP that always fails. The default until the app plugs in a real transport.
@@ -756,6 +797,9 @@ pub enum ArchiveKind {
     Cab,
     /// A GOG installer: a shell script with a zip at its end. The script never runs.
     Gog,
+    /// A script installer that states its archive's size (Kron4ek's YAD installers): the
+    /// archive is its last bytes, from [`crate::embedded_archive`]. The script never runs.
+    Script,
 }
 
 /// How far an unpack is: `done` of `total` bytes written.

@@ -145,7 +145,37 @@ pub(crate) fn is_gog_installer(path: &Path) -> bool {
     buf.windows(4).any(|w| w == b"PK\x05\x06")
 }
 
-/// The archive sets in the download at `folder`: by name, and GOG installers by their bytes.
+/// How far into a script installer's header its archive's size can be stated.
+const SCRIPT_HEAD: u64 = 128 * 1024;
+
+/// Where the archive a script installer carries at its end starts, when its header states the
+/// archive's size on an `arcsz=` line, as Kron4ek's YAD installers do; `None` for any other file.
+pub fn embedded_archive(path: &Path) -> Option<u64> {
+    use std::io::Read;
+    let file = std::fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    let mut head = Vec::new();
+    file.take(SCRIPT_HEAD).read_to_end(&mut head).ok()?;
+    if !head.starts_with(b"#!") {
+        return None;
+    }
+    let size: u64 = head.split(|b| *b == b'\n').find_map(|line| {
+        let value = line.strip_prefix(b"arcsz=")?;
+        let digits = std::str::from_utf8(value).ok()?.trim().trim_matches(|c| c == '"' || c == '\'');
+        digits.parse().ok()
+    })?;
+    // The script comes first.
+    (size > 0 && size.checked_add(1024)? <= len).then(|| len - size)
+}
+
+/// Whether `path` is named as a script installer is: `.sh` or `.run`.
+fn script_named(path: &str) -> Option<&str> {
+    let lower = path.to_ascii_lowercase();
+    [".sh", ".run"].iter().find(|ext| lower.ends_with(*ext)).map(|ext| &path[..path.len() - ext.len()])
+}
+
+/// The archive sets in the download at `folder`: by name, and script installers (GOG's, and
+/// those that state their archive's size) by their bytes.
 /// The `unpacked` folder is left out.
 pub(crate) fn scan(folder: &Path) -> Vec<ArchiveSet> {
     let mut paths = Vec::new();
@@ -172,10 +202,16 @@ pub(crate) fn scan(folder: &Path) -> Vec<ArchiveSet> {
         }
     }
     for path in &paths {
-        if path.to_ascii_lowercase().ends_with(".sh") && is_gog_installer(&folder.join(path)) {
-            let name = path[..path.len() - 3].to_owned();
-            gog.push(ArchiveSet { name, kind: ArchiveKind::Gog, parts: vec![path.clone()], problem: None });
-        }
+        let Some(name) = script_named(path) else { continue };
+        let file = folder.join(path);
+        let kind = if path.to_ascii_lowercase().ends_with(".sh") && is_gog_installer(&file) {
+            ArchiveKind::Gog
+        } else if embedded_archive(&file).is_some() {
+            ArchiveKind::Script
+        } else {
+            continue;
+        };
+        gog.push(ArchiveSet { name: name.to_owned(), kind, parts: vec![path.clone()], problem: None });
     }
     let mut sets = sets_of(paths.iter().map(String::as_str));
     sets.extend(gog);
@@ -424,6 +460,29 @@ mod tests {
         let doubled = sets_of(["Game.part1.rar", "game.part1.rar"]);
         assert!(doubled[0].problem.as_deref().is_some_and(|p| p.contains("the same part")), "{doubled:?}");
         assert!(sets_of(["Game/Data/levels.zip"]).is_empty(), "two folders down: the game's own data");
+    }
+
+    #[test]
+    fn a_script_installer_that_states_its_archive_s_size_is_unpacked_from_its_end() {
+        let dir = std::env::temp_dir().join(format!("nexus-script-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut installer = b"#!/usr/bin/env sh\napp=\"Game\"\narcsz=2048\nexport arcsz\nexit 0\n".to_vec();
+        installer.resize(4096, b'#');
+        let start = installer.len() as u64;
+        installer.resize(4096 + 2048, 0);
+        std::fs::write(dir.join("game_v1.2.run"), &installer).unwrap();
+        // Says a size bigger than the file: not one.
+        std::fs::write(dir.join("broken.sh"), b"#!/bin/sh\narcsz=99999999\n".repeat(100)).unwrap();
+        let mut plain = b"#!/bin/sh\n".to_vec();
+        plain.resize(4096, b' ');
+        std::fs::write(dir.join("start.sh"), plain).unwrap();
+
+        assert_eq!(embedded_archive(&dir.join("game_v1.2.run")), Some(start));
+        assert_eq!(embedded_archive(&dir.join("broken.sh")), None);
+        assert_eq!(embedded_archive(&dir.join("start.sh")), None);
+        let sets = scan(&dir);
+        assert_eq!(names(&sets), [("game_v1.2".into(), ArchiveKind::Script, vec!["game_v1.2.run".into()], None)]);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

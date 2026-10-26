@@ -112,15 +112,22 @@ pub fn clean_name(value: &str) -> String {
 
 /// A PC title's name without its add-ons and its year and version groups: "Celeste (2018)
 /// (v1.4.0.0) + 2 DLC" is "Celeste". It ends at the first group that is a year, a version or
-/// a build.
+/// a build. A version may come without its "v" ("Amnesia: Rebirth (1.41)"), and a date is
+/// written as one ("(15.01.2021)").
 pub(crate) fn pc_name(name: &str) -> String {
     let name = name.split(" + ").next().unwrap_or(name).trim();
+    // Digits, a dot, a digit: "1.11", "15.01.2021".
+    let dotted = |s: &str| {
+        let rest = s.trim_start_matches(|c: char| c.is_ascii_digit());
+        rest.len() < s.len() && rest.strip_prefix('.').is_some_and(|r| r.starts_with(|c: char| c.is_ascii_digit()))
+    };
     let is_tail = |group: &str| {
         let lower = group.to_ascii_lowercase();
         let year = lower.len() >= 5 && lower[..4].bytes().all(|b| b.is_ascii_digit()) && lower[4..].starts_with(')');
-        let version = lower
-            .strip_prefix('v')
-            .is_some_and(|v| v.trim_start_matches('.').starts_with(|c: char| c.is_ascii_digit()));
+        let version = dotted(&lower)
+            || lower
+                .strip_prefix('v')
+                .is_some_and(|v| v.trim_start_matches('.').starts_with(|c: char| c.is_ascii_digit()));
         year || version || lower.starts_with("v.build") || lower.starts_with("build")
     };
     let cut = name.match_indices(" (").map(|(at, _)| at).find(|&at| is_tail(&name[at + 2..]));
@@ -700,6 +707,10 @@ mod tests {
         );
         assert_eq!(pc_name("Fernbus Simulator (v.1.35.102872) +34 DLC"), "Fernbus Simulator");
         assert_eq!(pc_name("Silver Pines (2026) (v.629 175052)"), "Silver Pines");
+        assert_eq!(pc_name("Trine 3: The Artifacts of Power (1.11 (build 3091))"), "Trine 3: The Artifacts of Power");
+        assert_eq!(pc_name("Amnesia: Rebirth (1.41)"), "Amnesia: Rebirth");
+        assert_eq!(pc_name("WRATH: Aeon of Ruin (15.01.2021)"), "WRATH: Aeon of Ruin", "a date");
+        assert_eq!(pc_name("Worms 2 (2)"), "Worms 2 (2)", "a number alone is part of the name");
         assert_eq!(
             pc_name("Half-Life (Steam Edition)"),
             "Half-Life (Steam Edition)",

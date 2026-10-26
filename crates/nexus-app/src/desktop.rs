@@ -10,8 +10,9 @@
 //!   XWayland windows alike.
 //! - Linux on another Wayland desktop: no program may raise another's window. The launcher
 //!   raises itself through winit, and a game under XWayland still works through `xdotool`.
-//! - Windows: the Win32 API. Windows has no process groups: a game's group is its process
-//!   and its child processes, from a process snapshot (`system::tree`).
+//! - Windows: the Win32 API.
+//!
+//! A game is its processes, as `processes.rs` lists them: every call here takes their ids.
 //!
 //! Start at login writes the system's own entry for the installed launcher (`login`): a
 //! `nexus.desktop` in `$XDG_CONFIG_HOME/autostart` on Linux, a launch agent in
@@ -39,47 +40,6 @@ pub struct SystemDesktop {
 fn run(program: &str, args: &[&str]) -> Option<String> {
     let out = Command::new(program).args(args).stdin(Stdio::null()).stderr(Stdio::null()).output().ok()?;
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_owned())
-}
-
-/// Running processes in the process group `group`. A game leads a group of its own, so
-/// these are the programs it started.
-#[cfg(unix)]
-fn group_members(group: u32) -> Vec<u32> {
-    run("pgrep", &["-g", &group.to_string()])
-        .map(|out| out.split_whitespace().filter_map(|p| p.parse().ok()).collect())
-        .unwrap_or_default()
-}
-
-/// Each running process with its parent, as `ps` lists them.
-#[cfg(unix)]
-fn parents() -> Vec<(u32, u32)> {
-    run("ps", &["-A", "-o", "pid=,ppid="])
-        .map(|out| {
-            out.lines()
-                .filter_map(|line| {
-                    let mut ids = line.split_whitespace().map(|n| n.parse().ok());
-                    Some((ids.next()??, ids.next()??))
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-/// `ids` and every process below them, from `parents` (each process with its parent).
-#[cfg(any(unix, test))]
-fn and_below(mut ids: Vec<u32>, parents: &[(u32, u32)]) -> Vec<u32> {
-    let mut i = 0;
-    while i < ids.len() {
-        let parent = ids[i];
-        for (child, of) in parents {
-            // A process can be its own "parent" after its parent's id was reused.
-            if *of == parent && *child != parent && !ids.contains(child) {
-                ids.push(*child);
-            }
-        }
-        i += 1;
-    }
-    ids
 }
 
 #[cfg(target_os = "macos")]
@@ -387,53 +347,12 @@ function mine(w, ids) { return w && ids.indexOf(w.pid) >= 0 && (w.normalWindow |
 #[cfg(windows)]
 #[allow(unsafe_code)] // Win32 calls are foreign functions; each one is wrapped in a safe function here.
 mod system {
-    use windows_sys::Win32::Foundation::{CloseHandle, HWND, INVALID_HANDLE_VALUE, LPARAM};
-    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
-    };
+    use windows_sys::Win32::Foundation::{HWND, LPARAM};
     use windows_sys::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         BringWindowToTop, EnumWindows, GW_OWNER, GetForegroundWindow, GetWindow, GetWindowThreadProcessId, IsIconic,
         IsWindowVisible, SW_RESTORE, SetForegroundWindow, ShowWindow,
     };
-
-    /// Process id to parent process id, for every running process.
-    fn parents() -> Vec<(u32, u32)> {
-        let mut out = Vec::new();
-        // SAFETY: the snapshot handle is checked, read with a sized entry, and closed.
-        unsafe {
-            let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-            if snapshot == INVALID_HANDLE_VALUE {
-                return out;
-            }
-            let mut entry = PROCESSENTRY32W { dwSize: size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
-            let mut more = Process32FirstW(snapshot, &mut entry) != 0;
-            while more {
-                out.push((entry.th32ProcessID, entry.th32ParentProcessID));
-                more = Process32NextW(snapshot, &mut entry) != 0;
-            }
-            CloseHandle(snapshot);
-        }
-        out
-    }
-
-    /// Process `id` and every process below it.
-    pub fn tree(id: u32) -> Vec<u32> {
-        let parents = parents();
-        let mut ids = vec![id];
-        let mut i = 0;
-        while i < ids.len() {
-            let parent = ids[i];
-            for (child, of) in &parents {
-                // A process can be its own "parent" after its parent's id was reused.
-                if *of == parent && *child != parent && !ids.contains(child) {
-                    ids.push(*child);
-                }
-            }
-            i += 1;
-        }
-        ids
-    }
 
     fn owner(window: HWND) -> u32 {
         let mut id = 0;
@@ -505,23 +424,6 @@ mod system {
     }
 }
 
-/// A game's process and the programs it started.
-fn with_group(id: u32) -> Vec<u32> {
-    // A sandbox starts its programs in a session of their own, out of the group: Proton's
-    // (pressure-vessel) does. They are still below the game's process.
-    #[cfg(unix)]
-    let ids = {
-        let mut group = group_members(id);
-        if !group.contains(&id) {
-            group.insert(0, id);
-        }
-        and_below(group, &parents())
-    };
-    #[cfg(windows)]
-    let ids = system::tree(id);
-    ids
-}
-
 /// Puts the launcher on screen under Gamescope, once its window is there: Gamescope's Steam
 /// mode shows nothing until a window carries an id, and winit sets none. True when done; false
 /// while the window isn't up yet, and always outside Gamescope (Linux only).
@@ -541,8 +443,8 @@ impl Desktop for SystemDesktop {
         }
     }
 
-    fn show_game(&self, id: u32) -> bool {
-        system::show(&with_group(id))
+    fn show_game(&self, ids: &[u32]) -> bool {
+        system::show(ids)
     }
 
     fn show_launcher(&self) {
@@ -553,12 +455,13 @@ impl Desktop for SystemDesktop {
         }
     }
 
-    fn is_game(&self, id: u32, front: u32) -> bool {
-        with_group(id).contains(&front)
+    fn has_window(&self, ids: &[u32]) -> Option<bool> {
+        system::has_window(ids)
     }
 
-    fn has_window(&self, id: u32) -> Option<bool> {
-        system::has_window(&with_group(id))
+    /// On macOS a program keeps running after its last window closes: the game is over then.
+    fn window_close_ends_game(&self) -> bool {
+        cfg!(target_os = "macos")
     }
 
     fn problem(&self) -> Option<String> {
@@ -739,15 +642,6 @@ pub mod login {
 
 #[cfg(test)]
 mod tests {
-    /// A game's processes: its own, and those below them, also below one in a session of its
-    /// own, as Proton's sandbox starts the game.
-    #[test]
-    fn a_game_is_its_processes_and_every_one_below_them() {
-        let parents = [(10, 1), (11, 10), (20, 11), (30, 20), (40, 1), (50, 50)];
-        assert_eq!(super::and_below(vec![10, 11], &parents), [10, 11, 20, 30]);
-        assert_eq!(super::and_below(vec![50], &parents), [50], "not its own child");
-    }
-
     /// The script answers to the launcher's bus name, through `/nexus`, after KWin's names.
     #[cfg(target_os = "linux")]
     #[test]

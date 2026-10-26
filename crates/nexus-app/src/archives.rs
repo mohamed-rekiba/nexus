@@ -8,7 +8,9 @@
 //!
 //! Readers: `zip` for zip archives and GOG installers (a script with a zip at its end), `tar`
 //! and `flate2` for tar and tar.gz, `sevenz-rust2` for 7z (a split 7z is one stream cut into
-//! parts, read as one), and libarchive for RAR and the rest (see `libarchive.rs`).
+//! parts, read as one), and libarchive for RAR and the rest (see `libarchive.rs`). A RAR, or a
+//! script installer's archive, that libarchive can't read goes to `unar` (The Unarchiver) when
+//! it is installed: a RAR 5 with a dictionary bigger than libarchive takes.
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -175,7 +177,35 @@ enum Via {
     Libarchive,
 }
 
-fn unpack(kind: ArchiveKind, parts: &[PathBuf], mut work: Work) -> Result<(), String> {
+fn unpack(kind: ArchiveKind, parts: &[PathBuf], work: Work) -> Result<(), String> {
+    let again = Work {
+        into: work.into.clone(),
+        progress: work.progress.clone(),
+        cancel: work.cancel.clone(),
+        done: 0,
+        total: 0,
+    };
+    let error = match unpack_set(kind, parts, work) {
+        Ok(()) => return Ok(()),
+        Err(e) => e,
+    };
+    // A RAR libarchive can't read: unar may. Not one it refused for a password or a path.
+    let unreadable = error.starts_with("the archive couldn't be read") || error.contains(" couldn't be read: ");
+    if !matches!(kind, ArchiveKind::Rar | ArchiveKind::Script) || !unreadable || again.cancel.load(Ordering::Acquire) {
+        return Err(error);
+    }
+    let Some(tools) = Unar::find() else {
+        let by_hand = if kind == ArchiveKind::Script { ", or run the installer by hand" } else { "" };
+        return Err(format!("{error}. Install unar to unpack it{by_hand}"));
+    };
+    // What libarchive wrote before it stopped.
+    std::fs::remove_dir_all(&again.into)
+        .and_then(|()| std::fs::create_dir_all(&again.into))
+        .map_err(|e| e.to_string())?;
+    tools.unpack(kind, parts, again)
+}
+
+fn unpack_set(kind: ArchiveKind, parts: &[PathBuf], mut work: Work) -> Result<(), String> {
     let first = parts.first().ok_or("an archive with no parts")?;
     // The Rust readers first; libarchive for the rest, and for a 7z with a codec
     // `sevenz-rust2` isn't built with.
@@ -191,7 +221,8 @@ fn unpack(kind: ArchiveKind, parts: &[PathBuf], mut work: Work) -> Result<(), St
         | ArchiveKind::TarBz2
         | ArchiveKind::TarZst
         | ArchiveKind::Iso
-        | ArchiveKind::Cab => (Via::Libarchive, lib_entries(kind, parts)?),
+        | ArchiveKind::Cab
+        | ArchiveKind::Script => (Via::Libarchive, lib_entries(kind, parts)?),
     };
     work.total = entries.iter().filter(|e| e.item == Item::File).map(|e| e.size).sum();
     crate::disk::room(work.total, crate::disk::free_bytes(&work.into))?;
@@ -499,9 +530,21 @@ fn serde_name(kind: ArchiveKind) -> String {
     nexus_api::serde_json::to_value(kind).ok().and_then(|v| v.as_str().map(str::to_uppercase)).unwrap_or_default()
 }
 
+/// libarchive on the archive cut into `parts`; a script installer's from its end.
+fn lib_open(kind: ArchiveKind, parts: &[PathBuf]) -> Result<crate::libarchive::Reader, String> {
+    let api = lib_api(kind)?;
+    if kind != ArchiveKind::Script {
+        return crate::libarchive::Reader::open(api, parts);
+    }
+    let script = parts.first().ok_or("an archive with no parts")?;
+    let offset =
+        nexus_core::embedded_archive(script).ok_or_else(|| read_error(script, "it doesn't say its archive's size"))?;
+    crate::libarchive::Reader::open_at(api, script, offset)
+}
+
 fn lib_entries(kind: ArchiveKind, parts: &[PathBuf]) -> Result<Vec<Entry>, String> {
     use crate::libarchive::Kind;
-    let mut reader = crate::libarchive::Reader::open(lib_api(kind)?, parts)?;
+    let mut reader = lib_open(kind, parts)?;
     let mut out = Vec::new();
     while let Some(header) = reader.next()? {
         if header.encrypted {
@@ -525,7 +568,7 @@ fn lib_entries(kind: ArchiveKind, parts: &[PathBuf]) -> Result<Vec<Entry>, Strin
 }
 
 fn lib_write(kind: ArchiveKind, parts: &[PathBuf], entries: &[Entry], work: &mut Work) -> Result<(), String> {
-    let mut reader = crate::libarchive::Reader::open(lib_api(kind)?, parts)?;
+    let mut reader = lib_open(kind, parts)?;
     // The second pass reads the entries the first one checked, in the same order.
     for checked in entries {
         work.check_cancel()?;
@@ -541,6 +584,162 @@ fn lib_write(kind: ArchiveKind, parts: &[PathBuf], entries: &[Entry], work: &mut
         }
     }
     Ok(())
+}
+
+// unar, for what libarchive can't read. It reads only a whole file: a script installer's
+// archive is copied out first, beside the folder, and removed after.
+
+/// The Unarchiver's programs: `lsar` lists, `unar` unpacks.
+struct Unar {
+    lsar: PathBuf,
+    unar: PathBuf,
+}
+
+/// Files' Unix modes, by their paths in the folder.
+type Modes = Vec<(PathBuf, u32)>;
+
+/// A file removed when it goes out of scope.
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+impl Unar {
+    fn find() -> Option<Self> {
+        use nexus_core::ProcessSpawner;
+        let which = |name| nexus_core::TokioSpawner.which(name);
+        Some(Self { lsar: which("lsar")?, unar: which("unar")? })
+    }
+
+    fn unpack(&self, kind: ArchiveKind, parts: &[PathBuf], mut work: Work) -> Result<(), String> {
+        let first = parts.first().ok_or("an archive with no parts")?;
+        let scratch = if kind == ArchiveKind::Script { Some(copy_out(first, &mut work)?) } else { None };
+        let archive = scratch.as_ref().map_or(first.as_path(), |s| s.0.as_path());
+        let (entries, modes) = self.entries(archive)?;
+        work.total = entries.iter().filter(|e| e.item == Item::File).map(|e| e.size).sum();
+        work.done = 0;
+        crate::disk::room(work.total, crate::disk::free_bytes(&work.into))?;
+        let sizes: std::collections::HashMap<String, u64> =
+            entries.iter().map(|e| (e.path.to_string_lossy().into_owned(), e.size)).collect();
+        // `-D`: the entries as the archive has them; `-nr`: an archive inside stays packed.
+        let mut child = std::process::Command::new(&self.unar)
+            .args(["-f", "-D", "-nr", "-o"])
+            .arg(&work.into)
+            .arg(archive)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("unar: {e}"))?;
+        let stdout = child.stdout.take().ok_or("unar: no output")?;
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            use std::io::BufRead;
+            for line in std::io::BufReader::new(stdout).lines().map_while(Result::ok) {
+                let _ = tx.send(line);
+            }
+        });
+        // Each line names a file it wrote: "  Game/run.sh  (175 B)... OK."
+        let status = loop {
+            while let Ok(line) = rx.try_recv() {
+                if let Some(name) = line.trim_start().split("  (").next()
+                    && let Some(size) = sizes.get(name)
+                {
+                    work.done += size;
+                    (work.progress)(work.done, work.total);
+                }
+            }
+            if work.check_cancel().is_err() {
+                let _ = child.kill();
+                let _ = child.wait();
+                return work.check_cancel();
+            }
+            if let Some(status) = child.try_wait().map_err(|e| format!("unar: {e}"))? {
+                break status;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        };
+        if !status.success() {
+            let mut errors = String::new();
+            if let Some(mut stderr) = child.stderr.take() {
+                let _ = stderr.read_to_string(&mut errors);
+            }
+            return Err(format!("unar couldn't unpack {}: {}", first.display(), errors.trim()));
+        }
+        // unar leaves a program's flag off.
+        for (path, mode) in modes {
+            work.mode(&path, mode)?;
+        }
+        Ok(())
+    }
+
+    /// The archive's entries, checked as every reader's are, and the Unix modes it keeps.
+    fn entries(&self, archive: &Path) -> Result<(Vec<Entry>, Modes), String> {
+        use nexus_api::serde_json::Value;
+        let out = std::process::Command::new(&self.lsar)
+            .args(["-j", "-jss", "-nr"])
+            .arg(archive)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .map_err(|e| format!("lsar: {e}"))?;
+        if !out.status.success() {
+            return Err(read_error(archive, String::from_utf8_lossy(&out.stdout).trim()));
+        }
+        let listing: Value =
+            nexus_api::serde_json::from_slice(&out.stdout).map_err(|e| read_error(archive, &e.to_string()))?;
+        let mut entries = Vec::new();
+        let mut modes = Vec::new();
+        for e in listing["lsarContents"].as_array().ok_or_else(|| read_error(archive, "lsar listed nothing"))? {
+            let name = e["XADFileName"].as_str().ok_or_else(|| read_error(archive, "an entry with no name"))?;
+            if e["XADIsEncrypted"].as_u64().unwrap_or(0) != 0 {
+                return Err(password());
+            }
+            let size = e["XADFileSize"].as_u64().unwrap_or(0);
+            let item = if e["XADIsDirectory"].as_u64().unwrap_or(0) != 0 {
+                Item::Folder
+            } else if e["XADIsLink"].as_u64().unwrap_or(0) != 0 {
+                Item::Link(e["XADLinkDestination"].as_str().unwrap_or_default().into())
+            } else {
+                Item::File
+            };
+            let entry = entry(name, size, item)?;
+            // A RAR 5 made on Unix keeps the file's mode.
+            if entry.item == Item::File
+                && e["RAR5OS"].as_u64() == Some(1)
+                && let Some(attributes) = e["RAR5Attributes"].as_u64()
+            {
+                modes.push((entry.path.clone(), attributes as u32));
+            }
+            entries.push(entry);
+        }
+        Ok((entries, modes))
+    }
+}
+
+/// Copies a script installer's archive out of it, beside the unpack folder: unar reads only a
+/// whole file.
+fn copy_out(script: &Path, work: &mut Work) -> Result<Scratch, String> {
+    let offset =
+        nexus_core::embedded_archive(script).ok_or_else(|| read_error(script, "it doesn't say its archive's size"))?;
+    let mut file = File::open(script).map_err(|e| read_error(script, &e.to_string()))?;
+    let size = file.metadata().map_err(|e| read_error(script, &e.to_string()))?.len() - offset;
+    crate::disk::room(size, crate::disk::free_bytes(&work.into))?;
+    file.seek(SeekFrom::Start(offset)).map_err(|e| read_error(script, &e.to_string()))?;
+    let scratch = Scratch(work.into.with_extension("archive"));
+    let mut out = File::create(&scratch.0).map_err(|e| format!("{}: {e}", scratch.0.display()))?;
+    let mut buffer = vec![0; PIECE];
+    loop {
+        work.check_cancel()?;
+        let n = file.read(&mut buffer).map_err(|e| read_error(script, &e.to_string()))?;
+        if n == 0 {
+            break;
+        }
+        out.write_all(&buffer[..n]).map_err(|e| format!("{}: {e}", scratch.0.display()))?;
+    }
+    Ok(scratch)
 }
 
 #[cfg(test)]
@@ -627,6 +826,80 @@ mod tests {
         std::fs::write(dir.join("game.sh"), gog).unwrap();
         run(ArchiveKind::Gog, &[dir.join("game.sh")], &dir).unwrap();
         assert!(dir.join("out/data/noarch/game/start.sh").is_file());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_script_installer_unpacks_the_archive_its_header_sizes() {
+        if crate::libarchive::api().is_none() {
+            eprintln!("SKIPPED: no libarchive with RAR 5 on this computer");
+            return;
+        }
+        let dir = folder("script");
+        let mut tar = tar::Builder::new(flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast()));
+        let mut header = tar::Header::new_gnu();
+        header.set_size(3);
+        header.set_mode(0o755);
+        tar.append_data(&mut header, "Game/run.sh", &b"#!/"[..]).unwrap();
+        let payload = tar.into_inner().unwrap().finish().unwrap();
+        // The script, then the programs it unpacks with, then the archive.
+        let mut installer = format!("#!/usr/bin/env sh\narcsz={}\nexit 0\n", payload.len()).into_bytes();
+        installer.resize(4096, b'#');
+        installer.extend_from_slice(&[0x7f; 3000]);
+        installer.extend_from_slice(&payload);
+        std::fs::write(dir.join("game.run"), &installer).unwrap();
+        run(ArchiveKind::Script, &[dir.join("game.run")], &dir).unwrap();
+        assert_eq!(std::fs::read(dir.join("out/Game/run.sh")).unwrap(), b"#!/");
+
+        // An archive libarchive can't read: the player runs the installer.
+        let mut unreadable = b"#!/usr/bin/env sh\narcsz=3000\n".to_vec();
+        unreadable.resize(4096 + 3000, 0x7f);
+        std::fs::write(dir.join("other.run"), &unreadable).unwrap();
+        let refused = run(ArchiveKind::Script, &[dir.join("other.run")], &folder("script-bad")).unwrap_err();
+        if Unar::find().is_none() {
+            assert!(refused.ends_with("Install unar to unpack it, or run the installer by hand"), "{refused}");
+        } else {
+            assert!(refused.contains("couldn't be read"), "unar can't read it either: {refused}");
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Unpacks with unar into `<dir>/out`, and returns the last progress it reported.
+    fn run_unar(tools: &Unar, kind: ArchiveKind, parts: &[PathBuf], dir: &Path) -> Result<(u64, u64), String> {
+        let into = dir.join("out");
+        std::fs::create_dir_all(&into).unwrap();
+        let last = Arc::new(Mutex::new((0, 0)));
+        let progress: UnpackProgress = {
+            let last = last.clone();
+            Arc::new(move |done, total| *last.lock().unwrap() = (done, total))
+        };
+        let work = Work { into, progress, cancel: Arc::new(AtomicBool::new(false)), done: 0, total: 0 };
+        tools.unpack(kind, parts, work)?;
+        Ok(*last.lock().unwrap())
+    }
+
+    #[test]
+    fn unar_unpacks_a_rar_and_a_script_installer_s_archive_and_leaves_no_copy() {
+        let Some(tools) = Unar::find() else {
+            eprintln!("SKIPPED: no unar on this computer");
+            return;
+        };
+        let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata");
+        let dir = folder("unar-rar");
+        run_unar(&tools, ArchiveKind::Rar, &[data.join("version.rar")], &dir).unwrap();
+        assert!(!std::fs::read(dir.join("out/VERSION")).unwrap().is_empty());
+
+        // An installer with a RAR at its end, as Cuphead's.
+        let dir = folder("unar-script");
+        let payload = std::fs::read(data.join("version.rar")).unwrap();
+        let mut installer = format!("#!/usr/bin/env sh\narcsz={}\n", payload.len()).into_bytes();
+        installer.resize(4096, b'#');
+        installer.extend_from_slice(&payload);
+        std::fs::write(dir.join("game.run"), &installer).unwrap();
+        let (done, total) = run_unar(&tools, ArchiveKind::Script, &[dir.join("game.run")], &dir).unwrap();
+        assert!(total > 0 && done == total, "progress to the end: {done} of {total}");
+        assert!(!std::fs::read(dir.join("out/VERSION")).unwrap().is_empty());
+        assert!(!dir.join("out.archive").exists(), "the archive's copy is gone");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

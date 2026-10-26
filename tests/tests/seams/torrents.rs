@@ -571,6 +571,80 @@ async fn a_finished_pc_download_installs_and_shows_in_the_library() {
     assert!(games.contains(&"PC Penguins".to_owned()), "{games:?}");
 }
 
+// Unix only: links.
+#[cfg(unix)]
+#[tokio::test]
+async fn an_unpacked_pc_game_moves_into_the_games_folder_with_its_links_and_empty_folders() {
+    use std::os::unix::fs::MetadataExt;
+    let mut installer = b"#!/bin/sh\narcsz=16\n".to_vec();
+    installer.resize(2048, b'#');
+    let (t, home) = downloaded(
+        "PC",
+        topic("Sonic (v1.4) [amd64] [Native]", serde_json::json!({})),
+        &[("sonic.run", &installer)],
+        |h, _| {
+            // A repack with its own Proton: links between its libraries, and a Wine prefix's empty
+            // `dosdevices`, which Proton makes its drive links in.
+            let archives = h.archives();
+            archives.holds("sonic.run", &[("Sonic/start", b"#!/bin/sh\n"), ("Sonic/wine/lib/libav.so.58", b"lib")]);
+            archives.also_holds(
+                "sonic.run",
+                &[("Sonic/wine/lib/libav.so", "libav.so.58")],
+                &["Sonic/wine/default_pfx/dosdevices"],
+            );
+            h
+        },
+    )
+    .await;
+    act(&t, TorrentAction::Install).await;
+    let ended = installed(&t).await;
+    assert_eq!(ended.install, "done", "{ended:?}");
+
+    let game = home.path().join("Games/PC/Sonic");
+    let link = game.join("wine/lib/libav.so");
+    assert_eq!(std::fs::read_link(&link).unwrap(), std::path::Path::new("libav.so.58"), "still a link");
+    assert!(game.join("wine/default_pfx/dosdevices").is_dir(), "the empty folder too");
+    let left = |dir: &std::path::Path| -> bool {
+        let mut dirs = vec![dir.to_path_buf()];
+        while let Some(d) = dirs.pop() {
+            for e in std::fs::read_dir(d).unwrap().flatten() {
+                if e.file_name() == "start" {
+                    return true;
+                }
+                if e.file_type().unwrap().is_dir() {
+                    dirs.push(e.path());
+                }
+            }
+        }
+        false
+    };
+    assert!(!left(&home.path().join("Downloads")), "moved, not copied: the unpacked copy is gone");
+    assert!(std::fs::metadata(game.join("start")).unwrap().mode() & 0o100 != 0, "the start script runs");
+}
+
+#[tokio::test]
+async fn after_a_restart_a_pc_download_s_card_still_plays_the_game_it_installed() {
+    let (topic, elf) = penguins();
+    let (t, _home) = downloaded("PC", topic, &[("Penguins/penguins.x86_64", &elf)], |h, _| h).await;
+    act(&t, TorrentAction::Install).await;
+    assert_eq!(installed(&t).await.install, "done");
+
+    // The next start: the install's record is gone, and a PC game has no title id.
+    let again = nexus_core::Core::start(t.kernel.clone()).await;
+    again.dispatch(Command::RefreshLibrary).await.unwrap();
+    catalogs_fetched(&again).await;
+    let card = || again.view().downloads.torrents.into_iter().next().unwrap();
+    for _ in 0..200 {
+        if !card().game.is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let card = card();
+    assert!(!card.game.is_empty(), "the installed game: {card:?}");
+    assert!(card.actions.contains(&"play".to_owned()), "Play, not Install: {:?}", card.actions);
+}
+
 fn penguins() -> (serde_json::Value, Vec<u8>) {
     let mut elf = vec![0u8; 0x200];
     elf[..4].copy_from_slice(b"\x7fELF");

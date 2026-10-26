@@ -98,17 +98,8 @@ jobs:
         run: |
           owner=$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
           echo "IMAGE=ghcr.io/$owner/nexus-os" >> "$GITHUB_ENV"
-          img="ghcr.io/$owner/nexus-os:minimal$SUFFIX"
-          # The minimal edition builds its own base (bootc-base-imagectl needs these privileges),
-          # then is split into one layer per package with every timestamp zeroed: a daily rebuild
-          # then only changes the layers whose packages changed, and that's all a PC downloads.
-          sudo podman build --pull=always --cap-add=all --security-opt=label=disable --device /dev/fuse \
-            --build-arg BASE_IMAGE="$BASE" --build-arg OS_VERSION="$(cat os/version.txt)" \
-            --build-arg BUILD_DATE="$(date -u +%Y.%m.%d)" --build-arg IMAGE="ghcr.io/$owner/nexus-os" \
-            --build-arg REPO="$GITHUB_REPOSITORY" -f os/Containerfile -t "$img-build" .
-          sudo podman run --rm --privileged -v /var/lib/containers:/var/lib/containers "$BASE" \
-            /usr/libexec/bootc-base-imagectl rechunk "$img-build" "$img"
-          sudo podman rmi "$img-build"
+          IMAGE="ghcr.io/$owner/nexus-os" REPO="$GITHUB_REPOSITORY" \
+            os/build-image.sh "ghcr.io/$owner/nexus-os:minimal$SUFFIX"
 
       - name: Check the image
         run: |
@@ -261,11 +252,7 @@ jobs:
           # The very image the minimal job pushed, whatever was pushed since.
           core="ghcr.io/$owner/nexus-os@$DIGEST"
           sudo podman pull "$core"
-          mkdir -p out
-          sudo podman run --rm --privileged --network host -v /var/lib/containers:/var/lib/containers -v "$PWD:/src" -w /src \
-            -e CORE="$core" -e WORK=/src/.iso-work "$BASE" os/build-iso.sh out/nexus-os-x86_64.iso
-          sudo rm -rf .iso-work
-          sudo chown -R "$(id -u):$(id -g)" out
+          os/make-iso.sh "$core" out/nexus-os-x86_64.iso
 
       - name: Checksums, and parts when it's over 2 GiB
         working-directory: out

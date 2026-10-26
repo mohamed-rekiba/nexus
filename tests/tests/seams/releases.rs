@@ -357,7 +357,7 @@ async fn an_emulator_with_no_console_gets_no_catalog() {
 }
 
 /// `days` ago, as `YYYY-MM-DD` (Howard Hinnant's civil_from_days).
-fn days_ago(days: i64) -> String {
+pub(crate) fn days_ago(days: i64) -> String {
     let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
     let z = secs / 86_400 - days + 719_468;
     let era = z.div_euclid(146_097);

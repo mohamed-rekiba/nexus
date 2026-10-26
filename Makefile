@@ -2,8 +2,13 @@
 # and this file run the same commands.
 
 .DEFAULT_GOAL := help
-.PHONY: help check fmt fmt-check lint test run run-windowed package deny hooks-install hooks-run clean \
-	catalog catalog-refresh
+.PHONY: help check fmt fmt-check lint test run run-windowed build package linux-packages appimage test-rpm \
+	os-image os-iso os-vm deny hooks-install hooks-run clean catalog catalog-refresh
+
+VERSION := $(shell sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
+# The Nexus OS image the os-* targets build and use, and the base they build it on.
+OS_IMAGE ?= localhost/nexus-os:minimal
+OS_BASE ?= quay.io/fedora/fedora-bootc:44
 
 help: ## List the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -34,6 +39,27 @@ build: ## Build the launcher
 
 package: ## Release build into dist/nexus-<os>-<arch>/
 	scripts/package.sh
+
+linux-packages: package ## The deb, rpm and Arch packages into dist/packages/, checked (Linux)
+	NFPM=$${NFPM:-scripts/nfpm.sh} packaging/linux/build-packages.sh dist/nexus-linux-x86_64 $(VERSION) dist/packages
+	packaging/linux/check-packages.sh dist/packages
+
+appimage: package ## dist/Nexus-x86_64.AppImage (Linux; needs LINUXDEPLOY, the libmpv action's linuxdeploy)
+	scripts/appimage.sh
+
+test-rpm: ## A quick rpm of this checkout for this PC, into dist/test-rpm/ (the rest from the latest release)
+	scripts/test-rpm.sh
+
+os-image: ## The Nexus OS image as OS_IMAGE (os/build-image.sh, sudo); RPM=<file> bundles that rpm, not the latest release's
+	@if [ -n "$(RPM)" ]; then rm -rf os/nexus-rpm && mkdir -p os/nexus-rpm && cp "$(RPM)" os/nexus-rpm/; \
+	else os/fetch-nexus.sh; fi
+	BASE=$(OS_BASE) os/build-image.sh $(OS_IMAGE)
+
+os-iso: ## The Nexus OS USB stick, nexus-os-x86_64.iso, from OS_IMAGE (os/make-iso.sh; make os-image first)
+	BASE=$(OS_BASE) os/make-iso.sh $(OS_IMAGE) nexus-os-x86_64.iso
+
+os-vm: ## Start nexus-os-x86_64.iso in QEMU as a USB stick, with Secure Boot and a 64 GB disk (os/run-vm.sh)
+	os/run-vm.sh nexus-os-x86_64.iso
 
 deny: ## Advisories, licences and sources of every dependency (needs cargo-deny)
 	cargo deny check
