@@ -13,6 +13,9 @@ use std::sync::OnceLock;
 type Handle = *mut c_void;
 type Unary = unsafe extern "C" fn(Handle) -> c_int;
 type Text = unsafe extern "C" fn(Handle) -> *const c_char;
+type OpenCallback = unsafe extern "C" fn(Handle, *mut c_void) -> c_int;
+type ReadCallback = unsafe extern "C" fn(Handle, *mut c_void, *mut *const c_void) -> isize;
+type CloseCallback = unsafe extern "C" fn(Handle, *mut c_void) -> c_int;
 /// libarchive's `mode_t`: `unsigned short` on Windows.
 #[cfg(unix)]
 type Mode = libc::mode_t;
@@ -74,6 +77,8 @@ pub struct Api {
     open: unsafe extern "C" fn(Handle, *const *const c_char, usize) -> c_int,
     #[cfg(windows)]
     open: unsafe extern "C" fn(Handle, *const *const u16, usize) -> c_int,
+    open_stream:
+        unsafe extern "C" fn(Handle, *mut c_void, Option<OpenCallback>, ReadCallback, Option<CloseCallback>) -> c_int,
     next: unsafe extern "C" fn(Handle, *mut Handle) -> c_int,
     data: unsafe extern "C" fn(Handle, *mut c_void, usize) -> isize,
     skip: Unary,
@@ -116,6 +121,7 @@ impl Api {
                 open: sym!("archive_read_open_filenames"),
                 #[cfg(windows)]
                 open: sym!("archive_read_open_filenames_w"),
+                open_stream: sym!("archive_read_open"),
                 next: sym!("archive_read_next_header"),
                 data: sym!("archive_read_data"),
                 skip: sym!("archive_read_data_skip"),
@@ -193,6 +199,29 @@ pub struct Reader {
     api: &'static Api,
     handle: Handle,
     _names: Names,
+    /// What [`Reader::open_at`] reads from; freed after the handle.
+    _stream: Option<Box<Stream>>,
+}
+
+/// The rest of a file from a place in it, as libarchive reads a stream: forward only.
+struct Stream {
+    file: std::io::Take<std::fs::File>,
+    buf: Vec<u8>,
+}
+
+/// libarchive's read callback for a [`Stream`]: the next piece, 0 at its end, -1 on an error.
+unsafe extern "C" fn read_stream(_: Handle, data: *mut c_void, buffer: *mut *const c_void) -> isize {
+    use std::io::Read;
+    // SAFETY: `data` is the `Stream` that `open_at` gave libarchive, alive as long as the handle.
+    let stream = unsafe { &mut *data.cast::<Stream>() };
+    match stream.file.read(&mut stream.buf) {
+        Ok(n) => {
+            // SAFETY: libarchive gives a writable pointer; the piece lives until the next call.
+            unsafe { *buffer = stream.buf.as_ptr().cast() };
+            n as isize
+        }
+        Err(_) => -1,
+    }
 }
 
 impl Reader {
@@ -206,13 +235,36 @@ impl Reader {
         if handle.is_null() {
             return Err("libarchive couldn't start".into());
         }
-        let reader = Self { api, handle, _names: names };
+        let reader = Self { api, handle, _names: names, _stream: None };
         // SAFETY: `handle` is open, and `pointers` ends with a null and lives past the call;
         // libarchive keeps the names, which `_names` keeps alive.
         unsafe {
             reader.status((api.formats)(handle))?;
             reader.status((api.filters)(handle))?;
             reader.status((api.open)(handle, pointers.as_ptr(), 64 * 1024))?;
+        }
+        Ok(reader)
+    }
+
+    /// Opens the archive in the file at `path` from byte `offset` to its end, as a stream: a
+    /// script installer's archive after its script.
+    pub fn open_at(api: &'static Api, path: &Path, offset: u64) -> Result<Self, String> {
+        use std::io::{Read, Seek, SeekFrom};
+        let mut file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        file.seek(SeekFrom::Start(offset)).map_err(|e| format!("{}: {e}", path.display()))?;
+        let mut stream = Box::new(Stream { file: file.take(u64::MAX), buf: vec![0; 64 * 1024] });
+        let data: *mut Stream = &mut *stream;
+        // SAFETY: a new handle; `Drop` frees it.
+        let handle = unsafe { (api.new)() };
+        if handle.is_null() {
+            return Err("libarchive couldn't start".into());
+        }
+        let reader = Self { api, handle, _names: Vec::new(), _stream: Some(stream) };
+        // SAFETY: `handle` is open; the stream's box doesn't move and outlives the handle.
+        unsafe {
+            reader.status((api.formats)(handle))?;
+            reader.status((api.filters)(handle))?;
+            reader.status((api.open_stream)(handle, data.cast(), None, read_stream, None))?;
         }
         Ok(reader)
     }

@@ -583,6 +583,35 @@ async fn a_gog_installer_s_files_install_however_deep_they_are() {
 }
 
 #[tokio::test]
+async fn a_script_installer_s_archive_installs_as_the_game_named_by_its_folder() {
+    let p = boot(Platform::Linux).await;
+    // A YAD installer, which the host unpacked: its archive holds the game's folder.
+    p.download(&[
+        ("human_fall_flat_v1.2.run", b"#!/usr/bin/env sh\narcsz=3\n"),
+        ("unpacked/human_fall_flat_v1.2/Human Fall Flat/run.sh", b"#!/bin/sh\n./game/Human.x86_64\n"),
+        ("unpacked/human_fall_flat_v1.2/Human Fall Flat/uninstall.sh", b"#!/bin/sh\n"),
+        ("unpacked/human_fall_flat_v1.2/Human Fall Flat/game/Human.x86_64", &elf()),
+    ]);
+    assert_eq!(p.install().await, "done");
+    assert_eq!(p.titles(), [("Human Fall Flat".to_owned(), "PC".to_owned())], "the name of its folder");
+    let game = p.games.path().join("PC/Human-Fall-Flat");
+    assert!(game.join("game/Human.x86_64").is_file(), "the folder's files at the game's top");
+    assert!(!game.join("human_fall_flat_v1.2.run").exists(), "the installer isn't copied");
+    assert_eq!(p.starts("Human-Fall-Flat")[0], "run.sh");
+
+    // An archive with no folder of its own: the installer's name, without its version.
+    std::fs::remove_dir_all(p.packages.path().join("PC/torrent-abc")).unwrap();
+    p.download(&[
+        ("cuphead_v1.3.4.run", b"#!/usr/bin/env sh\narcsz=3\n"),
+        ("unpacked/cuphead_v1.3.4/Cuphead.x86_64", &elf()),
+        ("unpacked/cuphead_v1.3.4/run.sh", b"#!/bin/sh\n./Cuphead.x86_64\n"),
+    ]);
+    assert_eq!(p.install().await, "done");
+    assert!(p.titles().contains(&("Cuphead".to_owned(), "PC".to_owned())), "{:?}", p.titles());
+    assert_eq!(p.starts("Cuphead")[0], "run.sh");
+}
+
+#[tokio::test]
 async fn a_gog_game_installed_before_shows_the_name_gog_gives_it() {
     let p = boot(Platform::Linux).await;
     let game = p.games.path().join("PC/world-of-goo-2-1-0-13120-81588");

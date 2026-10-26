@@ -813,6 +813,9 @@ pub enum ArchiveKind {
     Cab,
     /// A GOG installer: a shell script with a zip at its end. The script never runs.
     Gog,
+    /// A script installer that states its archive's size (Kron4ek's YAD installers): the
+    /// archive is its last bytes, from [`crate::embedded_archive`]. The script never runs.
+    Script,
 }
 
 /// How far an unpack is: `done` of `total` bytes written.

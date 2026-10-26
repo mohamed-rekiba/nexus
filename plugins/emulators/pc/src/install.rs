@@ -31,6 +31,28 @@ struct Plan {
     files: Vec<DownloadFile>,
 }
 
+/// A script installer's name without its ending (`.sh`, `.run`), at the download's top or one
+/// folder down; the host unpacks GOG's and those that say their archive's size.
+fn script_stem(rel: &str) -> Option<&str> {
+    let lower = rel.to_ascii_lowercase();
+    let ext = [".sh", ".run"].into_iter().find(|ext| lower.ends_with(ext))?;
+    (rel.matches('/').count() <= 1).then(|| &rel[..rel.len() - ext.len()])
+}
+
+/// The one folder all of `paths` are in, without its `/`; `None` when they aren't in one.
+fn one_folder<'a>(paths: impl IntoIterator<Item = &'a str>) -> Option<&'a str> {
+    let mut top = None;
+    for path in paths {
+        let (dir, _) = path.split_once('/')?;
+        match top {
+            None => top = Some(dir),
+            Some(t) if t == dir => {}
+            Some(_) => return None,
+        }
+    }
+    top
+}
+
 /// The folder all of `files` are in, one level down (a torrent's own folder), or `""`.
 fn common_top(files: &[&DownloadFile]) -> String {
     let mut top: Option<&str> = None;
@@ -60,8 +82,7 @@ impl Pc {
         // The sets the host unpacked, by name, with the parts that make them.
         let mut sets: std::collections::BTreeMap<String, Vec<&DownloadFile>> = Default::default();
         for f in &own {
-            let gog = f.rel.to_ascii_lowercase().ends_with(".sh") && f.rel.matches('/').count() <= 1;
-            let name = set_name(&f.rel).or_else(|| gog.then(|| f.rel[..f.rel.len() - 3].to_owned()));
+            let name = set_name(&f.rel).or_else(|| script_stem(&f.rel).map(str::to_owned));
             // A set's parts can be spelled in another case: the host names its folder as the
             // first part spells it.
             let folder = name.and_then(|name| {
@@ -95,7 +116,8 @@ impl Pc {
         let mut packaging = Vec::new();
         for (name, parts) in &sets {
             let folder = name.rsplit_once('/').map(|(d, _)| d.to_owned()).unwrap_or_default();
-            let gog = parts.iter().any(|p| p.rel.to_ascii_lowercase().ends_with(".sh"));
+            // An installer is the packaging, whatever is beside it.
+            let installer = parts.iter().any(|p| script_stem(&p.rel).is_some());
             let unpack = match beside.get(&folder).copied().unwrap_or(Beside::Nothing) {
                 Beside::Nothing => true,
                 // The script starts what the archive holds.
@@ -113,7 +135,7 @@ impl Pc {
                 // A game's own data beside its program: it reads the archive as it is.
                 Beside::Program => false,
             };
-            if gog || unpack {
+            if installer || unpack {
                 packaging.push(name.clone());
             }
         }
@@ -125,29 +147,36 @@ impl Pc {
             .iter()
             .map(|f| DownloadFile { path: f.path.clone(), rel: f.rel[top.len()..].to_owned(), size: f.size })
             .collect();
+        // The game's folder an installer's archive holds: its files go at the game's top, and
+        // it names the game. A GOG installer's `data/noarch` keeps its shape.
+        let mut installer_folder = None;
         for name in &packaging {
             let inside = format!("{unpacked_prefix}{name}/");
             // An archive's files go where it was, in the game's folder.
             let at = name.rsplit_once('/').map(|(d, _)| format!("{d}/")).unwrap_or_default();
             let at = at.strip_prefix(&top).unwrap_or(&at).to_owned();
-            for f in download.files.iter().filter(|f| f.rel.starts_with(&inside)) {
-                files.push(DownloadFile {
-                    path: f.path.clone(),
-                    rel: format!("{at}{}", &f.rel[inside.len()..]),
-                    size: f.size,
-                });
+            let unpacked: Vec<&DownloadFile> = download.files.iter().filter(|f| f.rel.starts_with(&inside)).collect();
+            let installer = sets[name].iter().any(|p| script_stem(&p.rel).is_some());
+            let folder = one_folder(unpacked.iter().map(|f| &f.rel[inside.len()..]))
+                .filter(|_| installer && !unpacked.iter().any(|f| f.rel == format!("{inside}{GOG_INFO}")));
+            let cut = folder.map_or(inside.len(), |folder| inside.len() + folder.len() + 1);
+            if let Some(folder) = folder {
+                installer_folder.get_or_insert_with(|| folder.to_owned());
+            }
+            for f in unpacked {
+                files.push(DownloadFile { path: f.path.clone(), rel: format!("{at}{}", &f.rel[cut..]), size: f.size });
             }
         }
         // A GOG installer names its game in its `gameinfo` file.
         let mut gog_name = None;
-        for name in packaging.iter().filter(|n| sets[*n].iter().any(|p| p.rel.to_ascii_lowercase().ends_with(".sh"))) {
+        for name in packaging.iter().filter(|n| sets[*n].iter().any(|p| script_stem(&p.rel).is_some())) {
             let info = format!("{unpacked_prefix}{name}/{GOG_INFO}");
             if let Some(f) = download.files.iter().find(|f| f.rel == info) {
                 gog_name = self.named_in(&f.path, 0).await;
                 break;
             }
         }
-        let title = if let Some(name) = gog_name {
+        let title = if let Some(name) = gog_name.or(installer_folder) {
             name
         } else if !top.is_empty() {
             top.trim_end_matches('/').to_owned()
@@ -156,7 +185,19 @@ impl Pc {
         } else {
             "Game".into()
         };
-        Ok(Plan { name: probe::clean_name(&title), files })
+        let mut name = probe::clean_name(&title);
+        // A file's name in small letters ("cuphead_v1.3.4.run"): each word starts with a capital.
+        if !name.chars().any(char::is_uppercase) {
+            name = name
+                .split(' ')
+                .map(|word| {
+                    let mut letters = word.chars();
+                    letters.next().map(|first| first.to_uppercase().chain(letters).collect()).unwrap_or_default()
+                })
+                .collect::<Vec<String>>()
+                .join(" ");
+        }
+        Ok(Plan { name, files })
     }
 }
 

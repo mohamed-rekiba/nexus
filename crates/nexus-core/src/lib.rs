@@ -35,6 +35,7 @@ mod vpn;
 pub use app::{
     Command, Core, GRID_PAGE, Grid, HIDDEN_FILTER, INGAME_FILTER, INSTALLED_FILTER, MAX_SCALE, MIN_SCALE, Route,
 };
+pub use archives::embedded_archive;
 pub use bus::EventBus;
 pub use config::ConfigService;
 pub use downloads::{Job, JobPhase};

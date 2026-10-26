@@ -56,7 +56,7 @@ To build: a C toolchain, `pkg-config`, and the development files for fontconfig 
 | | Fedora | Debian and Ubuntu |
 |---|---|---|
 | Build | `gcc gcc-c++ make pkgconf-pkg-config fontconfig-devel libxkbcommon-devel systemd-devel alsa-lib-devel` | `build-essential pkg-config libfontconfig1-dev libxkbcommon-dev libudev-dev libasound2-dev` |
-| Run (all optional) | `xdotool xprop mpv-libs libarchive vulkan-loader mesa-vulkan-drivers wine NetworkManager gtk2 libpng12` | `xdotool x11-utils libmpv2 libarchive13 libvulkan1 mesa-vulkan-drivers wine network-manager libgtk2.0-0t64` |
+| Run (all optional) | `xdotool xprop mpv-libs libarchive vulkan-loader mesa-vulkan-drivers wine NetworkManager gtk2 libpng12 unar` | `xdotool x11-utils libmpv2 libarchive13 libvulkan1 mesa-vulkan-drivers wine network-manager libgtk2.0-0t64 unar` |
 | Package | `cmake patchelf xz-devel libzstd-devel bzip2-devel lz4-devel zlib-ng-compat-devel mpv mpv-devel` | `cmake patchelf liblzma-dev libzstd-dev libbz2-dev liblz4-dev zlib1g-dev libmpv-dev mpv` |
 
 Nexus starts without any of the run packages. Each turns on one feature:
@@ -65,6 +65,8 @@ Nexus starts without any of the run packages. Each turns on one feature:
   (`x11-utils` on Debian). On KDE Plasma's Wayland session KWin does it over D-Bus, with nothing
   to install. On another Wayland desktop only games under XWayland come to the front.
 - libmpv plays trailers in the window. Without it, trailers open in the browser.
+- unar unpacks a RAR that libarchive can't read (a RAR 5 with a big dictionary). The packages
+  recommend it.
 - GTK 2 and libpng 1.2 run old Linux games' own launchers, which their start scripts open
   (Frozenbyte's, for Trine 3 from GOG). The packages depend on them.
 - 32-bit libraries (the C library, X11, OpenGL, Vulkan, sound, fonts: the `.i686` packages)

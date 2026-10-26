@@ -67,8 +67,9 @@ contents:
 # What Nexus links and loads at run time (sound, fonts, controllers, the window, Vulkan for This
 # PC), the tools it runs to bring games to the front (ps, xdotool, xprop), what old Linux games'
 # own launchers need (GTK 2, and libpng 1.2 where the system has it: Trine 3's GOG start.sh runs
-# Frozenbyte's launcher), and, recommended, the session's display servers and the tools of
-# Settings → System (NetworkManager, BlueZ, pactl). Debian, Ubuntu and Arch have no libpng 1.2
+# Frozenbyte's launcher), and, recommended, the session's display servers, the tools of
+# Settings → System (NetworkManager, BlueZ, pactl), and unar, for the RAR archives libarchive
+# can't read (a RAR 5 with a big dictionary, as in Cuphead's installer). Debian, Ubuntu and Arch have no libpng 1.2
 # package (Arch's is in the AUR). Only the rpm depends on the 32-bit libraries that a game's own
 # 32-bit Wine needs: Debian and Ubuntu need the i386 architecture added first, Arch the multilib
 # repository.
@@ -93,6 +94,7 @@ overrides:
       - network-manager
       - bluez
       - pulseaudio-utils
+      - unar
   rpm:
     depends:
       - glibc >= 2.35
@@ -136,6 +138,7 @@ overrides:
       - NetworkManager
       - bluez
       - pulseaudio-utils
+      - unar
   archlinux:
     depends:
       - glibc
@@ -157,3 +160,4 @@ overrides:
       - networkmanager
       - bluez-utils
       - libpulse
+      - unarchiver

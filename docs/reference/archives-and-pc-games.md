@@ -140,6 +140,7 @@ Archives deeper than that are a game's own data, and are left as they are.
 | `name.iso` | ISO |
 | `name.cab` | cab |
 | `name.sh` that starts with `#!` and has a zip's end record in its last 64 KiB | GOG installer |
+| `name.sh` or `name.run` that starts with `#!` and has an `arcsz=<bytes>` line in its first 128 KiB | script installer (Kron4ek's YAD installers): the archive is the file's last `<bytes>` |
 
 Names match in any case. A set can have at most 999 parts. A set with a missing part ("part 2
 of game is missing") or a doubled one ("<a> and <b> are the same part of one archive") is
@@ -159,6 +160,8 @@ The app plugs in the `Archives` port (`crates/nexus-app/src/archives.rs`). It ha
 | tar, tar.gz | the `tar` crate, with `flate2` for gzip |
 | 7z | `sevenz-rust2` 0.23.0, with a split 7z read as one stream |
 | RAR (3, 4 and 5), tar.xz, tar.bz2, tar.zst, ISO, cab | libarchive, loaded at run time |
+| script installer | libarchive, reading the file from the archive's start as a stream |
+| a RAR or script installer libarchive can't read | `unar` (The Unarchiver), when it is installed: `lsar -j` lists it for the checks, then `unar` unpacks it; a script installer's archive is copied out beside the unpack folder first and removed after |
 | 7z with BZip2, Zstandard, Brotli, LZ4, LZS, Lizard or Deflate64 | libarchive |
 
 `sevenz-rust2` is built without those codecs, so a 7z that uses one goes to libarchive.
@@ -392,11 +395,20 @@ whether the set is the release's packaging, by what its folder holds beside the 
 | Nothing that starts a game | Yes |
 | Only a start script | Only when the unpacked files hold a program |
 | A program | No: the archive is the game's own data, and is copied as it is |
-| (a GOG installer) | Always |
+| (a GOG or script installer) | Always |
 
 Everything else is copied as it is. The files of a used set go where the archive was. The
 torrent's own top folder is the game's folder, and the game's name comes from it, cleaned of
 release tags: "[GOG] Celeste (v1.4.0.0) [amd64] [Multi]" is "Celeste".
+
+A script installer's archive usually holds the game's folder ("Human Fall Flat/"): its files go
+at the game's top, and the folder names the game. Without one, the installer's file name does,
+without its version, each word with a capital: "cuphead_v1.3.4.run" is "Cuphead".
+
+libarchive can't read every RAR: Cuphead's installer holds a RAR 5 with a 1 GB dictionary
+("Declared dictionary size is not supported"). Nexus then unpacks it with `unar`, which needs
+room for a copy of the archive too. Without `unar` the unpacking fails: "… Install unar to unpack
+it, or run the installer by hand". Nothing installs then.
 
 The plugin then lists every file that can start the game. The order compares, one after the
 other:
@@ -499,7 +511,7 @@ sibling `.unpacking` folder first, so a failure leaves the old build.
 
 - `tests/tests/seams/torrents.rs`, `unpack.rs`, `release_archives.rs`, `game_installs.rs`, `kyty.rs`,
   `shadps4.rs`, `pc.rs` and `vpn.rs` drive the core with fakes, as a player or a plugin does.
-- The tests in `crates/nexus-app/src/archives.rs` unpack real zip, tar.gz, GOG and RAR files,
+- The tests in `crates/nexus-app/src/archives.rs` unpack real zip, tar.gz, GOG, script installer and RAR files,
   and check the refusals and cancel. The RAR files in `crates/nexus-app/testdata/` come from the
   `unrar` crate's test data.
 - `tests/tests/seams/real_archives.rs` installs the real KytyPS5 and shadPS4 release archives, with
@@ -509,6 +521,6 @@ sibling `.unpacking` folder first, so a failure leaves the old build.
 ## Limits
 
 - Archives with a password are refused.
-- Nothing in a download runs during install, GOG installer scripts included.
+- Nothing in a download runs during install, GOG and script installers included.
 - Nexus doesn't download Wine, Proton or umu-launcher.
 - Downloads only through a VPN is not available on Windows.
