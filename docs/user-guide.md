@@ -94,8 +94,19 @@ game's menu, asks Steam, which confirms in its own dialog. A game you never put 
 not in those files, so it is not listed.
 
 Steam may ask to sign in or update before the game starts. Nexus waits about 2 minutes for the
-game, then says it did not start. Steam Input may take the controller
-while Steam runs: turn it off for a game in Steam if both read the controller.
+game, then says it did not start.
+
+#### The PS button opens Steam
+
+Nexus starts the Steam client and leaves it running. With Steam Input on, Steam reads the
+controller too. It can take the PS (Guide) button and open its own overlay or Big Picture, and
+Nexus cannot stop that. Turn Steam Input off in Steam:
+
+- For one game: Properties, Controller, **Disable Steam Input**.
+- For every game: Settings, Controller, turn off **Enable Steam Input for PlayStation
+  Controllers**. If Steam has **Guide Button Focuses Steam**, turn it off too.
+
+The names of these options can differ between Steam versions.
 
 ### gamescope, for old games
 
