@@ -36,19 +36,16 @@ pub(crate) fn write(view: &mut AppView) {
 }
 
 fn card(card: &mut GameCardVm) {
-    card.size = maybe_size_text(card.size_bytes);
-    card.last_played = days_text(card.last_played_days);
-    card.availability_text = availability_text(&card.availability);
+    (card.size, card.last_played, card.availability_text) =
+        game_text(card.size_bytes, card.last_played_days, &card.availability);
 }
 
 fn game(d: &mut GameDetailVm) {
-    d.size = maybe_size_text(d.size_bytes);
+    (d.size, d.last_played, d.availability_text) = game_text(d.size_bytes, d.last_played_days, &d.availability);
     d.rating_text = rating_text(d.rating);
     d.release_text = date_text(&d.release);
     d.year = d.release.get(..4).unwrap_or_default().to_owned();
     d.played = played_text(d.played_secs);
-    d.last_played = days_text(d.last_played_days);
-    d.availability_text = availability_text(&d.availability);
     if let Some(compat) = &mut d.compat {
         compat.tested_text = date_text(&compat.tested);
     }
@@ -58,6 +55,12 @@ fn game(d: &mut GameDetailVm) {
         r.counted_text = date_text(r.counted_at.get(..10).unwrap_or_default());
         r.availability_text = availability_text(&r.availability);
     }
+}
+
+/// The text a game's card and its page both show: its size, when it was last played, and
+/// its availability, in that order.
+fn game_text(size_bytes: Option<u64>, last_played_days: Option<u64>, availability: &str) -> (String, String, String) {
+    (maybe_size_text(size_bytes), days_text(last_played_days), availability_text(availability))
 }
 
 /// `7.6 GB`, `820 MB`: decimal units, as the PS5 shows them.
