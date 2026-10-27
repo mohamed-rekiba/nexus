@@ -22,6 +22,7 @@ mod launch;
 pub mod launcher_update;
 mod library;
 mod library_reads;
+mod notices;
 mod order;
 mod ports;
 mod preferences;
@@ -50,7 +51,9 @@ pub use downloads::{Job, JobPhase};
 pub use error::{CoreError, CoreResult, LoadError};
 pub use game_installs::GameInstallCmd;
 pub use kernel::{BootReport, HostConfig, Kernel, KernelBuilder, Loader, Origin, PluginInfo, PluginStatus, Rejection};
+pub use launcher_update::LauncherUpdateCmd;
 pub use library::LibraryCmd;
+pub use notices::NoticeCmd;
 pub use ports::{ArchiveError, Escape};
 pub use ports::{
     ArchiveKind, Archives, Body, Clock, Front, Gpu, GroupTree, Hardware, HttpTransport, LoginSession, Network,
@@ -66,3 +69,4 @@ pub use themes::{DataTheme, DirFiles};
 pub use torrents::{TorrentAction, TorrentCmd};
 /// The path checks every unpacker runs before it writes.
 pub use unpack::{inside, link_stays_inside, stays_inside};
+pub use vpn::VpnCmd;

@@ -122,6 +122,9 @@ name as the archive spells it, its size, its kind, and whether it needs a passwo
 launcher at login, and installing the launcher's own package with the administrator prompt.
 Not a play session.
 
+**Notice**: a short message for the player, such as "Download complete", until they close it.
+The notices subsystem keeps the newest three, each with its own id.
+
 **Offer**: one game a catalog offers, grouped from its releases by title id or by title
 without its edition words. An installed game can be an offer too: its record names the offer.
 
@@ -151,7 +154,7 @@ A plugin says it in words, or with a typed precondition (`OwnBuildMissing`) that
 words for the player.
 
 **Pref** (`Pref`): one of the app's own one-value settings, such as sounds, the size or the
-VPN rule, saved as `app.<key>`. Its spec says what values it takes and its default. The
+monitor, saved as `app.<key>`. Its spec says what values it takes and its default. The
 preferences subsystem checks each value the player sets, and the core reads them typed.
 _Avoid_: option (a theme's options are something else)
 
@@ -178,8 +181,9 @@ time.
 **Snapshot**: a subsystem's state read whole, in one lock. Reading it changes nothing.
 
 **Subsystem**: one area of the core's state with its own lock, saved records and ports. The core
-sends it commands, reads its snapshot and turns its events into work. The torrents subsystem
-is the first, the library subsystem the second.
+sends it commands, reads its snapshot and turns its events into work. The torrents, the game
+installs, the library, the preferences, the running games, the notices, the VPN setting and
+the launcher's update are subsystems.
 
 **Test run**: a new build runs once with `--help` before it becomes current. A build that fails
 it is removed.
@@ -191,6 +195,10 @@ share.
 **Torrent stats** (`TorrentStats`): what the BitTorrent engine reports for a torrent: its
 state (checking, live, paused or error), whether every piece is in, bytes, rates, peers and
 the error. Raw numbers, with no decision.
+
+**VPN rule** (`VpnRule`): "Download only through a VPN" as every area reads it: the setting,
+the picked VPN, the VPNs' source and whether a plugin waits for the VPN. Plugins get it as
+their VPN gate.
 
 **Windows** (`Windows`): the port for the desktop's windows: which window is in front, bringing
 a game's window or the launcher's to the front, and whether a game has a window.

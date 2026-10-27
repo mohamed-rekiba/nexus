@@ -6,7 +6,7 @@ use std::time::SystemTime;
 
 use nexus_api::{GameKey, JobId, PluginId, SessionId};
 use nexus_core::system::SystemCommand;
-use nexus_core::{Command, Core, GameInstallCmd, Grid, Pref, Route, SessionCmd, TorrentCmd};
+use nexus_core::{Command, Core, GameInstallCmd, Grid, Pref, Route, SessionCmd, TorrentCmd, VpnCmd};
 use nexus_ui_api::{ScreenId, ThemeError};
 use slint_interpreter::{ComponentDefinition, ComponentHandle, ComponentInstance, Image, SharedString, Value};
 
@@ -645,15 +645,15 @@ impl ThemeHost {
                 core(Command::Torrent(TorrentCmd::SeedDownloads(matches!(a.first(), Some(Value::Bool(true))))))
             }),
         )?;
-        callback("set-vpn-only", Box::new(move |a| pref(Pref::VpnOnly, flag(a, 0).into())))?;
-        callback("set-vpn", Box::new(move |a| pref(Pref::Vpn, arg(a, 0).into())))?;
-        callback("connect-vpn", Box::new(move |a| core(Command::ConnectVpn(arg(a, 0)))))?;
-        callback("disconnect-vpn", Box::new(move |a| core(Command::DisconnectVpn(arg(a, 0)))))?;
+        callback("set-vpn-only", Box::new(move |a| core(Command::Vpn(VpnCmd::SetOnly(flag(a, 0))))))?;
+        callback("set-vpn", Box::new(move |a| core(Command::Vpn(VpnCmd::Choose(arg(a, 0))))))?;
+        callback("connect-vpn", Box::new(move |a| core(Command::Vpn(VpnCmd::Connect(arg(a, 0))))))?;
+        callback("disconnect-vpn", Box::new(move |a| core(Command::Vpn(VpnCmd::Disconnect(arg(a, 0))))))?;
         callback(
             "import-vpn",
             Box::new(move |a| {
                 let path = arg(a, 0);
-                (!path.trim().is_empty()).then(|| core(Command::ImportVpn(path.trim().into()))).flatten()
+                (!path.trim().is_empty()).then(|| core(Command::Vpn(VpnCmd::Import(path.trim().into())))).flatten()
             }),
         )?;
         callback(
@@ -730,9 +730,12 @@ impl ThemeHost {
         callback("set-start-at-login", Box::new(move |a| pref(Pref::StartAtLogin, flag(a, 0).into())))?;
         callback("confirm-install", Box::new(move |_| core(Command::ConfirmInstall)))?;
         callback("cancel-install", Box::new(move |_| core(Command::CancelInstall)))?;
-        callback("dismiss-notices", Box::new(move |_| core(Command::DismissNotices)))?;
-        callback("dismiss-notice", Box::new(move |a| core(Command::DismissNotice(int(a, 0)))))?;
-        callback("open-notice", Box::new(move |a| core(Command::OpenNotice(int(a, 0)))))?;
+        callback("dismiss-notices", Box::new(move |_| core(Command::Notice(nexus_core::NoticeCmd::DismissAll))))?;
+        callback(
+            "dismiss-notice",
+            Box::new(move |a| core(Command::Notice(nexus_core::NoticeCmd::Dismiss(int(a, 0))))),
+        )?;
+        callback("open-notice", Box::new(move |a| core(Command::Notice(nexus_core::NoticeCmd::Open(int(a, 0))))))?;
         callback("refresh-library", Box::new(move |_| core(Command::Library(nexus_core::LibraryCmd::Refresh))))?;
         callback("play-sound", Box::new(move |a| Some(UiRequest::PlaySound(arg(a, 0)))))?;
         callback("quit", Box::new(move |_| Some(UiRequest::Quit)))?;
@@ -743,8 +746,14 @@ impl ThemeHost {
             Box::new(move |a| game(a, 0).and_then(|g| core(Command::Navigate(Route::GameSettings(g))))),
         )?;
         callback("restart", Box::new(move |_| Some(UiRequest::Restart)))?;
-        callback("check-launcher-update", Box::new(move |_| core(Command::CheckLauncherUpdate)))?;
-        callback("download-launcher-update", Box::new(move |_| core(Command::DownloadLauncherUpdate)))?;
+        callback(
+            "check-launcher-update",
+            Box::new(move |_| core(Command::LauncherUpdate(nexus_core::LauncherUpdateCmd::Check))),
+        )?;
+        callback(
+            "download-launcher-update",
+            Box::new(move |_| core(Command::LauncherUpdate(nexus_core::LauncherUpdateCmd::Download))),
+        )?;
         let system = |c: SystemCommand| Some(UiRequest::Core(Command::System(c)));
         callback("refresh-system", Box::new(move |_| system(SystemCommand::Refresh)))?;
         callback("scan-wifi", Box::new(move |_| system(SystemCommand::ScanWifi)))?;

@@ -50,9 +50,4 @@ impl Records {
     pub fn set_sharing(&self, on: bool) -> std::io::Result<()> {
         self.config.set(&SEED_DOWNLOADS, Value::Bool(on))
     }
-
-    /// The config, for the VPN rule's settings, which the subsystem reads and never writes.
-    pub fn config(&self) -> &ConfigService {
-        &self.config
-    }
 }

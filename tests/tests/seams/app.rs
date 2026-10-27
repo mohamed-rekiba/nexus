@@ -889,9 +889,9 @@ async fn only_the_newest_three_notices_stay_and_each_closes_on_its_own() {
     let ids: Vec<u64> = view.notice_cards.iter().map(|n| n.id).collect();
     assert!(ids.windows(2).all(|w| w[0] < w[1]), "newest last, each its own id: {ids:?}");
 
-    t.core.dispatch(Command::DismissNotice(ids[1])).await.unwrap();
+    t.core.dispatch(Command::Notice(nexus_core::NoticeCmd::Dismiss(ids[1]))).await.unwrap();
     assert_eq!(t.core.view().notices, ["Problem 2", "Problem 4"], "only that one closes");
-    t.core.dispatch(Command::OpenNotice(ids[2])).await.unwrap();
+    t.core.dispatch(Command::Notice(nexus_core::NoticeCmd::Open(ids[2]))).await.unwrap();
     assert_eq!(t.core.view().notices, ["Problem 2"], "opening one closes only it");
     assert_eq!(t.core.view().screen, ScreenId::Home, "it had nothing to open");
 }
@@ -908,7 +908,7 @@ async fn what_the_desktop_is_missing_is_said_once_a_run() {
 
     process.exit(0);
     closed(&mut events).await;
-    t.core.dispatch(Command::DismissNotices).await.unwrap();
+    t.core.dispatch(Command::Notice(nexus_core::NoticeCmd::DismissAll)).await.unwrap();
     t.core.dispatch(Command::Session(SessionCmd::Launch(key("emu-a:G0")))).await.unwrap();
     t.spawner.wait_for(2).await;
     t.clock.advance(Duration::from_millis(100)).await;

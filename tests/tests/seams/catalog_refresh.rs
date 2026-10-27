@@ -3,7 +3,7 @@
 
 use crate::common::*;
 use nexus_api::{ConfigScope, ReleaseList};
-use nexus_core::{Area, Command, Pref};
+use nexus_core::{Area, Command};
 
 use nexus_testkit::{FakeHost, TestCore};
 
@@ -532,7 +532,7 @@ async fn a_failed_refresh_shows_its_reason() {
 async fn with_downloads_only_through_a_vpn_the_refresh_waits_for_the_vpn() {
     let t = boot(true).await;
     t.network.down("wg-se");
-    t.core.dispatch(Command::Pref(Pref::VpnOnly, true.into())).await.unwrap();
+    t.core.dispatch(Command::Vpn(nexus_core::VpnCmd::SetOnly(true))).await.unwrap();
     assert_eq!(fetched(&t).await.releases.len(), 5, "the copy with no refresh");
     let row = refresh_row(&t, "PS5: Waiting for the VPN").await;
     assert!(row.starts_with("PS5: Waiting for the VPN"), "{row}");
@@ -555,7 +555,7 @@ async fn with_downloads_only_through_a_vpn_the_refresh_waits_for_the_vpn() {
 #[tokio::test]
 async fn with_downloads_only_through_a_vpn_and_no_vpn_at_all_the_refresh_is_skipped() {
     let t = boot(true).await;
-    t.core.dispatch(Command::Pref(Pref::VpnOnly, true.into())).await.unwrap();
+    t.core.dispatch(Command::Vpn(nexus_core::VpnCmd::SetOnly(true))).await.unwrap();
     list(&t).await;
     let row = refresh_row(&t, "PS5: Skipped").await;
     assert!(row.starts_with("PS5: Skipped: there is no VPN"), "{row}");
@@ -565,7 +565,7 @@ async fn with_downloads_only_through_a_vpn_and_no_vpn_at_all_the_refresh_is_skip
 #[tokio::test]
 async fn where_downloads_can_t_be_bound_to_a_vpn_the_page_says_why_the_refresh_ran_without_one() {
     let t = boot(true).await;
-    t.core.dispatch(Command::Pref(Pref::VpnOnly, true.into())).await.unwrap();
+    t.core.dispatch(Command::Vpn(nexus_core::VpnCmd::SetOnly(true))).await.unwrap();
     // The setting is on, and then this computer can't bind traffic to the VPN.
     t.network.unavailable("Not available on Windows");
     list(&t).await;
@@ -583,7 +583,7 @@ async fn boot_waiting_for_the_vpn(refresh: bool) -> TestCore {
         .boot_core()
         .await;
     t.network.down("wg-se");
-    t.core.dispatch(Command::Pref(Pref::VpnOnly, true.into())).await.unwrap();
+    t.core.dispatch(Command::Vpn(nexus_core::VpnCmd::SetOnly(true))).await.unwrap();
     serve(&t, refresh, PVC_ANSWER.to_owned()).await;
     t
 }

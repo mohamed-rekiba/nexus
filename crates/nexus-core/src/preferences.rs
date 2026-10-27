@@ -7,8 +7,9 @@
 //! the default.
 //!
 //! The settings that belong to another area stay there: the torrents subsystem keeps
-//! `app.seed_downloads`, and the lists and maps (`app.folders`, `app.playtime`, …) stay with
-//! their areas.
+//! `app.seed_downloads`, the VPN subsystem `app.vpn_only` and `app.vpn`, the launcher update
+//! subsystem `app.update_repo`, and the lists and maps (`app.folders`, `app.playtime`, …) stay
+//! with their areas.
 //!
 //! The subsystem follows the pattern in [`crate::torrents`]. The config is its store: it reads
 //! through to the config, so it keeps no copy that could drift. Its only state of its own is
@@ -22,7 +23,6 @@ use serde_json::Value;
 
 use crate::changes::{Area, Notifier};
 use crate::config::ConfigService;
-use crate::vpn::NetworkSource;
 use crate::{CoreError, CoreResult, LoginSession};
 
 /// The smallest and the largest size of everything ([`Pref::Scale`]).
@@ -53,20 +53,11 @@ pub enum Pref {
     Monitor,
     /// The player pressed Start on the Welcome screen: it doesn't show again.
     Welcomed,
-    /// "Download only through a VPN". Off by default. On is refused where the system can't
-    /// bind downloads to a VPN, and says why.
-    VpnOnly,
-    /// The VPN downloads use, by its name. Empty: the first connected one, where the system
-    /// finds VPNs.
-    Vpn,
     /// The theme the player chose. The UI host sets it once the theme is on screen
     /// (`Command::ThemeSwitched`).
     Theme,
     /// The PC the "games won't start here" notice was last for. The core sets it.
     PcNoticed,
-    /// Where the launcher's releases are, "owner/name". Unset: Nexus's own; empty: no checks.
-    /// Set by hand in the config.
-    UpdateRepo,
 }
 
 /// What values a [`Pref`] takes.
@@ -76,8 +67,6 @@ pub enum PrefKind {
     Flag,
     /// A number from `min` to `max`, saved with two decimals.
     Size { min: f32, max: f32 },
-    /// Any text.
-    Text,
     /// A name, or null for none. Empty text is none.
     Name,
 }
@@ -93,7 +82,7 @@ pub struct PrefSpec {
 
 impl Pref {
     /// Every preference.
-    pub const ALL: [Pref; 13] = [
+    pub const ALL: [Pref; 10] = [
         Pref::Sounds,
         Pref::Fullscreen,
         Pref::ReturnOnExit,
@@ -102,11 +91,8 @@ impl Pref {
         Pref::AutoUpdate,
         Pref::Monitor,
         Pref::Welcomed,
-        Pref::VpnOnly,
-        Pref::Vpn,
         Pref::Theme,
         Pref::PcNoticed,
-        Pref::UpdateRepo,
     ];
 
     /// Its key under `app` in the config.
@@ -120,11 +106,8 @@ impl Pref {
             Pref::AutoUpdate => "auto_update",
             Pref::Monitor => "monitor",
             Pref::Welcomed => "welcomed",
-            Pref::VpnOnly => "vpn_only",
-            Pref::Vpn => "vpn",
             Pref::Theme => "theme",
             Pref::PcNoticed => "pc_noticed",
-            Pref::UpdateRepo => "update_repo",
         }
     }
 
@@ -133,22 +116,12 @@ impl Pref {
             Pref::Sounds | Pref::Fullscreen | Pref::ReturnOnExit | Pref::AutoUpdate => {
                 (PrefKind::Flag, Value::Bool(true), true)
             }
-            Pref::StartAtLogin | Pref::Welcomed | Pref::VpnOnly => (PrefKind::Flag, Value::Bool(false), true),
+            Pref::StartAtLogin | Pref::Welcomed => (PrefKind::Flag, Value::Bool(false), true),
             Pref::Scale => (PrefKind::Size { min: MIN_SCALE, max: MAX_SCALE }, Value::from(1.0), true),
             Pref::Monitor => (PrefKind::Name, Value::Null, true),
-            Pref::Vpn => (PrefKind::Text, Value::from(""), true),
             Pref::Theme | Pref::PcNoticed => (PrefKind::Name, Value::Null, false),
-            Pref::UpdateRepo => (PrefKind::Text, Value::from(crate::launcher_update::DEFAULT_REPO), false),
         };
         PrefSpec { kind, default, by_player }
-    }
-
-    /// The area that changes with it.
-    pub fn area(self) -> Area {
-        match self {
-            Pref::VpnOnly | Pref::Vpn => Area::Vpn,
-            _ => Area::Settings,
-        }
     }
 
     /// `value` as it is saved: a size goes to the nearest end of its range, with two
@@ -180,7 +153,7 @@ impl Pref {
     /// `value` when it has the right type, a size within its range.
     fn fit(self, value: &Value) -> Option<Value> {
         match (self.spec().kind, value) {
-            (PrefKind::Flag, Value::Bool(_)) | (PrefKind::Text, Value::String(_)) => Some(value.clone()),
+            (PrefKind::Flag, Value::Bool(_)) => Some(value.clone()),
             (PrefKind::Name, Value::Null | Value::String(_)) => Some(value.clone()),
             (PrefKind::Size { min, max }, Value::Number(n)) => {
                 let size = n.as_f64()? as f32;
@@ -204,10 +177,6 @@ pub struct PreferencesSnapshot {
     pub auto_update: bool,
     pub monitor: Option<String>,
     pub welcomed: bool,
-    /// The player's setting. Downloads go only through the VPN when it is on and the system
-    /// can bind them to one: see [`crate::vpn::vpn_only`].
-    pub vpn_only: bool,
-    pub vpn: String,
     /// The theme the player chose last, when its id is valid.
     pub theme: Option<PluginId>,
 }
@@ -216,8 +185,6 @@ pub struct PreferencesSnapshot {
 pub(crate) struct PrefPorts {
     /// For "Start at login".
     pub login_session: Arc<dyn LoginSession>,
-    /// For "Download only through a VPN": whether the system can bind downloads to a VPN.
-    pub network: NetworkSource,
 }
 
 /// The app's own settings. The config holds them; this checks what goes in and types what
@@ -255,28 +222,18 @@ impl Preferences {
             auto_update: flag(Pref::AutoUpdate),
             monitor: name(Pref::Monitor),
             welcomed: flag(Pref::Welcomed),
-            vpn_only: flag(Pref::VpnOnly),
-            vpn: name(Pref::Vpn).unwrap_or_default(),
             theme: name(Pref::Theme).and_then(|id| PluginId::new(id).ok()),
         }
     }
 
-    /// Sets a preference the player sets. "Start at login" asks the system first, and "Download
-    /// only through a VPN" is refused where the system can't bind downloads to a VPN.
+    /// Sets a preference the player sets. "Start at login" asks the system first.
     pub async fn set(&self, pref: Pref, value: Value) -> CoreResult<()> {
         if !pref.spec().by_player {
             return Err(CoreError::Invalid(format!("the player doesn't set {}", pref.key())));
         }
         let value = pref.check(value)?;
-        let on = value == Value::Bool(true);
-        match pref {
-            Pref::StartAtLogin => self.start_at_login(on).await?,
-            Pref::VpnOnly if on => {
-                if let Some(why) = self.ports.network.get().problem() {
-                    return Err(CoreError::Invalid(why));
-                }
-            }
-            _ => {}
+        if pref == Pref::StartAtLogin {
+            self.start_at_login(value == Value::Bool(true)).await?;
         }
         self.write(pref, value)
     }
@@ -289,7 +246,7 @@ impl Preferences {
 
     fn write(&self, pref: Pref, value: Value) -> CoreResult<()> {
         self.config.set(&["app", pref.key()], value).map_err(|e| CoreError::Io(e.to_string()))?;
-        self.notifier.changed(pref.area());
+        self.notifier.changed(Area::Settings);
         Ok(())
     }
 
@@ -334,11 +291,8 @@ mod tests {
             (Pref::AutoUpdate, Value::Bool(true)),
             (Pref::Monitor, Value::Null),
             (Pref::Welcomed, Value::Bool(false)),
-            (Pref::VpnOnly, Value::Bool(false)),
-            (Pref::Vpn, Value::from("")),
             (Pref::Theme, Value::Null),
             (Pref::PcNoticed, Value::Null),
-            (Pref::UpdateRepo, Value::from("mohamed-rekiba/nexus")),
         ];
         assert_eq!(defaults.len(), Pref::ALL.len(), "every pref has a row");
         for (pref, default) in defaults {
@@ -350,7 +304,6 @@ mod tests {
     fn a_saved_value_of_the_wrong_type_reads_as_the_default() {
         assert_eq!(Pref::Sounds.read(&Value::from("off")), Value::Bool(true));
         assert_eq!(Pref::Scale.read(&Value::Bool(true)), Value::from(1.0));
-        assert_eq!(Pref::Vpn.read(&Value::from(3)), Value::from(""));
         assert_eq!(Pref::Monitor.read(&Value::from(3)), Value::Null);
         assert_eq!(Pref::Sounds.read(&Value::Bool(false)), Value::Bool(false), "a right one stays");
     }
@@ -379,7 +332,6 @@ mod tests {
         assert!(Pref::Scale.check(Value::from(f32::NAN)).is_err());
         assert!(Pref::Scale.check(Value::from("big")).is_err());
         assert!(Pref::Sounds.check(Value::from(1)).is_err());
-        assert!(Pref::Vpn.check(Value::Null).is_err());
         assert!(Pref::Monitor.check(Value::Bool(true)).is_err());
     }
 
@@ -387,12 +339,11 @@ mod tests {
     fn empty_text_is_no_name() {
         assert_eq!(Pref::Monitor.check(Value::from("")).unwrap(), Value::Null);
         assert_eq!(Pref::Monitor.check(Value::from("DP-1")).unwrap(), Value::from("DP-1"));
-        assert_eq!(Pref::Vpn.check(Value::from("")).unwrap(), Value::from(""), "an empty VPN is a choice");
     }
 
     #[test]
     fn the_player_sets_only_their_own_prefs() {
         let by_core: Vec<Pref> = Pref::ALL.into_iter().filter(|p| !p.spec().by_player).collect();
-        assert_eq!(by_core, [Pref::Theme, Pref::PcNoticed, Pref::UpdateRepo]);
+        assert_eq!(by_core, [Pref::Theme, Pref::PcNoticed]);
     }
 }

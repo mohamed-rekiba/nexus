@@ -242,7 +242,7 @@ fn failed_to_start(job: &Arc<dyn SystemJob>, error: &CoreError) {
 /// otherwise. Called at boot, before downloads resume, and at each read.
 pub(crate) async fn adopt_vpn(core: &Core) {
     if let Some((_, vpn)) = provider(core, |p| p.vpn.clone()).await {
-        core.kernel().use_network(Arc::new(crate::ports::PluginVpn(vpn)));
+        core.vpn().use_network(Arc::new(crate::ports::PluginVpn(vpn)));
     }
 }
 

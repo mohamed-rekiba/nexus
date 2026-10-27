@@ -39,7 +39,6 @@ mod vpn;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -50,7 +49,7 @@ pub(crate) use self::phase::TorrentState;
 use self::phase::{Action, Phase, TorrentStart};
 pub(crate) use self::records::Records;
 use crate::changes::{Area, Notifier};
-use crate::vpn::NetworkSource;
+use crate::vpn::VpnRule;
 use crate::{Clock, CoreError, CoreResult, Hardware, TorrentFile, Torrents};
 
 /// How many files a download shows; the count says how many there are.
@@ -246,8 +245,6 @@ pub(crate) type EventSink = Arc<dyn Fn(TorrentEvent) + Send + Sync>;
 /// The ports the subsystem uses, and nothing else.
 pub(crate) struct TorrentPorts {
     pub torrents: Arc<dyn Torrents>,
-    /// For "Download only through a VPN".
-    pub network: NetworkSource,
     /// For the free space before a download starts.
     pub hardware: Arc<dyn Hardware>,
     pub clock: Arc<dyn Clock>,
@@ -276,8 +273,8 @@ struct Shared {
     ports: TorrentPorts,
     polls: Polls,
     records: Records,
-    /// Set while a plugin waits for the VPN: see [`crate::vpn::HostVpnGate`].
-    vpn_waited: Arc<AtomicBool>,
+    /// "Download only through a VPN", with the VPNs.
+    vpn: VpnRule,
     notifier: Notifier,
     events: EventSink,
     state: Mutex<State>,
@@ -294,12 +291,12 @@ impl TorrentsSubsystem {
         ports: TorrentPorts,
         polls: Polls,
         records: Records,
-        vpn_waited: Arc<AtomicBool>,
+        vpn: VpnRule,
         notifier: Notifier,
         events: EventSink,
     ) -> Self {
         let state = Mutex::new(State::default());
-        Self { inner: Arc::new(Shared { ports, polls, records, vpn_waited, notifier, events, state }) }
+        Self { inner: Arc::new(Shared { ports, polls, records, vpn, notifier, events, state }) }
     }
 
     fn state(&self) -> MutexGuard<'_, State> {

@@ -6,15 +6,23 @@
 //! goes in the way the install takes ([`Install`]): kept in `updates/` with `ready.json` for the
 //! app to swap in or run at its next start ([`apply_staged`]), or handed to the system's
 //! package manager. On Nexus OS the system updates the launcher, so nothing is downloaded.
+//!
+//! The check and the download are a subsystem ([`LauncherUpdateSubsystem`]), in the shape of
+//! [`crate::torrents`]: its own state, its HTTP and login session ports, `app.update_repo`, and its
+//! changes as [`Area::LauncherUpdate`]. The rest of this module runs before the core starts:
+//! [`apply_staged`] swaps a kept update in.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use nexus_api::HttpRequest;
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
 
-use crate::{Core, CoreError, CoreResult};
+use crate::changes::{Area, Notifier};
+use crate::config::ConfigService;
+use crate::{CoreError, CoreResult, HttpTransport, LoginSession};
 
 /// Where a release's files are served from, after GitHub's redirects.
 const HOSTS: [&str; 3] = ["github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"];
@@ -183,40 +191,12 @@ fn host_of(url: &str) -> Option<&str> {
     (!host.contains('@')).then_some(host)
 }
 
-/// GET, following redirects only to GitHub's release hosts.
-async fn get(core: &Core, url: &str) -> CoreResult<Vec<u8>> {
-    let mut url = url.to_owned();
-    for _ in 0..=MAX_REDIRECTS {
-        if !host_of(&url).is_some_and(|h| HOSTS.contains(&h)) {
-            return Err(CoreError::Invalid(format!("updates come from GitHub only, not {url}")));
-        }
-        let response =
-            core.kernel().http().send(HttpRequest::get(url.clone())).await.map_err(|e| CoreError::Io(e.to_string()))?;
-        if (300..400).contains(&response.status) {
-            let location =
-                response.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("location")).map(|(_, v)| v.clone());
-            url = location.ok_or_else(|| CoreError::Io("a redirect without a Location".into()))?;
-            continue;
-        }
-        if response.status != 200 {
-            return Err(CoreError::Io(format!("{url}: HTTP {}", response.status)));
-        }
-        return Ok(response.body);
-    }
-    Err(CoreError::Io("too many redirects".into()))
-}
-
 /// Where Nexus's releases are, unless `app.update_repo` says otherwise.
 pub const DEFAULT_REPO: &str = "mohamed-rekiba/nexus";
-
-/// The repo to read releases from, "owner/name": `app.update_repo`, or [`DEFAULT_REPO`] when it
-/// isn't set. An empty `app.update_repo` turns the checks off.
-pub(crate) fn repo(core: &Core) -> Option<String> {
-    let value = crate::preferences::Pref::UpdateRepo.load(core.kernel().config());
-    let repo = value.as_str().map(str::trim).unwrap_or(DEFAULT_REPO);
-    (repo.split('/').count() == 2 && !repo.contains(' ') && !repo.starts_with('/') && !repo.ends_with('/'))
-        .then(|| repo.to_owned())
-}
+/// The setting that names the repo.
+const UPDATE_REPO: [&str; 2] = ["app", "update_repo"];
+/// This launcher's version.
+const CURRENT: &str = env!("CARGO_PKG_VERSION");
 
 fn newer(candidate: &str, current: &str) -> bool {
     match (semver::Version::parse(candidate.trim_start_matches('v')), semver::Version::parse(current)) {
@@ -225,68 +205,215 @@ fn newer(candidate: &str, current: &str) -> bool {
     }
 }
 
-/// Reads the newest release's `latest.json`.
-pub(crate) async fn check(core: &Core, current: &str, install: Install) -> UpdateState {
-    let Some(repo) = repo(core) else { return UpdateState::Off };
-    let url = format!("https://github.com/{repo}/releases/latest/download/latest.json");
-    let manifest = match get(core, &url)
-        .await
-        .and_then(|b| serde_json::from_slice::<Manifest>(&b).map_err(|e| CoreError::Io(e.to_string())))
-    {
-        Ok(m) => m,
-        Err(e) => return UpdateState::Failed(e.to_string()),
-    };
-    if !newer(&manifest.version, current) {
-        return UpdateState::UpToDate;
-    }
-    let Some(key) = package_key(install) else { return UpdateState::WithSystem { version: manifest.version } };
-    match manifest.assets.get(&key) {
-        Some(asset) => UpdateState::Available { version: manifest.version, asset: asset.clone() },
-        None => UpdateState::Failed(format!("Nexus {} has no package for this system", manifest.version)),
-    }
+/// What the player asks of the launcher's update.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LauncherUpdateCmd {
+    /// Reads the newest release of the launcher (`app.update_repo`).
+    Check,
+    /// Downloads the newer launcher the check found, for the next start.
+    Download,
 }
 
-/// Downloads the package and checks its SHA-256. A packaged install hands it to the package
-/// manager; any other keeps it for the next start.
-pub(crate) async fn update(core: &Core, version: &str, asset: &Asset, install: Install) -> CoreResult<UpdateState> {
-    let staged = download(core, version, asset).await?;
-    let Some(manager) = install.manager() else { return Ok(UpdateState::Ready { version: staged.version }) };
-    // Nothing for the next start: the package manager puts it in now.
-    let updates = core.kernel().host().data_dir.join("updates");
-    let _ = tokio::fs::remove_file(updates.join("ready.json")).await;
-    let desktop = core.kernel().login_session().clone();
-    let file = staged.file.clone();
-    let done = tokio::task::spawn_blocking(move || desktop.install_package(&file, manager))
-        .await
-        .map_err(|e| CoreError::Io(e.to_string()))?;
-    let _ = tokio::fs::remove_dir_all(&updates).await;
-    match done {
-        Ok(()) => Ok(UpdateState::Installed { version: staged.version }),
-        Err(crate::PackageError::Cancelled) => Err(CoreError::Invalid(format!(
-            "the password prompt was closed, so Nexus {} wasn't installed",
-            staged.version
-        ))),
-        Err(crate::PackageError::Failed(why)) => Err(CoreError::Io(why)),
-    }
+/// The ports the launcher's update uses, and nothing else.
+pub(crate) struct LauncherUpdatePorts {
+    pub http: Arc<dyn HttpTransport>,
+    /// Hands a package to the system's package manager.
+    pub login_session: Arc<dyn LoginSession>,
 }
 
-/// Downloads the package, checks its SHA-256, and keeps it for the next start.
-pub(crate) async fn download(core: &Core, version: &str, asset: &Asset) -> CoreResult<Staged> {
-    let bytes = get(core, &asset.url).await?;
-    let sum = hex::encode(sha2::Sha256::digest(&bytes));
-    if !sum.eq_ignore_ascii_case(asset.sha256.trim()) {
-        return Err(CoreError::Invalid(format!("the download's SHA-256 is {sum}, not {}", asset.sha256)));
+/// Where this launcher keeps its update, and how it was installed.
+pub(crate) struct ThisLauncher {
+    /// The data folder: the update goes in its `updates/`.
+    pub data_dir: PathBuf,
+    pub install: Install,
+}
+
+/// The subsystem's state, read whole.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct LauncherUpdateSnapshot {
+    pub state: UpdateState,
+    /// No release repo is set: no checks.
+    pub off: bool,
+    /// How an update goes in ([`Install::method`]).
+    pub method: &'static str,
+    /// This launcher's version.
+    pub current: &'static str,
+}
+
+struct Shared {
+    ports: LauncherUpdatePorts,
+    here: ThisLauncher,
+    /// For `app.update_repo`, which the subsystem reads and never writes.
+    config: Arc<ConfigService>,
+    notifier: Notifier,
+    state: Mutex<UpdateState>,
+}
+
+/// The launcher's own update. Cheap to clone; every clone is the same subsystem.
+#[derive(Clone)]
+pub(crate) struct LauncherUpdateSubsystem {
+    inner: Arc<Shared>,
+}
+
+impl LauncherUpdateSubsystem {
+    pub fn new(ports: LauncherUpdatePorts, here: ThisLauncher, config: Arc<ConfigService>, notifier: Notifier) -> Self {
+        let state = Mutex::new(UpdateState::Idle);
+        Self { inner: Arc::new(Shared { ports, here, config, notifier, state }) }
     }
-    let dir = core.kernel().host().data_dir.join("updates");
-    let name = asset.url.rsplit('/').next().filter(|n| !n.is_empty() && !n.contains("..")).unwrap_or("package");
-    let file = dir.join(name);
-    let staged = Staged { version: version.to_owned(), file: file.clone() };
-    let io = |e: std::io::Error| CoreError::Io(e.to_string());
-    tokio::fs::create_dir_all(&dir).await.map_err(io)?;
-    tokio::fs::write(&file, &bytes).await.map_err(io)?;
-    let ready = serde_json::to_vec(&staged).map_err(|e| CoreError::Io(e.to_string()))?;
-    tokio::fs::write(dir.join("ready.json"), ready).await.map_err(io)?;
-    Ok(staged)
+
+    fn state(&self) -> MutexGuard<'_, UpdateState> {
+        self.inner.state.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    fn set(&self, state: UpdateState) {
+        *self.state() = state;
+        self.inner.notifier.changed(Area::LauncherUpdate);
+    }
+
+    /// Where the update is, as it is now.
+    pub fn snapshot(&self) -> LauncherUpdateSnapshot {
+        LauncherUpdateSnapshot {
+            state: self.state().clone(),
+            off: self.repo().is_none(),
+            method: self.inner.here.install.method(),
+            current: CURRENT,
+        }
+    }
+
+    pub async fn handle(&self, command: LauncherUpdateCmd) -> CoreResult<()> {
+        match command {
+            LauncherUpdateCmd::Check => {
+                self.check().await;
+                Ok(())
+            }
+            LauncherUpdateCmd::Download => self.download().await,
+        }
+    }
+
+    /// Reads the newest release, and returns what it found.
+    pub async fn check(&self) -> UpdateState {
+        self.set(UpdateState::Checking);
+        let found = self.read_latest().await;
+        self.set(found.clone());
+        found
+    }
+
+    /// Downloads the update the check found.
+    async fn download(&self) -> CoreResult<()> {
+        let UpdateState::Available { version, asset } = self.state().clone() else {
+            return Err(CoreError::Invalid("no launcher update to download".into()));
+        };
+        self.set(UpdateState::Downloading { version: version.clone() });
+        let done = self.update(&version, &asset).await;
+        self.set(done.unwrap_or_else(|e| UpdateState::Failed(e.to_string())));
+        Ok(())
+    }
+
+    /// The repo to read releases from, "owner/name": `app.update_repo`, or [`DEFAULT_REPO`]
+    /// when it isn't set. An empty `app.update_repo` turns the checks off.
+    fn repo(&self) -> Option<String> {
+        let value = self.inner.config.get(&UPDATE_REPO);
+        let repo = value.as_str().map(str::trim).unwrap_or(DEFAULT_REPO);
+        (repo.split('/').count() == 2 && !repo.contains(' ') && !repo.starts_with('/') && !repo.ends_with('/'))
+            .then(|| repo.to_owned())
+    }
+
+    /// GET, following redirects only to GitHub's release hosts.
+    async fn get(&self, url: &str) -> CoreResult<Vec<u8>> {
+        let mut url = url.to_owned();
+        for _ in 0..=MAX_REDIRECTS {
+            if !host_of(&url).is_some_and(|h| HOSTS.contains(&h)) {
+                return Err(CoreError::Invalid(format!("updates come from GitHub only, not {url}")));
+            }
+            let response = self
+                .inner
+                .ports
+                .http
+                .send(HttpRequest::get(url.clone()))
+                .await
+                .map_err(|e| CoreError::Io(e.to_string()))?;
+            if (300..400).contains(&response.status) {
+                let location =
+                    response.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("location")).map(|(_, v)| v.clone());
+                url = location.ok_or_else(|| CoreError::Io("a redirect without a Location".into()))?;
+                continue;
+            }
+            if response.status != 200 {
+                return Err(CoreError::Io(format!("{url}: HTTP {}", response.status)));
+            }
+            return Ok(response.body);
+        }
+        Err(CoreError::Io("too many redirects".into()))
+    }
+
+    /// Reads the newest release's `latest.json`.
+    async fn read_latest(&self) -> UpdateState {
+        let Some(repo) = self.repo() else { return UpdateState::Off };
+        let url = format!("https://github.com/{repo}/releases/latest/download/latest.json");
+        let manifest = match self
+            .get(&url)
+            .await
+            .and_then(|b| serde_json::from_slice::<Manifest>(&b).map_err(|e| CoreError::Io(e.to_string())))
+        {
+            Ok(m) => m,
+            Err(e) => return UpdateState::Failed(e.to_string()),
+        };
+        if !newer(&manifest.version, CURRENT) {
+            return UpdateState::UpToDate;
+        }
+        let Some(key) = package_key(self.inner.here.install) else {
+            return UpdateState::WithSystem { version: manifest.version };
+        };
+        match manifest.assets.get(&key) {
+            Some(asset) => UpdateState::Available { version: manifest.version, asset: asset.clone() },
+            None => UpdateState::Failed(format!("Nexus {} has no package for this system", manifest.version)),
+        }
+    }
+
+    /// Downloads the package and checks its SHA-256. A packaged install hands it to the
+    /// package manager; any other keeps it for the next start.
+    async fn update(&self, version: &str, asset: &Asset) -> CoreResult<UpdateState> {
+        let staged = self.stage(version, asset).await?;
+        let Some(manager) = self.inner.here.install.manager() else {
+            return Ok(UpdateState::Ready { version: staged.version });
+        };
+        // Nothing for the next start: the package manager puts it in now.
+        let updates = self.inner.here.data_dir.join("updates");
+        let _ = tokio::fs::remove_file(updates.join("ready.json")).await;
+        let session = self.inner.ports.login_session.clone();
+        let file = staged.file.clone();
+        let done = tokio::task::spawn_blocking(move || session.install_package(&file, manager))
+            .await
+            .map_err(|e| CoreError::Io(e.to_string()))?;
+        let _ = tokio::fs::remove_dir_all(&updates).await;
+        match done {
+            Ok(()) => Ok(UpdateState::Installed { version: staged.version }),
+            Err(crate::PackageError::Cancelled) => Err(CoreError::Invalid(format!(
+                "the password prompt was closed, so Nexus {} wasn't installed",
+                staged.version
+            ))),
+            Err(crate::PackageError::Failed(why)) => Err(CoreError::Io(why)),
+        }
+    }
+
+    /// Downloads the package, checks its SHA-256, and keeps it for the next start.
+    async fn stage(&self, version: &str, asset: &Asset) -> CoreResult<Staged> {
+        let bytes = self.get(&asset.url).await?;
+        let sum = hex::encode(sha2::Sha256::digest(&bytes));
+        if !sum.eq_ignore_ascii_case(asset.sha256.trim()) {
+            return Err(CoreError::Invalid(format!("the download's SHA-256 is {sum}, not {}", asset.sha256)));
+        }
+        let dir = self.inner.here.data_dir.join("updates");
+        let name = asset.url.rsplit('/').next().filter(|n| !n.is_empty() && !n.contains("..")).unwrap_or("package");
+        let file = dir.join(name);
+        let staged = Staged { version: version.to_owned(), file: file.clone() };
+        let io = |e: std::io::Error| CoreError::Io(e.to_string());
+        tokio::fs::create_dir_all(&dir).await.map_err(io)?;
+        tokio::fs::write(&file, &bytes).await.map_err(io)?;
+        let ready = serde_json::to_vec(&staged).map_err(|e| CoreError::Io(e.to_string()))?;
+        tokio::fs::write(dir.join("ready.json"), ready).await.map_err(io)?;
+        Ok(staged)
+    }
 }
 
 /// The update kept for this start, if any.
@@ -481,5 +608,69 @@ mod tests {
         assert_eq!(host_of("https://github.com/a/b/releases"), Some("github.com"));
         assert_eq!(host_of("https://github.com@evil.example/x"), None);
         assert_eq!(host_of("http://github.com/a"), None);
+    }
+
+    /// Serves one `latest.json` behind GitHub's redirect, and counts the requests.
+    struct Releases {
+        latest: String,
+        asked: std::sync::atomic::AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl HttpTransport for Releases {
+        async fn send(&self, request: HttpRequest) -> nexus_api::PluginResult<nexus_api::HttpResponse> {
+            self.asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let served = "https://objects.githubusercontent.com/latest.json";
+            Ok(if request.url == served {
+                nexus_api::HttpResponse { status: 200, headers: vec![], body: self.latest.clone().into_bytes() }
+            } else {
+                nexus_api::HttpResponse { status: 302, headers: vec![("Location".into(), served.into())], body: vec![] }
+            })
+        }
+
+        async fn open(&self, url: &str, offset: u64) -> nexus_api::PluginResult<crate::Opened> {
+            crate::NoNetwork.open(url, offset).await
+        }
+    }
+
+    fn launcher(repo: Option<&str>, version: &str) -> (LauncherUpdateSubsystem, Arc<Releases>) {
+        let key = package_key(Install::Folder).unwrap();
+        let latest = serde_json::json!({ "version": version,
+            "assets": { key: { "url": "https://github.com/n/n/releases/download/x/nexus.tar.gz", "sha256": "00" } } });
+        let http = Arc::new(Releases { latest: latest.to_string(), asked: Default::default() });
+        let config = Arc::new(ConfigService::in_memory());
+        if let Some(repo) = repo {
+            config.set(&UPDATE_REPO, serde_json::Value::String(repo.into())).unwrap();
+        }
+        let notifier = Notifier::new(crate::changes::Changes::new(), crate::EventBus::default());
+        let ports = LauncherUpdatePorts { http: http.clone(), login_session: Arc::new(crate::NoLoginSession) };
+        let here = ThisLauncher { data_dir: PathBuf::from("/nowhere"), install: Install::Folder };
+        (LauncherUpdateSubsystem::new(ports, here, config, notifier), http)
+    }
+
+    #[tokio::test]
+    async fn a_higher_release_with_this_install_s_package_is_available() {
+        let (update, _) = launcher(None, "999.0.0");
+        let found = update.check().await;
+        assert!(matches!(&found, UpdateState::Available { version, .. } if version == "999.0.0"), "{found:?}");
+        let snapshot = update.snapshot();
+        assert_eq!(snapshot.state, found);
+        assert!(!snapshot.off);
+        assert_eq!(snapshot.method, "swap");
+    }
+
+    #[tokio::test]
+    async fn the_same_release_is_up_to_date() {
+        let (update, _) = launcher(Some("me/nexus"), CURRENT);
+        assert_eq!(update.check().await, UpdateState::UpToDate);
+    }
+
+    #[tokio::test]
+    async fn an_empty_repo_turns_the_checks_off_without_asking() {
+        let (update, http) = launcher(Some(""), "999.0.0");
+        assert!(update.snapshot().off);
+        assert_eq!(update.check().await, UpdateState::Off);
+        assert_eq!(http.asked.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert!(update.handle(LauncherUpdateCmd::Download).await.is_err(), "nothing to download");
     }
 }

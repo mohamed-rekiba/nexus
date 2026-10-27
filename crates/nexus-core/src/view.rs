@@ -683,7 +683,7 @@ fn grid_vm(
 }
 
 /// What clicking `notice` opens, for example "Open Downloads"; empty for nothing.
-fn notice_opens(kernel: &Kernel, notice: &crate::app::Notice) -> String {
+fn notice_opens(kernel: &Kernel, notice: &crate::notices::Notice) -> String {
     match &notice.route {
         Some(Route::Downloads) => "Open Downloads".into(),
         Some(Route::Catalog) => "Open the Catalog".into(),
@@ -697,12 +697,12 @@ fn notice_opens(kernel: &Kernel, notice: &crate::app::Notice) -> String {
 }
 
 /// The cover of the game `notice` is about.
-fn notice_art(library: &LibrarySnapshot, notice: &crate::app::Notice) -> Option<ImageRef> {
+fn notice_art(library: &LibrarySnapshot, notice: &crate::notices::Notice) -> Option<ImageRef> {
     let game = notice.game.as_ref()?;
     library.listed(game).and_then(|e| cover_of(library, e))
 }
 
-fn notice_vm(kernel: &Kernel, library: &LibrarySnapshot, notice: &crate::app::Notice) -> NoticeVm {
+fn notice_vm(kernel: &Kernel, library: &LibrarySnapshot, notice: &crate::notices::Notice) -> NoticeVm {
     NoticeVm {
         id: notice.id,
         text: notice.message.clone(),
@@ -721,6 +721,9 @@ pub(crate) fn build(core: &Core) -> AppView {
     let prefs = core.prefs();
     let installs = core.installs().snapshot();
     let sessions = core.sessions().snapshot();
+    let notices = core.notices().snapshot();
+    let launcher_update = core.launcher_update().snapshot();
+    let vpn = core.vpn().snapshot();
     let mut state = core.state();
 
     let route = state.nav.last().cloned().unwrap_or(Route::Home);
@@ -759,15 +762,15 @@ pub(crate) fn build(core: &Core) -> AppView {
         detail: detail_game.and_then(|key| detail_vm(core, &state, &library, &torrents, &installs, &sessions, &key)),
         catalog,
         downloads: downloads_vm(kernel, jobs, &state, &library, &torrents, &installs),
-        settings: settings_vm(core, &prefs, &state),
+        settings: settings_vm(core, &prefs, &state, &launcher_update, &vpn),
         emulators: emulators_vm(kernel, &state, &statuses),
         plugin_page: match &route {
             Route::Plugin(plugin) => plugin_page_vm(kernel, &state, &statuses, plugin),
             _ => None,
         },
         running: running_vm(kernel, &sessions, &route),
-        notices: state.notices.iter().map(|n| n.message.clone()).collect(),
-        notice_cards: state.notices.iter().map(|n| notice_vm(kernel, &library, n)).collect(),
+        notices: notices.iter().map(|n| n.message.clone()).collect(),
+        notice_cards: notices.iter().map(|n| notice_vm(kernel, &library, n)).collect(),
         install_prompt: state.install_prompt.as_ref().map(|p| InstallPromptVm {
             plugin: p.game.plugin.clone(),
             emulator: p.emulator.clone(),
@@ -777,8 +780,8 @@ pub(crate) fn build(core: &Core) -> AppView {
         }),
         boot: boot_vm(kernel, &prefs, &state, &library),
         task: library.task.clone(),
-        notice_opens: state.notices.last().map(|n| notice_opens(kernel, n)).unwrap_or_default(),
-        notice_art: state.notices.last().and_then(|n| notice_art(&library, n)),
+        notice_opens: notices.last().map(|n| notice_opens(kernel, n)).unwrap_or_default(),
+        notice_art: notices.last().and_then(|n| notice_art(&library, n)),
         system: system_vm(kernel, &state),
         result_prompt: state.result_prompt.as_ref().map(|(key, _)| library.title(key)),
     }
@@ -1647,12 +1650,11 @@ fn system_vm(kernel: &crate::Kernel, state: &AppState) -> nexus_ui_api::SystemVm
     }
 }
 
-fn launcher_update_vm(core: &Core, update: &crate::launcher_update::UpdateState) -> nexus_ui_api::LauncherUpdateVm {
-    use crate::launcher_update::{UpdateState, repo};
-    let current = env!("CARGO_PKG_VERSION").to_owned();
-    let off = repo(core).is_none();
-    let (state, version, text) = match update {
-        _ if off => ("off", String::new(), "Updates are off: no release repo is set".to_owned()),
+fn launcher_update_vm(update: &crate::launcher_update::LauncherUpdateSnapshot) -> nexus_ui_api::LauncherUpdateVm {
+    use crate::launcher_update::UpdateState;
+    let current = update.current.to_owned();
+    let (state, version, text) = match &update.state {
+        _ if update.off => ("off", String::new(), "Updates are off: no release repo is set".to_owned()),
         UpdateState::Off => ("off", String::new(), "Updates are off: no release repo is set".to_owned()),
         UpdateState::Idle => ("idle", String::new(), "Check for a newer Nexus".to_owned()),
         UpdateState::Checking => ("checking", String::new(), "Checking…".to_owned()),
@@ -1674,11 +1676,16 @@ fn launcher_update_vm(core: &Core, update: &crate::launcher_update::UpdateState)
         }
         UpdateState::Failed(why) => ("failed", String::new(), format!("Couldn't update: {why}")),
     };
-    let method = core.kernel().host().install.method().to_owned();
-    nexus_ui_api::LauncherUpdateVm { state: state.into(), current, version, text, method }
+    nexus_ui_api::LauncherUpdateVm { state: state.into(), current, version, text, method: update.method.to_owned() }
 }
 
-fn settings_vm(core: &Core, prefs: &PreferencesSnapshot, state: &AppState) -> SettingsVm {
+fn settings_vm(
+    core: &Core,
+    prefs: &PreferencesSnapshot,
+    state: &AppState,
+    launcher_update: &crate::launcher_update::LauncherUpdateSnapshot,
+    vpn: &crate::vpn::VpnSnapshot,
+) -> SettingsVm {
     let kernel = core.kernel();
     let manifests: Vec<_> = kernel
         .of_kind(PluginKind::Emulator)
@@ -1710,7 +1717,7 @@ fn settings_vm(core: &Core, prefs: &PreferencesSnapshot, state: &AppState) -> Se
         None => Vec::new(),
     };
     SettingsVm {
-        launcher_update: launcher_update_vm(core, &state.launcher_update),
+        launcher_update: launcher_update_vm(launcher_update),
         hardware,
         panels: state.settings.iter().map(settings_panel_vm).collect(),
         themes,
@@ -1725,23 +1732,19 @@ fn settings_vm(core: &Core, prefs: &PreferencesSnapshot, state: &AppState) -> Se
         can_start_at_login: kernel.login_session().can_start_at_login(),
         start_at_login: prefs.start_at_login,
         start_at_login_error: prefs.start_at_login_error.clone().unwrap_or_default(),
-        vpn: vpn_vm(core, prefs, state),
+        vpn: vpn_vm(vpn),
     }
 }
 
-fn vpn_vm(core: &Core, prefs: &PreferencesSnapshot, state: &AppState) -> nexus_ui_api::VpnSettingsVm {
-    let network = core.kernel().network();
-    let only = prefs.vpn_only && network.problem().is_none();
-    let chosen = prefs.vpn.clone();
-    let finds = network.finds_vpns();
+fn vpn_vm(vpn: &crate::vpn::VpnSnapshot) -> nexus_ui_api::VpnSettingsVm {
     nexus_ui_api::VpnSettingsVm {
-        problem: network.problem().unwrap_or_default(),
-        only,
-        finds,
-        can_import: network.can_import(),
-        route: if only { crate::vpn::pick(&state.vpns, &chosen, finds).unwrap_or_default() } else { String::new() },
-        chosen,
-        vpns: state
+        problem: vpn.problem.clone().unwrap_or_default(),
+        only: vpn.only,
+        finds: vpn.finds,
+        can_import: vpn.can_import,
+        route: vpn.route.clone().unwrap_or_default(),
+        chosen: vpn.chosen.clone(),
+        vpns: vpn
             .vpns
             .iter()
             .map(|v| nexus_ui_api::VpnVm {
@@ -1751,7 +1754,7 @@ fn vpn_vm(core: &Core, prefs: &PreferencesSnapshot, state: &AppState) -> nexus_u
                 switchable: v.switchable,
             })
             .collect(),
-        error: state.vpn_error.clone().unwrap_or_default(),
+        error: vpn.error.clone().unwrap_or_default(),
     }
 }
 

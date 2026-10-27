@@ -119,26 +119,20 @@ pub enum Command {
         name: String,
         paths: Vec<std::path::PathBuf>,
     },
-    /// Sets one of the player's preferences: sounds, full screen, size, the VPN rule and so
+    /// Sets one of the player's preferences: sounds, full screen, size, the monitor and so
     /// on. [`Pref`] says what values each takes; a size outside its range goes to its nearest
     /// end, and a value of the wrong type is refused.
     Pref(Pref, Value),
     /// The UI host finished swapping to this theme.
     ThemeSwitched(PluginId),
-    /// Closes every notice.
-    DismissNotices,
-    /// Closes the notice with this id (`NoticeVm::id`); the others stay.
-    DismissNotice(u64),
+    /// The notices: close one or all, or open what one is about.
+    Notice(crate::NoticeCmd),
     /// Looks for emulator updates and, if automatic updates are on, installs them. An update
     /// for an emulator whose game is running waits until the game closes. The core runs this
     /// every few hours by itself.
     CheckUpdates,
-    /// The notice with this id was clicked: open what it is about, and dismiss it.
-    OpenNotice(u64),
-    /// Reads the newest release of the launcher (`app.update_repo`).
-    CheckLauncherUpdate,
-    /// Downloads the newer launcher the check found, for the next start.
-    DownloadLauncherUpdate,
+    /// The launcher's own update: look for one, or download it.
+    LauncherUpdate(crate::LauncherUpdateCmd),
     /// "Rate how it runs": asks "How far did it get?" for this game.
     AskResult(GameKey),
     /// The player's answer to "How far did it get?" after playing: `ingame`, `menus`,
@@ -176,12 +170,8 @@ pub enum Command {
     /// Game installs: install a finished download or a package, delete a download's unpacked
     /// files, stop a download's install.
     GameInstall(crate::GameInstallCmd),
-    /// Connects or disconnects a VPN the system can switch, by its name.
-    ConnectVpn(String),
-    DisconnectVpn(String),
-    /// Adds a VPN from a provider's file (WireGuard `.conf`, OpenVPN `.ovpn`) and connects it.
-    /// `~/` is the home folder.
-    ImportVpn(std::path::PathBuf),
+    /// "Download only through a VPN", and the VPNs: connect, disconnect and add them.
+    Vpn(crate::VpnCmd),
     /// Something the player asked of the machine: Wi-Fi, Bluetooth, sound, power, Nexus OS.
     System(crate::system::SystemCommand),
     /// The player agreed to install the emulator a game needs: install it, then play.
@@ -346,14 +336,8 @@ pub(crate) struct AppState {
     pub result_prompt: Option<(GameKey, Option<String>)>,
     /// This PC, once the check ran.
     pub hardware: Option<crate::Specs>,
-    /// The launcher's own update.
-    pub launcher_update: crate::launcher_update::UpdateState,
     /// The machine's settings, from the system plugins.
     pub system: crate::system::SystemState,
-    /// What the player is told, newest last: at most `MAX_NOTICES`.
-    pub notices: Vec<Notice>,
-    /// The id the next notice gets.
-    pub next_notice: u64,
     pub install_prompt: Option<InstallPrompt>,
     /// Emulators with an update that waits for their game to close.
     pub pending_updates: BTreeSet<PluginId>,
@@ -362,10 +346,6 @@ pub(crate) struct AppState {
     /// Until when the stores' installs are read often: a minute after Nexus asked a store to
     /// install, as the store writes its install down a moment later.
     pub store_watch_until: Option<std::time::Instant>,
-    /// The VPNs, as last read.
-    pub vpns: Vec<crate::Vpn>,
-    /// Why the last connect, disconnect or import of a VPN failed.
-    pub vpn_error: Option<String>,
     /// The game selected in the Catalog. Home's selection stays a library game.
     pub catalog_selected: Option<GameKey>,
     /// The Catalog's grid as last built: on another screen, each view shows this one instead
@@ -389,6 +369,9 @@ pub(crate) struct Inner {
     pub library: crate::library::LibrarySubsystem,
     /// The running games.
     pub sessions: crate::sessions::SessionsSubsystem,
+    pub notices: crate::notices::NoticesSubsystem,
+    pub launcher_update: crate::launcher_update::LauncherUpdateSubsystem,
+    pub vpn: crate::vpn::VpnSubsystem,
     /// Held while the catalogs are read: see [`Core::refresh_releases`].
     pub reading_catalogs: tokio::sync::Mutex<()>,
 }
@@ -397,42 +380,6 @@ pub(crate) struct Inner {
 #[derive(Clone)]
 pub struct Core {
     pub(crate) inner: Arc<Inner>,
-}
-
-/// A short message for the player, until it is dismissed.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Notice {
-    pub id: u64,
-    pub message: String,
-    pub kind: NoticeKind,
-    /// Where the notice's subject is, for the player to open.
-    pub route: Option<Route>,
-    /// The game the notice is about: its card shows the game's art.
-    pub game: Option<GameKey>,
-}
-
-impl AppState {
-    /// Shows the player `message`. Clicking it opens `route`, when there is one. The oldest
-    /// notice goes when there are more than `MAX_NOTICES`.
-    pub(crate) fn post_notice(
-        &mut self,
-        kind: NoticeKind,
-        message: String,
-        route: Option<Route>,
-        game: Option<GameKey>,
-    ) {
-        // Only a problem is a warning in the log: "Download complete" is news.
-        if kind == NoticeKind::Error {
-            tracing::warn!(%message, "notice");
-        } else {
-            tracing::info!(%message, kind = kind.as_str(), "notice");
-        }
-        self.next_notice += 1;
-        self.notices.push(Notice { id: self.next_notice, message, kind, route, game });
-        if self.notices.len() > nexus_ui_api::MAX_NOTICES {
-            self.notices.remove(0);
-        }
-    }
 }
 
 impl Core {
@@ -449,18 +396,13 @@ impl Core {
             catalog_view: LibraryView::catalog(),
             result_prompt: None,
             hardware: None,
-            launcher_update: crate::launcher_update::UpdateState::Idle,
             system: Default::default(),
-            notices: Vec::new(),
-            next_notice: 0,
             install_prompt: None,
             pending_updates: BTreeSet::new(),
             store_installs: Vec::new(),
             store_watch_until: None,
             catalog_selected: None,
             catalog_grid: None,
-            vpns: Vec::new(),
-            vpn_error: None,
             grid_columns: HashMap::new(),
         };
         let downloads = Downloads::spawn(kernel.clone());
@@ -485,7 +427,7 @@ impl Core {
                 kernel.torrent_ports(),
                 crate::torrents::Polls { torrents: kernel.host().torrent_poll, vpn: kernel.host().vpn_poll },
                 crate::torrents::Records::new(kernel.config().clone()),
-                kernel.vpn_waited().clone(),
+                kernel.vpn_rule().clone(),
                 Notifier::new(changes.clone(), kernel.events().clone()),
                 events,
             );
@@ -532,6 +474,31 @@ impl Core {
                 Notifier::new(changes.clone(), kernel.events().clone()),
                 events,
             );
+            let notices =
+                crate::notices::NoticesSubsystem::new(Notifier::new(changes.clone(), kernel.events().clone()));
+            let launcher_update = crate::launcher_update::LauncherUpdateSubsystem::new(
+                crate::launcher_update::LauncherUpdatePorts {
+                    http: kernel.http().clone(),
+                    login_session: kernel.login_session().clone(),
+                },
+                crate::launcher_update::ThisLauncher {
+                    data_dir: kernel.host().data_dir.clone(),
+                    install: kernel.host().install,
+                },
+                kernel.config().clone(),
+                Notifier::new(changes.clone(), kernel.events().clone()),
+            );
+            // The setting or the VPNs changed: the downloads' kill switch looks at once.
+            let kill_switch = torrents.clone();
+            let vpn = crate::vpn::VpnSubsystem::new(
+                kernel.vpn_rule().clone(),
+                kernel.host().home.clone(),
+                Notifier::new(changes.clone(), kernel.events().clone()),
+                Arc::new(move || {
+                    let torrents = kill_switch.clone();
+                    Box::pin(async move { torrents.vpn_changed().await })
+                }),
+            );
             Inner {
                 preferences,
                 kernel,
@@ -542,6 +509,9 @@ impl Core {
                 installs,
                 library,
                 sessions,
+                notices,
+                launcher_update,
+                vpn,
                 reading_catalogs: tokio::sync::Mutex::new(()),
             }
         });
@@ -640,6 +610,21 @@ impl Core {
         }
     }
 
+    /// The notices.
+    pub(crate) fn notices(&self) -> &crate::notices::NoticesSubsystem {
+        &self.inner.notices
+    }
+
+    /// The launcher's own update.
+    pub(crate) fn launcher_update(&self) -> &crate::launcher_update::LauncherUpdateSubsystem {
+        &self.inner.launcher_update
+    }
+
+    /// "Download only through a VPN", and the VPNs.
+    pub(crate) fn vpn(&self) -> &crate::vpn::VpnSubsystem {
+        &self.inner.vpn
+    }
+
     pub(crate) fn state(&self) -> MutexGuard<'_, AppState> {
         self.inner.state.lock().unwrap_or_else(|p| p.into_inner())
     }
@@ -657,11 +642,9 @@ impl Core {
         self.inner.kernel.events().publish(Event::StateChanged);
     }
 
-    /// Posts a notice. The change that goes with it publishes [`Event::StateChanged`]; this
-    /// says only that the notices changed.
+    /// Posts a notice. The change that goes with it publishes [`Event::StateChanged`].
     fn post(&self, kind: NoticeKind, message: String, route: Option<Route>, game: Option<GameKey>) {
-        self.state().post_notice(kind, message, route, game);
-        self.inner.changes.publish(Area::Notices);
+        self.notices().post(kind, message, route, game);
     }
 
     /// A notice of the default kind, `Info`.
@@ -686,8 +669,7 @@ impl Core {
 
     /// Shows the player a problem outside the core, such as a theme's logic failing.
     pub fn report(&self, message: String) {
-        self.state().post_notice(NoticeKind::Error, message, None, None);
-        self.changed(Area::Notices);
+        self.notices().report(message);
     }
 
     /// The view models for the current state.
@@ -790,13 +772,7 @@ impl Core {
             Command::ThemeSwitched(theme) => self.theme_switched(theme),
             Command::SetFolders { name, paths } => self.set_folders(&name, &paths),
             Command::SetPluginEnabled { plugin, enabled } => self.set_plugin_enabled(&plugin, enabled).await,
-            Command::Pref(pref, value) => {
-                self.preferences().set(pref, value).await?;
-                if pref.area() == Area::Vpn {
-                    self.vpn_changed().await;
-                }
-                Ok(())
-            }
+            Command::Pref(pref, value) => self.preferences().set(pref, value).await,
             Command::ReportResult(level) => {
                 let Some((game, build)) = self.state().result_prompt.take() else { return Ok(()) };
                 self.library().answer(&game, level.as_deref(), build.as_deref())?;
@@ -825,14 +801,7 @@ impl Core {
             Command::CatalogMore => self.more(true),
             Command::Torrent(command) => self.torrent(command).await,
             Command::GameInstall(command) => self.game_install(command).await,
-            Command::ConnectVpn(name) => self.vpn_call(move |n| n.connect(&name)).await,
-            Command::DisconnectVpn(name) => self.vpn_call(move |n| n.disconnect(&name)).await,
-            Command::ImportVpn(file) => {
-                let home = self.inner.kernel.host().home.clone();
-                let file = crate::folders::expand(&file.to_string_lossy(), home.as_deref())
-                    .ok_or_else(|| CoreError::Invalid(format!("{} isn't a full path", file.display())))?;
-                self.vpn_call(move |n| n.import(&file)).await.map(|_| ())
-            }
+            Command::Vpn(command) => self.vpn().handle(command).await,
             Command::AskResult(game) => {
                 let build = self.build_of(&game.plugin);
                 self.state().result_prompt = Some((game, build));
@@ -840,26 +809,15 @@ impl Core {
                 Ok(())
             }
             Command::System(command) => crate::system::run(self, command).await,
-            Command::DismissNotices => {
-                self.state().notices.clear();
-                self.changed(Area::Notices);
-                Ok(())
-            }
-            Command::DismissNotice(id) => {
-                self.state().notices.retain(|n| n.id != id);
-                self.changed(Area::Notices);
-                Ok(())
-            }
-            Command::CheckLauncherUpdate => {
-                use crate::launcher_update::{UpdateState, check};
-                self.state().launcher_update = UpdateState::Checking;
-                self.changed(Area::LauncherUpdate);
-                let found = check(self, env!("CARGO_PKG_VERSION"), self.kernel().host().install).await;
+            Command::Notice(crate::NoticeCmd::Open(id)) => match self.notices().take(id).and_then(|n| n.route) {
+                Some(route) => self.navigate(route).await,
+                None => Ok(()),
+            },
+            Command::Notice(command) => self.notices().handle(command),
+            Command::LauncherUpdate(crate::LauncherUpdateCmd::Check) => {
+                let found = self.launcher_update().check().await;
                 // Nexus OS brings the new launcher with its next update: look for that now.
-                let with_system = matches!(found, UpdateState::WithSystem { .. });
-                self.state().launcher_update = found;
-                self.changed(Area::LauncherUpdate);
-                if with_system {
+                if matches!(found, crate::launcher_update::UpdateState::WithSystem { .. }) {
                     let core = self.clone();
                     tokio::spawn(async move {
                         let _ = crate::system::run(&core, crate::system::SystemCommand::CheckOsUpdate).await;
@@ -867,33 +825,7 @@ impl Core {
                 }
                 Ok(())
             }
-            Command::DownloadLauncherUpdate => {
-                use crate::launcher_update::{UpdateState, update};
-                let UpdateState::Available { version, asset } = self.state().launcher_update.clone() else {
-                    return Err(CoreError::Invalid("no launcher update to download".into()));
-                };
-                self.state().launcher_update = UpdateState::Downloading { version: version.clone() };
-                self.changed(Area::LauncherUpdate);
-                let done = update(self, &version, &asset, self.kernel().host().install).await;
-                self.state().launcher_update = done.unwrap_or_else(|e| UpdateState::Failed(e.to_string()));
-                self.changed(Area::LauncherUpdate);
-                Ok(())
-            }
-            Command::OpenNotice(id) => {
-                let route = {
-                    let mut state = self.state();
-                    let route = state.notices.iter().find(|n| n.id == id).and_then(|n| n.route.clone());
-                    state.notices.retain(|n| n.id != id);
-                    route
-                };
-                match route {
-                    Some(route) => self.navigate(route).await,
-                    None => {
-                        self.changed(Area::Notices);
-                        Ok(())
-                    }
-                }
-            }
+            Command::LauncherUpdate(command) => self.launcher_update().handle(command).await,
             Command::CheckUpdates => {
                 self.check_updates().await;
                 Ok(())
@@ -946,7 +878,7 @@ impl Core {
                 self.refresh_settings().await;
             }
             Route::Settings => {
-                self.refresh_vpns().await;
+                self.vpn().refresh().await;
                 self.refresh_settings().await;
             }
             // Read once; a new catalog address reads them again. The Catalog opens at once and
@@ -1043,10 +975,8 @@ impl Core {
 
     async fn open_game(&self, game: GameKey) -> CoreResult<()> {
         // A game a catalog offers: its download sheet names the VPN in use.
-        let kernel = self.kernel();
-        let vpn_only = crate::vpn::vpn_only(kernel.config(), kernel.network().as_ref());
-        if vpn_only && self.library().snapshot().offer(&game).is_some() {
-            self.refresh_vpns().await;
+        if self.vpn().only() && self.library().snapshot().offer(&game).is_some() {
+            self.vpn().refresh().await;
         }
         self.load_detail(&game).await?;
         self.select(&game);
