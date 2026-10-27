@@ -6,7 +6,7 @@ use std::path::Path;
 use emu_shadps4::{COMPATIBILITY, RELEASES, ShadPlugin};
 use emulator_kit::sfo::{Value as Sfo, build};
 use nexus_api::*;
-use nexus_core::{Area, Command};
+use nexus_core::{Area, Command, SessionCmd};
 use nexus_testkit::{FakeHost, FakeHttp, FakeSpawner, TestCore, contract};
 
 const TAG: &str = "v.0.18.0";
@@ -137,7 +137,7 @@ async fn the_app_run_from_the_appimage_starts_the_game_folder() {
     let app_run = test.data_dir().join("plugins/emu-shadps4/builds").join(TAG).join("squashfs-root/AppRun");
     assert!(app_run.is_file());
 
-    test.core.dispatch(Command::Launch("emu-shadps4:CUSA04118".parse().unwrap())).await.unwrap();
+    test.core.dispatch(Command::Session(SessionCmd::Launch("emu-shadps4:CUSA04118".parse().unwrap()))).await.unwrap();
 
     let process = test.spawner.wait_for(2).await;
     assert_eq!(process.command.program, app_run);
@@ -168,7 +168,7 @@ async fn a_new_build_that_does_not_run_here_is_removed_and_the_build_before_stay
     assert_eq!(ran.last().map(|c| c.args.clone()), Some(vec!["--help".to_owned()]), "a test run with --help");
     assert!(!test.data_dir().join("plugins/emu-shadps4/builds").join(NEXT).exists(), "the broken build goes");
     assert_eq!(test.core.view().emulators.emulators[0].installed, [TAG]);
-    test.core.dispatch(Command::Launch("emu-shadps4:CUSA04118".parse().unwrap())).await.unwrap();
+    test.core.dispatch(Command::Session(SessionCmd::Launch("emu-shadps4:CUSA04118".parse().unwrap()))).await.unwrap();
     let program = test.spawner.spawned().last().unwrap().command.program.clone();
     assert_eq!(program, app_run(&test, TAG), "games start on the build before");
 }
@@ -212,7 +212,7 @@ async fn your_own_build_runs_games_from_its_folder() {
     let emu = view.emulators.emulators.iter().find(|e| e.plugin == shad()).unwrap();
     assert_eq!(emu.installed, ["Your own build"]);
 
-    test.core.dispatch(Command::Launch("emu-shadps4:CUSA04118".parse().unwrap())).await.unwrap();
+    test.core.dispatch(Command::Session(SessionCmd::Launch("emu-shadps4:CUSA04118".parse().unwrap()))).await.unwrap();
     let process = test.spawner.wait_for(1).await;
     assert_eq!(process.command.program, own.path().join("Shadps4-sdl.AppImage"));
     assert_eq!(process.command.cwd, own.path());
@@ -232,7 +232,7 @@ async fn a_shadps4_on_the_path_is_found_and_can_be_chosen() {
     let use_own =
         Command::RunAction { plugin: shad(), action: "use-own".into(), game: None, args: serde_json::Value::Null };
     test.core.dispatch(use_own).await.unwrap();
-    test.core.dispatch(Command::Launch("emu-shadps4:CUSA04118".parse().unwrap())).await.unwrap();
+    test.core.dispatch(Command::Session(SessionCmd::Launch("emu-shadps4:CUSA04118".parse().unwrap()))).await.unwrap();
     assert_eq!(test.spawner.wait_for(1).await.command.program, Path::new("shadps4"), "run from PATH, by name");
 }
 
@@ -243,7 +243,7 @@ async fn installing_an_official_build_switches_away_from_your_own() {
     test.core.dispatch(set("own_build", "true")).await.unwrap();
 
     test.core.dispatch(Command::InstallEmulator { plugin: shad(), version: None }).await.unwrap();
-    test.core.dispatch(Command::Launch("emu-shadps4:CUSA04118".parse().unwrap())).await.unwrap();
+    test.core.dispatch(Command::Session(SessionCmd::Launch("emu-shadps4:CUSA04118".parse().unwrap()))).await.unwrap();
     let program = test.spawner.spawned().last().unwrap().command.program.clone();
     assert!(program.ends_with("squashfs-root/AppRun"), "the official build runs: {program:?}");
 }
@@ -419,7 +419,7 @@ async fn on_macos_the_official_zip_installs_and_its_shadps4_starts_the_game() {
 
     test.core.dispatch(Command::InstallEmulator { plugin: shad(), version: None }).await.unwrap();
     assert!(program.is_file());
-    test.core.dispatch(Command::Launch("emu-shadps4:CUSA04118".parse().unwrap())).await.unwrap();
+    test.core.dispatch(Command::Session(SessionCmd::Launch("emu-shadps4:CUSA04118".parse().unwrap()))).await.unwrap();
     assert_eq!(test.spawner.wait_for(1).await.command.program, program);
 }
 

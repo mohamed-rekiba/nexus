@@ -4,7 +4,6 @@
 //! any time without losing navigation, selection, downloads or running games.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use futures::stream::BoxStream;
@@ -81,14 +80,8 @@ pub enum Command {
     /// Deletes an installed game's folder, and takes it out of the Library. Not while it runs
     /// or its emulator installs a game.
     UninstallGame(GameKey),
-    /// Starts a game. One game runs at a time.
-    Launch(GameKey),
-    /// Asks the game to close, and kills it if it doesn't.
-    Stop(SessionId),
-    /// Brings the running game's window back to the front.
-    ShowGame(SessionId),
-    /// The PS button while a game runs: from the game to the launcher, or back to the game.
-    ToggleFocus,
+    /// The running games: launch one, stop it, and switch between it and the launcher.
+    Session(crate::SessionCmd),
     /// Deletes the emulator's compiled shaders for a game.
     ClearShaderCache(GameKey),
     SetConfig {
@@ -369,23 +362,6 @@ impl LibraryView {
     }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct Session {
-    pub game: GameKey,
-    pub title: String,
-    pub stopping: bool,
-    /// The game's window came to the front, or the launcher stopped waiting for one.
-    pub shown: bool,
-    /// The system's id for the game's process.
-    pub pid: Option<u32>,
-    /// By the kernel's clock.
-    pub started: std::time::Instant,
-    /// Where the game's output goes.
-    pub log: std::path::PathBuf,
-    /// The emulator build the game runs on, when the emulator has builds.
-    pub build: Option<String>,
-}
-
 /// How long a selection must stay before its details load.
 const SELECT_SETTLE: std::time::Duration = std::time::Duration::from_millis(150);
 /// How many games the store is asked about at once.
@@ -405,12 +381,6 @@ pub(crate) struct AppState {
     pub emulators: BTreeMap<PluginId, EmulatorState>,
     pub settings: Vec<SettingsPanelVm>,
     pub theme: Option<PluginId>,
-    pub sessions: BTreeMap<SessionId, Session>,
-    /// The last window the launcher brought to the front was the game's. It stands in for
-    /// the desktop when the desktop doesn't say which window is in front.
-    pub game_in_front: bool,
-    /// A launch is between its checks and its session: no other game may start.
-    pub launching: bool,
     /// The first library load, with the first game's details, is done.
     pub booted: bool,
     /// What a store's catalog says about each game, and the plugin that said it.
@@ -488,13 +458,11 @@ pub(crate) struct Inner {
     pub kernel: Kernel,
     pub state: Mutex<AppState>,
     pub downloads: Downloads,
-    pub next_session: AtomicU64,
-    pub stops: Mutex<HashMap<SessionId, tokio::sync::oneshot::Sender<()>>>,
-    /// The desktop was asked what it is missing, at the first game of this run.
-    pub desktop_checked: std::sync::atomic::AtomicBool,
     pub changes: Changes,
     /// The catalogs' downloads.
     pub torrents: crate::torrents::TorrentsSubsystem,
+    /// The running games.
+    pub sessions: crate::sessions::SessionsSubsystem,
     /// Held while the catalogs are read: see [`Core::refresh_releases`].
     pub reading_catalogs: tokio::sync::Mutex<()>,
 }
@@ -555,9 +523,6 @@ impl Core {
             emulators: BTreeMap::new(),
             settings: Vec::new(),
             theme,
-            sessions: BTreeMap::new(),
-            game_in_front: false,
-            launching: false,
             booted: false,
             meta: HashMap::new(),
             offer_art: Self::kept_offer_art(&kernel),
@@ -596,6 +561,7 @@ impl Core {
         let downloads = Downloads::spawn(kernel.clone());
         let changes = Changes::new();
         let inner = Arc::new_cyclic(|weak: &std::sync::Weak<Inner>| {
+            let weak_sessions = weak.clone();
             let weak = weak.clone();
             // The subsystem's events reach the core while it lives.
             let events: crate::torrents::EventSink = Arc::new(move |event| {
@@ -611,15 +577,31 @@ impl Core {
                 Notifier::new(changes.clone(), kernel.events().clone()),
                 events,
             );
+            let events: crate::sessions::EventSink = Arc::new(move |event| {
+                if let Some(inner) = weak_sessions.upgrade() {
+                    Core { inner }.session_event(event);
+                }
+            });
+            let sessions = crate::sessions::SessionsSubsystem::new(
+                kernel.session_ports(),
+                crate::sessions::Timings {
+                    watch_every: kernel.host().watch_every,
+                    show_timeout: kernel.host().show_timeout,
+                    hand_over_timeout: kernel.host().hand_over_timeout,
+                    stop_grace: kernel.host().stop_grace,
+                },
+                kernel.config().clone(),
+                kernel.events().clone(),
+                Notifier::new(changes.clone(), kernel.events().clone()),
+                events,
+            );
             Inner {
                 kernel,
                 state: Mutex::new(state),
                 downloads,
-                next_session: AtomicU64::new(0),
-                stops: Mutex::new(HashMap::new()),
-                desktop_checked: Default::default(),
                 changes,
                 torrents,
+                sessions,
                 reading_catalogs: tokio::sync::Mutex::new(()),
             }
         });
@@ -685,6 +667,18 @@ impl Core {
     /// The catalogs' downloads.
     pub(crate) fn torrents(&self) -> &crate::torrents::TorrentsSubsystem {
         &self.inner.torrents
+    }
+
+    /// The running games.
+    pub(crate) fn sessions(&self) -> &crate::sessions::SessionsSubsystem {
+        &self.inner.sessions
+    }
+
+    /// What the sessions subsystem says the core must do.
+    fn session_event(&self, event: crate::sessions::SessionEvent) {
+        match event {
+            crate::sessions::SessionEvent::Problem(problem) => self.notice(problem),
+        }
     }
 
     pub(crate) fn state(&self) -> MutexGuard<'_, AppState> {
@@ -829,24 +823,7 @@ impl Core {
             Command::InstallEmulator { plugin, version } => self.install(&plugin, version, None).await,
             Command::UpdateEmulator { plugin } => self.update(&plugin).await,
             Command::UninstallEmulator { plugin, version } => self.uninstall(&plugin, &version).await,
-            Command::Launch(game) => {
-                // A Catalog offer's Play starts the installed game it is.
-                let torrents = self.torrents().snapshot();
-                let game = crate::view::played_game(&self.state(), &torrents, &game);
-                let result = crate::launch::launch(self, game.clone()).await;
-                // The player pressed Play: say why nothing started.
-                if let Err(error) = &result {
-                    let why = crate::launch::cant_start(self, &game, error);
-                    self.notice_opening(NoticeKind::Error, Route::GameDetail(game.clone()), why);
-                }
-                result
-            }
-            Command::Stop(session) => crate::launch::stop(self, session),
-            Command::ShowGame(session) => crate::launch::show_game(self, session).await,
-            Command::ToggleFocus => {
-                crate::launch::toggle_focus(self).await;
-                Ok(())
-            }
+            Command::Session(command) => crate::launch::session(self, command).await,
             Command::ClearShaderCache(game) => self.clear_shader_cache(game).await,
             Command::SetConfig { plugin, scope, value } => self.set_config(&plugin, scope, value).await,
             Command::SetConfigField { plugin, scope, key, value } => {
@@ -1771,11 +1748,11 @@ impl Core {
     async fn uninstall_game(&self, game: &GameKey) -> CoreResult<()> {
         let also;
         let link;
+        if self.sessions().runs(game) {
+            return Err(CoreError::Invalid("Stop the game before you uninstall it".into()));
+        }
         let (folder, title) = {
             let state = self.state();
-            if state.sessions.values().any(|s| &s.game == game) {
-                return Err(CoreError::Invalid("Stop the game before you uninstall it".into()));
-            }
             if state
                 .game_installs
                 .values()
@@ -2112,7 +2089,7 @@ impl Core {
 
     /// One of the emulator's games is running.
     fn plays(&self, plugin: &PluginId) -> bool {
-        self.state().sessions.values().any(|s| &s.game.plugin == plugin)
+        self.sessions().plays(plugin)
     }
 
     /// A game closed: an update that waited for it installs now.
@@ -2214,7 +2191,7 @@ impl Core {
 
     /// The emulator's log of the game's last run. `None` before it ran.
     pub fn game_log(&self, game: &GameKey) -> Option<std::path::PathBuf> {
-        Some(crate::launch::log_path(&self.inner.kernel, game)).filter(|p| p.is_file())
+        Some(crate::sessions::log_path(&self.inner.kernel.host().data_dir, game)).filter(|p| p.is_file())
     }
 
     /// The player's own result for a game: `ingame`, `menus`, `boots` or `nothing`.
@@ -2255,19 +2232,19 @@ impl Core {
 
     /// A game is running.
     pub fn game_running(&self) -> bool {
-        !self.state().sessions.is_empty()
+        self.sessions().running()
     }
 
     /// The running games' sessions, to stop them.
     pub fn running_sessions(&self) -> Vec<SessionId> {
-        self.state().sessions.keys().copied().collect()
+        self.sessions().session_ids()
     }
 
     /// A game has the screen: the gamepad is the game's, not the launcher's. The desktop says
     /// which window is in front; when it can't, the last window the launcher showed counts.
-    /// Cheap: it reads app state, so the UI can ask on every press.
+    /// Cheap: it reads the sessions' state, so the UI can ask on every press.
     pub fn game_in_front(&self) -> bool {
-        crate::launch::game_in_front(self)
+        self.sessions().game_in_front()
     }
 
     /// Whether theme sounds play. On until the player turns them off.
@@ -2369,10 +2346,6 @@ impl Core {
         self.inner.kernel.events().publish(Event::ThemeChanged { from, to: theme });
         self.changed(Area::Settings);
         Ok(())
-    }
-
-    pub(crate) fn next_session(&self) -> SessionId {
-        SessionId(self.inner.next_session.fetch_add(1, Ordering::SeqCst) + 1)
     }
 }
 

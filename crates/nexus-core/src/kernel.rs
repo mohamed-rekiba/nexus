@@ -591,6 +591,16 @@ impl Kernel {
         }
     }
 
+    /// The ports the sessions subsystem takes.
+    pub(crate) fn session_ports(&self) -> crate::sessions::SessionPorts {
+        crate::sessions::SessionPorts {
+            spawner: self.inner.spawner.clone(),
+            processes: self.inner.processes.clone(),
+            desktop: self.inner.desktop.clone(),
+            clock: self.inner.clock.clone(),
+        }
+    }
+
     /// Set while a plugin waits for the VPN: see [`crate::vpn::HostVpnGate`].
     pub(crate) fn vpn_waited(&self) -> &Arc<AtomicBool> {
         &self.inner.vpn_waited

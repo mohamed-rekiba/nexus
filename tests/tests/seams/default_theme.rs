@@ -2,7 +2,7 @@
 //! the Library's filters and grid, and the theme's options.
 
 use crate::common::*;
-use nexus_core::{Area, Command};
+use nexus_core::{Area, Command, SessionCmd};
 use slint_interpreter::ComponentHandle;
 
 fn default_theme() -> Composed {
@@ -433,7 +433,7 @@ fn the_game_hub_stops_a_running_game() {
     let mut host = composed(|h| h.plugin(playable_games("emu-a", vec!["Alpha"])));
     host.ui.start().unwrap();
     host.dispatch(Command::RefreshLibrary);
-    host.dispatch(Command::Launch("emu-a:G0".parse().unwrap()));
+    host.dispatch(Command::Session(SessionCmd::Launch("emu-a:G0".parse().unwrap())));
     host.until(Area::Sessions, |core| core.game_running());
     host.dispatch(Command::OpenGame("emu-a:G0".parse().unwrap()));
     settle(&mut host);
@@ -867,7 +867,7 @@ fn the_launch_splash_shows_the_emulator_s_keys_and_takes_every_key_but_back_and_
     // Play from the game's Game Hub. No window yet: the game stays "starting", behind the splash.
     host.dispatch(Command::OpenGame("emu-a:G0".parse().unwrap()));
     host.test.desktop.no_windows();
-    host.dispatch(Command::Launch("emu-a:G0".parse().unwrap()));
+    host.dispatch(Command::Session(SessionCmd::Launch("emu-a:G0".parse().unwrap())));
     settle(&mut host);
     assert_eq!(values(&host, "launch-key"), ["Cross J", "Circle L"]);
     assert!(values(&host, "hint").is_empty(), "no launcher hints: {:?}", values(&host, "hint"));
@@ -903,7 +903,7 @@ fn a_notice_opens_what_it_is_about() {
     // A game whose plugin can't start games: Play leaves a notice about it.
     let mut host = default_theme();
     let core = host.core().clone();
-    let failed = host.rt.block_on(core.dispatch(Command::Launch("emu-a:G0".parse().unwrap())));
+    let failed = host.rt.block_on(core.dispatch(Command::Session(SessionCmd::Launch("emu-a:G0".parse().unwrap()))));
     assert!(failed.is_err());
     host.ui.render().unwrap();
     settle(&mut host);
@@ -960,7 +960,9 @@ fn a_notice_goes_after_a_while_and_one_with_a_link_stays_longer() {
 
     // A notice with something to open stays 10 s.
     let core = host.core().clone();
-    assert!(host.rt.block_on(core.dispatch(Command::Launch("emu-a:G0".parse().unwrap()))).is_err());
+    assert!(
+        host.rt.block_on(core.dispatch(Command::Session(SessionCmd::Launch("emu-a:G0".parse().unwrap())))).is_err()
+    );
     host.ui.render().unwrap();
     wait(&mut host, 100);
     for _ in 0..8 {
@@ -1052,7 +1054,7 @@ fn the_launch_splash_names_the_controller_or_the_keyboard() {
     host.dispatch(Command::RefreshLibrary);
     // No window yet: the game stays "starting", behind the splash.
     host.test.desktop.no_windows();
-    host.dispatch(Command::Launch("emu-a:G0".parse().unwrap()));
+    host.dispatch(Command::Session(SessionCmd::Launch("emu-a:G0".parse().unwrap())));
     settle(&mut host);
     assert_eq!(values(&host, "launch-input"), ["Keyboard: the keys are on the emu-a page"]);
 
@@ -1723,7 +1725,7 @@ fn a_first_play_asks_before_the_emulator_downloads_and_enter_agrees() {
     let mut host = composed(|h| h.plugin(games_needing_an_emulator("emu-x", vec!["Astro"])));
     host.ui.start().unwrap();
     host.dispatch(Command::RefreshLibrary);
-    host.dispatch(Command::Launch("emu-x:G0".parse().unwrap()));
+    host.dispatch(Command::Session(SessionCmd::Launch("emu-x:G0".parse().unwrap())));
     settle(&mut host);
 
     assert_eq!(values(&host, "install-prompt"), ["Install Emu?"]);
@@ -1742,7 +1744,7 @@ fn an_emulator_s_download_says_where_it_is_in_words() {
     let mut host = composed(|h| h.plugin(games_needing_an_emulator("emu-x", vec!["Astro"])));
     host.ui.start().unwrap();
     host.dispatch(Command::RefreshLibrary);
-    host.dispatch(Command::Launch("emu-x:G0".parse().unwrap()));
+    host.dispatch(Command::Session(SessionCmd::Launch("emu-x:G0".parse().unwrap())));
     // The build isn't there: the download fails, and its card stays to say so.
     let core = host.core().clone();
     assert!(host.rt.block_on(core.dispatch(Command::ConfirmInstall)).is_err());
@@ -1757,7 +1759,7 @@ fn not_now_closes_the_install_prompt() {
     let mut host = composed(|h| h.plugin(games_needing_an_emulator("emu-x", vec!["Astro"])));
     host.ui.start().unwrap();
     host.dispatch(Command::RefreshLibrary);
-    host.dispatch(Command::Launch("emu-x:G0".parse().unwrap()));
+    host.dispatch(Command::Session(SessionCmd::Launch("emu-x:G0".parse().unwrap())));
     settle(&mut host);
     key(&mut host, Key::Escape);
     assert!(values(&host, "install-prompt").is_empty(), "Escape says not now");
@@ -3760,7 +3762,7 @@ fn right_to_left_the_install_prompt_has_install_and_play_on_the_right_and_the_ke
     host.ui.start().unwrap();
     host.dispatch(Command::RefreshLibrary);
     host.dispatch(Command::SetThemeOption { key: "direction".into(), value: "rtl".into() });
-    host.dispatch(Command::Launch("emu-x:G0".parse().unwrap()));
+    host.dispatch(Command::Session(SessionCmd::Launch("emu-x:G0".parse().unwrap())));
     settle(&mut host);
     assert!(x_of(&host, "Install and play") > x_of(&host, "Not now"), "Install and play on the right");
     key(&mut host, Key::RightArrow);

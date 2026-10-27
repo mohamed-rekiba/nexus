@@ -28,6 +28,7 @@ mod release_downloads;
 mod releases;
 mod resolve;
 mod running;
+mod sessions;
 mod storage;
 pub mod system;
 mod themes;
@@ -54,6 +55,7 @@ pub use ports::{
     ProcessHandle, ProcessSpawner, ProcessTree, SEED_UPLOAD_LIMIT, SpawnCommand, Specs, TokioClock, TokioSpawner,
     TorrentFile, TorrentInfo, TorrentStats, Torrents, TransferState, UnpackProgress, Vpn,
 };
+pub use sessions::SessionCmd;
 pub use storage::DirStorage;
 pub use themes::{DataTheme, DirFiles};
 pub use torrents::{TorrentAction, TorrentCmd};

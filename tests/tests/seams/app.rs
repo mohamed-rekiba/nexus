@@ -7,7 +7,7 @@ use std::time::Duration;
 use futures::StreamExt;
 use nexus_api::*;
 use nexus_core::Front;
-use nexus_core::{Area, Clock, Command, Core, CoreError, Route};
+use nexus_core::{Area, Clock, Command, Core, CoreError, Route, SessionCmd};
 use nexus_testkit::{FakeHost, Shown, Signal, SpawnedProcess, StubPlugin, TestCore};
 use nexus_ui_api::ScreenId;
 
@@ -599,7 +599,7 @@ async fn launching_spawns_the_program_from_the_plugin_folder_and_tracks_the_proc
         .unwrap();
     let mut events = t.core.events();
 
-    t.core.dispatch(Command::Launch(key("emu-a:G0"))).await.unwrap();
+    t.core.dispatch(Command::Session(SessionCmd::Launch(key("emu-a:G0")))).await.unwrap();
 
     let process = t.spawner.wait_for(1).await;
     assert_eq!(process.command.program, t.data_dir().join("plugins/emu-a/builds/1.0/emu"));
@@ -624,14 +624,14 @@ async fn stop_kills_a_running_game() {
     let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
     install(&t.core).await;
     let mut events = t.core.events();
-    t.core.dispatch(Command::Launch(key("emu-a:G0"))).await.unwrap();
+    t.core.dispatch(Command::Session(SessionCmd::Launch(key("emu-a:G0")))).await.unwrap();
     let session = loop {
         if let Event::ProcessStarted { session, .. } = events.next().await.expect("the events ended first") {
             break session;
         }
     };
 
-    t.core.dispatch(Command::Stop(session)).await.unwrap();
+    t.core.dispatch(Command::Session(SessionCmd::Stop(session))).await.unwrap();
 
     loop {
         if let Event::ProcessExited { session: s, exit, .. } = events.next().await.expect("the events ended first") {
@@ -645,7 +645,7 @@ async fn stop_kills_a_running_game() {
 /// Installs the emulator and starts `emu-a:G0`.
 async fn play(t: &TestCore) -> (SessionId, SpawnedProcess) {
     install(&t.core).await;
-    t.core.dispatch(Command::Launch(key("emu-a:G0"))).await.unwrap();
+    t.core.dispatch(Command::Session(SessionCmd::Launch(key("emu-a:G0")))).await.unwrap();
     let process = t.spawner.wait_for(1).await;
     let session = SessionId(t.core.view().running.expect("a running game").session);
     (session, process)
@@ -764,7 +764,7 @@ async fn stop_reaches_the_processes_a_sandbox_moved_out_of_the_game_s_group() {
     t.processes.add(process.id, sandboxed);
     t.processes.stubborn();
 
-    t.core.dispatch(Command::Stop(session)).await.unwrap();
+    t.core.dispatch(Command::Session(SessionCmd::Stop(session))).await.unwrap();
     closed(&mut events).await;
 
     let ended = t.processes.ended();
@@ -809,7 +809,7 @@ async fn stop_ends_the_game_another_program_started_and_leaves_that_program_runn
     t.processes.start(game, STEAM_GAME);
     until(&t, "the game is in front", || t.core.game_in_front()).await;
 
-    t.core.dispatch(Command::Stop(session)).await.unwrap();
+    t.core.dispatch(Command::Session(SessionCmd::Stop(session))).await.unwrap();
     closed(&mut events).await;
     assert_eq!(t.processes.ended().first(), Some(&(vec![game], false)), "the game was asked to close");
     assert!(steam.signals().is_empty(), "Steam's client was left running: {:?}", steam.signals());
@@ -839,7 +839,7 @@ async fn stop_before_the_game_another_program_starts_shows_ends_with_nothing_pla
     let (session, launcher) = play(&t).await;
     // Steam is still starting, and the player gives up.
     t.clock.advance(Duration::from_millis(100)).await;
-    t.core.dispatch(Command::Stop(session)).await.unwrap();
+    t.core.dispatch(Command::Session(SessionCmd::Stop(session))).await.unwrap();
 
     closed(&mut events).await;
     let view = t.core.view();
@@ -902,7 +902,7 @@ async fn what_the_desktop_is_missing_is_said_once_a_run() {
     process.exit(0);
     closed(&mut events).await;
     t.core.dispatch(Command::DismissNotices).await.unwrap();
-    t.core.dispatch(Command::Launch(key("emu-a:G0"))).await.unwrap();
+    t.core.dispatch(Command::Session(SessionCmd::Launch(key("emu-a:G0")))).await.unwrap();
     t.spawner.wait_for(2).await;
     t.clock.advance(Duration::from_millis(100)).await;
 
@@ -944,7 +944,7 @@ async fn not_now_keeps_no_result() {
 /// Plays `emu-a:G0` once more, as the `n`th run, and waits until it closes.
 async fn play_run(t: &TestCore, n: usize) {
     let mut events = t.core.events();
-    t.core.dispatch(Command::Launch(key("emu-a:G0"))).await.unwrap();
+    t.core.dispatch(Command::Session(SessionCmd::Launch(key("emu-a:G0")))).await.unwrap();
     t.spawner.wait_for(n).await.exit(0);
     closed(&mut events).await;
 }
@@ -994,8 +994,8 @@ async fn two_presses_of_play_start_one_game() {
     install(&t.core).await;
 
     let (a, b) = tokio::join!(
-        t.core.dispatch(Command::Launch(key("emu-a:G0"))),
-        t.core.dispatch(Command::Launch(key("emu-a:G1"))),
+        t.core.dispatch(Command::Session(SessionCmd::Launch(key("emu-a:G0")))),
+        t.core.dispatch(Command::Session(SessionCmd::Launch(key("emu-a:G1")))),
     );
 
     assert!(a.is_ok() != b.is_ok(), "one starts, one is refused: {a:?} {b:?}");
@@ -1013,7 +1013,7 @@ async fn a_desktop_that_can_t_say_leaves_the_pad_to_the_game() {
 
     until(&t, "the launcher stops waiting", || t.core.view().running.is_some_and(|r| r.state == "running")).await;
     assert!(t.core.game_in_front(), "the game's window took the screen as it opened");
-    t.core.dispatch(Command::ToggleFocus).await.unwrap();
+    t.core.dispatch(Command::Session(SessionCmd::ToggleFocus)).await.unwrap();
     assert!(!t.core.game_in_front(), "the PS button gives the pad back");
 }
 
@@ -1079,11 +1079,11 @@ async fn the_ps_button_goes_from_the_game_to_the_launcher_and_back() {
     let (_, process) = play(&t).await;
     until(&t, "the game is in front", || t.core.game_in_front()).await;
 
-    t.core.dispatch(Command::ToggleFocus).await.unwrap();
+    t.core.dispatch(Command::Session(SessionCmd::ToggleFocus)).await.unwrap();
     assert!(!t.core.game_in_front());
     assert_eq!(t.desktop.shown().last(), Some(&Shown::Launcher));
 
-    t.core.dispatch(Command::ToggleFocus).await.unwrap();
+    t.core.dispatch(Command::Session(SessionCmd::ToggleFocus)).await.unwrap();
     assert!(t.core.game_in_front());
     assert_eq!(t.desktop.shown().last(), Some(&Shown::Game(process.id)));
 }
@@ -1099,7 +1099,7 @@ async fn the_desktop_says_which_window_is_in_front() {
     until(&t, "the launcher is in front", || !t.core.game_in_front()).await;
 
     // Resume, from the Running screen.
-    t.core.dispatch(Command::ShowGame(session)).await.unwrap();
+    t.core.dispatch(Command::Session(SessionCmd::ShowGame(session))).await.unwrap();
     assert!(t.core.game_in_front());
     assert_eq!(t.desktop.shown().last(), Some(&Shown::Game(process.id)));
 }
@@ -1111,7 +1111,7 @@ async fn without_the_desktop_s_answer_the_last_window_shown_counts() {
     let (_, _process) = play(&t).await;
 
     until(&t, "the game is in front", || t.core.game_in_front()).await;
-    t.core.dispatch(Command::ToggleFocus).await.unwrap();
+    t.core.dispatch(Command::Session(SessionCmd::ToggleFocus)).await.unwrap();
     assert!(!t.core.game_in_front());
 }
 
@@ -1122,7 +1122,7 @@ async fn stop_asks_the_game_to_close_before_it_kills_it() {
     let mut events = t.core.events();
     let (session, process) = play(&t).await;
 
-    t.core.dispatch(Command::Stop(session)).await.unwrap();
+    t.core.dispatch(Command::Session(SessionCmd::Stop(session))).await.unwrap();
     closed(&mut events).await;
 
     // Asked, killed when it ignored that, then what it left running swept up.
@@ -1154,7 +1154,7 @@ async fn one_game_runs_at_a_time() {
     t.core.dispatch(Command::RefreshLibrary).await.unwrap();
     let (_, _process) = play(&t).await;
 
-    let err = t.core.dispatch(Command::Launch(key("emu-a:G1"))).await.unwrap_err();
+    let err = t.core.dispatch(Command::Session(SessionCmd::Launch(key("emu-a:G1")))).await.unwrap_err();
 
     assert_eq!(err.to_string(), "A is running: stop it first");
     assert_eq!(t.spawner.spawned().len(), 1);
@@ -1189,7 +1189,7 @@ async fn a_program_outside_the_process_allowlist_is_not_spawned() {
     let t = host.plugin(emu_plugin_with("emu-a", emu, "network = [\"builds.example\"]")).boot_core().await;
     install(&t.core).await;
 
-    let err = t.core.dispatch(Command::Launch(key("emu-a:G0"))).await.unwrap_err();
+    let err = t.core.dispatch(Command::Session(SessionCmd::Launch(key("emu-a:G0")))).await.unwrap_err();
 
     assert!(matches!(err, CoreError::PermissionDenied { .. }), "{err}");
     assert!(t.spawner.spawned().is_empty());
@@ -1248,14 +1248,14 @@ async fn launch_middleware_can_change_the_spec_or_stop_the_launch() {
     install(&t.core).await;
 
     let mut events = t.core.events();
-    t.core.dispatch(Command::Launch(key("emu-a:G0"))).await.unwrap();
+    t.core.dispatch(Command::Session(SessionCmd::Launch(key("emu-a:G0")))).await.unwrap();
     let process = t.spawner.wait_for(1).await;
     assert_eq!(process.command.env.get("GAMEMODE").map(String::as_str), Some("1"));
     // One game runs at a time: close this one first.
     process.exit(0);
     while !matches!(events.next().await, Some(Event::ProcessExited { .. })) {}
 
-    let err = t.core.dispatch(Command::Launch(key("emu-a:G1"))).await.unwrap_err();
+    let err = t.core.dispatch(Command::Session(SessionCmd::Launch(key("emu-a:G1")))).await.unwrap_err();
     assert!(err.to_string().contains("firmware missing"), "{err}");
     assert_eq!(t.spawner.spawned().len(), 1);
     // The player sees why Play did nothing.
@@ -1406,7 +1406,7 @@ async fn playing_a_game_whose_emulator_isn_t_installed_asks_first_then_installs_
     let (t, _) = core_with(emu).await;
     t.core.dispatch(Command::RefreshLibrary).await.unwrap();
 
-    t.core.dispatch(Command::Launch(key("emu-a:G0"))).await.unwrap();
+    t.core.dispatch(Command::Session(SessionCmd::Launch(key("emu-a:G0")))).await.unwrap();
     let prompt = t.core.view().install_prompt.expect("a prompt before anything downloads");
     assert_eq!((prompt.emulator.as_str(), prompt.version.as_str()), ("emu-a", "1.0"));
     assert_eq!((prompt.game.as_str(), prompt.size_bytes), ("A", Some(20_000)));
@@ -1432,7 +1432,7 @@ async fn a_plugin_named_by_its_console_names_its_program_where_a_sentence_means_
     let detail = t.core.view().detail.expect("the Game Hub");
     assert_eq!(detail.launch_hint, "Play installs KytyPS5 first");
 
-    t.core.dispatch(Command::Launch(key("emu-a:G0"))).await.unwrap();
+    t.core.dispatch(Command::Session(SessionCmd::Launch(key("emu-a:G0")))).await.unwrap();
     let prompt = t.core.view().install_prompt.expect("a prompt before anything downloads");
     assert_eq!(prompt.emulator, "KytyPS5", "the program downloads, not the console");
     t.core.dispatch(Command::CancelInstall).await.unwrap();
@@ -1446,7 +1446,7 @@ async fn a_plugin_named_by_its_console_names_its_program_where_a_sentence_means_
     t.core.dispatch(Command::Navigate(Route::Emulators)).await.unwrap();
     assert_eq!((row(&t).build, row(&t).build_label), ("1.0".to_owned(), "KytyPS5 1.0".to_owned()));
 
-    t.core.dispatch(Command::Launch(key("emu-a:G0"))).await.unwrap();
+    t.core.dispatch(Command::Session(SessionCmd::Launch(key("emu-a:G0")))).await.unwrap();
     t.spawner.wait_for(1).await;
     let running = t.core.view().running.expect("the game runs");
     assert_eq!(
@@ -1459,7 +1459,7 @@ async fn a_plugin_named_by_its_console_names_its_program_where_a_sentence_means_
 #[tokio::test]
 async fn not_now_leaves_the_emulator_uninstalled() {
     let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
-    t.core.dispatch(Command::Launch(key("emu-a:G0"))).await.unwrap();
+    t.core.dispatch(Command::Session(SessionCmd::Launch(key("emu-a:G0")))).await.unwrap();
     t.core.dispatch(Command::CancelInstall).await.unwrap();
     assert!(t.core.view().install_prompt.is_none());
     assert!(installed(&t.core).await.is_empty());
@@ -1480,7 +1480,7 @@ async fn a_newer_build_installs_by_itself_when_no_game_runs() {
 async fn an_update_waits_until_the_emulator_s_game_closes() {
     let (t, emu) = core_with(FakeEmu::new(vec!["A"])).await;
     install(&t.core).await;
-    t.core.dispatch(Command::Launch(key("emu-a:G0"))).await.unwrap();
+    t.core.dispatch(Command::Session(SessionCmd::Launch(key("emu-a:G0")))).await.unwrap();
     let process = t.spawner.wait_for(1).await;
     *emu.latest.lock().unwrap() = "2.0".into();
 
@@ -1565,13 +1565,13 @@ async fn a_game_doesn_t_start_while_its_emulator_updates() {
     let update = tokio::spawn(async move { core.dispatch(Command::UpdateEmulator { plugin: id("emu-a") }).await });
     let busy = |core: &Core| core.view().emulators.emulators.iter().any(|e| e.plugin == id("emu-a") && e.busy);
     t.until(Area::Downloads, busy).await;
-    let err = t.core.dispatch(Command::Launch(key("emu-a:G0"))).await.unwrap_err();
+    let err = t.core.dispatch(Command::Session(SessionCmd::Launch(key("emu-a:G0")))).await.unwrap_err();
     assert!(err.to_string().contains("updating"), "{err}");
     assert!(t.spawner.spawned().is_empty());
 
     gate.release();
     update.await.unwrap().unwrap();
-    t.core.dispatch(Command::Launch(key("emu-a:G0"))).await.unwrap();
+    t.core.dispatch(Command::Session(SessionCmd::Launch(key("emu-a:G0")))).await.unwrap();
     assert_eq!(t.spawner.wait_for(1).await.command.args, ["G0"]);
 }
 

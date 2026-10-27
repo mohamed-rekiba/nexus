@@ -7,7 +7,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use crate::common::*;
-use nexus_core::{Area, Command, Route};
+use nexus_core::{Area, Command, Route, SessionCmd};
 use slint::platform::software_renderer::{MinimalSoftwareWindow, PremultipliedRgbaColor, RepaintBufferType};
 use slint::platform::{Platform, WindowAdapter};
 use slint_interpreter::ComponentHandle;
@@ -817,7 +817,7 @@ fn shoot_splash(window: &MinimalSoftwareWindow, out: &Path) {
         host.dispatch(Command::RefreshLibrary);
         // No window yet: the game stays "starting", behind the splash.
         host.test.desktop.no_windows();
-        host.dispatch(Command::Launch("emu-a:G0".parse().unwrap()));
+        host.dispatch(Command::Session(SessionCmd::Launch("emu-a:G0".parse().unwrap())));
         host.load_images();
         shoot(window, &out.join(format!("{prefix}-splash-keys.png")));
     }
@@ -851,7 +851,7 @@ fn shoot_console_names(window: &MinimalSoftwareWindow, out: &Path) {
         host.ui.start().unwrap();
         host.dispatch(Command::SetThemeOption { key: "direction".into(), value: direction.into() });
         host.dispatch(Command::RefreshLibrary);
-        host.dispatch(Command::Launch("emu-k:G0".parse().unwrap()));
+        host.dispatch(Command::Session(SessionCmd::Launch("emu-k:G0".parse().unwrap())));
         host.load_images();
         shoot(window, &out.join(format!("{prefix}-names-install-prompt.png")));
     }
@@ -1001,14 +1001,14 @@ fn every_default_screen_renders_the_library() {
     shoot_sizes(&mut host, &window, &out);
     shoot_steam_offers(&mut host, &window, &out);
     // A first play asks before the emulator downloads.
-    host.dispatch(Command::Launch("emu-x:G0".parse().unwrap()));
+    host.dispatch(Command::Session(SessionCmd::Launch("emu-x:G0".parse().unwrap())));
     shoot(&window, &out.join("default-install-prompt.png"));
     host.dispatch(Command::CancelInstall);
     // A game runs; the PS button brought the launcher back in front of it.
-    host.dispatch(Command::Launch("emu-p:G0".parse().unwrap()));
+    host.dispatch(Command::Session(SessionCmd::Launch("emu-p:G0".parse().unwrap())));
     // The game watcher's rounds bring the game to the front.
     run_until(&host, 5000, |core| core.game_in_front());
-    host.dispatch(Command::ToggleFocus);
+    host.dispatch(Command::Session(SessionCmd::ToggleFocus));
     // The theme selects the running game: carry that out, as the app does.
     slint::platform::update_timers_and_animations();
     host.pump();

@@ -2,7 +2,7 @@
 //! file the theme declared and gives it to the app to play, unless the player turned sounds off.
 
 use crate::common::*;
-use nexus_core::Command;
+use nexus_core::{Command, SessionCmd};
 use nexus_ui_host::{PadButton, UiRequest};
 
 fn tv() -> Composed {
@@ -116,7 +116,7 @@ fn a_game_that_starts_plays_start_and_one_that_crashes_plays_error() {
     host.dispatch(Command::RefreshLibrary);
     settle(&mut host);
     host.requests.borrow_mut().clear();
-    host.dispatch(Command::Launch("emu-a:G0".parse().unwrap()));
+    host.dispatch(Command::Session(SessionCmd::Launch("emu-a:G0".parse().unwrap())));
     watch_until(&mut host, "the game is in front", |core| core.game_in_front());
     assert!(asked_for(&host).contains(&"start".to_owned()), "{:?}", asked_for(&host));
 
@@ -134,7 +134,7 @@ fn a_notice_that_is_not_a_problem_plays_no_error() {
     settle(&mut host);
     host.test.desktop.set_problem("Install xdotool so games come to the front and the launcher comes back");
     host.requests.borrow_mut().clear();
-    host.dispatch(Command::Launch("emu-a:G0".parse().unwrap()));
+    host.dispatch(Command::Session(SessionCmd::Launch("emu-a:G0".parse().unwrap())));
     watch_until(&mut host, "the notice shows", |core| !core.view().notices.is_empty());
     settle(&mut host);
     assert!(!asked_for(&host).contains(&"error".to_owned()), "advice: {:?}", asked_for(&host));

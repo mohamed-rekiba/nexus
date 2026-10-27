@@ -6,7 +6,7 @@ use std::time::SystemTime;
 
 use nexus_api::{GameKey, JobId, PluginId, SessionId};
 use nexus_core::system::SystemCommand;
-use nexus_core::{Command, Core, Grid, Route, TorrentCmd};
+use nexus_core::{Command, Core, Grid, Route, SessionCmd, TorrentCmd};
 use nexus_ui_api::{ScreenId, ThemeError};
 use slint_interpreter::{ComponentDefinition, ComponentHandle, ComponentInstance, Image, SharedString, Value};
 
@@ -466,7 +466,7 @@ impl ThemeHost {
             // While a game runs, the PS button held closes it at once.
             crate::PadAction::Power if self.core.game_running() => {
                 for session in self.core.running_sessions() {
-                    (self.requests)(UiRequest::Core(Command::Stop(session)));
+                    (self.requests)(UiRequest::Core(Command::Session(SessionCmd::Stop(session))));
                 }
             }
             crate::PadAction::Power => {
@@ -598,8 +598,8 @@ impl ThemeHost {
                     .and_then(|grid| core(Command::GridColumns { grid, columns: int(a, 1).max(1) as usize }))
             }),
         )?;
-        callback("launch", Box::new(move |a| game(a, 0).map(Command::Launch).and_then(core)))?;
-        callback("stop", Box::new(move |a| core(Command::Stop(SessionId(int(a, 0))))))?;
+        callback("launch", Box::new(move |a| game(a, 0).map(SessionCmd::Launch).map(Command::Session).and_then(core)))?;
+        callback("stop", Box::new(move |a| core(Command::Session(SessionCmd::Stop(SessionId(int(a, 0)))))))?;
         callback("clear-shader-cache", Box::new(move |a| game(a, 0).map(Command::ClearShaderCache).and_then(core)))?;
         callback("pause-download", Box::new(move |a| core(Command::PauseDownload(JobId(int(a, 0))))))?;
         callback("resume-download", Box::new(move |a| core(Command::ResumeDownload(JobId(int(a, 0))))))?;
@@ -711,7 +711,7 @@ impl ThemeHost {
             "set-return-on-exit",
             Box::new(move |a| core(Command::SetReturnOnExit(matches!(a.first(), Some(Value::Bool(true)))))),
         )?;
-        callback("show-game", Box::new(move |a| core(Command::ShowGame(SessionId(int(a, 0))))))?;
+        callback("show-game", Box::new(move |a| core(Command::Session(SessionCmd::ShowGame(SessionId(int(a, 0)))))))?;
         callback("finish-welcome", Box::new(move |_| core(Command::FinishWelcome)))?;
         callback("library-search", Box::new(move |a| core(Command::LibrarySearch(arg(a, 0)))))?;
         callback(

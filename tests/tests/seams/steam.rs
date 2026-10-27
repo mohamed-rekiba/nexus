@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use emu_steam::SteamPlugin;
 use nexus_api::*;
-use nexus_core::{Area, Command};
+use nexus_core::{Area, Command, SessionCmd};
 use nexus_testkit::{FakeHost, TestCore, contract};
 use nexus_ui_api::ImageRef;
 
@@ -132,7 +132,7 @@ async fn play_asks_steam_to_start_the_game_and_follows_the_game_steam_started() 
     let s = boot().await;
     s.test.spawner.on_path("steam", Path::new("/usr/bin/steam"));
     let mut events = s.test.core.events();
-    s.test.core.dispatch(Command::Launch("emu-steam:570".parse().unwrap())).await.unwrap();
+    s.test.core.dispatch(Command::Session(SessionCmd::Launch("emu-steam:570".parse().unwrap()))).await.unwrap();
     let steam_command = s.test.spawner.wait_for(1).await;
     let run = &steam_command.command;
     assert_eq!(run.program, Path::new("steam"));
@@ -157,7 +157,8 @@ async fn play_asks_steam_to_start_the_game_and_follows_the_game_steam_started() 
 #[tokio::test]
 async fn without_steam_play_says_to_install_it() {
     let s = boot().await;
-    let refused = s.test.core.dispatch(Command::Launch("emu-steam:570".parse().unwrap())).await.unwrap_err();
+    let refused =
+        s.test.core.dispatch(Command::Session(SessionCmd::Launch("emu-steam:570".parse().unwrap()))).await.unwrap_err();
     assert!(refused.to_string().contains("Install Steam"), "{refused}");
 }
 
@@ -205,7 +206,7 @@ async fn a_flatpak_steam_s_game_starts_through_the_flatpak() {
     test.core.dispatch(Command::SetFolders { name: "steam".into(), paths: vec![root.clone()] }).await.unwrap();
     test.spawner.on_path("flatpak", Path::new("/usr/bin/flatpak"));
 
-    test.core.dispatch(Command::Launch("emu-steam:570".parse().unwrap())).await.unwrap();
+    test.core.dispatch(Command::Session(SessionCmd::Launch("emu-steam:570".parse().unwrap()))).await.unwrap();
     let run = test.spawner.wait_for(1).await.command;
     assert_eq!(run.program, Path::new("flatpak"));
     assert_eq!(run.args, ["run", "com.valvesoftware.Steam", "steam://rungameid/570"]);
@@ -225,7 +226,7 @@ async fn a_flatpak_steam_s_library_on_another_drive_starts_through_the_flatpak_t
     test.core.dispatch(Command::SetFolders { name: "steam".into(), paths }).await.unwrap();
     test.spawner.on_path("flatpak", Path::new("/usr/bin/flatpak"));
 
-    test.core.dispatch(Command::Launch("emu-steam:620".parse().unwrap())).await.unwrap();
+    test.core.dispatch(Command::Session(SessionCmd::Launch("emu-steam:620".parse().unwrap()))).await.unwrap();
     let run = test.spawner.wait_for(1).await.command;
     assert_eq!(run.program, Path::new("flatpak"), "{:?}", run.args);
 }
@@ -421,7 +422,7 @@ async fn a_steam_game_s_hub_installs_it_until_it_is_installed_and_then_plays_it(
     let hub = s.test.core.view().detail.unwrap();
     assert!(hub.can.play, "installed: Play");
     assert!(hub.releases.is_empty(), "nothing to install: {:?}", hub.releases);
-    s.test.core.dispatch(Command::Launch(dota)).await.unwrap();
+    s.test.core.dispatch(Command::Session(SessionCmd::Launch(dota))).await.unwrap();
     let run = s.test.spawner.wait_for(1).await.command;
     assert_eq!(run.args, ["-silent", "steam://rungameid/570"], "Play starts the installed game");
 }
