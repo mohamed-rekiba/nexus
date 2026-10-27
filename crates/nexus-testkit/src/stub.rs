@@ -1,0 +1,147 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
+
+use async_trait::async_trait;
+use nexus_api::{CodePlugin, Plugin, PluginBox, PluginContext, PluginError, PluginManifest, PluginResult, Provided};
+
+type InitFn = Arc<dyn Fn(PluginContext) -> PluginResult<Provided> + Send + Sync>;
+
+#[derive(Clone)]
+enum Behaviour {
+    Provide(InitFn),
+    Panic,
+    Hang,
+    Fail(PluginError),
+}
+
+/// A plugin made from a manifest plus test-chosen behaviour. It counts its `init` and
+/// `shutdown` calls.
+#[derive(Clone)]
+pub struct StubPlugin {
+    manifest: PluginManifest,
+    behaviour: Behaviour,
+    inits: Arc<AtomicUsize>,
+    shutdowns: Arc<AtomicUsize>,
+    shutdown_hangs: bool,
+}
+
+impl StubPlugin {
+    /// Panics on a bad manifest: it's a test.
+    pub fn from_toml(manifest: &str) -> Self {
+        let manifest = PluginManifest::from_toml(manifest).unwrap_or_else(|e| panic!("{e}\n{manifest}"));
+        Self {
+            manifest,
+            behaviour: Behaviour::Provide(Arc::new(|_| Ok(Provided::default()))),
+            inits: Arc::default(),
+            shutdowns: Arc::default(),
+            shutdown_hangs: false,
+        }
+    }
+
+    /// `init` returns what `f` builds from the context.
+    pub fn provides(mut self, f: impl Fn(PluginContext) -> PluginResult<Provided> + Send + Sync + 'static) -> Self {
+        self.behaviour = Behaviour::Provide(Arc::new(f));
+        self
+    }
+
+    /// The console the stub emulator plays, as the manifest's `console` says.
+    pub fn console(mut self, console: &str) -> Self {
+        self.manifest.console = Some(nexus_api::Console::new(console).expect("a console name"));
+        self
+    }
+
+    pub fn panics_on_init(mut self) -> Self {
+        self.behaviour = Behaviour::Panic;
+        self
+    }
+
+    pub fn hangs_on_init(mut self) -> Self {
+        self.behaviour = Behaviour::Hang;
+        self
+    }
+
+    pub fn fails_on_init(mut self, error: PluginError) -> Self {
+        self.behaviour = Behaviour::Fail(error);
+        self
+    }
+
+    pub fn hangs_on_shutdown(mut self) -> Self {
+        self.shutdown_hangs = true;
+        self
+    }
+
+    pub fn init_calls(&self) -> usize {
+        self.inits.load(Ordering::SeqCst)
+    }
+
+    pub fn shutdown_calls(&self) -> usize {
+        self.shutdowns.load(Ordering::SeqCst)
+    }
+
+    /// As a plugin with code, of the kind its manifest says.
+    pub fn boxed(&self) -> PluginBox {
+        PluginBox::code(self.clone())
+    }
+}
+
+#[async_trait]
+impl Plugin for StubPlugin {
+    fn manifest(&self) -> PluginManifest {
+        self.manifest.clone()
+    }
+
+    async fn shutdown(&self) -> PluginResult<()> {
+        self.shutdowns.fetch_add(1, Ordering::SeqCst);
+        if self.shutdown_hangs {
+            tokio::time::sleep(Duration::from_secs(3600)).await;
+        }
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl CodePlugin for StubPlugin {
+    async fn init(&self, ctx: PluginContext) -> PluginResult<Provided> {
+        self.inits.fetch_add(1, Ordering::SeqCst);
+        match &self.behaviour {
+            Behaviour::Provide(f) => f(ctx),
+            Behaviour::Panic => panic!("stub plugin {} panicked on purpose", self.manifest.id),
+            Behaviour::Hang => {
+                tokio::time::sleep(Duration::from_secs(3600)).await;
+                unreachable!("the host times out first")
+            }
+            Behaviour::Fail(e) => Err(e.clone()),
+        }
+    }
+}
+
+/// A plugin's backup items, as the test sets them: [`StubPlugin::backs_up`].
+#[derive(Clone, Default)]
+pub struct FakeBackup {
+    items: Arc<std::sync::Mutex<Vec<nexus_api::BackupItem>>>,
+}
+
+impl FakeBackup {
+    pub fn new(items: Vec<nexus_api::BackupItem>) -> Self {
+        Self { items: Arc::new(std::sync::Mutex::new(items)) }
+    }
+}
+
+#[async_trait::async_trait]
+impl nexus_api::Backup for FakeBackup {
+    async fn items(&self) -> PluginResult<Vec<nexus_api::BackupItem>> {
+        Ok(self.items.lock().unwrap().clone())
+    }
+}
+
+impl StubPlugin {
+    /// A plugin that provides only `backup`, with `permissions`: TOML for its `[permissions]`.
+    pub fn backs_up(id: &str, permissions: &str, backup: FakeBackup) -> Self {
+        StubPlugin::from_toml(&format!(
+            "id = \"{id}\"\nkind = \"emulator\"\nname = \"{id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
+             capabilities = [\"backup\"]\n[permissions]\n{permissions}\n"
+        ))
+        .provides(move |_| Ok(Provided { backup: Some(Arc::new(backup.clone())), ..Provided::default() }))
+    }
+}

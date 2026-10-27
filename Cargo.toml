@@ -5,6 +5,7 @@ members = [
     "crates/nexus-ui-api",
     "crates/nexus-core",
     "crates/nexus-ui-host",
+    "crates/nexus-testkit",
 ]
 # Vendored, and kept as it came: not formatted or linted with the workspace.
 exclude = ["third_party/oozextract"]
