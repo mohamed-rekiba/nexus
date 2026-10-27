@@ -129,7 +129,7 @@ pub(crate) async fn set_plugin_enabled(core: &Core, plugin: &PluginId, enabled: 
     if manifest.kind == PluginKind::Theme {
         return Err(CoreError::Invalid(format!("{} is a theme: switch themes instead", manifest.name)));
     }
-    if !enabled && core.state().emulators.get(plugin).is_some_and(|e| e.busy) {
+    if !enabled && crate::emulator_builds::busy(core, plugin) {
         return Err(CoreError::Invalid(format!("{} is busy: turn it off when it is done", manifest.name)));
     }
     // The list of exceptions: plugins turned off, or for one made for other systems, on.

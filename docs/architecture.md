@@ -583,7 +583,12 @@ is left. When the game exits, the core's `finish` ends the session (`SessionsSub
 which saves play time under `app.playtime` for sessions of 3 s or more), posts a notice with
 the log for a crash the player didn't cause, may ask how far the game got, brings the launcher
 back when "Back to the launcher" is on, calls `Launcher::on_exit`, publishes `Event::ProcessExited`,
-and runs an emulator update that waited for the game.
+and runs an emulator update that waited for the game. Which notice a game's end earns, and
+whether the core asks how far it got, is one pure rule, `sessions::outcome`
+(`crates/nexus-core/src/sessions/ending.rs`), with table tests: a game the player stopped is no
+crash, a game another program never started says so, and the question is asked once for each
+build. `emulator_builds::busy` says that an install or update of an emulator is under way, for
+the launch and for turning the emulator off.
 
 While the game's window is in front, or the launcher's window doesn't have focus, `ThemeHost`
 drops every pad button but a hold of the PS (Guide) button, which sends `SessionCmd::Stop` for

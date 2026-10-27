@@ -21,7 +21,7 @@ use serde_json::Value;
 use crate::app::Route;
 use crate::changes::Area;
 use crate::error::require;
-use crate::sessions::{NewSession, PLAYED_AT_LEAST, SessionCmd, log_path};
+use crate::sessions::{Ending, NewSession, SessionCmd, log_path, outcome};
 use crate::{Core, CoreError, CoreResult, DirStorage, Kernel, ProcessExit, SpawnCommand, folders};
 
 /// Emulator settings with the game's own settings on top.
@@ -85,9 +85,6 @@ fn spawn_command(
     Ok(SpawnCommand { program, args, env, cwd, log: None, keep_running: false })
 }
 
-/// A game that closes with an error sooner than this closed "right after it started".
-const EARLY_EXIT: Duration = Duration::from_secs(10);
-
 /// Runs a session command: a launch is resolved here, the rest goes to the subsystem.
 pub(crate) async fn session(core: &Core, command: SessionCmd) -> CoreResult<()> {
     let SessionCmd::Launch(game) = command else { return core.sessions().handle(command).await };
@@ -110,7 +107,7 @@ pub(crate) async fn launch(core: &Core, game: GameKey) -> CoreResult<()> {
     let claim = core.sessions().claim()?;
     // An install or update moves the emulator's files and the games' saves: no game starts
     // until it is done.
-    if core.state().emulators.get(&plugin).is_some_and(|e| e.busy) {
+    if crate::emulator_builds::busy(core, &plugin) {
         let name = kernel.manifest(&plugin).map(|m| m.name.clone()).unwrap_or_else(|_| plugin.to_string());
         return Err(CoreError::Invalid(format!("{name} is updating: play when it is done")));
     }
@@ -165,30 +162,16 @@ async fn finish(
     let exit = ExitInfo { code: ended.code, success: ended.success, duration_ms };
     tracing::info!(plugin_id = %game.plugin, %session, ?exit, played_any, "game exited");
     core.state().nav.retain(|r| r != &Route::Running(session));
-    let ended = core.sessions().end(session, played_any.then_some(played));
-    if let Some(ended) = &ended
-        && !played_any
-        && !ended.stopping
-    {
-        let waited = core.kernel().host().hand_over_timeout.as_secs();
-        core.notices().game_problem(
-            game,
-            format!("{} didn't start: its game didn't show up within {waited} seconds", ended.title),
-        );
-    }
-    let ended = ended.filter(|_| played_any);
-    if let Some(ended) = &ended
-        && !exit.success
-        && !ended.stopping
-    {
-        core.notices().game_problem(game, crash_notice(&ended.title, &exit, played, &ended.log));
-    }
-    // The player says how far it got, once for each build, unless they stopped it at once.
-    if let Some(ended) = ended
-        && (!ended.stopping || played >= PLAYED_AT_LEAST)
-        && !core.library().answered(game, ended.build.as_deref())
-    {
-        core.state().result_prompt = Some((game.clone(), ended.build));
+    if let Some(ended) = core.sessions().end(session, played_any.then_some(played)) {
+        let answered = core.library().answered(game, ended.build.as_deref());
+        let hand_over = core.kernel().host().hand_over_timeout;
+        let outcome = outcome(&Ending { session: &ended, played_any, exit: &exit, played, answered, hand_over });
+        if let Some(problem) = outcome.problem {
+            core.notices().game_problem(game, problem);
+        }
+        if outcome.ask_result {
+            core.state().result_prompt = Some((game.clone(), ended.build));
+        }
     }
     if core.prefs().return_on_exit {
         core.sessions().show_launcher().await;
@@ -227,16 +210,6 @@ fn own_build_missing(page: &str, folder: &str, program: &str, has_downloaded: bo
         format!("map the {folder} folder on the {page} page, or put {program} on your PATH")
     };
     format!("Own build is on, but your build isn't there: {fix}")
-}
-
-/// "Astro Bot closed right after it started (code 1). Its log: …".
-fn crash_notice(title: &str, exit: &ExitInfo, played: Duration, log: &std::path::Path) -> String {
-    let how = match exit.code {
-        Some(code) => format!("code {code}"),
-        None => "stopped by the system".into(),
-    };
-    let when = if played < EARLY_EXIT { "right after it started" } else { "with an error" };
-    format!("{title} closed {when} ({how}). Its log: {}", log.display())
 }
 
 /// "Rate how it runs": asks "How far did it get?" for `game`, on the build it runs on.
