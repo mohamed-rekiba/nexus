@@ -496,45 +496,15 @@ fn detail_vm(s: &Snapshot, owned: &Ownership, key: &GameKey) -> Option<GameDetai
     let meta = library.meta(key);
     // A release's store data fills in, field by field, what the store's catalog leaves out.
     let metas = library.metadata(key);
-    let text = |field: fn(&nexus_api::GameMetadata) -> &String| {
-        metas.iter().map(|(_, m)| field(m)).find(|t| !t.is_empty()).cloned().unwrap_or_default()
-    };
+    let text = |field: fn(&nexus_api::GameMetadata) -> &String| crate::game_words::first_text(&metas, field);
     let shown = library.art(key);
-    // The game's own words first; a store's catalog fills in what they leave out.
-    let description =
-        if details.description.is_empty() { text(|m| &m.description) } else { details.description.clone() };
-    let developer = details
-        .developer
-        .clone()
-        .or_else(|| Some(text(|m| &m.publisher)).filter(|p| !p.is_empty()))
-        .unwrap_or_default();
-    let genres = if details.genres.is_empty() {
-        metas.iter().map(|(_, m)| &m.genres).find(|g| !g.is_empty()).cloned().unwrap_or_default()
-    } else {
-        details.genres.clone()
+    let said = crate::game_words::words(details, &metas);
+    let store_name = offer.map(|o| s.plugins.name(&o.emulator));
+    let origin = match &store_name {
+        Some(emulator) => crate::game_words::Origin::Catalog { emulator },
+        None => crate::game_words::Origin::Local { program: &name },
     };
-    // Home's line, as the old launcher: the store's tagline, else the game's own words, else its
-    // facts on one line, else where it runs.
-    let tagline = meta.map(|(_, m)| m.tagline.clone()).filter(|t| !t.is_empty());
-    let version = details.facts.iter().find(|f| f.id == "version").map(|f| f.value.clone()).unwrap_or_default();
-    let facts_line = [
-        summary.title.clone(),
-        genres.join(", "),
-        Some(developer.clone()).filter(|d| !d.is_empty()).map(|d| format!("Developer: {d}")).unwrap_or_default(),
-        Some(version).filter(|v| !v.is_empty()).map(|v| format!("Version: {v}")).unwrap_or_default(),
-    ]
-    .into_iter()
-    .filter(|part| !part.is_empty())
-    .collect::<Vec<_>>();
-    let line = match tagline {
-        Some(tagline) => tagline,
-        None if !details.description.is_empty() => details.description.clone(),
-        None if facts_line.len() > 1 => facts_line.join(" · "),
-        None => match offer {
-            Some(o) => format!("In the catalog for {}.", s.plugins.name(&o.emulator)),
-            None => format!("Installed locally. Launches with the {name} emulator."),
-        },
-    };
+    let line = crate::game_words::home_line(details, &metas, meta.map(|(_, m)| m.tagline.as_str()), origin);
     let compatibility = offer.map(crate::releases::compatibility).unwrap_or_default();
     // Where the offer's downloads go, and the free space there.
     let download_folder = offer.and_then(|o| s.state.disks.download_folder(&o.emulator, &o.releases[0].platform));
@@ -566,9 +536,9 @@ fn detail_vm(s: &Snapshot, owned: &Ownership, key: &GameKey) -> Option<GameDetai
         platform: summary.platform.clone(),
         system: s.plugins.system(&summary.platform),
         summary: summary_of(&line),
-        description,
-        developer,
-        genres,
+        description: said.description,
+        developer: said.developer,
+        genres: said.genres,
         cover: shown.cover.map(plugin_image),
         background: shown.background.map(plugin_image),
         logo: shown.logo.map(plugin_image),
@@ -614,21 +584,10 @@ fn detail_vm(s: &Snapshot, owned: &Ownership, key: &GameKey) -> Option<GameDetai
             .map(|o| {
                 let today = s.today();
                 let best = &owned.best_release(o).id;
-                // By version, highest first; of one version, the newest upload first. A release
-                // its store installs is no use once the game is installed.
-                let mut ordered: Vec<&nexus_api::Release> =
-                    o.releases.iter().filter(|r| r.store.is_empty() || installed_as.is_none()).collect();
-                ordered.sort_by_cached_key(|r| std::cmp::Reverse(crate::releases::version_key(&r.version)));
-                let count = ordered.len();
-                ordered
+                crate::releases::ordered(&o.releases, installed_as.is_some())
                     .into_iter()
-                    .enumerate()
-                    .map(|(at, r)| ReleaseVm {
-                        version_label: format!(
-                            "Version {} of {count}{}",
-                            count - at,
-                            if at == 0 { " (newest)" } else { "" }
-                        ),
+                    .map(|crate::releases::Ordered { release: r, label }| ReleaseVm {
+                        version_label: label,
                         best: &r.id == best,
                         seeders: r.seeders,
                         leechers: r.leechers,

@@ -201,6 +201,29 @@ pub(crate) fn version_key(version: &str) -> Vec<u64> {
     parts
 }
 
+/// The releases of an offer in the order a game's page lists them, each with its label.
+pub(crate) struct Ordered<'a> {
+    pub release: &'a Release,
+    /// "Version 3 of 3 (newest)": its place among the ones listed.
+    pub label: String,
+}
+
+/// By version, highest first; of one version, the order the offer has them (newest upload
+/// first). A release its store installs is left out once the game is installed.
+pub(crate) fn ordered(releases: &[Release], installed: bool) -> Vec<Ordered<'_>> {
+    let mut listed: Vec<&Release> = releases.iter().filter(|r| r.store.is_empty() || !installed).collect();
+    listed.sort_by_cached_key(|r| std::cmp::Reverse(version_key(&r.version)));
+    let count = listed.len();
+    listed
+        .into_iter()
+        .enumerate()
+        .map(|(at, release)| Ordered {
+            release,
+            label: format!("Version {} of {count}{}", count - at, if at == 0 { " (newest)" } else { "" }),
+        })
+        .collect()
+}
+
 /// The title as a grouping key: lowercase letters and digits only.
 pub(crate) fn plain(title: &str) -> String {
     title.chars().filter(char::is_ascii_alphanumeric).map(|c| c.to_ascii_lowercase()).collect()
@@ -423,6 +446,33 @@ mod tests {
         assert_eq!(genres_in(&["Card game"]), ["Other"], "words that name no genre");
         assert!(genres_in(&["", " "]).is_empty(), "no words, no genre");
         assert_eq!(GENRES.len(), 16);
+    }
+
+    #[test]
+    fn a_page_lists_the_releases_by_version_and_labels_each_one() {
+        let release = |id: &str, version: &str, store: &str| Release {
+            id: id.into(),
+            version: version.into(),
+            store: store.into(),
+            ..Release::default()
+        };
+        let all = [
+            release("old", "1.05", ""),
+            release("new-b", "1.10", ""),
+            release("new-a", "1.10.000", ""),
+            release("steam", "9.9", "steam"),
+        ];
+        let listed = |installed| -> Vec<(String, String)> {
+            ordered(&all, installed).into_iter().map(|o| (o.release.id.clone(), o.label)).collect()
+        };
+        let ids = |installed| listed(installed).into_iter().map(|(id, _)| id).collect::<Vec<_>>();
+        assert_eq!(ids(false), ["steam", "new-b", "new-a", "old"], "highest first; one version in the offer's order");
+        assert_eq!(ids(true), ["new-b", "new-a", "old"], "an installed game has no use for its store's release");
+        assert_eq!(
+            listed(true).into_iter().map(|(_, label)| label).collect::<Vec<_>>(),
+            ["Version 3 of 3 (newest)", "Version 2 of 3", "Version 1 of 3"]
+        );
+        assert!(ordered(&[], false).is_empty());
     }
 
     #[test]

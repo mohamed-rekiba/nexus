@@ -729,6 +729,12 @@ The view's rules live in pure modules over the snapshot, each with its own tests
 - `disks.rs` (`Disks`): each console's download folder and the free space there. The core reads
   it again when a Game Hub opens, the catalogs are read, a folder changes, and a download starts
   or ends; the Game Hub's "Not enough space" comes from it.
+- `game_words.rs`: the words on a game's page. `words` takes the game's own description,
+  developer and genres first and fills what they leave out from the layers of store data.
+  `home_line` is Home's line for a game: the store's tagline, else the game's own description,
+  else its facts on one line, else where it runs.
+- `releases.rs` (`ordered`): the releases of an offer in the order the Game Hub lists them, by
+  version, with each one's "Version N of M" label.
 
 ## Themes
 
