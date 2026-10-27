@@ -97,7 +97,7 @@ Host.command ───▶ UiRequest::Core(Command) ─▶ Core::dispatch ─▶ 
    publishes `Event::StateChanged` on the `EventBus` (a `tokio::sync::broadcast` channel of
    1024; a reader that falls behind skips the oldest). Plugins see neither the change nor its
    area.
-4. The app reads every event from `core.events()` and hands it to `AppShell::on_core_event`,
+4. The app reads every event from `core.events()` and calls `AppShell::on_core_changed` for it,
    which asks for a render. An atomic flag keeps at most one event waiting on the UI thread.
 5. The shell renders at most once per `RENDER_GAP` (8 ms, a frame at 120 Hz). A burst of events
    or image loads renders once. Each render starts loading the images it asks for.

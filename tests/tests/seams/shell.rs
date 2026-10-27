@@ -3,7 +3,6 @@
 
 use std::time::Duration;
 
-use nexus_api::Event;
 use nexus_core::{Area, Command, LibraryCmd, Pref, SessionCmd};
 use nexus_testkit::PlatformCall;
 use nexus_ui_host::{RENDER_GAP, TICK, TrailerPoll, TrailerRequest, TrailerStatus, UiRequest};
@@ -26,7 +25,7 @@ fn a_burst_of_core_events_renders_once_when_its_time_comes() {
     let mut host = shown();
     let before = host.renders();
     for _ in 0..20 {
-        host.on_core_event(&Event::StateChanged);
+        host.on_core_changed();
     }
     assert_eq!(host.platform.wakes(), [RENDER_GAP], "one wake, a frame after the last render");
     host.poll();
@@ -38,7 +37,7 @@ fn a_burst_of_core_events_renders_once_when_its_time_comes() {
     host.poll();
     assert_eq!(host.renders(), before + 1, "once for the whole burst");
 
-    host.on_core_event(&Event::StateChanged);
+    host.on_core_changed();
     assert_eq!(host.platform.wakes().last(), Some(&RENDER_GAP), "the next change waits for its frame");
 }
 
@@ -47,7 +46,7 @@ fn a_change_long_after_the_last_render_renders_on_the_next_poll() {
     let mut host = shown();
     host.advance(Duration::from_secs(1));
     let before = host.renders();
-    host.on_core_event(&Event::StateChanged);
+    host.on_core_changed();
     assert_eq!(host.platform.wakes(), [Duration::ZERO]);
     host.poll();
     assert_eq!(host.renders(), before + 1);

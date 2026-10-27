@@ -166,13 +166,13 @@ fn run(args: args::Args) -> Result<(), String> {
     let pending = Arc::new(AtomicBool::new(false));
     let mut events = core.events();
     handle.spawn(async move {
-        while let Some(event) = events.next().await {
+        while events.next().await.is_some() {
             if !pending.swap(true, Ordering::SeqCst) {
                 let pending = pending.clone();
                 // Refused only once the app closes: no render is due then.
                 let _ = slint_interpreter::invoke_from_event_loop(move || {
                     pending.store(false, Ordering::SeqCst);
-                    with_app(|app| app.shell.on_core_event(&event));
+                    with_app(|app| app.shell.on_core_changed());
                 });
             }
         }

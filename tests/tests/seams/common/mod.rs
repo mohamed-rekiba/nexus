@@ -148,8 +148,8 @@ impl Composed {
     pub fn run_work(&mut self) {
         let errors = self.rt.block_on(self.platform.run_work());
         assert!(errors.is_empty(), "a command failed: {errors:?}");
-        while let Some(Some(event)) = self.events.next().now_or_never() {
-            self.shell.on_core_event(&event);
+        while let Some(Some(_)) = self.events.next().now_or_never() {
+            self.shell.on_core_changed();
         }
     }
 

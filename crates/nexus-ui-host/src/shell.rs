@@ -17,7 +17,6 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 
 use futures::future::BoxFuture;
-use nexus_api::Event;
 use nexus_core::{Clock, Core};
 use nexus_ui_api::ThemeError;
 use slint_interpreter::ComponentHandle;
@@ -230,8 +229,9 @@ impl AppShell {
         Ok(())
     }
 
-    /// The core changed: a render, at most once each [`RENDER_GAP`].
-    pub fn on_core_event(&mut self, _event: &Event) {
+    /// The core sent an event: every event means the view may have changed, so it asks for a
+    /// render, at most once each [`RENDER_GAP`].
+    pub fn on_core_changed(&mut self) {
         self.ask_render();
     }
 
