@@ -80,12 +80,6 @@ pub(crate) fn date_words(date: &str) -> String {
     format!("{} {day}, {year}", MONTHS[month - 1])
 }
 
-/// Today, in days since 1970-01-01.
-pub(crate) fn today() -> i64 {
-    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    (secs / 86_400) as i64
-}
-
 pub(crate) fn is_new(added: &str, today: i64) -> bool {
     days_of(added).is_some_and(|day| (0..=NEW_DAYS).contains(&(today - day)))
 }
@@ -157,23 +151,26 @@ fn starts_with_pattern(text: &[char], pattern: &[char]) -> bool {
 /// when there are no words.
 ///
 /// Each view asks for every offer's genres, and a catalog has few different genre texts, so
-/// each text is matched once.
+/// each text is matched once on each thread. The answers are the thread's own: a view takes no
+/// lock.
 pub(crate) fn genres_in(texts: &[&str]) -> Vec<&'static str> {
     /// More texts than any catalog has; past it the answers start over.
     const MOST: usize = 16_384;
-    static MATCHED: std::sync::LazyLock<std::sync::Mutex<HashMap<String, Vec<&'static str>>>> =
-        std::sync::LazyLock::new(Default::default);
+    thread_local! {
+        static MATCHED: std::cell::RefCell<HashMap<String, Vec<&'static str>>> = Default::default();
+    }
     let text = texts.join(" | ").to_lowercase();
-    let mut matched = MATCHED.lock().unwrap_or_else(|p| p.into_inner());
-    if let Some(genres) = matched.get(&text) {
-        return genres.clone();
-    }
-    let genres = match_genres(&text);
-    if matched.len() >= MOST {
-        matched.clear();
-    }
-    matched.insert(text, genres.clone());
-    genres
+    MATCHED.with_borrow_mut(|matched| {
+        if let Some(genres) = matched.get(&text) {
+            return genres.clone();
+        }
+        let genres = match_genres(&text);
+        if matched.len() >= MOST {
+            matched.clear();
+        }
+        matched.insert(text, genres.clone());
+        genres
+    })
 }
 
 /// [`genres_in`] of one lower-case text.
@@ -457,6 +454,7 @@ impl Core {
                 format!("{added} new release{s} in the Catalog"),
             );
         }
+        crate::disks::refresh(self);
         self.changed(Area::Catalogs);
         self.describe_catalog_page();
         // A catalog refresh waits for the VPN: the VPN check reads the catalogs again when it is back.
@@ -587,12 +585,9 @@ impl Core {
     /// Asks the stores about the games on the Catalog's shown pages that they haven't
     /// described yet, by title id and the newest release's region. In the background.
     pub(crate) fn describe_catalog_page(&self) {
-        let library = self.library().snapshot();
-        let page = {
-            let (torrents, installs) = (self.torrents().snapshot(), self.installs().snapshot());
-            let state = self.state();
-            crate::view::catalog_page(self.kernel(), &state, &library, &torrents, &installs)
-        };
+        let snapshot = crate::snapshot::take(self);
+        let page = snapshot.catalog_page();
+        let library = snapshot.library;
         let refs: Vec<(GameKey, nexus_api::GameRef)> = page
             .iter()
             .filter_map(|key| library.offer(key))

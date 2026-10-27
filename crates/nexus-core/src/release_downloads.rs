@@ -125,6 +125,7 @@ impl Core {
             TorrentCmd::Download { offer, release, folder } => {
                 self.torrents().set_download_error(None);
                 let started = self.download_release(&offer, &release, folder.as_deref()).await;
+                crate::disks::refresh(self);
                 // The sheet that asked says why nothing downloads, and so does a notice, for
                 // when the player closed the sheet.
                 if let Err(e) = &started {
@@ -161,17 +162,21 @@ impl Core {
                 if waiting {
                     self.installs().unpack(&id, false);
                 }
+                crate::disks::refresh(self);
                 self.notice_opening(
                     nexus_ui_api::NoticeKind::Success,
                     crate::Route::Downloads,
                     format!("Download complete: {title}. Install it from Downloads."),
                 );
             }
-            TorrentEvent::Stopped { title } => self.notice_opening(
-                nexus_ui_api::NoticeKind::Error,
-                crate::Route::Downloads,
-                format!("Download stopped: {title}. Open Downloads to see why"),
-            ),
+            TorrentEvent::Stopped { title } => {
+                crate::disks::refresh(self);
+                self.notice_opening(
+                    nexus_ui_api::NoticeKind::Error,
+                    crate::Route::Downloads,
+                    format!("Download stopped: {title}. Open Downloads to see why"),
+                )
+            }
             TorrentEvent::Problem(message) => self.problem(message),
             TorrentEvent::VpnsRead(vpns) => self.vpn().keep(vpns),
             // Not in the VPN check: the catalogs' fetches would hold up the kill switch.
@@ -217,7 +222,7 @@ impl Core {
         }
         let link = release.store.clone();
         crate::running::open_link(self, link).await.map_err(CoreError::Invalid)?;
-        let store = crate::view::system_of(self.kernel(), &release.platform).name;
+        let store = crate::snapshot::Plugins::new(self.kernel()).system(&release.platform).name;
         tracing::info!(%offer, link = %release.store, "asked the store to install");
         // The store writes its install down a moment later: its progress is read often for now.
         self.state().store_watch_until = Some(self.kernel().clock().now() + std::time::Duration::from_secs(60));

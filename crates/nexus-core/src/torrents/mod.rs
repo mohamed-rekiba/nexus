@@ -212,11 +212,11 @@ pub(crate) struct NewDownload {
     pub total: u64,
 }
 
-/// The subsystem's state, read whole.
+/// The subsystem's state, read whole. The downloads are shared, not copied.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct TorrentsSnapshot {
     /// By info hash.
-    pub jobs: BTreeMap<String, TorrentJob>,
+    pub jobs: Arc<BTreeMap<String, TorrentJob>>,
     /// Why the last download the player asked for on a game's Game Hub didn't start, for its
     /// download sheet; gone at the next try or when a Game Hub opens.
     pub download_error: Option<(GameKey, String)>,
@@ -259,7 +259,8 @@ pub(crate) struct Polls {
 
 #[derive(Default)]
 struct State {
-    jobs: BTreeMap<String, TorrentJob>,
+    /// A change copies them only while a snapshot holds them.
+    jobs: Arc<BTreeMap<String, TorrentJob>>,
     /// The watch task runs.
     watching: bool,
     /// The interface the torrent port is bound to; `None` for any.
@@ -353,7 +354,7 @@ impl TorrentsSubsystem {
     fn update<R>(&self, id: &str, change: impl FnOnce(&mut TorrentJob) -> R) -> Option<R> {
         let (job, out) = {
             let mut state = self.state();
-            let job = state.jobs.get_mut(id)?;
+            let job = Arc::make_mut(&mut state.jobs).get_mut(id)?;
             let out = change(job);
             (job.clone(), out)
         };
@@ -429,7 +430,7 @@ impl TorrentsSubsystem {
             start: None,
             hand_off: HandOff::default(),
         };
-        self.state().jobs.insert(job.id.clone(), job.clone());
+        Arc::make_mut(&mut self.state().jobs).insert(job.id.clone(), job.clone());
         self.inner.records.save(&job);
         self.changed();
         // Even its files come from the swarm: without the VPN it waits.
@@ -458,7 +459,7 @@ impl TorrentsSubsystem {
         {
             let mut state = self.state();
             for job in &jobs {
-                state.jobs.insert(job.id.clone(), job.clone());
+                Arc::make_mut(&mut state.jobs).insert(job.id.clone(), job.clone());
             }
         }
         for job in jobs {
@@ -687,7 +688,7 @@ impl TorrentsSubsystem {
             // The core refuses it first while the download's install runs.
             TorrentAction::DeleteFiles if !job.state.active() && !job.seeding && !unpacking => {
                 self.port().stop(id).await.map_err(|e| CoreError::Io(e.to_string()))?;
-                self.state().jobs.remove(id);
+                Arc::make_mut(&mut self.state().jobs).remove(id);
                 self.inner.records.forget(id);
                 // Only the folder Nexus made for this download (`torrent-<id>`).
                 let own = job.folder.file_name().is_some_and(|name| name == format!("torrent-{id}").as_str());
@@ -714,7 +715,7 @@ impl TorrentsSubsystem {
 
     /// Forgets a download: it leaves the list and the config.
     fn forget(&self, id: &str) {
-        self.state().jobs.remove(id);
+        Arc::make_mut(&mut self.state().jobs).remove(id);
         self.inner.records.forget(id);
         self.changed();
     }

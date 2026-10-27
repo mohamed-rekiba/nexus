@@ -1,5 +1,6 @@
 //! Play time: each game's total, saved under `app.playtime.<game>`.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use nexus_api::GameKey;
@@ -41,6 +42,27 @@ pub(crate) fn play_stats(config: &ConfigService, game: &GameKey) -> PlayStats {
     serde_json::from_value(value).unwrap_or_default()
 }
 
+/// Every game's play time, as saved, read at once.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct PlayTimes(HashMap<GameKey, PlayStats>);
+
+impl PlayTimes {
+    /// The game's play time; none for a game never played.
+    pub fn of(&self, game: &GameKey) -> PlayStats {
+        self.0.get(game).copied().unwrap_or_default()
+    }
+}
+
+/// Every game's play time, as saved. A key or a value that doesn't read is left out.
+pub(crate) fn play_times(config: &ConfigService) -> PlayTimes {
+    let saved = config.get(&PLAYTIME);
+    let Some(saved) = saved.as_object() else { return PlayTimes::default() };
+    let read = |(game, stats): (&String, &serde_json::Value)| {
+        Some((game.parse().ok()?, serde_json::from_value(stats.clone()).ok()?))
+    };
+    PlayTimes(saved.iter().filter_map(read).collect())
+}
+
 /// Adds a session of `played` to the game's play time, when it was long enough to count.
 pub(crate) fn add_play_time(config: &ConfigService, game: &GameKey, played: Duration) {
     let Some(stats) = play_stats(config, game).played(played, now_secs()) else { return };
@@ -50,17 +72,14 @@ pub(crate) fn add_play_time(config: &ConfigService, game: &GameKey, played: Dura
     }
 }
 
-fn now_secs() -> u64 {
+/// Now, in seconds since 1970.
+pub(crate) fn now_secs() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
-/// Whole days, of 24 hours, from `secs` (since 1970) to now. The core knows no time zone,
-/// so 0 means "in the last 24 hours", not "since midnight".
-pub(crate) fn days_since(secs: u64) -> u64 {
-    days_between(secs, now_secs())
-}
-
-fn days_between(secs: u64, now: u64) -> u64 {
+/// Whole days, of 24 hours, from `secs` to `now` (both since 1970). The core knows no time
+/// zone, so 0 means "in the last 24 hours", not "since midnight".
+pub(crate) fn days_between(secs: u64, now: u64) -> u64 {
     now.saturating_sub(secs) / 86_400
 }
 
@@ -78,6 +97,18 @@ mod tests {
         let before = PlayStats { secs: 60, count: 2, last: 10 };
         let after = before.played(Duration::from_millis(3500), 100).unwrap();
         assert_eq!(after, PlayStats { secs: 63, count: 3, last: 100 });
+    }
+
+    #[test]
+    fn every_saved_play_time_reads_at_once() {
+        let config = ConfigService::in_memory();
+        let game: GameKey = "emu:g".parse().unwrap();
+        add_play_time(&config, &game, Duration::from_secs(70));
+        config.set(&[PLAYTIME[0], PLAYTIME[1], "not a key"], serde_json::json!({ "secs": 5 })).unwrap();
+        let times = play_times(&config);
+        assert_eq!(times.of(&game), play_stats(&config, &game));
+        assert_eq!(times.of(&game).secs, 70);
+        assert_eq!(times.of(&"emu:other".parse().unwrap()), PlayStats::default(), "never played");
     }
 
     #[test]

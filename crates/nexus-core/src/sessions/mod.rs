@@ -29,7 +29,7 @@ use nexus_api::{Event, GameKey, PluginId, SessionId};
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
-pub(crate) use self::playtime::{PLAYED_AT_LEAST, days_since, play_stats};
+pub(crate) use self::playtime::{PLAYED_AT_LEAST, PlayTimes, days_between, now_secs};
 use crate::changes::{Area, Notifier};
 use crate::config::ConfigService;
 use crate::{Clock, CoreError, CoreResult, EventBus, ProcessExit, ProcessSpawner, ProcessTree, SpawnCommand, Windows};
@@ -72,6 +72,8 @@ pub(crate) struct SessionsSnapshot {
     /// The last window the launcher brought to the front was the game's, or the desktop says
     /// the game's window is in front.
     pub game_in_front: bool,
+    /// Every game's play time, as saved (`app.playtime`).
+    pub plays: PlayTimes,
 }
 
 impl SessionsSnapshot {
@@ -216,10 +218,11 @@ impl SessionsSubsystem {
         self.inner.notifier.changed(Area::Sessions);
     }
 
-    /// The running games and the window in front, as they are now.
+    /// The running games, the window in front and the play times, as they are now.
     pub fn snapshot(&self) -> SessionsSnapshot {
+        let plays = playtime::play_times(&self.inner.config);
         let state = self.state();
-        SessionsSnapshot { sessions: state.sessions.clone(), game_in_front: state.game_in_front }
+        SessionsSnapshot { sessions: state.sessions.clone(), game_in_front: state.game_in_front, plays }
     }
 
     /// A game runs.

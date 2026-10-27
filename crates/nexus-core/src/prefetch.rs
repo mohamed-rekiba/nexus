@@ -35,18 +35,16 @@ impl Core {
         let rested = clock.now() + SCREENSHOTS_AFTER;
         clock.sleep(NEIGHBOURS_AFTER).await;
         let art: Vec<ImageRef> = {
-            let library = self.library().snapshot();
-            let (torrents, installs) = (self.torrents().snapshot(), self.installs().snapshot());
-            let state = self.state();
-            let kernel = &self.inner.kernel;
-            crate::view::neighbours(kernel, &state, &library, &torrents, &installs, &game, MOST_NEIGHBOURS)
+            let snapshot = crate::snapshot::take(self);
+            snapshot
+                .neighbours(&game, MOST_NEIGHBOURS)
                 .iter()
                 .flat_map(|key| {
-                    let art = library.art(key);
+                    let art = snapshot.library.art(key);
                     [art.background, art.logo]
                 })
                 .flatten()
-                .map(|(plugin, image)| crate::view::image(&plugin, &image))
+                .map(|(plugin, image)| crate::library::image_ref(&plugin, &image))
                 .collect()
         };
         for image in &art {
@@ -54,7 +52,8 @@ impl Core {
         }
         clock.sleep_until(rested).await;
         let shots = self.library().snapshot().art(&game).screenshots;
-        let shots: Vec<ImageRef> = shots.iter().map(|(plugin, image)| crate::view::image(plugin, image)).collect();
+        let shots: Vec<ImageRef> =
+            shots.iter().map(|(plugin, image)| crate::library::image_ref(plugin, image)).collect();
         for image in &shots {
             self.fetch_ahead(image).await;
         }

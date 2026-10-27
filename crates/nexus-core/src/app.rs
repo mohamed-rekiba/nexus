@@ -17,6 +17,7 @@ use serde_json::Value;
 use crate::changes::{Area, Change, Changes, Notifier};
 use crate::downloads::Downloads;
 use crate::error::require;
+use crate::grid_query::{GRID_PAGE, Grid, GridQuery, ShownGrid};
 use crate::library::DetailState;
 use crate::preferences::{Pref, Preferences, PreferencesSnapshot};
 use crate::view;
@@ -38,15 +39,6 @@ pub enum Route {
     /// One game's own settings.
     GameSettings(GameKey),
     Running(SessionId),
-}
-
-/// A grid of game cards that tells the core how many columns it shows.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Grid {
-    /// The Library's grid, of the installed games.
-    Library,
-    /// The Catalog's grid, of the games the catalogs offer.
-    Catalog,
 }
 
 /// Everything the UI can ask the core to do.
@@ -245,15 +237,6 @@ pub(crate) fn resolve_game_folder(
     game_folders(kernel, game)?.resolve(folder).ok().filter(|p| p.is_dir())
 }
 
-/// The Library's "In-game" filter, among the systems: `Command::LibrarySystem` with this id.
-pub const INGAME_FILTER: &str = "ingame";
-
-/// The Catalog's "Installed" filter, among the systems: `Command::CatalogSystem` with this id.
-pub const INSTALLED_FILTER: &str = "installed";
-
-/// The Catalog's "Hidden" filter, among the systems: only the games the player hid.
-pub const HIDDEN_FILTER: &str = "hidden";
-
 #[derive(Clone, Debug, Default)]
 pub(crate) struct EmulatorState {
     pub installed: Vec<String>,
@@ -263,6 +246,20 @@ pub(crate) struct EmulatorState {
     pub busy: bool,
     /// Its `emulator.panel` slot items.
     pub panels: Vec<nexus_api::SlotItem>,
+}
+
+impl EmulatorState {
+    /// The newest available version, if it is newer than every installed one. Versions
+    /// compare as semver when they parse, as text otherwise.
+    pub fn update(&self) -> Option<String> {
+        let newest = self.available.first()?;
+        let installed = self.installed.last()?;
+        let newer = match (semver::Version::parse(newest), semver::Version::parse(installed)) {
+            (Ok(a), Ok(b)) => a > b,
+            _ => newest != installed && !self.installed.contains(newest),
+        };
+        newer.then(|| newest.clone())
+    }
 }
 
 /// A plugin's settings panel on the Settings screen: its slot item, and the schema and the
@@ -275,51 +272,10 @@ pub(crate) struct SettingsPanel {
     pub values: Value,
 }
 
-/// The Library's search, filters and sort.
-#[derive(Clone, Debug)]
-pub(crate) struct LibraryView {
-    pub query: String,
-    pub system: Option<String>,
-    /// Only games that reach gameplay: the community's result or the player's own.
-    pub ingame: bool,
-    /// Only the games the player has: in the Catalog, the offers of installed games.
-    pub installed: bool,
-    /// Only the games the player hid; else the Catalog leaves them out.
-    pub hidden: bool,
-    pub genre: Option<String>,
-    pub sort: String,
-    /// How many games show: pages of [`GRID_PAGE`], more as the player scrolls.
-    pub shown: usize,
-}
-
-/// How many more games a Library or Catalog page shows each time.
-pub const GRID_PAGE: usize = 60;
-
-impl Default for LibraryView {
-    fn default() -> Self {
-        Self {
-            query: String::new(),
-            system: None,
-            ingame: false,
-            installed: false,
-            hidden: false,
-            genre: None,
-            sort: "title".into(),
-            shown: GRID_PAGE,
-        }
-    }
-}
-
-impl LibraryView {
-    /// The Catalog's: newest added first.
-    fn catalog() -> Self {
-        Self { sort: "added".into(), ..Self::default() }
-    }
-}
-
 /// How long a selection must stay before its details load.
 const SELECT_SETTLE: std::time::Duration = std::time::Duration::from_millis(150);
 
+#[derive(Clone)]
 pub(crate) struct AppState {
     pub nav: Vec<Route>,
     pub selected: Option<GameKey>,
@@ -328,9 +284,9 @@ pub(crate) struct AppState {
     pub settings: Vec<SettingsPanel>,
     pub theme: Option<PluginId>,
     /// The Library's search, filters and sort.
-    pub library_view: LibraryView,
+    pub library_view: GridQuery,
     /// The Catalog's.
-    pub catalog_view: LibraryView,
+    pub catalog_view: GridQuery,
     /// A game that just closed, to ask the player how far it got, and the emulator build it
     /// ran on.
     pub result_prompt: Option<(GameKey, Option<String>)>,
@@ -348,11 +304,12 @@ pub(crate) struct AppState {
     pub store_watch_until: Option<std::time::Instant>,
     /// The game selected in the Catalog. Home's selection stays a library game.
     pub catalog_selected: Option<GameKey>,
-    /// The Catalog's grid as last built: on another screen, each view shows this one instead
-    /// of searching and sorting every offer again.
-    pub catalog_grid: Option<nexus_ui_api::LibraryVm>,
+    /// The Catalog's grid as last shown.
+    pub catalog_grid: ShownGrid,
     /// Each grid's columns.
     pub grid_columns: HashMap<Grid, usize>,
+    /// Where the catalogs' downloads go, and the free space there.
+    pub disks: crate::disks::Disks,
 }
 
 pub(crate) struct Inner {
@@ -392,8 +349,8 @@ impl Core {
             emulators: BTreeMap::new(),
             settings: Vec::new(),
             theme,
-            library_view: LibraryView::default(),
-            catalog_view: LibraryView::catalog(),
+            library_view: GridQuery::library(),
+            catalog_view: GridQuery::catalog(),
             result_prompt: None,
             hardware: None,
             system: Default::default(),
@@ -402,8 +359,9 @@ impl Core {
             store_installs: Vec::new(),
             store_watch_until: None,
             catalog_selected: None,
-            catalog_grid: None,
+            catalog_grid: ShownGrid::default(),
             grid_columns: HashMap::new(),
+            disks: Default::default(),
         };
         let downloads = Downloads::spawn(kernel.clone());
         let changes = Changes::new();
@@ -672,9 +630,14 @@ impl Core {
         self.notices().report(message);
     }
 
-    /// The view models for the current state.
+    /// The view models for the current state. The Catalog's grid, once built on the Catalog,
+    /// stands on the other screens.
     pub fn view(&self) -> AppView {
-        view::build(self)
+        let snapshot = crate::snapshot::take(self);
+        let view = view::build(&snapshot);
+        let on_catalog = snapshot.state.nav.last() == Some(&Route::Catalog);
+        self.state().catalog_grid.keep(on_catalog, &view.catalog.games);
+        view
     }
 
     /// The theme the player picked last, if any.
@@ -783,7 +746,7 @@ impl Core {
             Command::LibrarySystem(system) => self.set_grid(false, |v| v.set_system(system)),
             Command::LibraryGenre(genre) => self.set_grid(false, |v| v.genre = genre),
             Command::LibrarySort(sort) => {
-                check_sort(&sort)?;
+                let sort = sort.parse()?;
                 self.set_grid(false, |v| v.sort = sort)
             }
             Command::LibraryMore => self.more(false),
@@ -795,7 +758,7 @@ impl Core {
             Command::CatalogSystem(system) => self.set_grid(true, |v| v.set_system(system)),
             Command::CatalogGenre(genre) => self.set_grid(true, |v| v.genre = genre),
             Command::CatalogSort(sort) => {
-                check_sort(&sort)?;
+                let sort = sort.parse()?;
                 self.set_grid(true, |v| v.sort = sort)
             }
             Command::CatalogMore => self.more(true),
@@ -934,7 +897,7 @@ impl Core {
     }
 
     /// Changes the Library's or the Catalog's view, and goes back to its first page.
-    fn set_grid(&self, catalog: bool, change: impl FnOnce(&mut LibraryView)) -> CoreResult<()> {
+    fn set_grid(&self, catalog: bool, change: impl FnOnce(&mut GridQuery)) -> CoreResult<()> {
         {
             let mut state = self.state();
             let view = if catalog { &mut state.catalog_view } else { &mut state.library_view };
@@ -980,6 +943,7 @@ impl Core {
         }
         self.load_detail(&game).await?;
         self.select(&game);
+        crate::disks::refresh(self);
         self.push(Route::GameDetail(game));
         Ok(())
     }
@@ -1168,7 +1132,7 @@ impl Core {
         let emu = self.state().emulators.get(plugin).cloned().unwrap_or_default();
         let from =
             emu.installed.last().cloned().ok_or_else(|| CoreError::Invalid(format!("{plugin} is not installed")))?;
-        let to = view::update_for(&emu).ok_or_else(|| CoreError::Invalid(format!("{plugin} is up to date")))?;
+        let to = emu.update().ok_or_else(|| CoreError::Invalid(format!("{plugin} is up to date")))?;
         self.install(plugin, Some(to), Some(from)).await
     }
 
@@ -1201,7 +1165,7 @@ impl Core {
             }
             let opening = link.clone();
             crate::running::open_link(self, opening).await.map_err(CoreError::Invalid)?;
-            let store = crate::view::system_of(&self.inner.kernel, &platform).name;
+            let store = crate::snapshot::Plugins::new(self.kernel()).system(&platform).name;
             tracing::info!(%game, %link, "asked the store to uninstall");
             self.notice(format!("{store} is uninstalling {title}: it leaves your Library when it's done"));
             self.changed(Area::Library);
@@ -1371,7 +1335,7 @@ impl Core {
             if state.nav.is_empty() {
                 state.nav.push(Route::Home);
             }
-            state.catalog_grid = None;
+            state.catalog_grid.clear();
         }
         if enabled && kernel.of_kind(PluginKind::Emulator).contains(plugin) {
             self.refresh_emulator(plugin).await;
@@ -1412,6 +1376,7 @@ impl Core {
             config.set(&["app", "folders", name], Value::Array(list))
         };
         saved.map_err(|e| CoreError::Io(e.to_string()))?;
+        crate::disks::refresh(self);
         self.changed(Area::Settings);
         Ok(())
     }
@@ -1445,7 +1410,7 @@ impl Core {
             }
             self.refresh_emulator(&plugin).await;
             let emu = self.state().emulators.get(&plugin).cloned().unwrap_or_default();
-            if emu.installed.is_empty() || emu.own || view::update_for(&emu).is_none() || !self.prefs().auto_update {
+            if emu.installed.is_empty() || emu.own || emu.update().is_none() || !self.prefs().auto_update {
                 continue;
             }
             if self.plays(&plugin) {
@@ -1656,32 +1621,5 @@ impl Core {
         self.preferences().save(Pref::Theme, Value::from(theme.as_str()))?;
         self.inner.kernel.events().publish(Event::ThemeChanged { from, to: theme });
         Ok(())
-    }
-}
-
-/// The sorts the Library and the Catalog know.
-fn check_sort(sort: &str) -> CoreResult<()> {
-    match sort {
-        "title" | "played" | "size" | "smallest" | "rating" | "release" | "compat" | "added" => Ok(()),
-        _ => Err(CoreError::Invalid(format!("no sort {sort:?}"))),
-    }
-}
-
-impl LibraryView {
-    /// A system, or `INGAME_FILTER`, `INSTALLED_FILTER` or `HIDDEN_FILTER` to turn "In-game",
-    /// "Installed" or "Hidden" on or off; `None` clears them all.
-    fn set_system(&mut self, system: Option<String>) {
-        match system.as_deref() {
-            Some(INGAME_FILTER) => self.ingame = !self.ingame,
-            Some(INSTALLED_FILTER) => self.installed = !self.installed,
-            Some(HIDDEN_FILTER) => self.hidden = !self.hidden,
-            None => {
-                self.system = None;
-                self.ingame = false;
-                self.installed = false;
-                self.hidden = false;
-            }
-            Some(_) => self.system = system,
-        }
     }
 }

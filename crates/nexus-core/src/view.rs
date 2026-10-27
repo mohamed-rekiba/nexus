@@ -1,34 +1,28 @@
-//! Building view models from app state.
+//! Building view models from a [`Snapshot`] of the app. [`build`] is pure: it takes no lock and
+//! does no I/O, so a render is a function of the snapshot.
 
 use std::collections::BTreeMap;
 
 use nexus_api::{
-    ActionStyle, Capability, CompatInfo, CompatLevel, GameKey, ImageSource, Platform, PluginId, PluginKind,
-    SlotContent, SlotId, SlotItem, Tone,
+    ActionStyle, Capability, CompatInfo, CompatLevel, GameKey, Platform, PluginId, PluginKind, SlotContent, SlotId,
+    SlotItem, Tone,
 };
 use nexus_ui_api::*;
 use serde_json::Value;
 
-use crate::app::{AppState, EmulatorState, Grid, Route};
+use crate::app::Route;
 use crate::game_installs::InstallsSnapshot;
-use crate::library::{Entry, LibrarySnapshot, PluginImage};
+use crate::grid_query::{Grid, GridData, GridGames, GridQuery};
+use crate::library::{Entry, LibrarySnapshot, PluginImage, image_ref};
 use crate::order::sort_by_order;
 use crate::ownership::Ownership;
-use crate::sessions::SessionsSnapshot;
-use crate::torrents::{TorrentJob, TorrentsSnapshot};
-use crate::{Core, Job, JobPhase, Kernel, PluginStatus, PreferencesSnapshot};
+use crate::snapshot::{Plugins, Snapshot};
+use crate::torrents::TorrentJob;
+use crate::{JobPhase, PluginStatus};
 
 /// A plugin's image as the theme host fetches it.
 fn plugin_image((plugin, source): PluginImage) -> ImageRef {
-    image(&plugin, &source)
-}
-
-pub(crate) fn image(plugin: &PluginId, source: &ImageSource) -> ImageRef {
-    match source {
-        ImageSource::Url(url) => ImageRef::Url { plugin: plugin.clone(), url: url.clone() },
-        ImageSource::Asset(path) => ImageRef::PluginAsset { plugin: plugin.clone(), path: path.clone() },
-        ImageSource::Folder(path) => ImageRef::Folder { plugin: plugin.clone(), path: path.clone() },
-    }
+    image_ref(&plugin, &source)
 }
 
 /// One plugin's slot items as view models, in [`nexus_api::Order`] order.
@@ -59,7 +53,7 @@ fn slot_vm(plugin: &PluginId, slot: SlotId, item: SlotItem) -> SlotVm {
             vm.short = if short.is_empty() { label.clone() } else { short };
             vm.text = label;
             vm.tone = tone;
-            vm.icon = icon.map(|i| image(plugin, &i));
+            vm.icon = icon.map(|i| image_ref(plugin, &i));
         }
         SlotContent::Action { label, action, args, style, icon } => {
             vm.kind = SlotKind::Action;
@@ -67,7 +61,7 @@ fn slot_vm(plugin: &PluginId, slot: SlotId, item: SlotItem) -> SlotVm {
             vm.action = Some(action);
             vm.args = args;
             vm.style = style;
-            vm.icon = icon.map(|i| image(plugin, &i));
+            vm.icon = icon.map(|i| image_ref(plugin, &i));
         }
         SlotContent::Section { title, rows } => {
             vm.kind = SlotKind::Section;
@@ -105,18 +99,6 @@ fn compat_vm(info: &CompatInfo) -> CompatVm {
     }
 }
 
-/// The newest available version, if it is newer than every installed one. Versions compare as
-/// semver when they parse, as text otherwise.
-pub(crate) fn update_for(emu: &EmulatorState) -> Option<String> {
-    let newest = emu.available.first()?;
-    let installed = emu.installed.last()?;
-    let newer = match (semver::Version::parse(newest), semver::Version::parse(installed)) {
-        (Ok(a), Ok(b)) => a > b,
-        _ => newest != installed && !emu.installed.contains(newest),
-    };
-    newer.then(|| newest.clone())
-}
-
 /// The game's square art (see [`LibrarySnapshot::tile`]).
 fn cover_of(library: &LibrarySnapshot, entry: &Entry) -> Option<ImageRef> {
     library.tile(entry).map(plugin_image)
@@ -124,27 +106,13 @@ fn cover_of(library: &LibrarySnapshot, entry: &Entry) -> Option<ImageRef> {
 
 /// Whether `key`'s game can be uninstalled: its folder is known, isn't a whole player's folder,
 /// is in one its emulator may write, and is there.
-fn can_uninstall(kernel: &Kernel, library: &LibrarySnapshot, key: &GameKey) -> bool {
-    let folder = library.detail(key).and_then(|d| d.details.folder.as_ref());
+fn can_uninstall(s: &Snapshot, key: &GameKey) -> bool {
+    let folder = s.library.detail(key).and_then(|d| d.details.folder.as_ref());
     folder.is_some_and(|f| {
         !f.path.is_root()
-            && kernel.manifest(&key.plugin).is_ok_and(|m| m.permissions.folder(&f.folder).is_some_and(|g| g.write))
-            && crate::app::resolve_game_folder(kernel, key, f).is_some()
+            && s.plugins.manifest(&key.plugin).is_some_and(|m| m.permissions.folder(&f.folder).is_some_and(|g| g.write))
+            && s.files.game_folders.contains(key)
     })
-}
-
-/// The system `platform` (`PS5`), as the plugin whose `[system]` it is describes it: its full
-/// name and color. Without one, the code is its name and it has no color.
-pub(crate) fn system_of(kernel: &Kernel, platform: &str) -> GameSystemVm {
-    let look = kernel
-        .order()
-        .iter()
-        .filter_map(|plugin| kernel.manifest(plugin).ok()?.system.as_ref())
-        .find(|look| look.id == platform);
-    match look {
-        Some(look) => GameSystemVm { name: look.name.clone(), color: look.rgb() },
-        None => GameSystemVm { name: platform.to_owned(), color: None },
-    }
 }
 
 /// A game's badges, from its plugin.
@@ -152,25 +120,31 @@ fn badges_of(library: &LibrarySnapshot, key: &GameKey) -> Vec<SlotVm> {
     slot_vms(&key.plugin, SlotId::GameBadge, library.badges(key).to_vec())
 }
 
-fn card(kernel: &Kernel, core_state: &AppState, library: &LibrarySnapshot, entry: &Entry) -> GameCardVm {
-    let stats = crate::sessions::play_stats(kernel.config(), &entry.key);
+/// Whole days since the game was last played; `None` before it was.
+fn last_played_days(s: &Snapshot, key: &GameKey) -> Option<u64> {
+    let stats = s.sessions.plays.of(key);
+    (stats.count > 0).then(|| crate::sessions::days_between(stats.last, s.now_secs))
+}
+
+fn card(s: &Snapshot, entry: &Entry) -> GameCardVm {
+    let library = &s.library;
     GameCardVm {
         key: entry.key.to_string(),
         title: entry.summary.title.clone(),
         platform: entry.summary.platform.clone(),
-        system: system_of(kernel, &entry.summary.platform),
+        system: s.plugins.system(&entry.summary.platform),
         cover: cover_of(library, entry),
-        selected: core_state.selected.as_ref() == Some(&entry.key),
+        selected: s.state.selected.as_ref() == Some(&entry.key),
         badges: badges_of(library, &entry.key),
         release_year: entry.summary.release_year,
         rating: library.meta(&entry.key).and_then(|(_, m)| m.rating).map(|r| r.score),
         size_bytes: library.detail(&entry.key).and_then(|d| d.details.size_bytes),
-        last_played_days: (stats.count > 0).then(|| crate::sessions::days_since(stats.last)),
+        last_played_days: last_played_days(s, &entry.key),
         releases: 0,
         availability: String::new(),
         hidden: false,
         // A Library game's; `offer_card` gives an offer's.
-        can: game_actions(kernel, library, &entry.key, None),
+        can: game_actions(s, &entry.key, None),
     }
 }
 
@@ -184,9 +158,8 @@ fn card(kernel: &Kernel, core_state: &AppState, library: &LibrarySnapshot, entry
 /// - Uninstall: the installed game, by its store's link when its plugin gives one and may open
 ///   it, else by deleting its folder when its plugin may.
 /// - The main action: Play, else Get, else none. Uninstall is never the main one.
-pub(crate) fn game_actions(
-    kernel: &Kernel,
-    library: &LibrarySnapshot,
+fn game_actions(
+    s: &Snapshot,
     key: &GameKey,
     offer: Option<(&crate::releases::Offer, Option<&Entry>)>,
 ) -> GameActionsVm {
@@ -194,26 +167,26 @@ pub(crate) fn game_actions(
         None => Some(key),
         Some((_, game)) => game.map(|g| &g.key),
     };
-    let manifest = |plugin: &PluginId| kernel.manifest(plugin).ok();
+    let manifest = |plugin: &PluginId| s.plugins.manifest(plugin);
     let play =
         installed.is_some_and(|k| manifest(&k.plugin).is_some_and(|m| m.capabilities.contains(&Capability::Launcher)));
     let mut actions = GameActionsVm { play, ..GameActionsVm::default() };
     if let Some(game) = installed {
-        let details = library.detail(game).map(|d| &d.details);
+        let details = s.library.detail(game).map(|d| &d.details);
         let link = details.and_then(|d| d.uninstall_link.as_deref());
         let store_removes = link.is_some_and(|l| manifest(&game.plugin).is_some_and(|m| m.permissions.allows_link(l)));
         if store_removes {
             let platform = details.map(|d| d.summary.platform.as_str()).unwrap_or_default();
             actions.uninstall = game.to_string();
-            actions.uninstall_store = system_of(kernel, platform).name;
-        } else if can_uninstall(kernel, library, game) {
+            actions.uninstall_store = s.plugins.system(platform).name;
+        } else if can_uninstall(s, game) {
             actions.uninstall = game.to_string();
         }
     }
     if let Some((offer, None)) = offer {
         match offer.releases.iter().find(|r| !r.store.is_empty()) {
             Some(release) => {
-                actions.get_store = system_of(kernel, &release.platform).name;
+                actions.get_store = s.plugins.system(&release.platform).name;
                 actions.get = format!("Install in {}", actions.get_store);
                 actions.get_release = release.id.clone();
             }
@@ -231,304 +204,20 @@ pub(crate) fn game_actions(
     actions
 }
 
-/// The genres a store's catalog gives the game.
-fn genres_of(library: &LibrarySnapshot, key: &GameKey) -> Vec<String> {
-    library.meta(key).map(|(_, m)| m.genres.clone()).unwrap_or_default()
-}
-
-/// The fixed genres of a game a catalog offers (see [`crate::releases::GENRES`]), from its
-/// releases' genre words, a store's genres and its releases' store data.
-fn offer_genres(library: &LibrarySnapshot, offer: &crate::releases::Offer) -> Vec<String> {
-    let store = library.meta(&offer.entry.key).map(|(_, m)| &m.genres);
-    let release = crate::releases::metadata_of(offer).map(|m| &m.genres);
-    let words: Vec<&str> = offer
-        .releases
-        .iter()
-        .map(|r| r.fact_text(nexus_api::FactKind::Genre))
-        .chain(store.into_iter().chain(release).flatten().map(String::as_str))
-        .collect();
-    crate::releases::genres_in(&words).into_iter().map(str::to_owned).collect()
-}
-
-/// The words of a search or of a field, in lower case: letters and digits. An apostrophe joins
-/// its word ("Assassin's" is "assassins").
-fn search_words(text: &str) -> Vec<String> {
-    let text = text.to_lowercase().replace(['\'', '\u{2019}'], "");
-    text.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_owned).collect()
-}
-
-/// Whether each of the search's `words` starts a word of `fields`.
-fn has_words<'a>(words: &[String], fields: impl IntoIterator<Item = &'a str>) -> bool {
-    let known: Vec<String> = fields.into_iter().flat_map(search_words).collect();
-    words.iter().all(|w| known.iter().any(|k| k.starts_with(w.as_str())))
-}
-
-/// A Library's or the Catalog's games, searched, filtered and sorted, before paging, with
-/// the filters' chips.
-struct GridGames<'a> {
-    shown: Vec<&'a Entry>,
-    /// How many games there are before the search and the filters.
-    all: usize,
-    systems: Vec<FilterVm>,
-    genres: Vec<FilterVm>,
-}
-
-/// The offers by their key.
-fn offers_by_key(library: &LibrarySnapshot) -> std::collections::HashMap<&GameKey, &crate::releases::Offer> {
-    library.offers.iter().map(|o| (&o.entry.key, o)).collect()
-}
-
-fn grid<'a>(
-    kernel: &Kernel,
-    state: &AppState,
-    library: &'a LibrarySnapshot,
-    torrents: &TorrentsSnapshot,
-    installs: &InstallsSnapshot,
-    catalog: bool,
-) -> GridGames<'a> {
-    let view = if catalog { &state.catalog_view } else { &state.library_view };
-    let offers = offers_by_key(library);
-    let owned = Ownership::new(library, &torrents.jobs, installs);
-    let entries: Vec<&Entry> =
-        if catalog { library.offers.iter().map(|o| &o.entry).collect() } else { library.library().collect() };
-    // The Catalog's hidden games: out, but for the "Hidden" filter, which shows only them. With
-    // the filter turned off in the catalog's settings, its chip goes and it doesn't apply.
-    let hidden_filter = catalog && crate::Core::hidden_filter_on(kernel);
-    let only_hidden = hidden_filter && view.hidden;
-    // Hidden by the player in Nexus, or in the game's store (Steam's Hidden collection).
-    let store_hidden =
-        |e: &Entry| offers.get(&e.key).is_some_and(|o| !o.releases.is_empty() && o.releases.iter().all(|r| r.hidden));
-    let is_hidden = |e: &Entry| catalog && (library.hidden(&e.key) || store_hidden(e));
-    let hidden_count = entries.iter().filter(|e| is_hidden(e)).count();
-    let entries: Vec<&Entry> = entries.into_iter().filter(|e| is_hidden(e) == only_hidden).collect();
-    // How many games there are before the search and the filters: hidden ones count nowhere.
-    let all = entries.len();
-    let needle = view.query.trim().to_lowercase();
-    let words = search_words(&view.query);
-    let found = |e: &Entry| {
-        if e.summary.title.to_lowercase().contains(&needle) {
-            return true;
-        }
-        let publisher = library.meta(&e.key).map(|(_, m)| m.publisher.as_str()).unwrap_or_default();
-        let title_id = e.summary.title_id.as_deref().unwrap_or_default();
-        match offers.get(&e.key) {
-            // Every word in one release: its title, title ids, publisher, region and version.
-            Some(o) => o.releases.iter().any(|r| {
-                let ids = std::iter::once(r.title_id.as_str()).chain(r.title_ids.iter().map(String::as_str));
-                let own = r.fact_text(nexus_api::FactKind::Publisher);
-                let fields = [e.summary.title.as_str(), &r.title, own, publisher, &r.region, &r.version];
-                has_words(&words, fields.into_iter().chain(ids))
-            }),
-            None => has_words(&words, [e.summary.title.as_str(), title_id, publisher]),
-        }
-    };
-    let searched: Vec<&Entry> = entries.into_iter().filter(|e| needle.is_empty() || found(e)).collect();
-    // Systems count what the search leaves; genres count what the system leaves too.
-    let mut systems =
-        vec![FilterVm { id: String::new(), label: "All".into(), count: searched.len(), on: view.system.is_none() }];
-    for e in &searched {
-        let platform = &e.summary.platform;
-        match systems.iter_mut().find(|s| &s.id == platform) {
-            Some(s) => s.count += 1,
-            None => systems.push(FilterVm {
-                id: platform.clone(),
-                label: platform.clone(),
-                count: 1,
-                on: view.system.as_ref() == Some(platform),
-            }),
-        }
-    }
-    // How far each game gets: the player's own result first, then the community's.
-    let level = |e: &Entry| -> u8 {
-        let own = library.result(&e.key);
-        let compat = library.detail(&e.key).and_then(|d| d.compat.as_ref()).map(|c| compat_level(c.level).0);
-        match own.or(compat) {
-            Some("playable") => 5,
-            Some("ingame") => 4,
-            Some("menus") => 3,
-            Some("boots") => 2,
-            Some("nothing") => 1,
-            _ => 0,
-        }
-    };
-    let ingame = searched.iter().filter(|e| level(e) >= 4).count();
-    // The Catalog's only: the Library's games are the player's own. Shown once a game has a
-    // result to filter by.
-    let only_ingame = catalog && view.ingame;
-    if catalog && (ingame > 0 || view.ingame) {
-        systems.push(FilterVm {
-            id: crate::INGAME_FILTER.into(),
-            label: "In-game".into(),
-            count: ingame,
-            on: view.ingame,
-        });
-    }
-    // The Catalog's offers of the games the player has.
-    let installed = |e: &Entry| offers.get(&e.key).is_some_and(|o| owned.installed_game(o).is_some());
-    let installed_count = if catalog { searched.iter().filter(|e| installed(e)).count() } else { 0 };
-    if installed_count > 0 || (catalog && view.installed) {
-        systems.push(FilterVm {
-            id: crate::INSTALLED_FILTER.into(),
-            label: "Installed".into(),
-            count: installed_count,
-            on: view.installed,
-        });
-    }
-    if hidden_filter && (hidden_count > 0 || view.hidden) {
-        systems.push(FilterVm {
-            id: crate::HIDDEN_FILTER.into(),
-            label: "Hidden".into(),
-            count: hidden_count,
-            on: view.hidden,
-        });
-    }
-    let in_system: Vec<&Entry> = searched
-        .into_iter()
-        .filter(|e| view.system.as_ref().is_none_or(|s| &e.summary.platform == s))
-        .filter(|e| !only_ingame || level(e) >= 4)
-        .filter(|e| !catalog || !view.installed || installed(e))
-        .collect();
-    // The Library's chips are the store's genres; the Catalog's are the fixed genres.
-    let chips: std::collections::HashMap<&GameKey, Vec<String>> = in_system
-        .iter()
-        .map(|e| {
-            let genres = match offers.get(&e.key) {
-                Some(o) if catalog => offer_genres(library, o),
-                _ => genres_of(library, &e.key),
-            };
-            (&e.key, genres)
-        })
-        .collect();
-    let chips_of = |e: &Entry| chips.get(&e.key).map(Vec::as_slice).unwrap_or_default();
-    let mut genre_counts: BTreeMap<String, usize> = BTreeMap::new();
-    for e in &in_system {
-        for g in chips_of(e).iter().cloned() {
-            *genre_counts.entry(g).or_default() += 1;
-        }
-    }
-    let mut genres: Vec<FilterVm> = genre_counts
-        .into_iter()
-        .map(|(g, count)| FilterVm { on: view.genre.as_ref() == Some(&g), label: g.clone(), id: g, count })
-        .collect();
-    genres.sort_by(|a, b| b.count.cmp(&a.count).then(a.label.cmp(&b.label)));
-    genres.insert(
-        0,
-        FilterVm { id: String::new(), label: "All genres".into(), count: in_system.len(), on: view.genre.is_none() },
-    );
-    let mut shown: Vec<&Entry> =
-        in_system.into_iter().filter(|e| view.genre.as_ref().is_none_or(|g| chips_of(e).contains(g))).collect();
-    let size = |e: &Entry| -> Option<u64> {
-        match offers.get(&e.key) {
-            Some(o) => owned.best_release(o).size_bytes,
-            None => library.detail(&e.key).and_then(|d| d.details.size_bytes),
-        }
-    };
-    let added = |e: &Entry| offers.get(&e.key).map(|o| o.releases[0].added.clone()).unwrap_or_default();
-    // The catalog's own date of its best release first, then the store's, then the year.
-    let released = |e: &Entry| {
-        let catalog = offers.get(&e.key).and_then(|o| crate::releases::release_day(owned.best_release(o)));
-        let store = || library.meta(&e.key).and_then(|(_, m)| crate::releases::date_key(&m.release));
-        catalog.or_else(store).or_else(|| e.summary.release_year.map(|y| y.to_string())).unwrap_or_default()
-    };
-    match view.sort.as_str() {
-        "played" => shown.sort_by_key(|e| std::cmp::Reverse(crate::sessions::play_stats(kernel.config(), &e.key).last)),
-        "size" => shown.sort_by_key(|e| std::cmp::Reverse(size(e))),
-        // Smallest first; a game whose size isn't known goes last.
-        "smallest" => shown.sort_by_key(|e| size(e).unwrap_or(u64::MAX)),
-        // Top rated, newest, and best running first; a game without one goes last.
-        "rating" => shown.sort_by(|a, b| {
-            let score = |e: &Entry| library.meta(&e.key).and_then(|(_, m)| m.rating).map_or(-1.0, |r| r.score);
-            score(b).total_cmp(&score(a))
-        }),
-        "release" => shown.sort_by_cached_key(|e| std::cmp::Reverse(released(e))),
-        "compat" => shown.sort_by_key(|e| std::cmp::Reverse(level(e))),
-        "added" => shown.sort_by_cached_key(|e| std::cmp::Reverse(added(e))),
-        "title" => shown.sort_by_cached_key(|e| e.summary.title.to_lowercase()),
-        _ => {}
-    }
-    GridGames { shown, all, systems, genres }
-}
-
-/// The games beside `game`, at most `most`: in Home's row, one each side; in the Library's or
-/// the Catalog's grid, one each side and the ones above and below, when the grid said how many
-/// columns it has (`AppState::grid_columns`).
-pub(crate) fn neighbours(
-    kernel: &Kernel,
-    state: &AppState,
-    library: &LibrarySnapshot,
-    torrents: &TorrentsSnapshot,
-    installs: &InstallsSnapshot,
-    game: &GameKey,
-    most: usize,
-) -> Vec<GameKey> {
-    let mut found: Vec<GameKey> = Vec::new();
-    let mut around = |list: Vec<&GameKey>, steps: &[isize]| {
-        let Some(at) = list.iter().position(|k| *k == game) else { return };
-        for step in steps {
-            if let Some(key) = at.checked_add_signed(*step).and_then(|i| list.get(i))
-                && *key != game
-                && !found.contains(key)
-            {
-                found.push((*key).clone());
-            }
-        }
-    };
-    // An offer is in the Catalog's grid; a game of the Library is in Home's row too.
-    let (which, view) = if library.offer(game).is_some() {
-        (Grid::Catalog, &state.catalog_view)
-    } else {
-        around(library.library().map(|e| &e.key).collect(), &[1, -1]);
-        (Grid::Library, &state.library_view)
-    };
-    let games = grid(kernel, state, library, torrents, installs, which == Grid::Catalog);
-    let keys: Vec<&GameKey> = games.shown.iter().take(view.shown).map(|e| &e.key).collect();
-    match state.grid_columns.get(&which).copied().filter(|c| *c > 1) {
-        Some(c) => around(keys, &[1, -1, c as isize, -(c as isize)]),
-        None => around(keys, &[1, -1]),
-    }
-    found.truncate(most);
-    found
-}
-
-/// The games on the Catalog's shown pages, in order.
-pub(crate) fn catalog_page(
-    kernel: &Kernel,
-    state: &AppState,
-    library: &LibrarySnapshot,
-    torrents: &TorrentsSnapshot,
-    installs: &InstallsSnapshot,
-) -> Vec<GameKey> {
-    grid(kernel, state, library, torrents, installs, true)
-        .shown
-        .into_iter()
-        .take(state.catalog_view.shown)
-        .map(|e| e.key.clone())
-        .collect()
-}
-
-fn grid_vm(
-    kernel: &Kernel,
-    state: &AppState,
-    library: &LibrarySnapshot,
-    torrents: &TorrentsSnapshot,
-    installs: &InstallsSnapshot,
-    catalog: bool,
-) -> LibraryVm {
-    let view = if catalog { &state.catalog_view } else { &state.library_view };
-    let GridGames { shown, all, systems, genres } = grid(kernel, state, library, torrents, installs, catalog);
-    let offers = offers_by_key(library);
-    let owned = Ownership::new(library, &torrents.jobs, installs);
-    let today = crate::releases::today();
+fn grid_vm(s: &Snapshot, data: &GridData, query: &GridQuery) -> LibraryVm {
+    let GridGames { shown, all, systems, genres } = query.games(data);
+    let library = data.library;
+    let offers: std::collections::HashMap<&GameKey, &crate::releases::Offer> =
+        library.offers.iter().map(|o| (&o.entry.key, o)).collect();
     let total = shown.len();
     let games: Vec<GameCardVm> = shown
         .into_iter()
-        .take(view.shown)
+        .take(query.shown)
         .map(|e| match offers.get(&e.key) {
-            Some(offer) if catalog => GameCardVm {
-                hidden: library.hidden(&e.key),
-                ..offer_card(kernel, state, library, &owned, offer, today)
-            },
-            _ => card(kernel, state, library, e),
+            Some(offer) if query.grid == Grid::Catalog => {
+                GameCardVm { hidden: library.hidden(&e.key), ..offer_card(s, data.ownership, offer) }
+            }
+            _ => card(s, e),
         })
         .collect();
     LibraryVm {
@@ -538,19 +227,19 @@ fn grid_vm(
         all,
         systems,
         genres,
-        sort: view.sort.clone(),
-        query: view.query.clone(),
+        sort: query.sort.as_str().into(),
+        query: query.query.clone(),
     }
 }
 
 /// What clicking `notice` opens, for example "Open Downloads"; empty for nothing.
-fn notice_opens(kernel: &Kernel, notice: &crate::notices::Notice) -> String {
+fn notice_opens(plugins: &Plugins, notice: &crate::notices::Notice) -> String {
     match &notice.route {
         Some(Route::Downloads) => "Open Downloads".into(),
         Some(Route::Catalog) => "Open the Catalog".into(),
         Some(Route::GameDetail(_)) => "Open the Game Hub".into(),
         Some(Route::Plugin(plugin)) => {
-            format!("Open {}", kernel.manifest(plugin).map(|m| m.name.clone()).unwrap_or_default())
+            format!("Open {}", plugins.manifest(plugin).map(|m| m.name.clone()).unwrap_or_default())
         }
         Some(Route::Settings) => "Open Settings".into(),
         _ => String::new(),
@@ -563,30 +252,19 @@ fn notice_art(library: &LibrarySnapshot, notice: &crate::notices::Notice) -> Opt
     library.listed(game).and_then(|e| cover_of(library, e))
 }
 
-fn notice_vm(kernel: &Kernel, library: &LibrarySnapshot, notice: &crate::notices::Notice) -> NoticeVm {
+fn notice_vm(s: &Snapshot, notice: &crate::notices::Notice) -> NoticeVm {
     NoticeVm {
         id: notice.id,
         text: notice.message.clone(),
         kind: notice.kind,
-        art: notice_art(library, notice),
-        opens: notice_opens(kernel, notice),
+        art: notice_art(&s.library, notice),
+        opens: notice_opens(&s.plugins, notice),
     }
 }
 
-pub(crate) fn build(core: &Core) -> AppView {
-    let kernel = core.kernel();
-    let jobs = core.inner.downloads.jobs();
-    let statuses = kernel.statuses();
-    let library = core.library().snapshot();
-    let torrents = core.torrents().snapshot();
-    let prefs = core.prefs();
-    let installs = core.installs().snapshot();
-    let sessions = core.sessions().snapshot();
-    let notices = core.notices().snapshot();
-    let launcher_update = core.launcher_update().snapshot();
-    let vpn = core.vpn().snapshot();
-    let mut state = core.state();
-
+/// The view models for the snapshot `s`.
+pub(crate) fn build(s: &Snapshot) -> AppView {
+    let state = &s.state;
     let route = state.nav.last().cloned().unwrap_or(Route::Home);
     let (screen, game) = match &route {
         Route::Home => (ScreenId::Home, None),
@@ -600,38 +278,28 @@ pub(crate) fn build(core: &Core) -> AppView {
         Route::GameSettings(g) => (ScreenId::GameSettings, Some(g.clone())),
         Route::Running(_) => (ScreenId::Running, None),
     };
-    // The detail page of the game the player last opened stays available under overlays.
-    // With no detail page open, the selected game's details, once loaded.
-    let detail_game = game
-        .clone()
-        .or_else(|| {
-            state.nav.iter().rev().find_map(|r| if let Route::GameDetail(g) = r { Some(g.clone()) } else { None })
-        })
-        .or_else(|| if route == Route::Catalog { state.catalog_selected.clone() } else { None })
-        .or_else(|| state.selected.clone());
-
-    let catalog = catalog_vm(kernel, &state, &library, &torrents, &installs);
-    if state.catalog_grid.is_none() || state.nav.last() == Some(&Route::Catalog) {
-        state.catalog_grid = Some(catalog.games.clone());
-    }
-
+    let owned = s.ownership();
+    let data = s.grid_data(&owned);
+    let notices = &s.notices;
     AppView {
         screen,
         game: game.map(|g| g.to_string()),
         can_go_back: state.nav.len() > 1,
-        home: home_vm(kernel, &state, &library, &torrents, &installs),
-        detail: detail_game.and_then(|key| detail_vm(core, &state, &library, &torrents, &installs, &sessions, &key)),
-        catalog,
-        downloads: downloads_vm(kernel, jobs, &state, &library, &torrents, &installs),
-        settings: settings_vm(core, &prefs, &state, &launcher_update, &vpn),
-        emulators: emulators_vm(kernel, &state, &statuses),
+        home: home_vm(s, &data),
+        // The detail page of the game the player last opened stays available under overlays.
+        // With no detail page open, the selected game's details, once loaded.
+        detail: s.detail_game.as_ref().and_then(|key| detail_vm(s, &owned, key)),
+        catalog: catalog_vm(s, &data, route == Route::Catalog),
+        downloads: downloads_vm(s, &owned),
+        settings: settings_vm(s),
+        emulators: emulators_vm(s),
         plugin_page: match &route {
-            Route::Plugin(plugin) => plugin_page_vm(kernel, &state, &statuses, plugin),
+            Route::Plugin(plugin) => plugin_page_vm(s, plugin),
             _ => None,
         },
-        running: running_vm(kernel, &sessions, &route),
+        running: running_vm(s, &route),
         notices: notices.iter().map(|n| n.message.clone()).collect(),
-        notice_cards: notices.iter().map(|n| notice_vm(kernel, &library, n)).collect(),
+        notice_cards: notices.iter().map(|n| notice_vm(s, n)).collect(),
         install_prompt: state.install_prompt.as_ref().map(|p| InstallPromptVm {
             plugin: p.game.plugin.clone(),
             emulator: p.emulator.clone(),
@@ -639,12 +307,12 @@ pub(crate) fn build(core: &Core) -> AppView {
             game: p.title.clone(),
             size_bytes: p.size_bytes,
         }),
-        boot: boot_vm(kernel, &prefs, &state, &library),
-        task: library.task.clone(),
-        notice_opens: notices.last().map(|n| notice_opens(kernel, n)).unwrap_or_default(),
-        notice_art: notices.last().and_then(|n| notice_art(&library, n)),
-        system: system_vm(kernel, &state),
-        result_prompt: state.result_prompt.as_ref().map(|(key, _)| library.title(key)),
+        boot: boot_vm(s),
+        task: s.library.task.clone(),
+        notice_opens: notices.last().map(|n| notice_opens(&s.plugins, n)).unwrap_or_default(),
+        notice_art: notices.last().and_then(|n| notice_art(&s.library, n)),
+        system: system_vm(s),
+        result_prompt: state.result_prompt.as_ref().map(|(key, _)| s.library.title(key)),
     }
 }
 
@@ -661,22 +329,15 @@ fn badge(plugin: &PluginId, id: &str, text: &str, tone: Tone) -> SlotVm {
     )
 }
 
-fn offer_card(
-    kernel: &Kernel,
-    state: &AppState,
-    library: &LibrarySnapshot,
-    owned: &Ownership,
-    offer: &crate::releases::Offer,
-    today: i64,
-) -> GameCardVm {
-    let mut card = card(kernel, state, library, &offer.entry);
-    card.selected = state.catalog_selected.as_ref() == Some(&offer.entry.key);
+fn offer_card(s: &Snapshot, owned: &Ownership, offer: &crate::releases::Offer) -> GameCardVm {
+    let mut card = card(s, &offer.entry);
+    card.selected = s.state.catalog_selected.as_ref() == Some(&offer.entry.key);
     let best = owned.best_release(offer);
     card.size_bytes = best.size_bytes;
     card.availability = crate::releases::availability(best.seeders).into();
     card.releases = offer.releases.len();
     let installed = owned.installed_game(offer);
-    card.can = game_actions(kernel, library, &offer.entry.key, Some((offer, installed)));
+    card.can = game_actions(s, &offer.entry.key, Some((offer, installed)));
     // A game its store installs has no torrent to be available.
     if offer.releases.iter().any(|r| !r.store.is_empty()) {
         card.availability = String::new();
@@ -687,26 +348,20 @@ fn offer_card(
     }
     if installed.is_some() {
         card.badges.push(badge(plugin, "installed", "Installed", Tone::Success));
-    } else if offer.releases.iter().any(|r| crate::releases::is_new(&r.added, today)) {
+    } else if offer.releases.iter().any(|r| crate::releases::is_new(&r.added, s.today())) {
         card.badges.push(badge(plugin, "new", "New", Tone::Info));
     }
     // Every release is for another system.
-    let here = kernel.host().platform;
+    let here = s.plugins.host().platform;
     if offer.releases.iter().all(|r| !crate::releases::not_here(&r.system, here).is_empty()) {
         card.badges.push(badge(plugin, "not-here", "Can't run here", Tone::Warning));
     }
     card
 }
 
-fn catalog_vm(
-    kernel: &Kernel,
-    state: &AppState,
-    library: &LibrarySnapshot,
-    torrents: &TorrentsSnapshot,
-    installs: &InstallsSnapshot,
-) -> CatalogVm {
-    let name =
-        |plugin: &PluginId| kernel.manifest(plugin).map(|m| m.name.clone()).unwrap_or_else(|_| plugin.to_string());
+/// The Catalog. Only the Catalog shows its grid: `on_screen` off, the last one stands.
+fn catalog_vm(s: &Snapshot, data: &GridData, on_screen: bool) -> CatalogVm {
+    let library = &s.library;
     let sources = library
         .catalogs
         .iter()
@@ -717,7 +372,7 @@ fn catalog_vm(
                 nexus_api::ReleaseSource::Cached => format!("the copy fetched before from {}", l.host),
                 nexus_api::ReleaseSource::Bundled => "the bundled catalog".into(),
             };
-            let mut parts = vec![format!("{}: {copy}", name(&c.emulator))];
+            let mut parts = vec![format!("{}: {copy}", s.plugins.name(&c.emulator))];
             if !l.version.is_empty() {
                 parts.push(format!("version {}", l.version));
             }
@@ -749,11 +404,7 @@ fn catalog_vm(
             .filter_map(|c| crate::releases::days_of(&c.list.updated).map(|_| &c.list.updated[..10]))
             .max()
     };
-    // Only the Catalog shows its grid: on another screen, the last one stands.
-    let games = match &state.catalog_grid {
-        Some(games) if state.nav.last() != Some(&Route::Catalog) => games.clone(),
-        _ => grid_vm(kernel, state, library, torrents, installs, true),
-    };
+    let games = s.state.catalog_grid.get(on_screen).unwrap_or_else(|| grid_vm(s, data, &s.state.catalog_view));
     let buttons = |kind: SlotKind| -> Vec<SlotVm> {
         let all = library.catalog_buttons.iter();
         all.flat_map(|(plugin, items)| slot_vms(plugin, SlotId::CatalogAction, items.clone()))
@@ -761,7 +412,7 @@ fn catalog_vm(
             .collect()
     };
     CatalogVm {
-        available: crate::Core::catalog_available(kernel),
+        available: s.plugins.catalog_available(),
         games,
         sources,
         releases: shown_releases,
@@ -772,14 +423,8 @@ fn catalog_vm(
     }
 }
 
-fn home_vm(
-    kernel: &Kernel,
-    state: &AppState,
-    library: &LibrarySnapshot,
-    torrents: &TorrentsSnapshot,
-    installs: &InstallsSnapshot,
-) -> HomeVm {
-    let games: Vec<GameCardVm> = library.library().map(|e| card(kernel, state, library, e)).collect();
+fn home_vm(s: &Snapshot, data: &GridData) -> HomeVm {
+    let games: Vec<GameCardVm> = s.library.library().map(|e| card(s, e)).collect();
     let selected = games.iter().position(|g| g.selected);
     let mut groups: Vec<GroupVm> = Vec::new();
     for game in &games {
@@ -791,8 +436,8 @@ fn home_vm(
     for group in &mut groups {
         group.selected = group.games.iter().position(|g| g.selected);
     }
-    let grid = grid_vm(kernel, state, library, torrents, installs, false);
-    HomeVm { games, selected, loading: library.loading, groups, library: grid }
+    let grid = grid_vm(s, data, &s.state.library_view);
+    HomeVm { games, selected, loading: s.library.loading, groups, library: grid }
 }
 
 /// A plugin's settings panel, with its fields.
@@ -802,9 +447,9 @@ fn settings_panel_vm(panel: &crate::app::SettingsPanel) -> SettingsPanelVm {
 }
 
 /// A game's own settings, as its Game Hub shows them.
-fn game_settings_vm(kernel: &Kernel, key: &GameKey, settings: &crate::library::GameSettings) -> SettingsPanelVm {
+fn game_settings_vm(plugins: &Plugins, key: &GameKey, settings: &crate::library::GameSettings) -> SettingsPanelVm {
     let plugin = &key.plugin;
-    let name = kernel.manifest(plugin).map(|m| m.emulator_name().to_owned()).unwrap_or_default();
+    let name = plugins.manifest(plugin).map(|m| m.emulator_name().to_owned()).unwrap_or_default();
     let slot = SlotVm {
         slot: SlotId::SettingsPanel,
         plugin: plugin.clone(),
@@ -824,32 +469,23 @@ fn game_settings_vm(kernel: &Kernel, key: &GameKey, settings: &crate::library::G
     SettingsPanelVm { fields: crate::settings_schema::fields(&settings.schema, &settings.values), slot }
 }
 
-fn detail_vm(
-    core: &Core,
-    state: &AppState,
-    library: &LibrarySnapshot,
-    torrents: &TorrentsSnapshot,
-    installs: &InstallsSnapshot,
-    sessions: &SessionsSnapshot,
-    key: &GameKey,
-) -> Option<GameDetailVm> {
-    let kernel = core.kernel();
+fn detail_vm(s: &Snapshot, owned: &Ownership, key: &GameKey) -> Option<GameDetailVm> {
+    let (library, torrents) = (&s.library, &s.torrents);
     let d = library.detail(key)?;
     let details = &d.details;
     let summary = &details.summary;
-    let manifest = kernel.manifest(&key.plugin).ok();
+    let manifest = s.plugins.manifest(&key.plugin);
     let offer = library.offer(key);
-    let owned = Ownership::new(library, &torrents.jobs, installs);
     let has_installer = manifest.is_some_and(|m| m.capabilities.contains(&Capability::Installer));
-    let installed = state.emulators.get(&key.plugin).is_some_and(|e| !e.installed.is_empty());
+    let installed = s.state.emulators.get(&key.plugin).is_some_and(|e| !e.installed.is_empty());
     // A Catalog offer plays as the installed game it is, and not at all before it is installed.
     let installed_as = offer.and_then(|o| owned.installed_game(o));
     let played = installed_as.map(|g| &g.key).unwrap_or(key);
-    let can = game_actions(kernel, library, key, offer.map(|o| (o, installed_as)));
+    let can = game_actions(s, key, offer.map(|o| (o, installed_as)));
     let needs_emulator = has_installer && !installed;
     // The program, not the console: "Launches with the KytyPS5 emulator".
     let name = manifest.map(|m| m.emulator_name().to_owned()).unwrap_or_default();
-    let stats = crate::sessions::play_stats(kernel.config(), key);
+    let stats = s.sessions.plays.of(key);
     let meta = library.meta(key);
     // A release's store data fills in, field by field, what the store's catalog leaves out.
     let metas = library.metadata(key);
@@ -888,23 +524,14 @@ fn detail_vm(
         None if !details.description.is_empty() => details.description.clone(),
         None if facts_line.len() > 1 => facts_line.join(" · "),
         None => match offer {
-            Some(o) => format!(
-                "In the catalog for {}.",
-                kernel.manifest(&o.emulator).map(|m| m.name.clone()).unwrap_or_else(|_| o.emulator.to_string())
-            ),
+            Some(o) => format!("In the catalog for {}.", s.plugins.name(&o.emulator)),
             None => format!("Installed locally. Launches with the {name} emulator."),
         },
     };
     let compatibility = offer.map(crate::releases::compatibility).unwrap_or_default();
-    // Where the offer's downloads go, and the free space there. The console's folder may not
-    // be there yet: the disk that holds it is the one the nearest folder above is on.
-    let download_folder = offer
-        .and_then(|o| core.torrent_folder(&o.emulator, &o.releases[0].platform, "x", None).ok())
-        .and_then(|(_, folder)| folder.parent().map(std::path::Path::to_path_buf));
-    let free = download_folder
-        .as_ref()
-        .and_then(|folder| folder.ancestors().find(|p| p.is_dir()).map(std::path::Path::to_path_buf))
-        .and_then(|folder| kernel.hardware().free_bytes(&folder));
+    // Where the offer's downloads go, and the free space there.
+    let download_folder = offer.and_then(|o| s.state.disks.download_folder(&o.emulator, &o.releases[0].platform));
+    let free = download_folder.and_then(|f| f.free);
     let no_room = |r: &nexus_api::Release| match (r.size_bytes, free) {
         (Some(size), Some(free)) if !torrents.jobs.contains_key(&r.id) => {
             crate::torrents::no_room(size, free, "download folder").unwrap_or_default()
@@ -912,7 +539,7 @@ fn detail_vm(
         _ => String::new(),
     };
     let releases = offer.map_or(&[][..], |o| &o.releases[..]);
-    let (this_pc, pc_warning) = on_this_pc(kernel, state, offer.map_or(&key.plugin, |o| &o.emulator), releases);
+    let (this_pc, pc_warning) = on_this_pc(s, offer.map_or(&key.plugin, |o| &o.emulator), releases);
     // A game that starts here but doesn't fit says so instead, from its best release.
     let this_pc = match (this_pc, offer.map(|o| no_room(owned.best_release(o))), free) {
         (Some(v), Some(short), Some(free)) if v.level != "no" && !short.is_empty() => Some(VerdictVm {
@@ -923,11 +550,12 @@ fn detail_vm(
         }),
         (this_pc, _, _) => this_pc,
     };
+    let home = s.plugins.host().home.as_ref().and_then(|h| h.to_str());
     Some(GameDetailVm {
         key: key.to_string(),
         title: summary.title.clone(),
         platform: summary.platform.clone(),
-        system: system_of(kernel, &summary.platform),
+        system: s.plugins.system(&summary.platform),
         summary: summary_of(&line),
         description,
         developer,
@@ -945,8 +573,8 @@ fn detail_vm(
         this_pc,
         pc_warning,
         your_result: library.result(key).unwrap_or_default().to_owned(),
-        has_folder: details.folder.as_ref().and_then(|f| crate::app::resolve_game_folder(kernel, key, f)).is_some(),
-        has_log: crate::sessions::log_path(&kernel.host().data_dir, key).is_file(),
+        has_folder: s.files.game_folders.contains(key),
+        has_log: s.files.has_log,
         hidden: library.hidden(key),
         compat_page: d.compat.as_ref().and_then(|c| c.page.clone()).unwrap_or_default(),
         trailer_url: meta.map(|(_, m)| m.trailer.clone()).unwrap_or_default(),
@@ -955,18 +583,18 @@ fn detail_vm(
         actions: slot_vms(&key.plugin, SlotId::GameAction, d.actions.clone()),
         sections: slot_vms(&key.plugin, SlotId::GameDetailSection, d.sections.clone()),
         can: can.clone(),
-        settings: d.settings.iter().map(|settings| game_settings_vm(kernel, key, settings)).collect(),
+        settings: d.settings.iter().map(|settings| game_settings_vm(&s.plugins, key, settings)).collect(),
         launch_hint: if can.play && needs_emulator { format!("Play installs {name} first") } else { String::new() },
-        running: sessions.runs(played),
+        running: s.sessions.runs(played),
         size_bytes: details.size_bytes,
         facts: details.facts.clone(),
         played_secs: stats.secs,
-        last_played_days: (stats.count > 0).then(|| crate::sessions::days_since(stats.last)),
+        last_played_days: last_played_days(s, key),
         // No plugin reports a shader cache: the plugin API has no seam for one.
         shader_cache: None,
         releases: offer
             .map(|o| {
-                let today = crate::releases::today();
+                let today = s.today();
                 let best = &owned.best_release(o).id;
                 // By version, highest first; of one version, the newest upload first. A release
                 // its store installs is no use once the game is installed.
@@ -989,7 +617,7 @@ fn detail_vm(
                         counted_at: r.counted_at.clone(),
                         availability: crate::releases::availability(r.seeders).into(),
                         id: r.id.clone(),
-                        store: if r.store.is_empty() { String::new() } else { system_of(kernel, &r.platform).name },
+                        store: if r.store.is_empty() { String::new() } else { s.plugins.system(&r.platform).name },
                         version: r.version.clone(),
                         region: r.region.clone(),
                         size_bytes: r.size_bytes,
@@ -997,7 +625,7 @@ fn detail_vm(
                         new: crate::releases::is_new(&r.added, today),
                         description: r.description.clone(),
                         system: crate::releases::system_label(&r.system).into(),
-                        not_here: crate::releases::not_here(&r.system, kernel.host().platform),
+                        not_here: crate::releases::not_here(&r.system, s.plugins.host().platform),
                         warning: r.install_warning.clone().unwrap_or_default(),
                         no_room: no_room(r),
                         download: torrents.jobs.get(&r.id).map(|j| j.state.as_str().to_owned()).unwrap_or_default(),
@@ -1012,15 +640,10 @@ fn detail_vm(
             .unwrap_or_default(),
         emulator: offer
             .map(|o| {
-                kernel
-                    .manifest(&o.emulator)
-                    .map(|m| m.emulator_name().to_owned())
-                    .unwrap_or_else(|_| o.emulator.to_string())
+                s.plugins.manifest(&o.emulator).map_or_else(|| o.emulator.to_string(), |m| m.emulator_name().to_owned())
             })
             .unwrap_or_default(),
-        download_folder: download_folder
-            .map(|p| short_home(&p.display().to_string(), kernel.host().home.as_ref().and_then(|h| h.to_str())))
-            .unwrap_or_default(),
+        download_folder: download_folder.map(|f| short_home(&f.path.display().to_string(), home)).unwrap_or_default(),
         availability: offer
             .map(|o| crate::releases::availability(owned.best_release(o).seeders).to_owned())
             .unwrap_or_default(),
@@ -1036,16 +659,11 @@ fn detail_vm(
 /// How `emulator`'s games run on this PC, and why they won't start, if they won't. An offer
 /// whose `releases` are all for another system won't start, whatever the emulator needs.
 /// `None` before the check, for a plugin that isn't an emulator, and when the system can't say.
-fn on_this_pc(
-    kernel: &Kernel,
-    state: &AppState,
-    emulator: &PluginId,
-    releases: &[nexus_api::Release],
-) -> (Option<VerdictVm>, String) {
-    let Some(manifest) = kernel.manifest(emulator).ok().filter(|m| m.kind == PluginKind::Emulator) else {
+fn on_this_pc(s: &Snapshot, emulator: &PluginId, releases: &[nexus_api::Release]) -> (Option<VerdictVm>, String) {
+    let Some(manifest) = s.plugins.manifest(emulator).filter(|m| m.kind == PluginKind::Emulator) else {
         return (None, String::new());
     };
-    let here = kernel.host().platform;
+    let here = s.plugins.host().platform;
     if !releases.is_empty() && releases.iter().all(|r| !crate::releases::not_here(&r.system, here).is_empty()) {
         let mut systems: Vec<&str> = Vec::new();
         for label in releases.iter().map(|r| crate::releases::system_label(&r.system)) {
@@ -1061,7 +679,7 @@ fn on_this_pc(
             String::new(),
         );
     }
-    let Some(specs) = &state.hardware else { return (None, String::new()) };
+    let Some(specs) = &s.state.hardware else { return (None, String::new()) };
     let verdict = crate::hardware::verdict(specs, &manifest.requires);
     let warning = match &verdict {
         crate::hardware::Verdict::Unknown(_) => return (None, String::new()),
@@ -1074,14 +692,8 @@ fn on_this_pc(
     )
 }
 
-fn downloads_vm(
-    kernel: &Kernel,
-    jobs: Vec<Job>,
-    state: &AppState,
-    library: &LibrarySnapshot,
-    torrents: &TorrentsSnapshot,
-    installs: &InstallsSnapshot,
-) -> DownloadsVm {
+fn downloads_vm(s: &Snapshot, owned: &Ownership) -> DownloadsVm {
+    let (torrents, installs) = (&s.torrents, &s.installs);
     // Game installs, newest first, then the downloads. A catalog download's install shows on
     // the download's own card (`torrent_vm`), so it has no card of its own.
     let on_a_card = |j: &crate::game_installs::GameJob| {
@@ -1106,7 +718,7 @@ fn downloads_vm(
         can_resume: false,
         can_cancel: j.phase == crate::game_installs::GamePhase::Installing,
     });
-    let downloads = jobs.into_iter().rev().map(|j| DownloadVm {
+    let downloads = s.downloads.iter().rev().cloned().map(|j| DownloadVm {
         id: j.id.0,
         progress: match j.total {
             Some(t) if t > 0 => (j.received as f32 / t as f32).min(1.0),
@@ -1123,35 +735,36 @@ fn downloads_vm(
         can_cancel: !j.phase.is_over(),
     });
     let jobs = install_jobs.chain(downloads).collect();
-    let home = kernel.host().home.as_ref().and_then(|h| h.to_str()).map(str::to_owned);
-    let owned = Ownership::new(library, &torrents.jobs, installs);
+    let home = s.plugins.host().home.as_ref().and_then(|h| h.to_str()).map(str::to_owned);
     let mut cards: Vec<TorrentVm> = torrents
         .jobs
         .values()
         .map(|j| TorrentVm {
             folder: short_home(&j.folder.display().to_string(), home.as_deref()),
-            install_note: install_note(kernel, &j.emulator),
-            install_folder: crate::release_downloads::install_folder(kernel, &j.emulator, None)
-                .map(|(_, path)| short_home(&path.display().to_string(), home.as_deref()))
+            install_note: install_note(&s.plugins, &j.emulator),
+            install_folder: s
+                .files
+                .install_folders
+                .get(&j.emulator)
+                .map(|path| short_home(&path.display().to_string(), home.as_deref()))
                 .unwrap_or_default(),
-            ..torrent_vm(library, installs, &owned, j)
+            ..torrent_vm(&s.library, installs, owned, j)
         })
         .collect();
     cards.reverse();
     // The installs stores do (Steam's), after the downloads: the same cards, with the store's
     // own page as their one action.
-    cards.extend(state.store_installs.iter().map(|(plugin, install)| store_install_vm(kernel, plugin, install)));
+    cards.extend(s.state.store_installs.iter().map(|(plugin, install)| store_install_vm(&s.plugins, plugin, install)));
     let downloading = torrents.jobs.values().filter(|j| j.state.active()).count();
     let sharing = torrents.jobs.values().filter(|j| j.seeding).count();
     DownloadsVm { jobs, torrents: cards, seeding: torrents.sharing, downloading, sharing }
 }
 
 /// A store's install as a Downloads card: its phase and bytes, and the store's page.
-fn store_install_vm(kernel: &Kernel, plugin: &PluginId, install: &nexus_api::StoreInstall) -> TorrentVm {
+fn store_install_vm(plugins: &Plugins, plugin: &PluginId, install: &nexus_api::StoreInstall) -> TorrentVm {
     use nexus_api::StorePhase as P;
-    let store = kernel
+    let store = plugins
         .manifest(plugin)
-        .ok()
         .and_then(|m| m.system.as_ref().map(|s| s.name.clone()))
         .unwrap_or_else(|| plugin.to_string());
     let part =
@@ -1178,8 +791,8 @@ fn store_install_vm(kernel: &Kernel, plugin: &PluginId, install: &nexus_api::Sto
 }
 
 /// What `emulator` installs from, as its manifest says, then what the host does first.
-fn install_note(kernel: &Kernel, emulator: &PluginId) -> String {
-    let own = kernel.manifest(emulator).map(|m| m.install_note.clone()).unwrap_or_default();
+fn install_note(plugins: &Plugins, emulator: &PluginId) -> String {
+    let own = plugins.manifest(emulator).map(|m| m.install_note.clone()).unwrap_or_default();
     let archives =
         "Nexus first unpacks the RAR, ZIP, 7z and TAR archives in the download, but not one with a password.";
     if own.is_empty() { archives.to_owned() } else { format!("{own} {archives}") }
@@ -1311,11 +924,11 @@ fn job_text(job: &crate::system::JobState) -> nexus_ui_api::SystemJobVm {
     vm
 }
 
-fn system_vm(kernel: &crate::Kernel, state: &AppState) -> nexus_ui_api::SystemVm {
+fn system_vm(s: &Snapshot) -> nexus_ui_api::SystemVm {
     use nexus_api::{Capability, Connection, OsUpdate};
     use nexus_ui_api::{AudioOutputVm, BluetoothDeviceVm, InstallDiskVm, SystemJobVm, WifiVm};
-    let system = &state.system;
-    let place = kernel.host().place;
+    let system = &s.state.system;
+    let place = s.plugins.host().place;
     let reason = |c: Capability| system.unavailable(c);
     let network = system.network.clone().unwrap_or_default();
     let (os_update, os_update_text) = match &system.os_update {
@@ -1441,60 +1054,54 @@ fn launcher_update_vm(update: &crate::launcher_update::LauncherUpdateSnapshot) -
     nexus_ui_api::LauncherUpdateVm { state: state.into(), current, version, text, method: update.method.to_owned() }
 }
 
-fn settings_vm(
-    core: &Core,
-    prefs: &PreferencesSnapshot,
-    state: &AppState,
-    launcher_update: &crate::launcher_update::LauncherUpdateSnapshot,
-    vpn: &crate::vpn::VpnSnapshot,
-) -> SettingsVm {
-    let kernel = core.kernel();
-    let manifests: Vec<_> = kernel
+fn settings_vm(s: &Snapshot) -> SettingsVm {
+    let (plugins, state, prefs) = (&s.plugins, &s.state, &s.prefs);
+    let manifests: Vec<_> = plugins
         .of_kind(PluginKind::Emulator)
         .into_iter()
         .filter_map(|id| {
-            kernel.manifest(&id).ok().filter(|m| m.capabilities.contains(&Capability::Launcher)).map(|m| (id, m))
+            plugins.manifest(&id).filter(|m| m.capabilities.contains(&Capability::Launcher)).map(|m| (id, m))
         })
         .collect();
     let hardware = crate::hardware::hardware_vm(
         state.hardware.as_ref(),
         manifests.iter().map(|(id, m)| (id.to_string(), m.name.clone(), &m.requires)),
     );
-    let themes = kernel
+    let themes = plugins
         .of_kind(PluginKind::Theme)
         .into_iter()
         .map(|id| ThemeChoiceVm {
-            name: kernel.manifest(&id).map(|m| m.name.clone()).unwrap_or_default(),
+            name: plugins.manifest(&id).map(|m| m.name.clone()).unwrap_or_default(),
             current: state.theme.as_ref() == Some(&id),
             id,
         })
         .collect();
     let theme_options = match &state.theme {
         Some(theme) => {
-            let chain = theme_chain(kernel, theme);
+            let chain = theme_chain(plugins, theme);
             let refs: Vec<&ThemeManifest> = chain.iter().collect();
             let schema = options_schema(&merge_options(&refs));
-            crate::settings_schema::fields(&schema, &core.theme_options(theme))
+            crate::settings_schema::fields(&schema, &s.theme_options)
         }
         None => Vec::new(),
     };
     SettingsVm {
-        launcher_update: launcher_update_vm(launcher_update),
+        launcher_update: launcher_update_vm(&s.launcher_update),
         hardware,
         panels: state.settings.iter().map(settings_panel_vm).collect(),
         themes,
         theme_options,
         // The game folders. The other folders are on the pages of the plugins that ask for them.
-        folders: folders_vm(kernel).into_iter().filter(|f| nexus_api::shared_folder(&f.name).is_some()).collect(),
+        folders: folders_vm(s).into_iter().filter(|f| nexus_api::shared_folder(&f.name).is_some()).collect(),
         sounds: prefs.sounds,
         fullscreen: prefs.fullscreen,
         return_on_exit: prefs.return_on_exit,
         auto_update: prefs.auto_update,
         scale: prefs.scale,
-        can_start_at_login: kernel.login_session().can_start_at_login(),
+        can_start_at_login: s.can_start_at_login,
         start_at_login: prefs.start_at_login,
         start_at_login_error: prefs.start_at_login_error.clone().unwrap_or_default(),
-        vpn: vpn_vm(vpn),
+        vpn: vpn_vm(&s.vpn),
     }
 }
 
@@ -1520,17 +1127,16 @@ fn vpn_vm(vpn: &crate::vpn::VpnSnapshot) -> nexus_ui_api::VpnSettingsVm {
     }
 }
 
-fn folders_vm(kernel: &Kernel) -> Vec<FolderVm> {
+fn folders_vm(s: &Snapshot) -> Vec<FolderVm> {
+    let (plugins, host) = (&s.plugins, s.plugins.host());
     let mut by_name: BTreeMap<String, FolderVm> = BTreeMap::new();
-    for plugin in kernel.order() {
-        let Ok(manifest) = kernel.manifest(plugin) else { continue };
+    for plugin in plugins.order() {
+        let Some(manifest) = plugins.manifest(plugin) else { continue };
         for grant in &manifest.permissions.filesystem {
-            let home = kernel.host().home.as_deref();
+            let home = host.home.as_deref();
             let folder = by_name.entry(grant.folder.clone()).or_insert_with(|| {
-                let paths: Vec<String> = crate::folders::roots(kernel.config(), home, kernel.host().platform, grant)
-                    .iter()
-                    .map(|p| p.display().to_string())
-                    .collect();
+                let roots = s.files.roots.get(&grant.folder).map(Vec::as_slice).unwrap_or_default();
+                let paths: Vec<String> = roots.iter().map(|p| p.display().to_string()).collect();
                 FolderVm {
                     name: grant.folder.clone(),
                     title: String::new(),
@@ -1544,8 +1150,7 @@ fn folders_vm(kernel: &Kernel) -> Vec<FolderVm> {
                 }
             });
             if folder.default.is_empty()
-                && let Some(default) =
-                    grant.default_path(kernel.host().platform).and_then(|d| crate::folders::expand(d, home))
+                && let Some(default) = grant.default_path(host.platform).and_then(|d| crate::folders::expand(d, home))
             {
                 folder.default = default.display().to_string();
             }
@@ -1563,7 +1168,7 @@ fn folders_vm(kernel: &Kernel) -> Vec<FolderVm> {
             folder.write |= grant.write;
         }
     }
-    let home = kernel.host().home.as_deref().map(|h| h.display().to_string());
+    let home = host.home.as_deref().map(|h| h.display().to_string());
     by_name
         .into_values()
         .map(|mut f| {
@@ -1587,36 +1192,37 @@ fn short_home(path: &str, home: Option<&str>) -> String {
     }
 }
 
-fn emulators_vm(kernel: &Kernel, state: &AppState, statuses: &BTreeMap<PluginId, PluginStatus>) -> EmulatorsVm {
+fn emulators_vm(s: &Snapshot) -> EmulatorsVm {
+    let (plugins, state) = (&s.plugins, &s.state);
     let manages_an_emulator = |id: &PluginId| {
-        kernel.manifest(id).is_ok_and(|m| {
+        plugins.manifest(id).is_some_and(|m| {
             m.capabilities.contains(&Capability::Installer) || m.capabilities.contains(&Capability::Launcher)
         })
     };
-    let emulators = kernel
+    let emulators = plugins
         .of_kind(PluginKind::Emulator)
         .into_iter()
         .filter(manages_an_emulator)
         .map(|id| {
             let emu = state.emulators.get(&id).cloned().unwrap_or_default();
             EmulatorVm {
-                name: kernel.manifest(&id).map(|m| m.emulator_name().to_owned()).unwrap_or_default(),
-                status: status_text(statuses.get(&id)),
-                has_builds: kernel.manifest(&id).is_ok_and(|m| m.capabilities.contains(&Capability::Installer)),
-                update: update_for(&emu),
+                name: plugins.manifest(&id).map(|m| m.emulator_name().to_owned()).unwrap_or_default(),
+                status: status_text(plugins.status(&id)),
+                has_builds: plugins.manifest(&id).is_some_and(|m| m.capabilities.contains(&Capability::Installer)),
+                update: emu.update(),
                 installed: emu.installed,
                 available: emu.available,
                 busy: emu.busy,
                 panels: slot_vms(&id, SlotId::EmulatorPanel, emu.panels),
-                controllers: controllers(kernel.manifest(&id).ok()),
+                controllers: controllers(plugins.manifest(&id)),
                 plugin: id,
             }
         })
         .collect();
-    let plugins = kernel
+    let rows = plugins
         .order()
         .iter()
-        .filter_map(|id| kernel.manifest(id).ok().map(|m| (id, m)))
+        .filter_map(|id| plugins.manifest(id).map(|m| (id, m)))
         .map(|(id, m)| PluginRowVm {
             id: id.clone(),
             name: m.name.clone(),
@@ -1627,15 +1233,15 @@ fn emulators_vm(kernel: &Kernel, state: &AppState, statuses: &BTreeMap<PluginId,
                 PluginKind::Theme => "theme".into(),
             },
             version: m.version.to_string(),
-            status: status_text(statuses.get(id)),
-            enabled: kernel.enabled(id),
+            status: status_text(plugins.status(id)),
+            enabled: plugins.enabled(id),
             build: state.emulators.get(id).and_then(|e| e.installed.last().cloned()).unwrap_or_default(),
             build_label: build_label(
                 m.emulator_name(),
                 state.emulators.get(id).and_then(|e| e.installed.last()).map_or("", String::as_str),
             ),
             has_builds: m.capabilities.contains(&Capability::Installer),
-            note: if kernel.elsewhere(id) {
+            note: if plugins.elsewhere(id) {
                 let names: Vec<&str> = m
                     .platforms
                     .iter()
@@ -1651,7 +1257,7 @@ fn emulators_vm(kernel: &Kernel, state: &AppState, statuses: &BTreeMap<PluginId,
             },
         })
         .collect();
-    EmulatorsVm { emulators, plugins }
+    EmulatorsVm { emulators, plugins: rows }
 }
 
 /// `build` with the program's name `emulator` once: "shadPS4 v.0.20.0", and
@@ -1669,13 +1275,9 @@ fn build_label(emulator: &str, build: &str) -> String {
     }
 }
 
-fn plugin_page_vm(
-    kernel: &Kernel,
-    state: &AppState,
-    statuses: &BTreeMap<PluginId, PluginStatus>,
-    plugin: &PluginId,
-) -> Option<PluginPageVm> {
-    let all = emulators_vm(kernel, state, statuses);
+fn plugin_page_vm(s: &Snapshot, plugin: &PluginId) -> Option<PluginPageVm> {
+    let state = &s.state;
+    let all = emulators_vm(s);
     let row = all.plugins.into_iter().find(|p| &p.id == plugin)?;
     if !row.enabled {
         return Some(PluginPageVm {
@@ -1686,7 +1288,8 @@ fn plugin_page_vm(
             folders: Vec::new(),
         });
     }
-    let asks: Vec<&str> = kernel
+    let asks: Vec<&str> = s
+        .plugins
         .manifest(plugin)
         .map(|m| m.permissions.filesystem.iter().map(|g| g.folder.as_str()).collect())
         .unwrap_or_default();
@@ -1698,7 +1301,7 @@ fn plugin_page_vm(
             .get(plugin)
             .map(|e| slot_vms(plugin, SlotId::EmulatorPanel, e.panels.clone()))
             .unwrap_or_default(),
-        folders: folders_vm(kernel)
+        folders: folders_vm(s)
             .into_iter()
             .filter(|f| nexus_api::shared_folder(&f.name).is_none() && asks.contains(&f.name.as_str()))
             .collect(),
@@ -1709,7 +1312,8 @@ fn plugin_page_vm(
 /// The most covers the boot screen's wall shows.
 const BOOT_COVERS: usize = 30;
 
-fn boot_vm(kernel: &Kernel, prefs: &PreferencesSnapshot, state: &AppState, library: &LibrarySnapshot) -> BootVm {
+fn boot_vm(s: &Snapshot) -> BootVm {
+    let library = &s.library;
     let ready = library.booted;
     let games = library.library().count();
     let step = |label: String, detail: String| BootStepVm {
@@ -1718,8 +1322,8 @@ fn boot_vm(kernel: &Kernel, prefs: &PreferencesSnapshot, state: &AppState, libra
         state: if ready { "done".into() } else { "working".into() },
     };
     let mut steps = vec![step("Game folders".into(), if ready { Look::games(games) } else { "Looking…".into() })];
-    for (plugin, emu) in &state.emulators {
-        let Ok(manifest) = kernel.manifest(plugin) else { continue };
+    for (plugin, emu) in &s.state.emulators {
+        let Some(manifest) = s.plugins.manifest(plugin) else { continue };
         if !manifest.capabilities.contains(&Capability::Installer) {
             continue;
         }
@@ -1727,7 +1331,7 @@ fn boot_vm(kernel: &Kernel, prefs: &PreferencesSnapshot, state: &AppState, libra
             "Your own build"
         } else if emu.installed.is_empty() {
             "Installs on first play"
-        } else if update_for(emu).is_some() {
+        } else if emu.update().is_some() {
             "Update available"
         } else {
             "Latest build"
@@ -1750,7 +1354,7 @@ fn boot_vm(kernel: &Kernel, prefs: &PreferencesSnapshot, state: &AppState, libra
     steps.push(step("Covers & Home screen".into(), if ready { "Ready".into() } else { "Loading…".into() }));
     BootVm {
         ready,
-        welcome: !prefs.welcomed,
+        welcome: !s.prefs.welcomed,
         progress: if ready {
             1.0
         } else if library.loading {
@@ -1779,13 +1383,14 @@ impl Look {
 }
 
 /// The game on the Running screen, or else the newest one still running.
-fn running_vm(kernel: &Kernel, sessions: &SessionsSnapshot, route: &Route) -> Option<RunningVm> {
+fn running_vm(snapshot: &Snapshot, route: &Route) -> Option<RunningVm> {
+    let sessions = &snapshot.sessions;
     let session = match route {
         Route::Running(session) => *session,
         _ => *sessions.sessions.keys().next_back()?,
     };
     let s = sessions.sessions.get(&session)?;
-    let manifest = kernel.manifest(&s.game.plugin).ok();
+    let manifest = snapshot.plugins.manifest(&s.game.plugin);
     Some(RunningVm {
         session: session.0,
         key: s.game.to_string(),
@@ -1799,21 +1404,21 @@ fn running_vm(kernel: &Kernel, sessions: &SessionsSnapshot, route: &Route) -> Op
         } else {
             "starting".into()
         },
-        elapsed_secs: kernel.clock().now().saturating_duration_since(s.started).as_secs(),
+        elapsed_secs: snapshot.now.saturating_duration_since(s.started).as_secs(),
         in_front: sessions.game_in_front,
         keymap: manifest.map(|m| m.keymap.clone()).unwrap_or_default(),
     })
 }
 
 /// A theme's manifest and its parents' (the theme first). Stops at a missing or bad manifest.
-fn theme_chain(kernel: &crate::Kernel, theme: &PluginId) -> Vec<ThemeManifest> {
+fn theme_chain(plugins: &Plugins, theme: &PluginId) -> Vec<ThemeManifest> {
     let mut chain: Vec<ThemeManifest> = Vec::new();
     let mut next = Some(theme.clone());
     while let Some(id) = next.take() {
         if chain.iter().any(|m| m.id() == &id) {
             break;
         }
-        let Some(manifest) = kernel.manifest(&id).ok().and_then(|m| ThemeManifest::from_plugin(m).ok()) else { break };
+        let Some(manifest) = plugins.manifest(&id).and_then(|m| ThemeManifest::from_plugin(m).ok()) else { break };
         next = manifest.theme.extends.clone();
         chain.push(manifest);
     }

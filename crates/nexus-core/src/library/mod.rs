@@ -93,6 +93,17 @@ pub(crate) struct GameRecord {
     pub offer_art: Option<PluginImage>,
 }
 
+/// A plugin's image as the theme host fetches it.
+pub(crate) fn image_ref(plugin: &PluginId, source: &nexus_api::ImageSource) -> nexus_ui_api::ImageRef {
+    use nexus_api::ImageSource;
+    use nexus_ui_api::ImageRef;
+    match source {
+        ImageSource::Url(url) => ImageRef::Url { plugin: plugin.clone(), url: url.clone() },
+        ImageSource::Asset(path) => ImageRef::PluginAsset { plugin: plugin.clone(), path: path.clone() },
+        ImageSource::Folder(path) => ImageRef::Folder { plugin: plugin.clone(), path: path.clone() },
+    }
+}
+
 /// Sorts games by title, as the Library shows them.
 pub(crate) fn sort_by_title(library: &mut [Entry]) {
     library.sort_by(|a, b| a.summary.title.to_lowercase().cmp(&b.summary.title.to_lowercase()).then(a.key.cmp(&b.key)));

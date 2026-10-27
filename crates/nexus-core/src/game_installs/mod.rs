@@ -164,7 +164,7 @@ impl TorrentDownloads for crate::torrents::TorrentsSubsystem {
     }
 
     fn jobs(&self) -> Vec<TorrentJob> {
-        self.snapshot().jobs.into_values().collect()
+        self.snapshot().jobs.values().cloned().collect()
     }
 
     fn hand_off(&self, id: &str, change: &mut dyn FnMut(&TorrentState, &mut HandOff)) -> bool {
