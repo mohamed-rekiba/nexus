@@ -31,6 +31,7 @@ mod release_downloads;
 mod releases;
 mod resolve;
 mod running;
+mod sessions;
 mod storage;
 pub mod system;
 mod themes;
@@ -59,6 +60,7 @@ pub use ports::{
     UnpackProgress, Vpn, Windows,
 };
 pub use preferences::{MAX_SCALE, MIN_SCALE, Pref, PrefKind, PrefSpec, PreferencesSnapshot};
+pub use sessions::SessionCmd;
 pub use storage::DirStorage;
 pub use themes::{DataTheme, DirFiles};
 pub use torrents::{TorrentAction, TorrentCmd};

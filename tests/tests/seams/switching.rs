@@ -3,7 +3,7 @@
 use crate::common::*;
 use futures::StreamExt;
 use nexus_api::Event;
-use nexus_core::{Command, Route};
+use nexus_core::{Command, Route, SessionCmd};
 use nexus_ui_api::ThemeError;
 use nexus_ui_host::{UiRequest, vm_text};
 use slint_interpreter::{ComponentHandle, Value};
@@ -27,7 +27,7 @@ fn switching_keeps_screen_selection_and_running_games() {
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::Select("emu-a:G1".parse().unwrap()));
-    host.dispatch(Command::Launch("emu-a:G2".parse().unwrap()));
+    host.dispatch(Command::Session(SessionCmd::Launch("emu-a:G2".parse().unwrap())));
     host.dispatch(Command::OpenGame("emu-a:G1".parse().unwrap()));
 
     for theme in ["fixture-grid", "default"] {

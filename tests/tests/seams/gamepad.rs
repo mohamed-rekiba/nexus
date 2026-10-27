@@ -1,7 +1,7 @@
 //! Seam 3, composed host: a gamepad drives the default theme through the keys it already handles.
 
 use crate::common::*;
-use nexus_core::{Command, Route};
+use nexus_core::{Command, Route, SessionCmd};
 use nexus_ui_api::ScreenId;
 use nexus_ui_host::{PadButton, vm_text};
 
@@ -75,7 +75,7 @@ fn while_a_game_is_in_front_the_pad_is_the_game_s_and_a_ps_button_tap_too() {
     let mut host = composed(|h| h.plugin(playable_games("emu-a", vec!["Alpha"])));
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
-    host.dispatch(Command::Launch("emu-a:G0".parse().unwrap()));
+    host.dispatch(Command::Session(SessionCmd::Launch("emu-a:G0".parse().unwrap())));
     watch_until(&mut host, "the game is in front", |core| core.game_in_front());
     assert_eq!(host.core().view().screen, ScreenId::Running);
     let process = host.test.spawner.spawned()[0].clone();
@@ -98,7 +98,7 @@ fn holding_the_ps_button_closes_a_running_game_at_once_and_opens_no_power_menu()
     let mut host = composed(|h| h.plugin(playable_games("emu-a", vec!["Alpha"])));
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
-    host.dispatch(Command::Launch("emu-a:G0".parse().unwrap()));
+    host.dispatch(Command::Session(SessionCmd::Launch("emu-a:G0".parse().unwrap())));
     watch_until(&mut host, "the game is in front", |core| core.game_in_front());
     let process = host.test.spawner.spawned()[0].clone();
     host.pump();
@@ -135,7 +135,7 @@ fn after_a_game_closes_the_launcher_asks_how_far_it_got() {
     let mut host = composed(|h| h.plugin(playable_games("emu-a", vec!["Alpha"])));
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
-    host.dispatch(Command::Launch("emu-a:G0".parse().unwrap()));
+    host.dispatch(Command::Session(SessionCmd::Launch("emu-a:G0".parse().unwrap())));
     watch_until(&mut host, "the game is in front", |core| core.game_in_front());
     host.pump();
     host.test.spawner.spawned()[0].exit(0);

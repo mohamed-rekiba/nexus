@@ -7,7 +7,7 @@ use std::time::Duration;
 use emu_kyty::{COMPATIBILITY, KytyPlugin, RELEASES};
 use futures::StreamExt;
 use nexus_api::*;
-use nexus_core::{Area, Command, Route};
+use nexus_core::{Area, Command, Route, SessionCmd};
 use nexus_testkit::{FakeHost, FakeHttp, TestCore, contract};
 
 #[test]
@@ -147,7 +147,7 @@ async fn a_build_installs_from_github_and_a_game_launches_with_its_folder() {
         use std::os::unix::fs::PermissionsExt;
         assert_eq!(std::fs::metadata(&binary).unwrap().permissions().mode() & 0o111, 0o111, "made executable");
     }
-    k.test.core.dispatch(Command::Launch("emu-kyty:PPSA05678".parse().unwrap())).await.unwrap();
+    k.test.core.dispatch(Command::Session(SessionCmd::Launch("emu-kyty:PPSA05678".parse().unwrap()))).await.unwrap();
 
     let process = k.test.spawner.wait_for(1).await;
     assert_eq!(process.command.program, binary);
@@ -185,7 +185,7 @@ async fn saves_and_caches_move_to_the_new_build_on_an_update_and_back_on_a_rollb
         Command::RunAction { plugin: kyty(), action: "rollback".into(), game: None, args: serde_json::Value::Null };
     core.dispatch(rollback).await.unwrap();
     assert_eq!(std::fs::read(work_dir(&k.test, V1).join("_SaveData/PPSA01234/save.dat")).unwrap(), b"progress");
-    core.dispatch(Command::Launch("emu-kyty:PPSA01234".parse().unwrap())).await.unwrap();
+    core.dispatch(Command::Session(SessionCmd::Launch("emu-kyty:PPSA01234".parse().unwrap()))).await.unwrap();
     assert_eq!(k.test.spawner.wait_for(1).await.command.cwd, work_dir(&k.test, V1));
 
     // Removing the current build parks the data; the next install picks it up.
@@ -217,7 +217,7 @@ async fn a_new_build_that_does_not_run_here_is_removed_and_the_saves_stay_with_t
     assert!(!k.test.data_dir().join("plugins/emu-kyty/builds").join(V2).exists(), "the broken build goes");
     assert_eq!(core.view().emulators.emulators[0].installed, [V1]);
     assert_eq!(std::fs::read(work_dir(&k.test, V1).join("_SaveData/PPSA01234/save.dat")).unwrap(), b"progress");
-    core.dispatch(Command::Launch("emu-kyty:PPSA01234".parse().unwrap())).await.unwrap();
+    core.dispatch(Command::Session(SessionCmd::Launch("emu-kyty:PPSA01234".parse().unwrap()))).await.unwrap();
     let process = k.test.spawner.wait_for(1).await;
     assert_eq!(process.command.program, work_dir(&k.test, V1).join("kyty_emulator"), "games start on the build before");
 }
@@ -334,7 +334,7 @@ async fn your_own_build_runs_games_from_its_folder_and_shows_its_version() {
     let emu = view.emulators.emulators.iter().find(|e| e.plugin == kyty()).unwrap();
     assert_eq!(emu.installed, ["Your own build · 2026-09-29 (6799ecb)"]);
 
-    k.test.core.dispatch(Command::Launch("emu-kyty:PPSA05678".parse().unwrap())).await.unwrap();
+    k.test.core.dispatch(Command::Session(SessionCmd::Launch("emu-kyty:PPSA05678".parse().unwrap()))).await.unwrap();
     let process = k.test.spawner.wait_for(1).await;
     let release = own.path().join("_Build/release-linux");
     assert_eq!(process.command.program, release.join("kyty_emulator"));
@@ -352,7 +352,7 @@ async fn your_own_build_can_be_mapped_as_the_program_itself() {
     k.test.core.dispatch(folders).await.unwrap();
     k.test.core.dispatch(set("own_build", "true")).await.unwrap();
 
-    k.test.core.dispatch(Command::Launch("emu-kyty:PPSA05678".parse().unwrap())).await.unwrap();
+    k.test.core.dispatch(Command::Session(SessionCmd::Launch("emu-kyty:PPSA05678".parse().unwrap()))).await.unwrap();
     let process = k.test.spawner.wait_for(1).await;
     assert_eq!(process.command.program, program);
     assert_eq!(process.command.cwd, dir.path(), "its data next to it");
@@ -371,7 +371,7 @@ async fn a_kyty_on_the_path_is_found_and_can_be_chosen() {
     assert!(offer.text.contains("/opt/kyty/kyty_emulator"), "{}", offer.text);
 
     k.test.core.dispatch(action("use-own")).await.unwrap();
-    k.test.core.dispatch(Command::Launch("emu-kyty:PPSA01234".parse().unwrap())).await.unwrap();
+    k.test.core.dispatch(Command::Session(SessionCmd::Launch("emu-kyty:PPSA01234".parse().unwrap()))).await.unwrap();
     let process = k.test.spawner.wait_for(1).await;
     assert_eq!(process.command.program, Path::new("kyty_emulator"), "run from PATH, by name");
 }
@@ -382,7 +382,12 @@ async fn own_build_on_without_one_says_to_turn_it_off_when_a_build_is_downloaded
     k.test.core.dispatch(Command::InstallEmulator { plugin: kyty(), version: None }).await.unwrap();
     k.test.core.dispatch(set("own_build", "true")).await.unwrap();
 
-    let err = k.test.core.dispatch(Command::Launch("emu-kyty:PPSA01234".parse().unwrap())).await.unwrap_err();
+    let err = k
+        .test
+        .core
+        .dispatch(Command::Session(SessionCmd::Launch("emu-kyty:PPSA01234".parse().unwrap())))
+        .await
+        .unwrap_err();
 
     // The plugin says what is missing; the core words it, with the emulator's page.
     let notices = k.test.core.view().notices;
@@ -404,7 +409,7 @@ async fn switching_to_official_builds_brings_your_saves_along() {
     let copied = work_dir(&k.test, V1).join("_SaveData/PPSA01234/save.dat");
     assert_eq!(std::fs::read(copied).unwrap(), b"own progress");
     assert!(saves.join("save.dat").is_file(), "your build's saves stay where they were");
-    k.test.core.dispatch(Command::Launch("emu-kyty:PPSA01234".parse().unwrap())).await.unwrap();
+    k.test.core.dispatch(Command::Session(SessionCmd::Launch("emu-kyty:PPSA01234".parse().unwrap()))).await.unwrap();
     assert_eq!(k.test.spawner.wait_for(1).await.command.program, work_dir(&k.test, V1).join("kyty_emulator"));
 }
 
@@ -463,7 +468,7 @@ async fn a_choice_setting_is_saved_and_reaches_the_command_line() {
     let k = boot(&[V1]).await;
     k.test.core.dispatch(Command::InstallEmulator { plugin: kyty(), version: None }).await.unwrap();
     k.test.core.dispatch(set("present_mode", "Fifo")).await.unwrap();
-    k.test.core.dispatch(Command::Launch("emu-kyty:PPSA01234".parse().unwrap())).await.unwrap();
+    k.test.core.dispatch(Command::Session(SessionCmd::Launch("emu-kyty:PPSA01234".parse().unwrap()))).await.unwrap();
     let args = k.test.spawner.wait_for(1).await.command.args;
     let at = args.iter().position(|a| a == "--present-mode").expect("the present mode");
     assert_eq!(args[at + 1], "Fifo");
@@ -728,7 +733,8 @@ async fn a_turned_off_plugin_has_no_games_and_cannot_launch_until_turned_on_agai
 
     core.dispatch(Command::SetPluginEnabled { plugin: kyty(), enabled: false }).await.unwrap();
     assert!(core.view().home.games.is_empty(), "its games leave the library");
-    let refused = core.dispatch(Command::Launch("emu-kyty:PPSA01234".parse().unwrap())).await.unwrap_err();
+    let refused =
+        core.dispatch(Command::Session(SessionCmd::Launch("emu-kyty:PPSA01234".parse().unwrap()))).await.unwrap_err();
     assert!(refused.to_string().contains("turned off"), "{refused}");
     let row = core.view().emulators.plugins.into_iter().find(|p| p.id == kyty()).expect("still listed");
     assert!(!row.enabled);

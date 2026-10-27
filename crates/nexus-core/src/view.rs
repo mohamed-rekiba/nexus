@@ -13,6 +13,7 @@ use crate::app::{AppState, EmulatorState, Grid, Route};
 use crate::game_installs::InstallsSnapshot;
 use crate::library::{Entry, LibrarySnapshot, PluginImage};
 use crate::order::sort_by_order;
+use crate::sessions::SessionsSnapshot;
 use crate::torrents::{TorrentJob, TorrentsSnapshot};
 use crate::{Core, Job, JobPhase, Kernel, PluginStatus, PreferencesSnapshot};
 
@@ -291,7 +292,7 @@ fn badges_of(library: &LibrarySnapshot, key: &GameKey) -> Vec<SlotVm> {
 }
 
 fn card(kernel: &Kernel, core_state: &AppState, library: &LibrarySnapshot, entry: &Entry) -> GameCardVm {
-    let stats = crate::launch::play_stats(kernel, &entry.key);
+    let stats = crate::sessions::play_stats(kernel.config(), &entry.key);
     GameCardVm {
         key: entry.key.to_string(),
         title: entry.summary.title.clone(),
@@ -303,7 +304,7 @@ fn card(kernel: &Kernel, core_state: &AppState, library: &LibrarySnapshot, entry
         release_year: entry.summary.release_year,
         rating: library.meta(&entry.key).and_then(|(_, m)| m.rating).map(|r| r.score),
         size_bytes: library.detail(&entry.key).and_then(|d| d.details.size_bytes),
-        last_played_days: (stats.count > 0).then(|| crate::launch::days_since(stats.last)),
+        last_played_days: (stats.count > 0).then(|| crate::sessions::days_since(stats.last)),
         releases: 0,
         availability: String::new(),
         hidden: false,
@@ -569,7 +570,7 @@ fn grid<'a>(
         catalog.or_else(store).or_else(|| e.summary.release_year.map(|y| y.to_string())).unwrap_or_default()
     };
     match view.sort.as_str() {
-        "played" => shown.sort_by_key(|e| std::cmp::Reverse(crate::launch::play_stats(kernel, &e.key).last)),
+        "played" => shown.sort_by_key(|e| std::cmp::Reverse(crate::sessions::play_stats(kernel.config(), &e.key).last)),
         "size" => shown.sort_by_key(|e| std::cmp::Reverse(size(e))),
         // Smallest first; a game whose size isn't known goes last.
         "smallest" => shown.sort_by_key(|e| size(e).unwrap_or(u64::MAX)),
@@ -719,6 +720,7 @@ pub(crate) fn build(core: &Core) -> AppView {
     let torrents = core.torrents().snapshot();
     let prefs = core.prefs();
     let installs = core.installs().snapshot();
+    let sessions = core.sessions().snapshot();
     let mut state = core.state();
 
     let route = state.nav.last().cloned().unwrap_or(Route::Home);
@@ -754,7 +756,7 @@ pub(crate) fn build(core: &Core) -> AppView {
         game: game.map(|g| g.to_string()),
         can_go_back: state.nav.len() > 1,
         home: home_vm(kernel, &state, &library, &torrents, &installs),
-        detail: detail_game.and_then(|key| detail_vm(core, kernel, &state, &library, &torrents, &installs, &key)),
+        detail: detail_game.and_then(|key| detail_vm(core, &state, &library, &torrents, &installs, &sessions, &key)),
         catalog,
         downloads: downloads_vm(kernel, jobs, &state, &library, &torrents, &installs),
         settings: settings_vm(core, &prefs, &state),
@@ -763,7 +765,7 @@ pub(crate) fn build(core: &Core) -> AppView {
             Route::Plugin(plugin) => plugin_page_vm(kernel, &state, &statuses, plugin),
             _ => None,
         },
-        running: running_vm(kernel, &state, &route),
+        running: running_vm(kernel, &sessions, &route),
         notices: state.notices.iter().map(|n| n.message.clone()).collect(),
         notice_cards: state.notices.iter().map(|n| notice_vm(kernel, &library, n)).collect(),
         install_prompt: state.install_prompt.as_ref().map(|p| InstallPromptVm {
@@ -1059,13 +1061,14 @@ fn game_settings_vm(kernel: &Kernel, key: &GameKey, settings: &crate::library::G
 
 fn detail_vm(
     core: &Core,
-    kernel: &Kernel,
     state: &AppState,
     library: &LibrarySnapshot,
     torrents: &TorrentsSnapshot,
     installs: &InstallsSnapshot,
+    sessions: &SessionsSnapshot,
     key: &GameKey,
 ) -> Option<GameDetailVm> {
+    let kernel = core.kernel();
     let d = library.detail(key)?;
     let details = &d.details;
     let summary = &details.summary;
@@ -1081,7 +1084,7 @@ fn detail_vm(
     let needs_emulator = has_installer && !installed;
     // The program, not the console: "Launches with the KytyPS5 emulator".
     let name = manifest.map(|m| m.emulator_name().to_owned()).unwrap_or_default();
-    let stats = crate::launch::play_stats(kernel, key);
+    let stats = crate::sessions::play_stats(kernel.config(), key);
     let meta = library.meta(key);
     // A release's store data fills in, field by field, what the store's catalog leaves out.
     let metas = library.metadata(key);
@@ -1178,7 +1181,7 @@ fn detail_vm(
         pc_warning,
         your_result: library.result(key).unwrap_or_default().to_owned(),
         has_folder: details.folder.as_ref().and_then(|f| crate::app::resolve_game_folder(kernel, key, f)).is_some(),
-        has_log: crate::launch::log_path(kernel, key).is_file(),
+        has_log: crate::sessions::log_path(&kernel.host().data_dir, key).is_file(),
         hidden: library.hidden(key),
         compat_page: d.compat.as_ref().and_then(|c| c.page.clone()).unwrap_or_default(),
         trailer_url: meta.map(|(_, m)| m.trailer.clone()).unwrap_or_default(),
@@ -1189,11 +1192,11 @@ fn detail_vm(
         can: can.clone(),
         settings: d.settings.iter().map(|settings| game_settings_vm(kernel, key, settings)).collect(),
         launch_hint: if can.play && needs_emulator { format!("Play installs {name} first") } else { String::new() },
-        running: state.sessions.values().any(|s| &s.game == played),
+        running: sessions.runs(played),
         size_bytes: details.size_bytes,
         facts: details.facts.clone(),
         played_secs: stats.secs,
-        last_played_days: (stats.count > 0).then(|| crate::launch::days_since(stats.last)),
+        last_played_days: (stats.count > 0).then(|| crate::sessions::days_since(stats.last)),
         // No plugin reports a shader cache: the plugin API has no seam for one.
         shader_cache: None,
         releases: offer
@@ -2011,12 +2014,12 @@ impl Look {
 }
 
 /// The game on the Running screen, or else the newest one still running.
-fn running_vm(kernel: &Kernel, state: &AppState, route: &Route) -> Option<RunningVm> {
+fn running_vm(kernel: &Kernel, sessions: &SessionsSnapshot, route: &Route) -> Option<RunningVm> {
     let session = match route {
         Route::Running(session) => *session,
-        _ => *state.sessions.keys().next_back()?,
+        _ => *sessions.sessions.keys().next_back()?,
     };
-    let s = state.sessions.get(&session)?;
+    let s = sessions.sessions.get(&session)?;
     let manifest = kernel.manifest(&s.game.plugin).ok();
     Some(RunningVm {
         session: session.0,
@@ -2032,7 +2035,7 @@ fn running_vm(kernel: &Kernel, state: &AppState, route: &Route) -> Option<Runnin
             "starting".into()
         },
         elapsed_secs: kernel.clock().now().saturating_duration_since(s.started).as_secs(),
-        in_front: state.game_in_front,
+        in_front: sessions.game_in_front,
         keymap: manifest.map(|m| m.keymap.clone()).unwrap_or_default(),
     })
 }

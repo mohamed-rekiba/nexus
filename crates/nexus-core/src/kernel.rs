@@ -569,14 +569,6 @@ impl Kernel {
         &self.inner.spawner
     }
 
-    pub(crate) fn processes(&self) -> &Arc<dyn ProcessTree> {
-        &self.inner.processes
-    }
-
-    pub(crate) fn windows(&self) -> &Arc<dyn Windows> {
-        &self.inner.windows
-    }
-
     pub(crate) fn login_session(&self) -> &Arc<dyn LoginSession> {
         &self.inner.login_session
     }
@@ -614,6 +606,16 @@ impl Kernel {
         crate::preferences::PrefPorts {
             login_session: self.inner.login_session.clone(),
             network: self.inner.network.clone(),
+        }
+    }
+
+    /// The ports the sessions subsystem takes.
+    pub(crate) fn session_ports(&self) -> crate::sessions::SessionPorts {
+        crate::sessions::SessionPorts {
+            spawner: self.inner.spawner.clone(),
+            processes: self.inner.processes.clone(),
+            windows: self.inner.windows.clone(),
+            clock: self.inner.clock.clone(),
         }
     }
 

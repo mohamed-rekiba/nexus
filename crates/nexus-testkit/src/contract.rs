@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use nexus_api::*;
-use nexus_core::{ArchiveError, ArchiveKind, Archives, Command, Escape, UNPACK_SPARE};
+use nexus_core::{ArchiveError, ArchiveKind, Archives, Command, Escape, SessionCmd, UNPACK_SPARE};
 
 use crate::TestCore;
 
@@ -160,7 +160,7 @@ async fn launch_contract(test: &TestCore, plugin: &PluginId, game: &str) {
     // Installs may have run programs (an AppImage's extract); the game is the next one.
     let before = test.spawner.spawned().len();
     test.core
-        .dispatch(Command::Launch(key.clone()))
+        .dispatch(Command::Session(SessionCmd::Launch(key.clone())))
         .await
         .unwrap_or_else(|e| panic!("contract launcher: launch through the host: {e}"));
     let process =

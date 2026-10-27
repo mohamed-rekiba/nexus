@@ -9,7 +9,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use crate::common::*;
-use nexus_core::{Area, Command, Route};
+use nexus_core::{Area, Command, Route, SessionCmd};
 use slint::platform::software_renderer::{MinimalSoftwareWindow, PremultipliedRgbaColor, RepaintBufferType};
 use slint::platform::{Platform, WindowAdapter};
 use slint_interpreter::ComponentHandle;
@@ -141,7 +141,7 @@ fn the_default_theme_on_a_real_library() {
     host.dispatch(Command::Navigate(Route::Home));
     // A game that starts: the fake spawner starts nothing.
     host.test.windows.no_windows();
-    host.dispatch(Command::Launch(first.parse().unwrap()));
+    host.dispatch(Command::Session(SessionCmd::Launch(first.parse().unwrap())));
     shoot(&mut host, &window, &out.join("new-launch.png"));
     host.test.windows.windows_open();
     if host.core().view().install_prompt.is_some() {

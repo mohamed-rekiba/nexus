@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use nexus_api::Event;
-use nexus_core::{Area, Command, LibraryCmd, Pref};
+use nexus_core::{Area, Command, LibraryCmd, Pref, SessionCmd};
 use nexus_testkit::PlatformCall;
 use nexus_ui_host::{RENDER_GAP, TICK, TrailerPoll, TrailerRequest, TrailerStatus, UiRequest};
 
@@ -63,7 +63,7 @@ fn the_tick_re_renders_every_15_seconds_while_a_game_runs() {
     host.on_tick();
     assert_eq!(host.renders(), idle, "nothing changed, no game: no render");
 
-    host.dispatch(Command::Launch("emu-a:G0".parse().unwrap()));
+    host.dispatch(Command::Session(SessionCmd::Launch("emu-a:G0".parse().unwrap())));
     host.until(Area::Sessions, |core| core.game_running());
     host.on_tick();
     let playing = host.renders();
