@@ -25,16 +25,23 @@
 //! its topics, and every topic has a unique positive id and a name. Apps, system software and
 //! forum threads aren't games and are left out, and so is a topic without a magnet link: there
 //! is nothing to download.
+//!
+//! The file reads into the typed model of [`crate::topic`], and [`release`] turns each topic
+//! into a release. What a topic is for comes from its own fields, else from the forum it or
+//! its file names, which the catalog sources describe (see [`Forums`]), else from its title.
 
 use std::collections::HashSet;
 
-use nexus_api::serde_json::{self, Value};
+use nexus_api::serde_json;
 use nexus_api::{Release, ReleaseList, SteamInfo};
 
 use crate::info_hash;
+use crate::sources::{ForumFacts, Forums};
+use crate::topic::{CatalogFile, GameInfo, Scalar, Topic};
 
-fn text(value: &Value, key: &str) -> String {
-    value[key].as_str().unwrap_or("").trim().to_owned()
+/// A text field, trimmed. Empty when it is missing.
+fn text(value: &Option<String>) -> String {
+    value.as_deref().unwrap_or("").trim().to_owned()
 }
 
 /// The PS5 (`PPSA12345`) and PS4 (`CUSA12345`) title ids in `value`, in order, once each.
@@ -150,8 +157,8 @@ fn tags(title: &str) -> Vec<String> {
 
 /// The system a PC release is for, from its game info's platform, else its title's tags:
 /// `linux`, `windows`, `macos`, or `""` when neither says.
-fn system(info: &Value, title: &str) -> &'static str {
-    let named = text(info, "platform").to_ascii_lowercase();
+fn system(info: &GameInfo, title: &str) -> &'static str {
+    let named = text(&info.platform).to_ascii_lowercase();
     let from = |word: &str| match word {
         "linux" | "native" | "wine" | "amd64" | "x86_64" | "x64" => "linux",
         "windows" | "win" | "win64" | "win32" => "windows",
@@ -175,12 +182,9 @@ fn steam_date(date: &str) -> Option<String> {
     Some(format!("{year:04}-{month:02}-{day:02}"))
 }
 
-/// The text or the number at `key`, as text: a year can be either. Empty when it is neither.
-fn scalar(value: &Value, key: &str) -> String {
-    match &value[key] {
-        Value::Number(n) => n.to_string(),
-        _ => text(value, key),
-    }
+/// A fact written as text or as a number, as text. Empty when it is missing.
+fn scalar(value: &Option<Scalar>) -> String {
+    value.as_ref().map(Scalar::text).unwrap_or_default()
 }
 
 /// The catalog's `multiplayer` words in plain words: `No` is `Single player`, `Yes` is
@@ -193,40 +197,41 @@ fn players(multiplayer: &str) -> String {
     }
 }
 
-/// The `https://` address at `key`, or empty.
-fn address(value: &Value, key: &str) -> String {
-    Some(text(value, key)).filter(|url| url.starts_with("https://")).unwrap_or_default()
+/// An `https://` address, or empty.
+fn address(value: &Option<String>) -> String {
+    Some(text(value)).filter(|url| url.starts_with("https://")).unwrap_or_default()
 }
 
-fn texts(value: &Value, key: &str) -> Vec<String> {
-    let items = value[key].as_array().into_iter().flatten().filter_map(Value::as_str);
+/// The items of a list of texts, trimmed, without the empty ones.
+fn texts(items: &Option<Vec<String>>) -> Vec<String> {
+    let items = items.iter().flatten();
     items.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty()).collect()
 }
 
-/// A topic's `steam` object, as the catalog collector writes it. `None` when it
-/// has no app id: Steam didn't have the game.
-fn steam(topic: &Value) -> Option<SteamInfo> {
-    let steam = &topic["steam"];
-    let app_id = steam["appid"].as_u64()?;
+/// A topic's Steam data. `None` when it has no app id: Steam didn't have the game.
+fn steam(topic: &Topic) -> Option<SteamInfo> {
+    let steam = topic.steam.as_ref()?;
+    let app_id = steam.appid?;
+    let assets = steam.assets.clone().unwrap_or_default();
     Some(SteamInfo {
         app_id,
-        short: text(steam, "short"),
-        genres: texts(steam, "genres"),
-        release: steam_date(&text(steam, "release")).unwrap_or_default(),
-        developers: texts(steam, "developers"),
-        publishers: texts(steam, "publishers"),
-        header: address(steam, "header"),
-        screenshots: texts(steam, "shots").into_iter().filter(|url| url.starts_with("https://")).collect(),
-        portrait: address(&steam["assets"], "portrait"),
-        hero: address(&steam["assets"], "hero"),
-        logo: address(&steam["assets"], "logo"),
-        protondb: text(steam, "protondb").to_ascii_lowercase(),
+        short: text(&steam.short),
+        genres: texts(&steam.genres),
+        release: steam_date(&text(&steam.release)).unwrap_or_default(),
+        developers: texts(&steam.developers),
+        publishers: texts(&steam.publishers),
+        header: address(&steam.header),
+        screenshots: texts(&steam.shots).into_iter().filter(|url| url.starts_with("https://")).collect(),
+        portrait: address(&assets.portrait),
+        hero: address(&assets.hero),
+        logo: address(&assets.logo),
+        protondb: text(&steam.protondb).to_ascii_lowercase(),
     })
 }
 
 /// A PKG release: its game info's format, or a tag in its title, says `pkg` or `fpkg`.
-fn is_package(info: &Value, title: &str) -> bool {
-    let format = text(info, "format").to_ascii_lowercase();
+fn is_package(info: &GameInfo, title: &str) -> bool {
+    let format = text(&info.format).to_ascii_lowercase();
     let words = format.split(|c: char| !c.is_ascii_alphanumeric()).map(str::to_owned);
     words.chain(tags(title)).any(|word| word == "pkg" || word == "fpkg")
 }
@@ -260,8 +265,8 @@ fn is_game(title: &str, genre: &str, title_id: &str, magnet: &str) -> bool {
 
 /// The console a topic is for: its game info's, else the `[PS5]` tag in its title, else its
 /// title id's.
-fn platform(info: &Value, title: &str, title_id: &str) -> String {
-    let named = text(info, "platform").to_ascii_uppercase();
+fn platform(info: &GameInfo, title: &str, title_id: &str) -> String {
+    let named = text(&info.platform).to_ascii_uppercase();
     if named == "PS5" || named == "PS4" || named == "PC" {
         return named;
     }
@@ -285,152 +290,150 @@ fn platform(info: &Value, title: &str, title_id: &str) -> String {
 /// them: its console (`platform`: `PS5`, `PS4` or `PC`), the system a PC release is for
 /// (`system`), and whether it is packed with Wine (`wine_packed`). `None` for a field it doesn't
 /// have.
-fn declared(topic: &Value) -> (Option<String>, Option<String>, Option<bool>) {
-    let platform = text(topic, "platform").to_ascii_uppercase();
+fn declared(topic: &Topic) -> (Option<String>, Option<String>, Option<bool>) {
+    let platform = text(&topic.platform).to_ascii_uppercase();
     let platform = ["PS5", "PS4", "PC"].contains(&platform.as_str()).then_some(platform);
-    let system = Some(text(topic, "system").to_ascii_lowercase()).filter(|s| !s.is_empty());
-    (platform, system, topic["wine_packed"].as_bool())
+    let system = Some(text(&topic.system).to_ascii_lowercase()).filter(|s| !s.is_empty());
+    (platform, system, topic.wine_packed)
 }
 
-/// What a catalog or a topic of one forum is for, from its `source` forum, else its `platform`: the
-/// console, the system a PC release is for, and whether its releases are packed with Wine.
-/// `None` when the file doesn't say.
-///
-/// The collector's published files say this in each topic's own fields (see [`declared`]). This
-/// table of the forums' numbers serves the collector's raw listings, copied in by hand.
-fn forum(file: &Value) -> Option<(&'static str, &'static str, bool)> {
-    let source = text(file, "source");
-    let id = source.split_once("viewforum.php?f=").map(|(_, id)| id.split('&').next().unwrap_or_default());
-    let named = text(file, "platform").to_ascii_lowercase();
-    match (id, named.as_str()) {
-        (Some("546"), _) | (None, "ps5") => Some(("PS5", "", false)),
-        (Some("973"), _) | (None, "ps4") => Some(("PS4", "", false)),
-        (Some("1992"), _) | (None, "linux") => Some(("PC", "linux", false)),
-        (Some("2059"), _) | (None, "wine") => Some(("PC", "linux", true)),
-        _ => None,
-    }
+/// Reads a catalog file. Any part that doesn't read fails the whole file. `forums` says what
+/// the topics of each forum are for.
+pub fn read(bytes: &[u8], forums: &Forums) -> Result<ReleaseList, String> {
+    let file: CatalogFile = serde_json::from_slice(bytes).map_err(|e| format!("not a catalog file: {e}"))?;
+    releases(&file, forums)
 }
 
-/// Reads a catalog file. Any part that doesn't read fails the whole file.
-pub fn read(bytes: &[u8]) -> Result<ReleaseList, String> {
-    let file: Value = serde_json::from_slice(bytes).map_err(|e| format!("not a catalog file: {e}"))?;
-    if file["complete"].as_bool() != Some(true) {
+/// The releases of a catalog file. It fails when any part of the file doesn't read.
+pub fn releases(file: &CatalogFile, forums: &Forums) -> Result<ReleaseList, String> {
+    if file.complete != Some(true) {
         return Err("the catalog isn't complete: partial listings aren't read".into());
     }
-    if file["translation"]["language"].as_str() != Some("en") {
+    if file.translation.as_ref().and_then(|t| t.language.as_deref()) != Some("en") {
         return Err("the catalog isn't in English".into());
     }
-    let topics = file["topics"].as_array().ok_or("the catalog has no topics list")?;
-    if file["topic_count"].as_u64() != Some(topics.len() as u64) {
+    let topics = file.topics.as_ref().ok_or("the catalog has no topics list")?;
+    if file.topic_count != Some(topics.len() as u64) {
         return Err("topic_count doesn't match the topics".into());
     }
-    let file_forum = forum(&file);
+    let file_forum = forums.named(file.source.as_deref(), file.platform.as_deref());
     let mut ids = HashSet::new();
     let mut hashes = HashSet::new();
     let mut releases = Vec::with_capacity(topics.len());
     for topic in topics {
-        let id = topic["id"]
-            .as_str()
-            .and_then(|id| id.parse::<i64>().ok())
-            .or_else(|| topic["id"].as_i64())
-            .filter(|id| *id > 0)
-            .ok_or("a topic has no valid id")?;
+        let id = topic.id.parse::<i64>().ok().filter(|id| *id > 0).ok_or("a topic has no valid id")?;
         if !ids.insert(id) {
             return Err(format!("topic {id} is listed twice"));
         }
-        let info = &topic["game_info"];
-        // A topic's own fields win, then its forum: a file of several forums names each topic's
-        // forum. Then the file's forum, then the title's tags.
-        let (own_platform, own_system, own_wine) = declared(topic);
-        let forum = forum(topic).or(file_forum);
-        let title = text(topic, "title");
-        let named = text(info, "name");
-        let name = clean_name(if named.is_empty() { &title } else { &named });
-        if name.is_empty() {
-            return Err(format!("topic {id} has no game name"));
-        }
-        let raw_id = text(info, "title_id");
-        let mut all_ids = title_ids(&raw_id);
-        if all_ids.is_empty() {
-            all_ids = title_ids(&title).into_iter().take(1).collect();
-        }
-        let genre = text(info, "genre");
-        let magnet = text(topic, "magnet");
-        if !is_game(&title, &genre, &raw_id, &magnet) {
-            continue;
-        }
-        // Nothing to download without a magnet link with an info hash.
-        let Some(hash) = magnet.starts_with("magnet:?").then(|| info_hash(&magnet)).flatten() else { continue };
+        // A file of several forums names each topic's forum.
+        let forum = forums.named(topic.source.as_deref(), topic.platform.as_deref()).or(file_forum);
+        let Some(release) = release(id, topic, forum)? else { continue };
         // The same torrent in two topics: the first one stands.
-        if !hashes.insert(hash.clone()) {
-            continue;
+        if hashes.insert(release.id.clone()) {
+            releases.push(release);
         }
-        let title_id = all_ids.first().cloned().unwrap_or_default();
-        // A PC forum says what all its topics are for; a console forum fills in a topic that
-        // doesn't say.
-        let platform = own_platform.unwrap_or_else(|| match forum {
-            Some(("PC", ..)) => "PC".to_owned(),
-            Some((console, ..)) => {
-                Some(platform(info, &title, &title_id)).filter(|p| !p.is_empty()).unwrap_or_else(|| console.to_owned())
-            }
-            None => platform(info, &title, &title_id),
-        });
-        let system = match (own_system, forum) {
-            _ if platform != "PC" => String::new(),
-            (Some(own), _) => own,
-            (None, Some(("PC", system, _))) => system.to_owned(),
-            (None, _) => system(info, &title).to_owned(),
-        };
-        let name = if platform == "PC" { pc_name(&name) } else { name };
-        let added = ["published_at", "added_at", "registered_at"]
-            .iter()
-            .map(|key| text(topic, key))
-            .find(|date| !date.is_empty())
-            .unwrap_or_default();
-        releases.push(Release {
-            id: hash,
-            topic: id.to_string(),
-            system,
-            platform,
-            title_ids: all_ids.iter().skip(1).cloned().collect(),
-            title_id,
-            title: name,
-            version: text(info, "version"),
-            region: text(info, "region"),
-            size_bytes: topic["size_bytes"].as_u64().or_else(|| size_bytes(&text(topic, "size"))),
-            added,
-            description: text(info, "release_summary"),
-            torrent: magnet,
-            steam: steam(topic),
-            wine_packed: own_wine
-                .unwrap_or_else(|| matches!(forum, Some((_, _, true))) || tags(&title).iter().any(|t| t == "wine")),
-            package: is_package(info, &title),
-            seeders: topic["seeders"].as_u64(),
-            leechers: topic["leechers"].as_u64(),
-            counted_at: text(topic, "peers_observed"),
-            genre,
-            developer: text(info, "developer"),
-            publisher: text(info, "publisher"),
-            release_date: scalar(info, "release_date"),
-            release_year: scalar(info, "release_year"),
-            update: text(info, "release_update"),
-            players: players(&text(info, "multiplayer")),
-            minimum_firmware: text(info, "minimum_firmware"),
-            interface_languages: text(info, "interface_languages"),
-            audio_languages: text(info, "audio_languages"),
-            format: text(info, "format"),
-            image_urls: texts(info, "image_urls").into_iter().filter(|url| url.starts_with("https://")).collect(),
-            ..Release::default()
-        });
     }
-    let updated =
-        Some(text(&file, "refreshed_at")).filter(|t| !t.is_empty()).unwrap_or_else(|| text(&file, "collected_at"));
-    Ok(ReleaseList { releases, version: text(&file, "version"), updated, ..ReleaseList::default() })
+    let updated = Some(text(&file.refreshed_at)).filter(|t| !t.is_empty()).unwrap_or_else(|| text(&file.collected_at));
+    Ok(ReleaseList { releases, version: text(&file.version), updated, ..ReleaseList::default() })
+}
+
+/// The release of topic number `id`, from the forum `forum`, if the file or the topic names
+/// one. `None` for a topic that isn't a game, or has nothing to download. It fails for a
+/// topic with no game name.
+///
+/// What the topic is for comes from its own fields first, then from its forum, then from its
+/// title's tags.
+pub fn release(id: i64, topic: &Topic, forum: Option<&ForumFacts>) -> Result<Option<Release>, String> {
+    let none = GameInfo::default();
+    let info = topic.game_info.as_ref().unwrap_or(&none);
+    let (own_platform, own_system, own_wine) = declared(topic);
+    let title = text(&topic.title);
+    let named = text(&info.name);
+    let name = clean_name(if named.is_empty() { &title } else { &named });
+    if name.is_empty() {
+        return Err(format!("topic {id} has no game name"));
+    }
+    let raw_id = text(&info.title_id);
+    let mut all_ids = title_ids(&raw_id);
+    if all_ids.is_empty() {
+        all_ids = title_ids(&title).into_iter().take(1).collect();
+    }
+    let genre = text(&info.genre);
+    let magnet = text(&topic.magnet);
+    if !is_game(&title, &genre, &raw_id, &magnet) {
+        return Ok(None);
+    }
+    // Nothing to download without a magnet link with an info hash.
+    let Some(hash) = magnet.starts_with("magnet:?").then(|| info_hash(&magnet)).flatten() else { return Ok(None) };
+    let title_id = all_ids.first().cloned().unwrap_or_default();
+    let pc_forum = forum.filter(|f| f.console.as_str() == "PC");
+    // A PC forum says what all its topics are for; a console forum fills in a topic that
+    // doesn't say.
+    let platform = own_platform.unwrap_or_else(|| match forum {
+        Some(forum) if forum.console.as_str() == "PC" => "PC".to_owned(),
+        Some(forum) => Some(platform(info, &title, &title_id))
+            .filter(|p| !p.is_empty())
+            .unwrap_or_else(|| forum.console.as_str().to_owned()),
+        None => platform(info, &title, &title_id),
+    });
+    let system = match (own_system, pc_forum) {
+        _ if platform != "PC" => String::new(),
+        (Some(own), _) => own,
+        (None, Some(forum)) => forum.system.clone().unwrap_or_default(),
+        (None, None) => system(info, &title).to_owned(),
+    };
+    let name = if platform == "PC" { pc_name(&name) } else { name };
+    let added = [&topic.published_at, &topic.added_at, &topic.registered_at]
+        .into_iter()
+        .map(text)
+        .find(|date| !date.is_empty())
+        .unwrap_or_default();
+    Ok(Some(Release {
+        id: hash,
+        topic: id.to_string(),
+        system,
+        platform,
+        title_ids: all_ids.iter().skip(1).cloned().collect(),
+        title_id,
+        title: name,
+        version: text(&info.version),
+        region: text(&info.region),
+        size_bytes: topic.size_bytes.or_else(|| size_bytes(&text(&topic.size))),
+        added,
+        description: text(&info.release_summary),
+        torrent: magnet,
+        steam: steam(topic),
+        wine_packed: own_wine
+            .unwrap_or_else(|| forum.is_some_and(|f| f.wine) || tags(&title).iter().any(|t| t == "wine")),
+        package: is_package(info, &title),
+        seeders: topic.seeders,
+        leechers: topic.leechers,
+        counted_at: text(&topic.peers_observed),
+        genre,
+        developer: text(&info.developer),
+        publisher: text(&info.publisher),
+        release_date: scalar(&info.release_date),
+        release_year: scalar(&info.release_year),
+        update: text(&info.release_update),
+        players: players(&text(&info.multiplayer)),
+        minimum_firmware: text(&info.minimum_firmware),
+        interface_languages: text(&info.interface_languages),
+        audio_languages: text(&info.audio_languages),
+        format: text(&info.format),
+        image_urls: texts(&info.image_urls).into_iter().filter(|url| url.starts_with("https://")).collect(),
+        ..Release::default()
+    }))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nexus_api::serde_json::Value;
+
+    /// Reads a catalog file with the forums of the bundled catalog sources.
+    fn read(bytes: &[u8]) -> Result<ReleaseList, String> {
+        super::read(bytes, &crate::sources::read(crate::BUNDLED_SOURCES).unwrap().forums())
+    }
 
     fn file(topics: Value) -> Vec<u8> {
         serde_json::to_vec(&serde_json::json!({ "source": "https://xyz.dev", "complete": true,
