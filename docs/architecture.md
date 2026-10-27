@@ -78,9 +78,9 @@ theme callback ─▶ UiRequest::Core(Command) ─▶ Core::dispatch ─▶ AppS
    `OpenPath`, `Quit`, `Restart`, `Trailer`, `Render`).
 2. `Core::dispatch` runs the command. Most state lives in one `AppState` behind a mutex in
    `Core`: navigation (`nav`, a stack of `Route`s), selection, the library, details, store
-   metadata, catalogs and offers, downloads, sessions, notices and more. An area that became a
-   subsystem keeps its own state behind its own lock: the torrents so far (see
-   [Subsystems](#subsystems)). `view::build` reads each subsystem's snapshot before it locks
+   metadata, catalogs and offers, downloads, sessions and more. An area that became a
+   subsystem keeps its own state behind its own lock: the torrents, the notices, the VPN
+   setting and the launcher's update so far (see [Subsystems](#subsystems)). `view::build` reads each subsystem's snapshot before it locks
    `AppState`.
 3. A change calls `Core::changed(area)`, or a subsystem's `Notifier`. It sends a `Change { area }` (the torrents, the
    catalogs, the installs, …) to `Core::changes()`, a broadcast for the core and its tests, and
@@ -323,18 +323,26 @@ installed into the `games` folders.
 ## Subsystems
 
 `Core` is splitting into subsystems, one for each area of its state. The torrents are the
-first (`crates/nexus-core/src/torrents/mod.rs`); the other areas follow the same shape:
+first (`crates/nexus-core/src/torrents/mod.rs`); the notices (`notices.rs`), the VPN setting
+(`vpn.rs`) and the launcher's update (`launcher_update.rs`) follow, and the other areas
+follow the same shape:
 
 - A subsystem owns its state behind its own lock, and its saved records (the torrents:
   `app.torrents` and `app.seed_downloads`). Nothing else takes that lock or writes those keys.
-- It takes only the ports it needs (`TorrentPorts`: `Torrents`, `Network`, `Hardware`,
-  `Clock`), never the `Kernel` or the `Core`.
+- It takes only the ports it needs (`TorrentPorts`: `Torrents`, `Hardware`, `Clock`; the
+  VPN rule brings the `Network` port), never the `Kernel` or the `Core`. Until the ports are
+  one bundle, the core takes them from the kernel when it starts the subsystems.
 - The core sends it commands (`handle(TorrentCmd)`) and reads it whole (`snapshot()`). A read
-  changes nothing.
+  changes nothing. `Command` nests each subsystem's commands: `Command::Torrent(TorrentCmd)`,
+  `Command::Notice(NoticeCmd)`, `Command::Vpn(VpnCmd)`,
+  `Command::LauncherUpdate(LauncherUpdateCmd)`. A subsystem's command type derives `serde`'s
+  `Serialize` and `Deserialize`.
 - It publishes its changes with its area on the core's one change signal, through a
   `Notifier`. `Core::changes()` is the merge of every subsystem's changes.
 - What other areas must do about it goes out as events (`TorrentEvent`), which the core turns
   into work: an unpack, a notice, a catalog refresh. A subsystem never calls into the core.
+  Where the work must end before the command returns, the core hands the subsystem an async
+  callback instead: the VPN subsystem's `OnChange` runs the torrents' kill switch.
 - A command that needs another area first is resolved by the core, which hands the subsystem
   plain data (`add(NewDownload)`). Fields another area still writes on a record (`HandOff`:
   the unpack and the install) change through one call, `hand_off`.
@@ -503,9 +511,15 @@ sound and Bluetooth controls only when it's the whole screen. The view model is 
 
 ## Downloads only through a VPN
 
-`crates/nexus-core/src/vpn.rs` holds the rule, and the torrents subsystem's
-`torrents/vpn.rs` applies it to the downloads, with the `Network` port. While `app.vpn_only` is
-on, the subsystem binds the torrent port to the VPN's interface (`Torrents::route`) before a download talks to
+`crates/nexus-core/src/vpn.rs` holds the rule (`VpnRule`) and the VPN subsystem
+(`VpnSubsystem`). The rule reads `app.vpn_only` and `app.vpn`, holds the `Network` port (a
+system plugin's `vpn` replaces the app's once one provides it) and notes when a plugin waits.
+The kernel makes the rule at boot and gives it to each plugin as its `VpnGate`; the VPN and
+torrents subsystems share it. The VPN subsystem owns the two settings, the VPN list for the
+view and the last connect error, and runs `Command::Vpn(VpnCmd)`: the setting, the picked VPN,
+and connecting, disconnecting and adding VPNs. After each of those it awaits the torrents' kill
+switch. The torrents subsystem's `torrents/vpn.rs` applies the rule to the downloads. While
+`app.vpn_only` is on, the subsystem binds the torrent port to the VPN's interface (`Torrents::route`) before a download talks to
 the swarm. Without that VPN a download waits (`waiting_vpn`).
 
 The kill switch: while a download runs or waits, the subsystem's watch task checks the VPN every
@@ -524,11 +538,14 @@ supported; on Windows the setting is unavailable.
 
 ## The launcher's update
 
-`crates/nexus-core/src/launcher_update.rs`. On `Command::CheckLauncherUpdate` the core reads
-`latest.json` from the latest release of `app.update_repo` (default `mohamed-rekiba/nexus`),
-following redirects only to GitHub's hosts. A higher version is an update.
-`Command::DownloadLauncherUpdate` downloads this system's package, checks its SHA-256 and keeps
-it in `updates/` with `ready.json`. At the next start, before anything else, `main` calls
+`crates/nexus-core/src/launcher_update.rs`. The `LauncherUpdateSubsystem` takes the
+`HttpTransport` and `Desktop` ports, the data folder and the kind of install, and owns
+`app.update_repo`. On `LauncherUpdateCmd::Check` it reads `latest.json` from the latest
+release of `app.update_repo` (default `mohamed-rekiba/nexus`), following redirects only to
+GitHub's hosts. A higher version is an update. On Nexus OS the core then looks for a system
+update. `LauncherUpdateCmd::Download` downloads this system's package, checks its SHA-256 and
+keeps it in `updates/` with `ready.json`, or hands it to the package manager for a deb, rpm or
+Arch install. At the next start, before anything else, `main` calls
 `apply_launcher_update`: for an installed launcher only (an AppImage, `Nexus.app`, or a package
 folder with `LICENSE` and `extensions/`), `apply_staged` swaps it in, puts the old one back on
 failure, and starts the new binary. The Restart button (`UiRequest::Restart`) quits and starts

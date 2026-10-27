@@ -84,6 +84,9 @@ _Avoid_: type, category
 **Listing** (`ArchiveEntry`): an archive's entries as a format reader gives them, unchecked: each
 name as the archive spells it, its size, its kind, and whether it needs a password.
 
+**Notice**: a short message for the player, such as "Download complete", until they close it.
+The notices subsystem keeps the newest three, each with its own id.
+
 **Own build**: an emulator build the player built or installed, used instead of a downloaded
 one while the `own_build` setting is on. The host never updates it.
 
@@ -107,8 +110,8 @@ checks its files, and seeds only when every piece is there. It never downloads.
 **Snapshot**: a subsystem's state read whole, in one lock. Reading it changes nothing.
 
 **Subsystem**: one area of the core's state with its own lock, saved records and ports. The core
-sends it commands, reads its snapshot and turns its events into work. The torrents subsystem
-is the first.
+sends it commands, reads its snapshot and turns its events into work. The torrents, the
+notices, the VPN setting and the launcher's update are subsystems.
 
 **Test run**: a new build runs once with `--help` before it becomes current. A build that fails
 it is removed.
@@ -120,3 +123,7 @@ share.
 **Torrent stats** (`TorrentStats`): what the BitTorrent engine reports for a torrent: its
 state (checking, live, paused or error), whether every piece is in, bytes, rates, peers and
 the error. Raw numbers, with no decision.
+
+**VPN rule** (`VpnRule`): "Download only through a VPN" as every area reads it: the setting,
+the picked VPN, the VPNs' source and whether a plugin waits for the VPN. Plugins get it as
+their VPN gate.
