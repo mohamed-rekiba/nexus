@@ -564,6 +564,12 @@ impl Kernel {
         self.record(plugin).map(|r| &r.manifest)
     }
 
+    /// The player's folders as `plugin` may use them. `None` for a plugin that isn't loaded.
+    pub(crate) fn host_folders(&self, plugin: &PluginId) -> Option<crate::folders::HostFolders> {
+        let record = self.record(plugin).ok()?;
+        Some(crate::folders::HostFolders::new(&record.manifest, &self.inner.config, &self.inner.host))
+    }
+
     pub fn plugin_dir(&self, plugin: &PluginId) -> CoreResult<Option<&Path>> {
         self.record(plugin).map(|r| r.dir.as_deref())
     }
@@ -760,13 +766,7 @@ impl Kernel {
             plugin: id.clone(),
             config: Arc::new(ScopedConfig { plugin: id.clone(), service: self.inner.config.clone() }),
             storage: Arc::new(DirStorage::new(host.plugin_dir(&id))),
-            folders: Arc::new(crate::folders::HostFolders {
-                plugin: id.clone(),
-                permissions: record.manifest.permissions.clone(),
-                config: self.inner.config.clone(),
-                home: host.home.clone(),
-                platform: host.platform,
-            }),
+            folders: Arc::new(crate::folders::HostFolders::new(&record.manifest, &self.inner.config, host)),
             programs: Arc::new(crate::programs::HostPrograms {
                 plugin: id.clone(),
                 permissions: record.manifest.permissions.clone(),

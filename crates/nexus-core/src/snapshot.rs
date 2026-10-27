@@ -13,6 +13,7 @@ use nexus_ui_api::GameSystemVm;
 use serde_json::Value;
 
 use crate::app::{AppState, Route};
+use crate::folders::Purpose;
 use crate::game_installs::InstallsSnapshot;
 use crate::grid_query::GridData;
 use crate::launcher_update::LauncherUpdateSnapshot;
@@ -227,7 +228,8 @@ pub(crate) fn files(
         }
     }
     let install_folder = |emulator: &PluginId| {
-        let (_, path) = crate::release_downloads::install_folder(kernel, emulator, None).ok()?;
+        let console = crate::release_downloads::console_of(kernel, emulator);
+        let (_, path) = kernel.host_folders(emulator)?.place(Purpose::Install, &console, None).ok()?;
         Some((emulator.clone(), path))
     };
     Files {

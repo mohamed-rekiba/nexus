@@ -162,7 +162,14 @@ impl Setup {
             "filesystem": [{ "folder": "games", "write": true }, { "folder": "packages", "write": true }],
         }))
         .unwrap();
-        HostFolders { plugin: plugin(), permissions, config: self.config.clone(), home: None, platform: None }
+        HostFolders {
+            plugin: plugin(),
+            name: "Emu".into(),
+            permissions,
+            config: self.config.clone(),
+            home: None,
+            platform: None,
+        }
     }
 
     fn new_install(&self, id: u64, source: HostPath) -> NewInstall {

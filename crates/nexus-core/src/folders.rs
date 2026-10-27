@@ -7,19 +7,23 @@
 //! `steamapps/libraryfolders.vdf` names its libraries on other drives.
 //! Each folder is a [`DirStorage`] root, so a symlink out of it is refused like one out of the
 //! data folder.
+//!
+//! The core also asks here where a console's downloads and installs go
+//! ([`HostFolders::place`]), and saves the player's pick ([`HostFolders::remember`]). A
+//! [`Purpose`] says which of the two it is.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use nexus_api::{
-    DirEntry, FolderRoot, Folders, HostPath, MAX_FOLDER_READ, PathGrant, Permissions, PluginError, PluginId,
-    PluginResult, Storage,
+    DirEntry, FolderRoot, Folders, GAMES_FOLDER, HostPath, MAX_FOLDER_READ, PACKAGES_FOLDER, PathGrant, Permissions,
+    PluginError, PluginId, PluginManifest, PluginResult, RelPath, Storage,
 };
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
-use crate::{ConfigService, DirStorage};
+use crate::{ConfigService, CoreError, CoreResult, DirStorage};
 
 /// The player's folders for `grant`: the saved mapping, or else the default on `platform`, or
 /// else each folder of the default's list that exists.
@@ -109,6 +113,8 @@ pub(crate) fn expand(path: &str, home: Option<&Path>) -> Option<PathBuf> {
 /// One plugin's view of the host folders.
 pub(crate) struct HostFolders {
     pub plugin: PluginId,
+    /// The plugin's name, for what the player reads.
+    pub name: String,
     pub permissions: Permissions,
     pub config: Arc<ConfigService>,
     pub home: Option<PathBuf>,
@@ -116,7 +122,107 @@ pub(crate) struct HostFolders {
     pub platform: Option<nexus_api::Platform>,
 }
 
+/// What a folder of a console is for. It picks the grant the folder lies in, the key the last
+/// pick is saved under, and the words of an error.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Purpose {
+    /// Where the catalogs' downloads go: inside a `packages` folder.
+    Download,
+    /// Where a downloaded game is installed: inside a `games` folder.
+    Install,
+}
+
+impl Purpose {
+    fn grant(self) -> &'static str {
+        match self {
+            Purpose::Download => PACKAGES_FOLDER,
+            Purpose::Install => GAMES_FOLDER,
+        }
+    }
+
+    /// The key under `app`, then the console, that holds the last pick. Players have these saved.
+    fn saved(self) -> &'static str {
+        match self {
+            Purpose::Download => "download_folder",
+            Purpose::Install => "install_folder",
+        }
+    }
+
+    fn noun(self) -> &'static str {
+        match self {
+            Purpose::Download => "packages folder",
+            Purpose::Install => "game folder",
+        }
+    }
+}
+
 impl HostFolders {
+    pub(crate) fn new(manifest: &PluginManifest, config: &Arc<ConfigService>, host: &crate::HostConfig) -> Self {
+        Self {
+            plugin: manifest.id.clone(),
+            name: manifest.name.clone(),
+            permissions: manifest.permissions.clone(),
+            config: config.clone(),
+            home: host.home.clone(),
+            platform: host.platform,
+        }
+    }
+
+    /// The folder of `console` for `purpose`, inside one of the plugin's grant folders:
+    /// `chosen`, or else the one last picked for the console, or else `<console>` in the first
+    /// grant folder. A saved pick that is in no grant folder any more reads as none.
+    pub(crate) fn place(
+        &self,
+        purpose: Purpose,
+        console: &str,
+        chosen: Option<&Path>,
+    ) -> CoreResult<(HostPath, PathBuf)> {
+        let (grant, noun) = (purpose.grant(), purpose.noun());
+        let home = self.home.as_deref();
+        let roots =
+            self.permissions.folder(grant).map(|g| roots(&self.config, home, self.platform, g)).unwrap_or_default();
+        // The root that holds `folder`, and the path from that root.
+        let inside = |folder: &Path| {
+            roots.iter().enumerate().find_map(|(i, root)| {
+                let rest = folder.strip_prefix(root).ok()?;
+                let parts: Vec<String> =
+                    rest.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+                Some((i as u32, parts))
+            })
+        };
+        let (root, parts) = match chosen {
+            Some(path) => {
+                let path = expand(&path.to_string_lossy(), home)
+                    .ok_or_else(|| CoreError::Invalid(format!("{} isn't a full path", path.display())))?;
+                inside(&path).ok_or_else(|| {
+                    CoreError::Invalid(format!(
+                        "{} isn't in a {noun}. Pick a folder inside a {noun}, or add it in Settings",
+                        path.display()
+                    ))
+                })?
+            }
+            None => self
+                .config
+                .get(&["app", purpose.saved(), console])
+                .as_str()
+                .and_then(|saved| inside(Path::new(saved)))
+                .unwrap_or_else(|| (0, vec![console.to_owned()])),
+        };
+        let rel = RelPath::new(parts.join("/")).map_err(|e| CoreError::Invalid(e.to_string()))?;
+        let at = HostPath::new(grant, root, rel);
+        let folder = resolve(&self.config, home, self.platform, &self.permissions, &at)
+            .map_err(|e| CoreError::Invalid(format!("{} has no {noun}: {e}", self.name)))?;
+        Ok((at, folder))
+    }
+
+    /// Saves `folder` as the last one picked for `console` and `purpose`.
+    pub(crate) fn remember(&self, purpose: Purpose, console: &str, folder: &Path) {
+        let value = Value::String(folder.display().to_string());
+        if let Err(e) = self.config.set(&["app", purpose.saved(), console], value) {
+            tracing::warn!(error = %e, "could not save the folder");
+        }
+    }
+
     /// Where `path` is on disk, checked against the plugin's grants.
     pub(crate) fn resolve(&self, path: &HostPath) -> PluginResult<PathBuf> {
         self.storage(path, false)?.resolve(&path.path)
@@ -301,6 +407,101 @@ pub(crate) fn resolve(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    /// The folders of a plugin that asks for `packages` and `games`, with the player's `packages`
+    /// and `games` mapped to the given folders.
+    fn host_folders(packages: &[&Path], games: &[&Path]) -> HostFolders {
+        let config = Arc::new(ConfigService::in_memory());
+        for (name, roots) in [("packages", packages), ("games", games)] {
+            let list: Vec<String> = roots.iter().map(|p| p.display().to_string()).collect();
+            config.set(&["app", "folders", name], serde_json::json!(list)).unwrap();
+        }
+        let permissions = serde_json::from_value(serde_json::json!({
+            "filesystem": [{ "folder": "packages", "write": true }, { "folder": "games", "write": true }],
+        }))
+        .unwrap();
+        HostFolders {
+            plugin: PluginId::new("emu").unwrap(),
+            name: "Emu".into(),
+            permissions,
+            config,
+            home: None,
+            platform: None,
+        }
+    }
+
+    #[test]
+    fn a_download_goes_to_the_console_s_folder_in_the_first_packages_folder() {
+        let (first, second) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let folders = host_folders(&[first.path(), second.path()], &[]);
+        let (at, folder) = folders.place(Purpose::Download, "ps5", None).unwrap();
+        assert_eq!(folder, first.path().join("ps5"));
+        assert_eq!((at.folder.as_str(), at.root, at.path.as_str()), ("packages", 0, "ps5"));
+    }
+
+    #[test]
+    fn a_chosen_folder_is_used_when_it_is_inside_a_grant_folder_and_refused_when_it_is_not() {
+        let (first, second, outside) =
+            (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let folders = host_folders(&[first.path(), second.path()], &[]);
+        let chosen = second.path().join("mine/ps4");
+        let (at, folder) = folders.place(Purpose::Download, "ps4", Some(&chosen)).unwrap();
+        assert_eq!(folder, chosen);
+        assert_eq!((at.root, at.path.as_str()), (1, "mine/ps4"));
+
+        let refused = folders.place(Purpose::Download, "ps4", Some(outside.path())).unwrap_err().to_string();
+        assert!(refused.contains("Pick a folder inside a packages folder"), "{refused}");
+        let relative = folders.place(Purpose::Download, "ps4", Some(Path::new("games/ps4"))).unwrap_err().to_string();
+        assert!(relative.contains("isn't a full path"), "{relative}");
+    }
+
+    #[test]
+    fn a_chosen_folder_can_be_the_grant_folder_itself() {
+        let root = tempfile::tempdir().unwrap();
+        let folders = host_folders(&[root.path()], &[]);
+        let (at, folder) = folders.place(Purpose::Download, "ps5", Some(root.path())).unwrap();
+        assert_eq!((folder, at.root, at.path.as_str()), (root.path().to_owned(), 0, ""));
+    }
+
+    #[test]
+    fn the_last_pick_is_used_until_it_is_in_no_grant_folder_any_more() {
+        let (first, second) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let folders = host_folders(&[first.path(), second.path()], &[]);
+        folders.remember(Purpose::Download, "ps5", &second.path().join("lib/ps5"));
+        let (at, folder) = folders.place(Purpose::Download, "ps5", None).unwrap();
+        assert_eq!((folder, at.root), (second.path().join("lib/ps5"), 1));
+
+        // The player unmapped that folder: the console's folder in the first one is used.
+        folders.config.set(&["app", "folders", "packages"], serde_json::json!([first.path()])).unwrap();
+        let (at, folder) = folders.place(Purpose::Download, "ps5", None).unwrap();
+        assert_eq!((folder, at.root), (first.path().join("ps5"), 0));
+    }
+
+    #[test]
+    fn a_download_and_an_install_use_their_own_grant_and_their_own_saved_pick() {
+        let (packages, games) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let folders = host_folders(&[packages.path()], &[games.path()]);
+        folders.remember(Purpose::Install, "ps5", &games.path().join("chosen"));
+        let (_, download) = folders.place(Purpose::Download, "ps5", None).unwrap();
+        let (at, install) = folders.place(Purpose::Install, "ps5", None).unwrap();
+        assert_eq!(download, packages.path().join("ps5"), "the install's pick doesn't move a download");
+        assert_eq!((install, at.folder.as_str()), (games.path().join("chosen"), "games"));
+        assert_eq!(
+            folders.config.get(&["app", "install_folder", "ps5"]),
+            serde_json::json!(games.path().join("chosen"))
+        );
+        assert!(folders.config.get(&["app", "download_folder", "ps5"]).is_null());
+    }
+
+    #[test]
+    fn a_plugin_without_the_grant_has_no_folder_to_place() {
+        let mut folders = host_folders(&[], &[]);
+        folders.permissions = serde_json::from_value(serde_json::json!({})).unwrap();
+        let refused = folders.place(Purpose::Install, "ps5", None).unwrap_err().to_string();
+        assert!(refused.contains("Emu has no game folder"), "{refused}");
+    }
+
     /// A store's library list: each library's path, a Windows one with its backslashes doubled.
     #[test]
     fn a_list_file_gives_each_value_of_its_key() {

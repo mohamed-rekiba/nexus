@@ -189,22 +189,6 @@ pub enum Command {
 
 pub use nexus_api::HOST_INSTALL_GAME;
 
-/// The player's folders as `game`'s plugin may use them.
-pub(crate) fn game_folders(kernel: &Kernel, game: &GameKey) -> Option<crate::folders::HostFolders> {
-    plugin_folders(kernel, &game.plugin)
-}
-
-/// The player's folders as `plugin` may use them.
-pub(crate) fn plugin_folders(kernel: &Kernel, plugin: &PluginId) -> Option<crate::folders::HostFolders> {
-    Some(crate::folders::HostFolders {
-        plugin: plugin.clone(),
-        permissions: kernel.manifest(plugin).ok()?.permissions.clone(),
-        config: kernel.config().clone(),
-        home: kernel.host().home.clone(),
-        platform: kernel.host().platform,
-    })
-}
-
 /// Where a game's folder is on disk, through its plugin's folder grants; `None` when the
 /// grants refuse it or it isn't a folder.
 pub(crate) fn resolve_game_folder(
@@ -212,7 +196,7 @@ pub(crate) fn resolve_game_folder(
     game: &GameKey,
     folder: &nexus_api::HostPath,
 ) -> Option<std::path::PathBuf> {
-    game_folders(kernel, game)?.resolve(folder).ok().filter(|p| p.is_dir())
+    kernel.host_folders(&game.plugin)?.resolve(folder).ok().filter(|p| p.is_dir())
 }
 
 pub(crate) struct Inner {
@@ -363,7 +347,7 @@ impl Core {
             }
         });
         let core = Core { inner };
-        core.installs().clean_up(|plugin| plugin_folders(core.kernel(), plugin));
+        core.installs().clean_up(|plugin| core.kernel().host_folders(plugin));
         crate::system::adopt_vpn(&core).await;
         core.torrents().restore();
         crate::emulator_builds::resume_installs(&core).await;
@@ -701,13 +685,7 @@ impl Core {
                 from_plugin.or_else(from_dir).ok_or_else(|| CoreError::Io(format!("{plugin} has no asset {path}")))
             }
             nexus_ui_api::ImageRef::Folder { plugin, path } => {
-                let folders = crate::folders::HostFolders {
-                    plugin: plugin.clone(),
-                    permissions: kernel.manifest(plugin)?.permissions.clone(),
-                    config: kernel.config().clone(),
-                    home: kernel.host().home.clone(),
-                    platform: kernel.host().platform,
-                };
+                let folders = kernel.host_folders(plugin).ok_or_else(|| CoreError::UnknownPlugin(plugin.clone()))?;
                 nexus_api::Folders::read_range(&folders, path, 0, nexus_api::MAX_FOLDER_READ)
                     .await
                     .map_err(|error| CoreError::Plugin { plugin: plugin.clone(), error })

@@ -211,6 +211,11 @@ is (`schedule.rs`). They take the time as an input, so the tests need no clock.
 
 **Seed-only start**: a start of a finished download after a restart. The torrent starts paused,
 checks its files, and seeds only when every piece is there. It never downloads.
+**Purpose** (`Purpose`, nexus-core `folders.rs`): what a console's folder is for, `Download` or
+`Install`. It picks the grant the folder lies in (`packages` or `games`), the key of the last
+pick, and the words of an error. `HostFolders::place` takes it with a console.
+_Avoid_: place (`Place` in `system.rs` says where Nexus runs), kind (a plugin's kind is something else)
+
 
 **Session**: one run of a game, from its spawn to the end of its last process. It has a number
 (`SessionId`), and the game's log and play time come from it.
