@@ -490,8 +490,12 @@ async fn a_game_steam_has_no_art_cached_for_gets_only_art_steam_s_server_has() {
     collections(s.root.path(), "[620]", "[]", "[]");
     let releases = provided.releases.unwrap();
     let list = releases.releases(&Console::new("Steam").unwrap()).await.unwrap().unwrap();
-    let steam = list.releases[0].steam.clone().unwrap();
-    assert_eq!((steam.hero.as_str(), steam.logo.as_str(), steam.header.as_str()), ("", "", header));
+    let art = list.releases[0].metadata.clone().unwrap();
+    assert_eq!(
+        (art.background, art.logo),
+        (Some(ImageSource::Url(header.into())), None),
+        "the header, no hero or logo"
+    );
 }
 
 /// Team Fortress 2's app file in `root`, as Steam writes it while it installs: `flags`, and

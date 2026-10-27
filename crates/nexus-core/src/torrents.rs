@@ -110,13 +110,14 @@ fn save_folder(kernel: &Kernel, saved: &str, console: &str, folder: &Path) {
     }
 }
 
-/// The console an emulator plays, which names its folders: PS5 when its manifest doesn't say.
+/// The console an emulator plays, which names its folders: the plugin's id when its manifest
+/// doesn't say.
 pub(crate) fn console_of(kernel: &Kernel, emulator: &PluginId) -> String {
     kernel
         .manifest(emulator)
         .ok()
         .and_then(|m| m.console.as_ref().map(|c| c.as_str().to_owned()))
-        .unwrap_or_else(|| "PS5".into())
+        .unwrap_or_else(|| emulator.to_string())
 }
 
 /// Where an install of `emulator`'s goes: `chosen`, or else the folder last picked for its
@@ -237,9 +238,10 @@ pub enum TorrentAction {
     OpenStore,
 }
 
-/// The console a release is for, which names its folder: PS5 when the catalog doesn't say.
-fn console(platform: &str) -> &str {
-    if platform.is_empty() { "PS5" } else { platform }
+/// The console a release is for, which names its folder: the emulator's when the catalog
+/// doesn't say.
+fn console(kernel: &Kernel, emulator: &PluginId, platform: &str) -> String {
+    if platform.is_empty() { console_of(kernel, emulator) } else { platform.to_owned() }
 }
 
 impl Core {
@@ -386,7 +388,12 @@ impl Core {
             return Err(CoreError::Invalid(error));
         }
         if let Some(parent) = folder.parent().filter(|_| chosen) {
-            save_folder(self.kernel(), "download_folder", console(&release.platform), parent);
+            save_folder(
+                self.kernel(),
+                "download_folder",
+                &console(self.kernel(), &found.emulator, &release.platform),
+                parent,
+            );
         }
         let job = TorrentJob {
             id: release.id.clone(),
@@ -440,7 +447,7 @@ impl Core {
             kernel,
             emulator,
             PACKAGES_FOLDER,
-            console(platform),
+            &console(kernel, emulator, platform),
             chosen,
             "download_folder",
             "packages folder",

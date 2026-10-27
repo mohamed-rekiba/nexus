@@ -147,7 +147,7 @@ impl Steam {
         let releases = owned
             .into_iter()
             .map(|(app, game)| {
-                let art = |file: &str| format!("{ART}/{app}/{file}");
+                let art = |file: &str| Some(ImageSource::Url(format!("{ART}/{app}/{file}")));
                 Release {
                     id: format!("steam-{app}"),
                     title_id: app.to_string(),
@@ -158,12 +158,12 @@ impl Steam {
                     hidden: game.hidden,
                     favorite: game.favorite,
                     // Only what Steam's server has for every game: a guessed hero or logo is
-                    // missing for an older game (the Game Hub falls back to the header).
-                    steam: Some(SteamInfo {
-                        app_id: app.into(),
-                        portrait: art(COVER),
-                        header: art(HEADER),
-                        ..SteamInfo::default()
+                    // missing for an older game, so the header is the background.
+                    metadata: Some(GameMetadata {
+                        cover: art(COVER),
+                        background: art(HEADER),
+                        store_url: format!("https://store.steampowered.com/app/{app}/"),
+                        ..GameMetadata::default()
                     }),
                     ..Release::default()
                 }

@@ -6,8 +6,8 @@
 use std::collections::HashMap;
 
 use nexus_api::{
-    Capability, Console, GameDetails, GameFact, GameKey, GameMetadata, GameSummary, ImageSource, PluginId, PluginKind,
-    Release, ReleaseList, SteamInfo,
+    Capability, Console, FactKind, GameDetails, GameFact, GameKey, GameMetadata, GameSummary, ImageSource, PluginId,
+    PluginKind, Release, ReleaseList,
 };
 
 use crate::app::{Core, Detail, Entry};
@@ -62,11 +62,10 @@ pub(crate) fn date_key(text: &str) -> Option<String> {
 }
 
 /// The day a release's game came out, to sort by (see [`date_key`]): the catalog's release
-/// date, else its year, else Steam's date.
+/// date or year, else the date in the release's store data.
 pub(crate) fn release_day(release: &Release) -> Option<String> {
-    date_key(&release.release_date)
-        .or_else(|| date_key(&release.release_year))
-        .or_else(|| release.steam.as_ref().and_then(|s| date_key(&s.release)))
+    date_key(release.fact_text(FactKind::ReleaseDate))
+        .or_else(|| release.metadata.as_ref().and_then(|m| date_key(&m.release)))
 }
 
 /// A `YYYY-MM-DD` date in words, "Sep 6, 2024"; other text stays as it is.
@@ -313,11 +312,11 @@ pub(crate) fn offers(copy: &CatalogCopy) -> Vec<Offer> {
                 Some(t) => format!("{}/{t}", copy.emulator),
                 None => format!("{}/title-{}", copy.emulator, plain(&newest.title)),
             };
-            // Steam's cover, for a game the catalog found on Steam, else a topic's first picture.
-            // A store's art comes first.
-            let steam = group.iter().find_map(|r| r.steam.as_ref()).and_then(|s| steam_metadata(s).cover);
+            // The cover of the release's store data, else a release's first picture. A store's
+            // art comes first.
+            let store = group.iter().find_map(|r| r.metadata.as_ref()).and_then(|m| m.cover.clone());
             let picture = group.iter().find_map(|r| r.image_urls.first()).map(|url| ImageSource::Url(url.clone()));
-            let cover = steam.or(picture);
+            let cover = store.or(picture);
             Offer {
                 entry: Entry {
                     key: GameKey::new(copy.service.clone(), local),
@@ -569,19 +568,11 @@ impl Core {
         if let Some(t) = &offer.entry.summary.title_id {
             fact("title-id", "Title ID", t);
         }
-        let released = if best.release_date.is_empty() { &best.release_year } else { &best.release_date };
-        for (id, label, value) in [
-            ("publisher", "Publisher", &best.publisher),
-            ("developer", "Developer", &best.developer),
-            ("release-date", "Release date", &date_words(released)),
-            ("players", "Players", &best.players),
-            ("update", "Update", &best.update),
-            ("format", "Format", &best.format),
-            ("firmware", "Minimum firmware", &best.minimum_firmware),
-            ("interface-languages", "Interface languages", &best.interface_languages),
-            ("audio-languages", "Audio languages", &best.audio_languages),
-        ] {
-            fact(id, label, value);
+        // The catalog's facts, in its order. The genre words and the compatibility tier show
+        // elsewhere.
+        for f in best.facts.iter().filter(|f| !matches!(f.kind, FactKind::Genre | FactKind::Compatibility)) {
+            let value = if f.kind == FactKind::ReleaseDate { date_words(&f.value) } else { f.value.clone() };
+            fact(f.kind.id(), &f.label, &value);
         }
         // The catalog's counts, not live ones.
         let count = |n: Option<u64>| n.map_or_else(|| "Unknown".to_owned(), |n| n.to_string());
@@ -596,7 +587,7 @@ impl Core {
             details: Some(GameDetails {
                 summary: offer.entry.summary.clone(),
                 description: best.description.clone(),
-                developer: Some(best.developer.clone()).filter(|d| !d.is_empty()),
+                developer: Some(best.fact_text(FactKind::Developer).to_owned()).filter(|d| !d.is_empty()),
                 genres: Vec::new(),
                 size_bytes: best.size_bytes,
                 background: None,
@@ -643,47 +634,17 @@ impl Core {
     }
 }
 
-/// The Steam data of the offer's newest release that has some.
-pub(crate) fn steam_of(offer: &Offer) -> Option<&SteamInfo> {
-    offer.releases.iter().find_map(|r| r.steam.as_ref())
+/// The store data of the offer's newest release that has some.
+pub(crate) fn metadata_of(offer: &Offer) -> Option<&GameMetadata> {
+    offer.releases.iter().find_map(|r| r.metadata.as_ref())
 }
 
-/// Steam's data in the shape a store's catalog gives: the library portrait as the cover, the
-/// hero art (else the header) as the background, and the store page.
-pub(crate) fn steam_metadata(steam: &SteamInfo) -> GameMetadata {
-    let url = |url: &String| Some(url).filter(|u| !u.is_empty()).map(|u| ImageSource::Url(u.clone()));
-    GameMetadata {
-        description: steam.short.clone(),
-        publisher: steam.developers.first().or(steam.publishers.first()).cloned().unwrap_or_default(),
-        genres: steam.genres.clone(),
-        release: steam.release.clone(),
-        cover: url(&steam.portrait).or_else(|| url(&steam.header)),
-        background: url(&steam.hero).or_else(|| url(&steam.header)),
-        logo: url(&steam.logo),
-        screenshots: steam.screenshots.iter().filter_map(url).collect(),
-        store_url: format!("https://store.steampowered.com/app/{}/", steam.app_id),
-        ..GameMetadata::default()
-    }
-}
-
-/// ProtonDB's tier and page for an offer of a Windows game packed with Wine that the catalog
-/// found on Steam: empty for any other.
-pub(crate) fn protondb(offer: &Offer) -> (String, String) {
-    match steam_of(offer) {
-        Some(steam) if offer.releases.iter().any(|r| r.wine_packed) => {
-            (steam.protondb.clone(), format!("https://www.protondb.com/app/{}", steam.app_id))
-        }
-        _ => (String::new(), String::new()),
-    }
-}
-
-/// Why a release may not install, or empty. KytyPS5 installs debug packages, so a PS5
-/// package stays listed, with this.
-pub(crate) fn warning(release: &Release) -> &'static str {
-    if release.package && release.platform == "PS5" {
-        "Retail PS5 packages can't be installed; pick a folder, an archive or an exFAT image"
-    } else {
-        ""
+/// The compatibility tier of the offer's newest release that has one, and its page: empty for
+/// none.
+pub(crate) fn compatibility(offer: &Offer) -> (String, String) {
+    match offer.releases.iter().find_map(|r| r.fact(FactKind::Compatibility)) {
+        Some(tier) => (tier.value.clone(), tier.url.clone()),
+        None => (String::new(), String::new()),
     }
 }
 
