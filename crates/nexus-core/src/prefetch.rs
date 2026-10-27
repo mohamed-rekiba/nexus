@@ -25,7 +25,7 @@ impl Core {
         let core = self.clone();
         let game = game.clone();
         let task = tokio::spawn(async move { core.prefetch(game).await });
-        if let Some(last) = self.state().prefetch.replace(task.abort_handle()) {
+        if let Some(last) = self.library().prefetching(task.abort_handle()) {
             last.abort();
         }
     }
@@ -35,30 +35,26 @@ impl Core {
         let rested = clock.now() + SCREENSHOTS_AFTER;
         clock.sleep(NEIGHBOURS_AFTER).await;
         let art: Vec<ImageRef> = {
+            let library = self.library().snapshot();
             let (torrents, installs) = (self.torrents().snapshot(), self.installs().snapshot());
             let state = self.state();
-            crate::view::neighbours(
-                &self.inner.kernel,
-                &state,
-                &torrents,
-                &installs,
-                &game,
-                &state.grid_columns,
-                MOST_NEIGHBOURS,
-            )
-            .iter()
-            .flat_map(|key| {
-                let art = crate::view::hub_art(&state, key);
-                [art.background, art.logo]
-            })
-            .flatten()
-            .collect()
+            let kernel = &self.inner.kernel;
+            crate::view::neighbours(kernel, &state, &library, &torrents, &installs, &game, MOST_NEIGHBOURS)
+                .iter()
+                .flat_map(|key| {
+                    let art = library.art(key);
+                    [art.background, art.logo]
+                })
+                .flatten()
+                .map(|(plugin, image)| crate::view::image(&plugin, &image))
+                .collect()
         };
         for image in &art {
             self.fetch_ahead(image).await;
         }
         clock.sleep_until(rested).await;
-        let shots = crate::view::hub_art(&self.state(), &game).screenshots;
+        let shots = self.library().snapshot().art(&game).screenshots;
+        let shots: Vec<ImageRef> = shots.iter().map(|(plugin, image)| crate::view::image(plugin, image)).collect();
         for image in &shots {
             self.fetch_ahead(image).await;
         }
@@ -67,7 +63,7 @@ impl Core {
     /// Fetches a web image into the image cache, once a run. Other images are local.
     async fn fetch_ahead(&self, image: &ImageRef) {
         let ImageRef::Url { url, .. } = image else { return };
-        if !self.state().prefetched.insert(url.clone()) {
+        if !self.library().first_fetch(url) {
             return;
         }
         // A task of its own, which the next select doesn't stop: a stop while the image is

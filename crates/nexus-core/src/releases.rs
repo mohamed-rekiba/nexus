@@ -10,8 +10,9 @@ use nexus_api::{
     PluginKind, Release, ReleaseList,
 };
 
-use crate::app::{Core, Detail, Entry};
+use crate::app::Core;
 use crate::changes::Area;
+use crate::library::{Detail, Entry};
 
 /// A release added this many days ago, or fewer, is new.
 pub const NEW_DAYS: i64 = 14;
@@ -356,7 +357,7 @@ pub(crate) fn offers(copy: &CatalogCopy) -> Vec<Offer> {
 /// emulator `before` didn't, by topic (a torrent uploaded again is no new release), else by
 /// id. A catalog that took the place of the bundled copy, or of none, adds none: only a
 /// catalog read before from its address or a refresh counts.
-fn added_releases(before: &[CatalogCopy], now: &[CatalogCopy]) -> usize {
+pub(crate) fn added_releases(before: &[CatalogCopy], now: &[CatalogCopy]) -> usize {
     let name = |r: &Release| if r.topic.is_empty() { format!("id:{}", r.id) } else { format!("topic:{}", r.topic) };
     now.iter()
         .filter_map(|copy| {
@@ -440,24 +441,14 @@ impl Core {
             if let Some(slots) = &provided.slots {
                 let request = nexus_api::SlotRequest { slot: nexus_api::SlotId::CatalogAction, game: None };
                 match kernel.guard(&service, "slots.items", slots.items(&request)).await {
-                    Ok(items) => {
-                        buttons.extend(crate::view::slot_vms(&service, nexus_api::SlotId::CatalogAction, items))
-                    }
+                    Ok(items) => buttons.push((service.clone(), items)),
                     Err(e) => self.problem(e.to_string()),
                 }
             }
         }
         let offers: Vec<Offer> = copies.iter().flat_map(offers).collect();
-        let added = {
-            let mut state = self.state();
-            let added = added_releases(&state.catalogs, &copies);
-            state.catalogs = copies;
-            state.catalogs_read = true;
-            state.catalog_buttons = buttons;
-            state.offers = offers;
-            added
-        };
-        self.remember_offer_art();
+        let installed = self.installed_offers(self.library().snapshot().library(), &offers);
+        let added = self.library().set_catalogs(copies, buttons, offers, installed);
         if added > 0 {
             let s = if added == 1 { "" } else { "s" };
             self.notice_opening(
@@ -528,13 +519,13 @@ impl Core {
         if !ended.is_empty() {
             for (plugin, install) in &ended {
                 let installed = {
+                    let library = self.library().snapshot();
                     let (torrents, installs) = (self.torrents().snapshot(), self.installs().snapshot());
-                    let state = self.state();
-                    let owned = crate::view::Owned::new(&state, &torrents, &installs);
-                    state.offers.iter().any(|o| {
+                    let owned = crate::view::Owned::new(library.library(), &torrents.jobs, &installs);
+                    library.offers.iter().any(|o| {
                         &o.entry.key.plugin == plugin
                             && o.releases.iter().any(|r| r.id == install.release)
-                            && crate::view::installed_game(&state, &owned, o).is_some()
+                            && crate::view::installed_game(&owned, o).is_some()
                     })
                 };
                 if installed {
@@ -545,19 +536,14 @@ impl Core {
         self.changed(Area::Downloads);
     }
 
-    /// The offer `key` names, if it is one.
-    pub(crate) fn offer(&self, key: &GameKey) -> Option<Offer> {
-        self.state().offers.iter().find(|o| &o.entry.key == key).cloned()
-    }
-
     /// An offer's Game Hub: the words and facts of its best release (see
     /// [`crate::view::best_release`]), with how many share it and when the catalog counted them.
     pub(crate) fn offer_detail(&self, offer: &Offer) -> Detail {
         let best = {
+            let library = self.library().snapshot();
             let (torrents, installs) = (self.torrents().snapshot(), self.installs().snapshot());
-            let state = self.state();
-            let owned = crate::view::Owned::new(&state, &torrents, &installs);
-            crate::view::best_release(&state, &owned, offer).clone()
+            let owned = crate::view::Owned::new(library.library(), &torrents.jobs, &installs);
+            crate::view::best_release(&library, &owned, offer).clone()
         };
         let mut facts = Vec::new();
         let mut fact = |id: &str, label: &str, value: &str| {
@@ -585,50 +571,48 @@ impl Core {
             None => "Date unknown".to_owned(),
         };
         fact("counted", "Counted", &counted);
-        Detail {
-            details: Some(GameDetails {
-                summary: offer.entry.summary.clone(),
-                description: best.description.clone(),
-                developer: Some(best.fact_text(FactKind::Developer).to_owned()).filter(|d| !d.is_empty()),
-                genres: Vec::new(),
-                size_bytes: best.size_bytes,
-                background: None,
-                facts,
-                folder: None,
-                also: Vec::new(),
-                uninstall_link: None,
-            }),
-            ..Detail::default()
-        }
+        Detail::of(GameDetails {
+            summary: offer.entry.summary.clone(),
+            description: best.description.clone(),
+            developer: Some(best.fact_text(FactKind::Developer).to_owned()).filter(|d| !d.is_empty()),
+            genres: Vec::new(),
+            size_bytes: best.size_bytes,
+            background: None,
+            facts,
+            folder: None,
+            also: Vec::new(),
+            uninstall_link: None,
+        })
     }
 
     /// Asks the stores about the games on the Catalog's shown pages that they haven't
     /// described yet, by title id and the newest release's region. In the background.
     pub(crate) fn describe_catalog_page(&self) {
-        let todo: Vec<(GameKey, nexus_api::GameRef)> = {
+        let library = self.library().snapshot();
+        let page = {
             let (torrents, installs) = (self.torrents().snapshot(), self.installs().snapshot());
-            let mut state = self.state();
-            let page = crate::view::catalog_page(self.kernel(), &state, &torrents, &installs);
-            let todo: Vec<_> = page
-                .iter()
-                .filter(|key| !state.meta.contains_key(key) && !state.asked.contains(key))
-                .filter_map(|key| state.offers.iter().find(|o| &o.entry.key == key))
-                .filter_map(|o| {
-                    Some((
-                        o.entry.key.clone(),
-                        nexus_api::GameRef {
-                            platform: o.entry.summary.platform.clone(),
-                            title_id: o.entry.summary.title_id.clone()?,
-                            content_id: String::new(),
-                            title: o.entry.summary.title.clone(),
-                            region: o.releases[0].region.clone(),
-                        },
-                    ))
-                })
-                .collect();
-            state.asked.extend(todo.iter().map(|(key, _)| key.clone()));
-            todo
+            let state = self.state();
+            crate::view::catalog_page(self.kernel(), &state, &library, &torrents, &installs)
         };
+        let refs: Vec<(GameKey, nexus_api::GameRef)> = page
+            .iter()
+            .filter_map(|key| library.offer(key))
+            .filter_map(|o| {
+                Some((
+                    o.entry.key.clone(),
+                    nexus_api::GameRef {
+                        platform: o.entry.summary.platform.clone(),
+                        title_id: o.entry.summary.title_id.clone()?,
+                        content_id: String::new(),
+                        title: o.entry.summary.title.clone(),
+                        region: o.releases[0].region.clone(),
+                    },
+                ))
+            })
+            .collect();
+        let keys: Vec<GameKey> = refs.iter().map(|(key, _)| key.clone()).collect();
+        let asking = self.library().to_ask(&keys);
+        let todo: Vec<_> = refs.into_iter().filter(|(key, _)| asking.contains(key)).collect();
         if todo.is_empty() {
             return;
         }

@@ -111,7 +111,7 @@ async fn shadps4_meets_every_contract() {
 #[tokio::test]
 async fn full_games_are_listed_with_their_status_and_updates_are_not() {
     let (test, _games) = boot().await;
-    test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
 
     let home = test.core.view().home;
     assert_eq!(home.games.iter().map(|g| g.key.as_str()).collect::<Vec<_>>(), ["emu-shadps4:CUSA04118"]);
@@ -122,7 +122,7 @@ async fn full_games_are_listed_with_their_status_and_updates_are_not() {
 #[tokio::test]
 async fn the_game_hub_says_when_the_result_was_tested() {
     let (test, _games) = boot().await;
-    test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     test.core.dispatch(Command::OpenGame("emu-shadps4:CUSA04118".parse().unwrap())).await.unwrap();
 
     let compat = test.core.view().detail.unwrap().compat.expect("the community's result");
@@ -343,7 +343,7 @@ async fn uninstalling_a_game_deletes_its_update_and_its_add_ons_too() {
         .dispatch(Command::SetFolders { name: "shadps4-data".into(), paths: vec![data.path().into()] })
         .await
         .unwrap();
-    test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     let game: nexus_api::GameKey = "emu-shadps4:CUSA04118".parse().unwrap();
     test.core.dispatch(Command::OpenGame(game.clone())).await.unwrap();
 
@@ -380,7 +380,7 @@ async fn one_games_folder_holds_games_for_both_consoles_and_each_emulator_finds_
         .boot_core()
         .await;
     test.core.dispatch(Command::SetFolders { name: "games".into(), paths: vec![games.path().into()] }).await.unwrap();
-    test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
 
     let mut keys: Vec<_> = test.core.view().home.games.into_iter().map(|g| g.key).collect();
     keys.sort();

@@ -126,7 +126,7 @@ async fn kyty_meets_every_contract() {
 #[tokio::test]
 async fn games_come_from_the_player_s_folder_with_their_icons_and_community_status() {
     let k = boot(&[V1]).await;
-    k.test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    k.test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
 
     let home = k.test.core.view().home;
     let titles: Vec<_> = home.games.iter().map(|g| (g.key.as_str(), g.title.as_str())).collect();
@@ -723,7 +723,7 @@ async fn a_stored_window_size_becomes_the_nearest_resolution_and_settings_still_
 async fn a_turned_off_plugin_has_no_games_and_cannot_launch_until_turned_on_again() {
     let k = boot(&[V1]).await;
     let core = &k.test.core;
-    core.dispatch(Command::RefreshLibrary).await.unwrap();
+    core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     assert_eq!(core.view().home.games.len(), 2);
 
     core.dispatch(Command::SetPluginEnabled { plugin: kyty(), enabled: false }).await.unwrap();
@@ -748,7 +748,7 @@ async fn a_theme_cannot_be_turned_off() {
 #[tokio::test]
 async fn a_game_s_menu_finds_its_folder_and_log_and_names_the_community_list() {
     let k = boot(&[V1]).await;
-    k.test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    k.test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     let game: nexus_api::GameKey = "emu-kyty:PPSA01234".parse().unwrap();
     k.test.core.dispatch(Command::OpenGame(game.clone())).await.unwrap();
 
@@ -769,7 +769,7 @@ async fn a_game_s_menu_finds_its_folder_and_log_and_names_the_community_list() {
 #[tokio::test]
 async fn a_game_has_its_own_settings_and_a_change_shows_on_its_page() {
     let k = boot(&[V1]).await;
-    k.test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    k.test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     let game: nexus_api::GameKey = "emu-kyty:PPSA01234".parse().unwrap();
     k.test.core.dispatch(Command::Navigate(Route::GameSettings(game.clone()))).await.unwrap();
 

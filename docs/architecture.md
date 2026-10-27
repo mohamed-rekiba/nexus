@@ -36,7 +36,7 @@ nexus-app (the binary)         ──▶ nexus-ui-host, nexus-core, every built-
 | Crate | Owns |
 | --- | --- |
 | `crates/nexus-api` | The plugin API. The plugin traits, `PluginManifest`, `Capability`, `Provided`, `PluginContext` and its facades (`ConfigStore`, `Storage`, `Folders`, `Programs`, `HttpClient`, `Logger`, `EventSink`, `ServiceRegistry`), `RelPath` and `HostPath`, plans (`DownloadPlan`, `LaunchSpec`), slots, `Event`, `VpnGate`. Semver-versioned: a manifest's `host_api` must match `API_VERSION`, which is set by hand with the API, not from Nexus's version. |
-| `crates/nexus-core` | The kernel and the app. Plugin lifecycle and registry (`Kernel`), the event bus (`EventBus`), settings (`ConfigService`), the app state and commands (`Core`, `AppState`, `Command`), the subsystems (`torrents/`, `game_installs/`), view building (`view.rs`), HTTP downloads, unpacking, launches, VPN rules, catalogs, "This PC", the launcher update, and the port traits. |
+| `crates/nexus-core` | The kernel and the app. Plugin lifecycle and registry (`Kernel`), the event bus (`EventBus`), settings (`ConfigService`), the app state and commands (`Core`, `AppState`, `Command`), the subsystems (`torrents/`, `game_installs/`, `library/`), view building (`view.rs`), HTTP downloads, unpacking, launches, VPN rules, catalogs, "This PC", the launcher update, and the port traits. |
 | `crates/nexus-ui-api` | The theme contract. View models (`vm.rs`: `AppView` and the rest), the theme manifest (`ThemeManifest`), design tokens, and `contract/types.slint` with the `Vm` and `Host` globals. No toolkit code. |
 | `crates/nexus-ui-host` | `ThemeSet` (finds themes, resolves `extends`) and `ThemeHost`: compiles a theme with `slint-interpreter`, binds the view models, loads images, turns gamepad buttons into keys, and swaps themes. |
 | `crates/nexus-app` | The binary. The event loop, render scheduling, the image loader, and the system adapters: `desktop.rs`, `processes.rs` (a running game's processes), `torrents.rs` (librqbit), `archives.rs` and `libarchive.rs`, `hardware.rs` and `gpu_probe.rs` (Vulkan), `trailer.rs` (libmpv), `gamepad.rs` (gilrs), `audio.rs` (rodio), `http.rs` (reqwest), `disk.rs`, `clock.rs`. |
@@ -327,10 +327,11 @@ Linux, `~/Library/Application Support/nexus` on macOS, `%APPDATA%\nexus` on Wind
 
 Some `app` keys the core keeps: `theme-options`, `disabled_plugins`, `enabled_plugins`,
 `folders`, `downloads` and `installs` (work in progress, resumed at start), `game_installs`
-(work folders to clean up), `torrents`, `playtime`, `results`, `seed_downloads`. The one-value
-settings are the prefs (`Pref`): `sounds`, `fullscreen`, `return_on_exit`, `scale`,
-`start_at_login`, `auto_update`, `monitor`, `welcomed`, `vpn_only`, `vpn`, `theme`,
-`pc_noticed` and `update_repo`.
+(work folders to clean up), `torrents`, `playtime`, `results`, `result_builds`,
+`result_skipped`, `hidden_games`, `game_art`, `seed_downloads`. The one-value settings are the
+prefs (`Pref`): `sounds`, `fullscreen`, `return_on_exit`, `scale`, `start_at_login`,
+`auto_update`, `monitor`, `welcomed`, `vpn_only`, `vpn`, `theme`, `pc_noticed` and
+`update_repo`.
 
 Downloaded games are not in the data folder: they go to the player's `packages` folders and are
 installed into the `games` folders.
@@ -338,9 +339,9 @@ installed into the `games` folders.
 ## Subsystems
 
 `Core` is splitting into subsystems, one for each area of its state. The torrents
-(`crates/nexus-core/src/torrents/mod.rs`) and the game installs
-(`crates/nexus-core/src/game_installs/mod.rs`) are subsystems; the other areas follow the same
-shape:
+(`crates/nexus-core/src/torrents/mod.rs`), the game installs
+(`crates/nexus-core/src/game_installs/mod.rs`) and the library
+(`crates/nexus-core/src/library/mod.rs`) are subsystems; the other areas follow the same shape:
 
 - A subsystem owns its state behind its own lock, and its saved records (the torrents:
   `app.torrents` and `app.seed_downloads`). Nothing else takes that lock or writes those keys.
@@ -355,7 +356,12 @@ shape:
 - A command that needs another area first is resolved by the core, which hands the subsystem
   plain data (`add(NewDownload)`, `begin(NewInstall)`). The fields the game installs write on
   a download's record (`HandOff`: the unpack and the install) change through one call,
-  `hand_off`, which the game installs reach through a narrow port (`TorrentDownloads`).
+  `hand_off`, which the game installs reach through a narrow port (`TorrentDownloads`). The
+  library takes the plugins' answers the same way: the core reads them and calls
+  `set_library`, `set_detail` or `set_catalogs`, with what other areas decide (the offer each
+  installed game is) worked out first, so one change publishes it all.
+- A snapshot that the view reads on every render shares its data through `Arc` (the library's
+  records and offers), and a change copies it only while a snapshot is held.
 - The subsystem never calls out while it holds its lock, and the core takes a subsystem's lock
   only when it doesn't hold `AppState`.
 
@@ -490,13 +496,30 @@ opens Home and a hold opens the power menu. Per-system details: [reference/deskt
 
 ## Library, metadata and catalogs
 
-**Library.** `Command::RefreshLibrary` lists every `Catalog` plugin's games, sorts them by
-title, reads their `game.badge` slots and selects the first game. The first load is the boot:
-it reads the emulators' builds and asks the `Metadata` plugins about the games, 6 at a time,
-waiting at most 10 s. Then `AppState.booted` turns true. Later loads do this in the background.
+**The library subsystem** (`crates/nexus-core/src/library/`) holds one `GameRecord` per game
+key: the game as its plugin lists it, its badges, its details (`DetailState`: unread, read or
+failed), what a store said about it, whether a store was asked, and for an installed game, the
+catalog's offer it is and that offer's cover. Beside the records it holds the catalogs' copies
+and the offers grouped from them. It stores domain data (`SlotItem`, `CompatInfo`, a settings
+schema with its values); `view.rs` turns it into view models. Its snapshot shares the records
+and the offers through `Arc`, and answers the queries the view and the core ask: `art`,
+`metadata` (a store's catalog first, then a release's store data), `detail_state`, `title`,
+`offer`, `hidden` and `result`.
 
-**Metadata.** The core keeps what a `Metadata` plugin says in `AppState.meta`, by game, and
-asks about each game at most once a run (`AppState.asked`). The `playstation-store` service
+It asks no plugin. The core reads the plugins (`library_reads.rs`, and the catalog reads in
+`releases.rs`) and hands it the answers, because a read crosses areas: the emulators' builds,
+notices and the selection. It owns `app.hidden_games`, `app.game_art` and `app.results` (with
+`app.result_builds` and `app.result_skipped`), and reads them from the config each time, so a
+value set there shows at once.
+
+**Library.** `Command::Library(LibraryCmd::Refresh)` lists every `Catalog` plugin's games,
+sorts them by title, reads their `game.badge` slots and selects the first game. The first load
+is the boot: it reads the emulators' builds and asks the `Metadata` plugins about the games, 6
+at a time, waiting at most 10 s. Then the library counts as booted. Later loads do this in the
+background. `LibraryCmd::Hide` hides a game from the Catalog.
+
+**Metadata.** The core keeps what a `Metadata` plugin says in the game's record, and asks about
+each game at most once a run. The `playstation-store` service
 keeps its answers in its own `catalog.json` (14 days for a hit, 3 for a miss).
 
 **Catalogs.** A `Releases` plugin answers `releases(console)` for the console each turned-on
@@ -631,7 +654,7 @@ keyboard's (the default theme's on-screen keyboard opens for a controller only).
 6. `ThemeHost::new` collects the themes; `start_with` shows the chosen theme or `default`.
 7. Old thumbnails are swept, the image loader is made, and the gamepad thread, the core event
    task and the 250 ms timer start.
-8. `Command::RefreshLibrary` is dispatched, the first render runs, and Slint's event loop runs.
+8. `Command::Library(LibraryCmd::Refresh)` is dispatched, the first render runs, and Slint's event loop runs.
 
 The event loop ends on Quit, Restart, or a signal: Ctrl-C, SIGTERM or SIGHUP quit the same way
 as the Quit button, and a second signal exits at once (code 130). Then the timer and the UI state

@@ -202,13 +202,7 @@ pub(crate) async fn launch(core: &Core, game: GameKey) -> CoreResult<()> {
         kernel.spawner().spawn(command).await.map_err(|error| CoreError::Plugin { plugin: plugin.clone(), error })?;
 
     let session = core.next_session();
-    let title = core
-        .state()
-        .library
-        .iter()
-        .find(|e| e.key == game)
-        .map(|e| e.summary.title.clone())
-        .unwrap_or_else(|| game.local.clone());
+    let title = core.library().snapshot().title(&game);
     let pid = process.id();
     let started = kernel.clock().now();
     let build = core.build_of(&plugin);
@@ -285,7 +279,7 @@ async fn finish(
     // The player says how far it got, once for each build, unless they stopped it at once.
     if let Some(ended) = ended
         && (!ended.stopping || played >= PLAYED_AT_LEAST)
-        && !core.result_asked(game, ended.build.as_deref())
+        && !core.library().answered(game, ended.build.as_deref())
     {
         core.state().result_prompt = Some((game.clone(), ended.build));
     }
@@ -302,13 +296,7 @@ async fn finish(
 
 /// "Can't start Astro Bot: firmware missing". A plugin's own words, without the error's kind.
 pub(crate) fn cant_start(core: &Core, game: &GameKey, error: &CoreError) -> String {
-    let title = core
-        .state()
-        .library
-        .iter()
-        .find(|e| &e.key == game)
-        .map(|e| e.summary.title.clone())
-        .unwrap_or_else(|| game.local.clone());
+    let title = core.library().snapshot().title(game);
     let reason = match error {
         CoreError::Plugin { error: PluginError::Precondition(why) | PluginError::NotFound(why), .. } => why.clone(),
         CoreError::Plugin { plugin, error: PluginError::OwnBuildMissing { has_downloaded, folder, program } } => {

@@ -78,9 +78,13 @@ peers and upload time of each topic, with no titles.
 game folder, in the background. The game installs subsystem owns the job; the plugin reports
 through an `InstallJob`.
 
-**Hand-off** (`HandOff`): the fields of a download that the game installs write: the unpack of
-its archives and the install from it. They are saved with the download, and change only
-through the torrents subsystem's `hand_off` call.
+**Game record** (`GameRecord`): everything the core knows about one game, by its game key: the
+game as its plugin lists it, its badges, its details, a store's metadata, and for an installed
+game, the catalog's offer it is and that offer's cover. The library subsystem holds one per game.
+
+**Hand-off** (`HandOff`): the fields of a download that another area writes: the unpack of its
+archives and the install from it. They change only through the torrents subsystem's
+`hand_off` call.
 
 **Hold**: the wait of a fetch or a refresh that failed or waits for the VPN. The work doesn't
 try again before the hold ends. Each hold is twice as long as the one before, at most the
@@ -101,8 +105,15 @@ a plugin's privileges only: the system capabilities, long-running programs and p
 system plugins. Any code plugin may provide the data capabilities.
 _Avoid_: type, category
 
+**Library subsystem** (`LibrarySubsystem`): the subsystem that holds the game records, the
+catalogs' copies and their offers, and the library's saved choices (hidden games, kept covers,
+the player's results). It asks no plugin; the core hands it the plugins' answers.
+
 **Listing** (`ArchiveEntry`): an archive's entries as a format reader gives them, unchecked: each
 name as the archive spells it, its size, its kind, and whether it needs a password.
+
+**Offer**: one game a catalog offers, grouped from its releases by title id or by title
+without its edition words. An installed game can be an offer too: its record names the offer.
 
 **Own build**: an emulator build the player built or installed, used instead of a downloaded
 one while the `own_build` setting is on. The host never updates it.
@@ -142,7 +153,7 @@ checks its files, and seeds only when every piece is there. It never downloads.
 
 **Subsystem**: one area of the core's state with its own lock, saved records and ports. The core
 sends it commands, reads its snapshot and turns its events into work. The torrents subsystem
-is the first.
+is the first, the library subsystem the second.
 
 **Test run**: a new build runs once with `--help` before it becomes current. A build that fails
 it is removed.

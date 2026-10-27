@@ -66,7 +66,7 @@ async fn boot() -> Steam {
     write(root.path().join("steamapps/libraryfolders.vdf"), folders.as_bytes());
     let paths = vec![root.path().into(), library.path().into()];
     test.core.dispatch(Command::SetFolders { name: "steam".into(), paths }).await.unwrap();
-    test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     Steam { test, root, library }
 }
 
@@ -120,7 +120,7 @@ async fn the_old_cache_layout_still_gives_a_game_its_cover() {
     std::fs::remove_dir_all(s.root.path().join("appcache/librarycache/570")).unwrap();
     // Before 2024 Steam kept each file flat, named after the game.
     write(s.root.path().join("appcache/librarycache/570_library_600x900.jpg"), b"jpg");
-    s.test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    s.test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
 
     let flat = HostPath::new("steam", 0, RelPath::new("appcache/librarycache/570_library_600x900.jpg").unwrap());
     assert_eq!(s.cover("Dota 2"), Some(ImageRef::Folder { plugin: steam(), path: flat }));
@@ -259,7 +259,7 @@ async fn the_libraries_steam_lists_are_read_with_nothing_set() {
         .built_in(PluginBox::code(SteamPlugin))
         .boot_core()
         .await;
-    test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
 
     let titles: Vec<_> = test.core.view().home.games.into_iter().map(|g| g.title).collect();
     assert_eq!(titles, ["Dota 2", "Team Fortress 2"], "Steam's folder and the library on another drive");
@@ -282,7 +282,7 @@ async fn the_player_s_own_steam_libraries_setting_replaces_steam_s_list() {
         .boot_core()
         .await;
     test.core.dispatch(Command::SetFolders { name: "steam".into(), paths: vec![root] }).await.unwrap();
-    test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
 
     let titles: Vec<_> = test.core.view().home.games.into_iter().map(|g| g.title).collect();
     assert_eq!(titles, ["Dota 2"], "only the folders the player set");
@@ -573,7 +573,7 @@ async fn a_steam_game_s_hub_has_steam_s_screenshots_words_and_trailer_kept_a_wee
     let url = "https://store.steampowered.com/api/appdetails?appids=570&l=english";
     s.test.http.serve(url, details.to_string());
     // Booting asked before Steam answered: nothing was kept, and the next look asks again.
-    s.test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    s.test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     let dota: GameKey = "emu-steam:570".parse().unwrap();
 
     let mut hub = None;
@@ -594,7 +594,7 @@ async fn a_steam_game_s_hub_has_steam_s_screenshots_words_and_trailer_kept_a_wee
 
     // Kept: once it answered, Steam isn't asked again.
     let asked = s.test.http.sent().iter().filter(|u| *u == url).count();
-    s.test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    s.test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     s.test.core.dispatch(Command::OpenGame(dota)).await.unwrap();
     assert_eq!(s.test.http.sent().iter().filter(|u| *u == url).count(), asked, "{:?}", s.test.http.sent());
 }

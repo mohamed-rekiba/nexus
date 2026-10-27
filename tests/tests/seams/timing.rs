@@ -18,7 +18,7 @@ fn the_catalog_s_view_builds_and_binds_in_time() {
             .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     let started = Instant::now();
     host.dispatch(Command::Navigate(Route::Catalog));
     eprintln!("first Catalog open, with reading the catalogs: {:?}", started.elapsed());

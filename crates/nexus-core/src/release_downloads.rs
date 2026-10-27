@@ -229,7 +229,12 @@ impl Core {
     /// The player asked to download `release` of the offered game `offer`: the subsystem reads
     /// the torrent's files, and waits for the player to start it.
     async fn download_release(&self, offer: &GameKey, release: &str, folder: Option<&Path>) -> CoreResult<()> {
-        let found = self.offer(offer).ok_or_else(|| CoreError::Invalid(format!("no game {offer} in a catalog")))?;
+        let found = self
+            .library()
+            .snapshot()
+            .offer(offer)
+            .cloned()
+            .ok_or_else(|| CoreError::Invalid(format!("no game {offer} in a catalog")))?;
         let release = found
             .releases
             .iter()
@@ -341,7 +346,7 @@ impl Core {
     pub(crate) async fn install_event(&self, event: InstallEvent) {
         match event {
             InstallEvent::Installed => {
-                if let Err(e) = Box::pin(self.dispatch(crate::Command::RefreshLibrary)).await {
+                if let Err(e) = Box::pin(self.dispatch(crate::Command::Library(crate::LibraryCmd::Refresh))).await {
                     tracing::warn!(error = %e, "library refresh after an install failed");
                 }
             }

@@ -20,7 +20,7 @@ async fn the_first_library_load_waits_for_the_stores_descriptions() {
         .boot_core()
         .await;
 
-    t.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
 
     let view = t.core.view();
     assert!(view.boot.ready);
@@ -46,7 +46,7 @@ async fn a_game_the_store_does_not_know_keeps_its_own_details() {
         .boot_core()
         .await;
 
-    t.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
 
     let view = t.core.view();
     let beta = view.home.games.iter().find(|g| g.title == "Beta").unwrap();
@@ -61,7 +61,7 @@ async fn the_library_has_no_in_game_filter_and_sorts_by_rating_and_release() {
         .plugin(store("store", vec![("CUSA00000", 3.0, ""), ("CUSA00001", 4.8, "")], None, Duration::ZERO))
         .boot_core()
         .await;
-    t.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     let titles = |t: &nexus_testkit::TestCore| -> Vec<String> {
         t.core.view().home.library.games.iter().map(|g| g.title.clone()).collect()
     };
@@ -91,7 +91,7 @@ async fn a_slow_store_holds_the_first_load_ten_seconds_on_the_clock_and_no_more(
         .boot_core()
         .await;
     let core = t.core.clone();
-    let load = tokio::spawn(async move { core.dispatch(Command::RefreshLibrary).await });
+    let load = tokio::spawn(async move { core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await });
 
     t.clock.advance(Duration::from_secs(9)).await;
     assert!(!t.core.view().boot.ready, "the first load waits for the store");

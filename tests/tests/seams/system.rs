@@ -206,7 +206,7 @@ async fn a_hanging_or_panicking_system_plugin_leaves_the_core_working() {
     assert_eq!(vm.connection, "none", "the hung read gave nothing");
     assert!(!vm.battery_shown, "the panicking read gave nothing");
     assert_eq!(vm.volume, 40, "the other reads still came");
-    t.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
 }
 
 #[tokio::test]

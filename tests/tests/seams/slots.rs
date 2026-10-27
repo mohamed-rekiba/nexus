@@ -11,7 +11,7 @@ fn shown(theme: &str, width: f32, height: f32) -> Composed {
     host.ui.start().unwrap();
     host.ui.switch(&id(theme)).unwrap();
     host.resize(width, height);
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     if theme == "default" {
         // The default theme shows games, and their badges, in the Library.
         let tabs = i_slint_backend_testing::ElementHandle::find_by_accessible_label(host.instance(), "default-system");
@@ -79,7 +79,7 @@ fn the_desktop_grid_reflows_at_its_compact_breakpoint() {
 fn default_theme_shows_the_controllers_of_an_emulator_with_keyboard_keys() {
     let mut host = composed(|h| h.plugin(games_with_keys("emu-a", vec!["Alpha"])));
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
 
     // The controllers are on the emulator's page.
     host.dispatch(Command::Navigate(nexus_core::Route::Plugin("emu-a".parse().unwrap())));

@@ -233,7 +233,7 @@ async fn a_console_turned_off_in_the_catalog_s_settings_offers_nothing_and_its_g
     t.http.serve(URL, catalog("2026-10-18T00:00:00Z"));
     t.http.serve("https://xyz.dev/catalog/ps4.json", ps4_catalog());
     set_address(&t, "https://xyz.dev/catalog").await.unwrap();
-    t.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     t.core.dispatch(Command::Navigate(nexus_core::Route::Catalog)).await.unwrap();
     catalogs_fetched(&t.core).await;
 
@@ -395,7 +395,7 @@ async fn with_offers() -> TestCore {
     let file = catalog_of("2026-10-18T00:00:00Z", topics);
     t.http.serve(URL, file.to_string());
     set_address(&t, "https://xyz.dev/catalog").await.unwrap();
-    t.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     t.core.dispatch(Command::Navigate(nexus_core::Route::Catalog)).await.unwrap();
     catalogs_fetched(&t.core).await;
     t
@@ -598,7 +598,7 @@ async fn an_installed_game_with_no_art_of_its_own_has_its_offer_s_and_keeps_it_w
         "magnet": format!("magnet:?xt=urn:btih:{HASH}"), "game_info": { "name": "Celeste" }, "steam": steam_block() }]);
     t.http.serve("https://xyz.dev/catalog/pc.json", catalog_of("2026-10-18T00:00:00Z", topics));
     set_address(&t, "https://xyz.dev/catalog").await.unwrap();
-    t.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     t.core.dispatch(Command::Navigate(nexus_core::Route::Catalog)).await.unwrap();
     catalogs_fetched(&t.core).await;
     let card = t.core.view().catalog.games.games.first().cloned().unwrap();
@@ -616,7 +616,7 @@ async fn an_installed_game_with_no_art_of_its_own_has_its_offer_s_and_keeps_it_w
     assert!(detail.releases.is_empty(), "the offer's releases are the Catalog's");
 
     t.core.dispatch(Command::SetPluginEnabled { plugin: id("release-catalog"), enabled: false }).await.unwrap();
-    t.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     assert_eq!(cover(&t), steam_image("portrait.jpg"), "and keeps its cover with no catalog");
     t.core.dispatch(Command::OpenGame(game)).await.unwrap();
     assert_eq!(t.core.view().detail.unwrap().cover, steam_image("portrait.jpg"), "in its Game Hub too");
@@ -913,7 +913,7 @@ async fn an_installed_game_matches_its_offer_by_name_on_the_same_console_and_has
     ]);
     t.http.serve(URL, catalog_of("2026-10-18T00:00:00Z", topics));
     set_address(&t, "https://xyz.dev/catalog").await.unwrap();
-    t.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     t.core.dispatch(Command::Navigate(nexus_core::Route::Catalog)).await.unwrap();
     catalogs_fetched(&t.core).await;
 
@@ -970,7 +970,7 @@ async fn a_card_shows_its_best_release_and_the_game_hub_orders_them_by_version()
     ]);
     t.http.serve(URL, catalog_of("2026-10-18T00:00:00Z", topics));
     set_address(&t, "https://xyz.dev/catalog").await.unwrap();
-    t.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     let alpha = t.core.view().home.games.first().cloned().expect("the installed Alpha");
     t.core.dispatch(Command::OpenGame(alpha.key.parse().unwrap())).await.unwrap();
     t.core.dispatch(Command::Back).await.unwrap();
@@ -1295,7 +1295,7 @@ async fn a_hidden_game_leaves_the_catalog_and_the_hidden_filter_shows_it() {
     let bolt: nexus_api::GameKey =
         t.core.view().catalog.games.games.iter().find(|g| g.title == "Bolt").unwrap().key.parse().unwrap();
 
-    t.core.dispatch(Command::HideGame { game: bolt.clone(), hidden: true }).await.unwrap();
+    t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Hide { game: bolt.clone(), hidden: true })).await.unwrap();
 
     assert_eq!(titles(&t), ["Astro", "Comet"]);
     let grid = t.core.view().catalog;
@@ -1321,7 +1321,7 @@ async fn a_hidden_game_leaves_the_catalog_and_the_hidden_filter_shows_it() {
     t.core.dispatch(filter(true)).await.unwrap();
     assert_eq!(hidden_chip(&t).map(|c| c.count), Some(1));
 
-    t.core.dispatch(Command::HideGame { game: bolt, hidden: false }).await.unwrap();
+    t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Hide { game: bolt, hidden: false })).await.unwrap();
     t.core.dispatch(Command::CatalogSystem(None)).await.unwrap();
     assert_eq!(titles(&t), ["Astro", "Bolt", "Comet"]);
     assert!(hidden_chip(&t).is_none());

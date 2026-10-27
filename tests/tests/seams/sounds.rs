@@ -8,7 +8,7 @@ use nexus_ui_host::{PadButton, UiRequest};
 fn tv() -> Composed {
     let mut host = composed(|h| h.plugin(games("emu-a", vec!["Alpha", "Beta"])));
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::Select("emu-a:G0".parse().unwrap()));
     host
 }
@@ -113,7 +113,7 @@ fn opening_a_game_selects_and_leaving_the_library_goes_back() {
 fn a_game_that_starts_plays_start_and_one_that_crashes_plays_error() {
     let mut host = composed(|h| h.plugin(playable_games("emu-a", vec!["Alpha"])));
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     settle(&mut host);
     host.requests.borrow_mut().clear();
     host.dispatch(Command::Launch("emu-a:G0".parse().unwrap()));
@@ -130,7 +130,7 @@ fn a_game_that_starts_plays_start_and_one_that_crashes_plays_error() {
 fn a_notice_that_is_not_a_problem_plays_no_error() {
     let mut host = composed(|h| h.plugin(playable_games("emu-a", vec!["Alpha"])));
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     settle(&mut host);
     host.test.desktop.set_problem("Install xdotool so games come to the front and the launcher comes back");
     host.requests.borrow_mut().clear();

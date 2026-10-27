@@ -29,7 +29,7 @@ fn every_default_screen_renders() {
             .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     for screen in ["home", "catalog", "downloads", "settings", "emulators", "themes"] {
         host.instance().invoke_global("Host", "navigate", &[slint_interpreter::Value::String(screen.into())]).unwrap();
         host.pump();
@@ -88,7 +88,7 @@ export component Card inherits Rectangle {
         value: serde_json::json!({ "catalog_url": "https://xyz.dev/c" }),
     });
     host.catalogs_fetched();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
 
     let resolved = host.ui.resolved().unwrap();
     assert_eq!(resolved.inherited_screens().len(), ScreenId::ALL.len(), "every screen comes from default");
@@ -285,7 +285,10 @@ fn the_default_settings_screen_edits_a_folder_with_the_keys() {
     // The keys reach the sheet again: Down moves on to the Rescan row, and Enter there scans.
     press(&host, Key::DownArrow.into());
     press(&host, Key::Return.into());
-    let asked =
-        host.requests.borrow().iter().any(|r| matches!(r, nexus_ui_host::UiRequest::Core(Command::RefreshLibrary)));
+    let asked = host
+        .requests
+        .borrow()
+        .iter()
+        .any(|r| matches!(r, nexus_ui_host::UiRequest::Core(Command::Library(nexus_core::LibraryCmd::Refresh))));
     assert!(asked, "Enter on Rescan, after the text box closed, asks the core to scan");
 }
