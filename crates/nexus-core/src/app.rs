@@ -141,10 +141,11 @@ pub enum Command {
     LauncherUpdate(crate::LauncherUpdateCmd),
     /// "Rate how it runs": asks "How far did it get?" for this game.
     AskResult(GameKey),
-    /// The player's answer to "How far did it get?" after playing: `ingame`, `menus`,
-    /// `boots` or `nothing`, or `None` for "Not now". It is the player's own result for the
-    /// game, saved, and shown with its compatibility.
-    ReportResult(Option<String>),
+    /// The player's answer to "How far did it get?" after playing: one of
+    /// [`CompatLevel::RESULTS`](nexus_api::CompatLevel::RESULTS) (`ingame`, `menus`, `boots` or
+    /// `nothing`), or `None` for "Not now". It is the player's own result for the game, saved,
+    /// and shown with its compatibility.
+    ReportResult(Option<nexus_api::CompatLevel>),
     /// The Library's search text.
     LibrarySearch(String),
     /// The Library's system (a platform label, such as `PS5`), or a filter to turn on or off;
@@ -790,5 +791,10 @@ mod tests {
         }));
         round_trip(Command::SetFolders { name: "games".into(), paths: vec!["/games".into()] });
         round_trip(Command::ReportResult(None));
+        round_trip(Command::ReportResult(Some(nexus_api::CompatLevel::Menus)));
+        // The default theme sends the result's name.
+        let menus: Command = serde_json::from_str(r#"{"ReportResult":"menus"}"#).unwrap();
+        assert_eq!(menus, Command::ReportResult(Some(nexus_api::CompatLevel::Menus)));
+        assert!(serde_json::from_str::<Command>(r#"{"ReportResult":"great"}"#).is_err());
     }
 }

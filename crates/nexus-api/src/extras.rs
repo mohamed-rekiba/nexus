@@ -17,6 +17,25 @@ pub enum CompatLevel {
     Playable,
 }
 
+impl CompatLevel {
+    /// The levels a player can give a game after playing it, best first.
+    pub const RESULTS: [CompatLevel; 4] =
+        [CompatLevel::Ingame, CompatLevel::Menus, CompatLevel::Boots, CompatLevel::Nothing];
+
+    /// Its name, as it reads and writes with `serde`: `unknown`, `nothing`, `boots`, `menus`,
+    /// `ingame` or `playable`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CompatLevel::Unknown => "unknown",
+            CompatLevel::Nothing => "nothing",
+            CompatLevel::Boots => "boots",
+            CompatLevel::Menus => "menus",
+            CompatLevel::Ingame => "ingame",
+            CompatLevel::Playable => "playable",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompatInfo {
     pub level: CompatLevel,

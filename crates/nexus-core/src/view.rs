@@ -77,23 +77,22 @@ fn slot_vm(plugin: &PluginId, slot: SlotId, item: SlotItem) -> SlotVm {
     vm
 }
 
-/// A compatibility level's id and its words.
-fn compat_level(level: CompatLevel) -> (&'static str, &'static str) {
+/// A compatibility level's words.
+fn compat_label(level: CompatLevel) -> &'static str {
     match level {
-        CompatLevel::Unknown => ("unknown", "Not tested"),
-        CompatLevel::Nothing => ("nothing", "Doesn't start"),
-        CompatLevel::Boots => ("boots", "Boots"),
-        CompatLevel::Menus => ("menus", "Menus"),
-        CompatLevel::Ingame => ("ingame", "In-game"),
-        CompatLevel::Playable => ("playable", "Playable"),
+        CompatLevel::Unknown => "Not tested",
+        CompatLevel::Nothing => "Doesn't start",
+        CompatLevel::Boots => "Boots",
+        CompatLevel::Menus => "Menus",
+        CompatLevel::Ingame => "In-game",
+        CompatLevel::Playable => "Playable",
     }
 }
 
 fn compat_vm(info: &CompatInfo) -> CompatVm {
-    let (level, label) = compat_level(info.level);
     CompatVm {
-        level: level.into(),
-        label: label.into(),
+        level: info.level.as_str().into(),
+        label: compat_label(info.level).into(),
         notes: info.notes.clone().unwrap_or_default(),
         tested: info.tested.clone().unwrap_or_default(),
         tested_text: String::new(),
@@ -587,7 +586,7 @@ fn detail_vm(s: &Snapshot, owned: &Ownership, key: &GameKey) -> Option<GameDetai
         protondb_url: compatibility.1,
         this_pc,
         pc_warning,
-        your_result: library.result(key).unwrap_or_default().to_owned(),
+        your_result: library.result(key).map(CompatLevel::as_str).unwrap_or_default().to_owned(),
         has_folder: s.files.game_folders.contains(key),
         has_log: s.files.has_log,
         hidden: library.hidden(key),

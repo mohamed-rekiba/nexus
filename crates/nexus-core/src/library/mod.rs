@@ -22,7 +22,7 @@ mod records;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use nexus_api::{CompatInfo, GameDetails, GameKey, GameMetadata, GameSummary, PluginId, SlotItem};
+use nexus_api::{CompatInfo, CompatLevel, GameDetails, GameKey, GameMetadata, GameSummary, PluginId, SlotItem};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -159,7 +159,7 @@ pub(crate) struct LibrarySnapshot {
     /// The games the player hid from the Catalog, by their key as text.
     pub hidden: HashSet<String>,
     /// The player's own results, by the game's key as text.
-    pub results: HashMap<String, String>,
+    pub results: HashMap<String, CompatLevel>,
 }
 
 impl LibrarySnapshot {
@@ -260,9 +260,9 @@ impl LibrarySnapshot {
         self.hidden.contains(&key.to_string())
     }
 
-    /// The player's own result for `key`: `ingame`, `menus`, `boots` or `nothing`.
-    pub fn result(&self, key: &GameKey) -> Option<&str> {
-        self.results.get(&key.to_string()).map(String::as_str)
+    /// The player's own result for `key`: one of [`CompatLevel::RESULTS`].
+    pub fn result(&self, key: &GameKey) -> Option<CompatLevel> {
+        self.results.get(&key.to_string()).copied()
     }
 }
 
@@ -565,11 +565,11 @@ impl LibrarySubsystem {
 
     /// Saves the player's answer to "How far did it get?" for `game` on `build`: a result, or
     /// `None` for "Not now".
-    pub fn answer(&self, game: &GameKey, level: Option<&str>, build: Option<&str>) -> CoreResult<()> {
+    pub fn answer(&self, game: &GameKey, level: Option<CompatLevel>, build: Option<&str>) -> CoreResult<()> {
         if let Some(level) = level
-            && !records::RESULT_LEVELS.contains(&level)
+            && !CompatLevel::RESULTS.contains(&level)
         {
-            return Err(CoreError::Invalid(format!("no result {level:?}")));
+            return Err(CoreError::Invalid(format!("no result {:?}", level.as_str())));
         }
         self.inner.records.answer(game, level, build).map_err(|e| CoreError::Io(e.to_string()))?;
         self.inner.notifier.changed(Area::Library);
@@ -782,9 +782,10 @@ mod tests {
         lib.handle(LibraryCmd::Hide { game: game.clone(), hidden: false }).unwrap();
         assert!(!lib.snapshot().hidden(&game));
 
-        assert!(lib.answer(&game, Some("great"), Some("1")).is_err());
-        lib.answer(&game, Some("menus"), Some("1")).unwrap();
-        assert_eq!(lib.snapshot().result(&game), Some("menus"));
+        assert!(lib.answer(&game, Some(CompatLevel::Playable), Some("1")).is_err(), "the community's level only");
+        assert!(lib.answer(&game, Some(CompatLevel::Unknown), Some("1")).is_err());
+        lib.answer(&game, Some(CompatLevel::Menus), Some("1")).unwrap();
+        assert_eq!(lib.snapshot().result(&game), Some(CompatLevel::Menus));
         assert!(lib.answered(&game, Some("1")));
     }
 

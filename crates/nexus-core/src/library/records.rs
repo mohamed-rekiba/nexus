@@ -6,7 +6,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use nexus_api::{GameKey, ImageSource, PluginId};
+use nexus_api::{CompatLevel, GameKey, ImageSource, PluginId};
+use serde::Deserialize;
 use serde_json::Value;
 
 use crate::config::ConfigService;
@@ -16,9 +17,6 @@ const GAME_ART: [&str; 2] = ["app", "game_art"];
 const RESULTS: &str = "results";
 const RESULT_BUILDS: &str = "result_builds";
 const RESULT_SKIPPED: &str = "result_skipped";
-
-/// The results a player can give a game, worst last.
-pub(crate) const RESULT_LEVELS: [&str; 4] = ["ingame", "menus", "boots", "nothing"];
 
 /// A plugin's image: the plugin that has it, and where.
 pub(crate) type PluginImage = (PluginId, ImageSource);
@@ -79,22 +77,22 @@ impl Records {
         }
     }
 
-    /// The player's own results, by the game's key as text: `ingame`, `menus`, `boots` or
-    /// `nothing`.
-    pub fn results(&self) -> HashMap<String, String> {
+    /// The player's own results, by the game's key as text: each saved as its level's name,
+    /// `ingame`, `menus`, `boots` or `nothing`.
+    pub fn results(&self) -> HashMap<String, CompatLevel> {
         let results = self.config.get(&["app", RESULTS]);
         let Some(results) = results.as_object() else { return HashMap::new() };
-        results.iter().filter_map(|(game, level)| Some((game.clone(), level.as_str()?.to_owned()))).collect()
+        results.iter().filter_map(|(game, level)| Some((game.clone(), CompatLevel::deserialize(level).ok()?))).collect()
     }
 
     /// Saves the player's answer for `game` on `build`: a result, or `None` for "Not now".
-    pub fn answer(&self, game: &GameKey, level: Option<&str>, build: Option<&str>) -> std::io::Result<()> {
+    pub fn answer(&self, game: &GameKey, level: Option<CompatLevel>, build: Option<&str>) -> std::io::Result<()> {
         let game = game.to_string();
         let set = |key: &str, value: Value| self.config.set(&["app", key, &game], value);
         let build = build.map(Value::from).unwrap_or(Value::Null);
         match level {
             Some(level) => {
-                set(RESULTS, Value::from(level))?;
+                set(RESULTS, Value::from(level.as_str()))?;
                 set(RESULT_BUILDS, build)
             }
             None => set(RESULT_SKIPPED, build),
@@ -153,13 +151,14 @@ mod tests {
         let r = records();
         let game = key("emu:g");
         assert!(!r.answered(&game, None), "a game with no build is always asked");
-        r.answer(&game, Some("ingame"), Some("1.0")).unwrap();
-        assert_eq!(r.results().get("emu:g").map(String::as_str), Some("ingame"));
+        r.answer(&game, Some(CompatLevel::Ingame), Some("1.0")).unwrap();
+        assert_eq!(r.config.get(&["app", RESULTS]), serde_json::json!({ "emu:g": "ingame" }), "the saved format");
+        assert_eq!(r.results().get("emu:g"), Some(&CompatLevel::Ingame));
         assert!(r.answered(&game, Some("1.0")));
         assert!(!r.answered(&game, Some("1.1")), "a new build asks again");
 
         r.answer(&game, None, Some("1.1")).unwrap();
         assert!(r.answered(&game, Some("1.1")), "\"Not now\" for that build");
-        assert_eq!(r.results().get("emu:g").map(String::as_str), Some("ingame"), "the result stays");
+        assert_eq!(r.results().get("emu:g"), Some(&CompatLevel::Ingame), "the result stays");
     }
 }

@@ -273,27 +273,12 @@ fn has_words<'a>(words: &[String], fields: impl IntoIterator<Item = &'a str>) ->
 }
 
 /// How far a game gets, for the "In-game" filter and the sort: the player's own result first,
-/// then the community's. 0 for unknown, 5 for playable.
-fn reach(library: &LibrarySnapshot, key: &GameKey) -> u8 {
-    let rank = |result: &str| match result {
-        "playable" => 5,
-        "ingame" => 4,
-        "menus" => 3,
-        "boots" => 2,
-        "nothing" => 1,
-        _ => 0,
-    };
-    if let Some(own) = library.result(key) {
-        return rank(own);
-    }
-    match library.detail(key).and_then(|d| d.compat.as_ref()).map(|c| c.level) {
-        Some(CompatLevel::Playable) => 5,
-        Some(CompatLevel::Ingame) => 4,
-        Some(CompatLevel::Menus) => 3,
-        Some(CompatLevel::Boots) => 2,
-        Some(CompatLevel::Nothing) => 1,
-        Some(CompatLevel::Unknown) | None => 0,
-    }
+/// then the community's.
+fn reach(library: &LibrarySnapshot, key: &GameKey) -> CompatLevel {
+    library
+        .result(key)
+        .or_else(|| library.detail(key).and_then(|d| d.compat.as_ref()).map(|c| c.level))
+        .unwrap_or(CompatLevel::Unknown)
 }
 
 fn games<'a>(query: &GridQuery, data: &GridData<'a>) -> GridGames<'a> {
@@ -351,7 +336,7 @@ fn games<'a>(query: &GridQuery, data: &GridData<'a>) -> GridGames<'a> {
         }
     }
     let level = |e: &Entry| reach(library, &e.key);
-    let ingame = searched.iter().filter(|e| level(e) >= 4).count();
+    let ingame = searched.iter().filter(|e| level(e) >= CompatLevel::Ingame).count();
     // The Catalog's only: the Library's games are the player's own. Shown once a game has a
     // result to filter by.
     let only_ingame = catalog && query.ingame;
@@ -385,7 +370,7 @@ fn games<'a>(query: &GridQuery, data: &GridData<'a>) -> GridGames<'a> {
     let in_system: Vec<&Entry> = searched
         .into_iter()
         .filter(|e| query.system.as_ref().is_none_or(|s| &e.summary.platform == s))
-        .filter(|e| !only_ingame || level(e) >= 4)
+        .filter(|e| !only_ingame || level(e) >= CompatLevel::Ingame)
         .filter(|e| !catalog || !query.installed || installed(e))
         .collect();
     // The Library's chips are the store's genres; the Catalog's are the fixed genres.

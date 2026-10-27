@@ -12,8 +12,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use nexus_api::{
-    Capability, ConfigScope, Event, ExitInfo, GameKey, LaunchArg, LaunchSpec, Location, Permissions, PluginError,
-    PluginId, SessionId,
+    Capability, CompatLevel, ConfigScope, Event, ExitInfo, GameKey, LaunchArg, LaunchSpec, Location, Permissions,
+    PluginError, PluginId, SessionId,
 };
 use nexus_ui_api::NoticeKind;
 use serde_json::Value;
@@ -248,9 +248,9 @@ pub(crate) fn ask_result(core: &Core, game: GameKey) -> CoreResult<()> {
 }
 
 /// The player's answer to "How far did it get?", or `None` for "Not now".
-pub(crate) fn report_result(core: &Core, level: Option<String>) -> CoreResult<()> {
+pub(crate) fn report_result(core: &Core, level: Option<CompatLevel>) -> CoreResult<()> {
     let Some((game, build)) = core.state().result_prompt.take() else { return Ok(()) };
-    core.library().answer(&game, level.as_deref(), build.as_deref())?;
+    core.library().answer(&game, level, build.as_deref())?;
     core.changed(Area::Sessions);
     Ok(())
 }

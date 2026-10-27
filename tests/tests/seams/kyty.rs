@@ -768,7 +768,7 @@ async fn a_game_s_menu_finds_its_folder_and_log_and_names_the_community_list() {
 
     // "Rate how it runs": the answer is kept for this game.
     k.test.core.dispatch(Command::AskResult(game.clone())).await.unwrap();
-    k.test.core.dispatch(Command::ReportResult(Some("menus".into()))).await.unwrap();
+    k.test.core.dispatch(Command::ReportResult(Some(nexus_api::CompatLevel::Menus))).await.unwrap();
     assert_eq!(k.test.core.view().detail.unwrap().your_result, "menus");
 }
 

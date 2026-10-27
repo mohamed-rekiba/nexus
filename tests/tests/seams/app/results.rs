@@ -12,7 +12,7 @@ async fn after_playing_the_player_says_how_far_it_got_and_it_is_kept() {
     closed(&mut events).await;
     assert_eq!(t.core.view().result_prompt.as_deref(), Some("A"));
 
-    t.core.dispatch(Command::ReportResult(Some("menus".into()))).await.unwrap();
+    t.core.dispatch(Command::ReportResult(Some(nexus_api::CompatLevel::Menus))).await.unwrap();
 
     assert_eq!(t.core.view().result_prompt, None);
     t.core.dispatch(Command::OpenGame(key("emu-a:G0"))).await.unwrap();
@@ -48,7 +48,7 @@ async fn how_far_it_got_is_asked_once_for_each_build() {
     t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     install(&t.core).await;
     play_run(&t, 1).await;
-    t.core.dispatch(Command::ReportResult(Some("menus".into()))).await.unwrap();
+    t.core.dispatch(Command::ReportResult(Some(nexus_api::CompatLevel::Menus))).await.unwrap();
 
     play_run(&t, 2).await;
     assert_eq!(t.core.view().result_prompt, None, "this build has a result");
