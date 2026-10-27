@@ -467,7 +467,7 @@ made one). Don't make a new release.
 ## The launcher's own update
 
 `crates/nexus-core/src/launcher_update.rs` and `apply_launcher_update` in
-`crates/nexus-app/src/main.rs` do it.
+`crates/nexus-app/src/update.rs` do it.
 
 - `latest.json` holds the version and, for each kind of install, its package's URL and SHA-256:
   `linux-x86_64` (the tar.gz), `linux-x86_64-appimage`, `linux-x86_64-deb`, `linux-x86_64-rpm`,

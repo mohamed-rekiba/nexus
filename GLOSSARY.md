@@ -2,6 +2,12 @@
 
 Terms used in the code and the docs, in alphabetical order.
 
+**App shell** (`AppShell`, nexus-ui-host): what the launcher does on the UI thread around the
+theme host: it carries out the theme's requests, coalesces renders, loads images and runs the
+tick. It reaches the system only through its platform. The app and the seam tests run the same
+shell.
+_Avoid_: event loop, main loop
+
 **Archive error** (`ArchiveError`): why an archive didn't unpack, typed: `Password`, `Escapes`,
 `NoRoom`, `Unsupported`, `Missing`, `Corrupt`, `Io` or `Cancelled`. The core shows its text;
 an adapter picks a fallback reader by its kind, never by its text.
@@ -77,11 +83,23 @@ storage, folders, programs, HTTP, settings and the log.
 a plugin's privileges.
 _Avoid_: type, category
 
+**Login session** (`LoginSession`): the port for the player's login session: starting the
+launcher at login, and installing the launcher's own package with the administrator prompt.
+Not a play session.
+
 **Listing** (`ArchiveEntry`): an archive's entries as a format reader gives them, unchecked: each
 name as the archive spells it, its size, its kind, and whether it needs a password.
 
+**Opener** (`Opener`): the port that opens a link or a file with the system's opener, as a click
+on it would. The core opens plugins' store links with it; the app shell's platform opens pages
+and folders with it.
+
 **Own build**: an emulator build the player built or installed, used instead of a downloaded
 one while the `own_build` setting is on. The host never updates it.
+
+**Platform** (`Platform`, nexus-ui-host): the app shell's port: running work off the UI thread,
+waking the shell, opening links and paths, quitting, the lines the Nexus session reads, sounds,
+trailers, the local time, and the window's monitors and focus. The test fake records each call.
 
 **Port**: what the core needs from the outside world, as one interface. The app plugs in real ones and
 the tests plug in fakes.
@@ -99,3 +117,6 @@ it is removed.
 **Topic**: one release thread of a forum, as a catalog file lists it: the title, magnet link,
 size, peers and game info. `topic.rs` has its typed model, which the refresh and the reader
 share.
+
+**Windows** (`Windows`): the port for the desktop's windows: which window is in front, bringing
+a game's window or the launcher's to the front, and whether a game has a window.
