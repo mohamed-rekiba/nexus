@@ -1330,23 +1330,7 @@ impl Core {
             Some(c) => kernel.guard(plugin, "configurator.schema", c.schema(&scope)).await?,
             None => Value::Null,
         };
-        let prop = schema.pointer(&format!("/properties/{key}")).cloned().unwrap_or(Value::Null);
-        // An optional setting left empty is unset: the emulator's own value applies.
-        let value = match view::type_of(&prop) {
-            _ if text.trim().is_empty() && view::nullable(&prop) => Value::Null,
-            Some("boolean") => Value::Bool(text == "true"),
-            Some("integer") => text
-                .trim()
-                .parse::<i64>()
-                .map(Value::from)
-                .map_err(|_| CoreError::Invalid(format!("{key} must be a whole number")))?,
-            Some("number") => text
-                .trim()
-                .parse::<f64>()
-                .map(Value::from)
-                .map_err(|_| CoreError::Invalid(format!("{key} must be a number")))?,
-            _ => Value::String(text),
-        };
+        let value = crate::settings_schema::typed(&schema, &key, text)?;
         let mut current = self.config_value(plugin, &scope).await?;
         if !current.is_object() {
             current = Value::Object(serde_json::Map::new());

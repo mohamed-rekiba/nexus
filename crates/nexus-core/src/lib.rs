@@ -33,6 +33,7 @@ mod releases;
 mod resolve;
 mod running;
 mod sessions;
+mod settings_schema;
 mod storage;
 pub mod system;
 mod themes;
