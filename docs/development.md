@@ -17,6 +17,11 @@ in [architecture.md](architecture.md).
 - **Lints**: the workspace denies `unsafe_code` and warns on `clippy::all`. `make lint` and CI
   turn the warnings into errors.
 - **Git**, **Bash** for `scripts/` (Git Bash on Windows) and **make** for the `Makefile`.
+- **cargo-nextest** runs the tests as `make check` and CI do, each test in its own process:
+  `cargo install --locked cargo-nextest`, or the prebuilt binary:
+  `curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin`
+  (macOS and Windows: see [nexte.st](https://nexte.st/docs/installation/pre-built-binaries/)).
+  Without it, `scripts/check.sh` falls back to `cargo test`.
 - Optional tools:
 
 | Tool | For | Install |
@@ -39,11 +44,14 @@ opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 2
+debug = "line-tables-only"
 ```
 
 The workspace's own crates build at `opt-level = 1`, so a change rebuilds fast. Every dependency
 builds at `opt-level = 2`, so image decoding, JSON reading and Slint run near release speed under
-`make run` and in the tests. The first build after `cargo clean` takes longer for it. Release
+`make run` and in the tests. The first build after `cargo clean` takes longer for it.
+Dependencies keep only line tables for debug info: their backtraces still name files and lines,
+while a debug build is about a quarter smaller and a cold build about a fifth faster. Release
 builds (`make build`, `make package`) use Cargo's default release profile.
 
 ## System packages
@@ -229,7 +237,7 @@ cd scripts/catalog && npm test               # the catalog collector's tests (No
 ```
 
 `scripts/check.sh test` runs the tests with [cargo-nextest](https://nexte.st) when it's installed
-(`cargo install cargo-nextest`), as CI does, and with `cargo test` otherwise. Its settings are in
+(see [Toolchain](#toolchain)), as CI does, and with `cargo test` otherwise. Its settings are in
 `.config/nextest.toml`. The seam tests are one test binary, `seams` (`tests/tests/seams/main.rs`,
 one module per area), so their shared code builds and links once; `spans.rs` is its own binary.
 

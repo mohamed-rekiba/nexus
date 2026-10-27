@@ -599,6 +599,11 @@ plugins are compiled in and talk to the host only through `nexus-api`; themes ar
 (`theme.toml` and Slint markup) that the UI host loads, swaps and rolls back. `make check` runs
 what CI runs: the format check, clippy with warnings as errors, and every test.
 
+Besides [Rust](https://rustup.rs) and the [system packages](#system-packages), you need
+[cargo-nextest](https://nexte.st) for the tests (`cargo install --locked cargo-nextest`) and
+[pre-commit](https://pre-commit.com) for the git hooks (`make hooks-install`). The full list,
+with the optional tools, is in [docs/development.md](docs/development.md#toolchain).
+
 | Document | What it covers |
 |---|---|
 | [docs/architecture.md](docs/architecture.md) | How the core, the plugins and the UI host fit together |

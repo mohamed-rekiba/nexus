@@ -89,9 +89,11 @@ all = { level = "warn", priority = -1 }
 
 # Dependencies build optimised in debug builds too: image decoding, JSON reading and Slint
 # run at release speed under `cargo run` and in the tests, while the workspace's own crates
-# still build fast.
+# still build fast. Dependencies keep only line tables for debug info: backtraces still name
+# their files and lines, and a build is smaller and links faster.
 [profile.dev]
 opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 2
+debug = "line-tables-only"
