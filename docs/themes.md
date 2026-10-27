@@ -614,30 +614,37 @@ window (`tests/tests/seams/common/mod.rs`):
 - `fixture_themes()` is `tests/fixtures/themes`, holding `fixture-grid`.
 - `host.ui.start()` shows the saved theme, `host.ui.switch(&id)` another one.
 - `host.dispatch(Command::...)` drives the core and renders; `host.pump()` carries out what the
-  theme asked through `Host`; `settle(&mut host)` lets animations finish.
-- `host.count(label)` and `host.first(label)` find rendered elements by accessible label.
+  theme asked through `Host`.
+
+`Composed` is a `ThemeDriver` (`nexus-testkit`): a test drives the theme as a player does, through
+accessible labels, keys, clicks and the passing of time, and never through the `Vm` globals or
+the theme's callbacks.
+
+- `host.press(label, value)` invokes the element labelled `label` whose value is `value`;
+  `host.press_first(label)` the first one; `host.click(label)` clicks it with the mouse.
+- `host.navigate(key)` presses a key and carries out what the theme asked; `host.tap(key)`
+  presses it and only redraws; `host.down_to(label, most)` goes down until the label shows.
+- `host.type_text(text)` types on a physical keyboard; `host.pad(button)` presses a controller
+  button.
+- `host.values(label)`, `host.value(label)`, `host.focused(label)` (the selected ones),
+  `host.lit(label)`, `host.count(label)`, `host.first(label)` and `host.description(label)`
+  read what shows.
+- `host.settle()` lets the animations finish; `host.wait(duration)` moves Slint's clock.
 
 Accessible labels are the test seam. Give the elements a test needs to find an
 `accessible-label`, and an `accessible-value` for what it shows, and an
 `accessible-action-default` for what a click does. Slot items carry `<plugin-id>:<item-id>`. The
-default theme's tests in `tests/tests/seams/default_theme.rs` find, for example, the top bar's tabs:
+default theme's tests in `tests/tests/seams/default_theme/` press, for example, the top bar's
+Library tab:
 
 ```rust
-fn press(host: &mut Composed, label: &str, value: &str) {
-    let found = ElementHandle::find_by_accessible_label(host.instance(), label);
-    let target = found
-        .into_iter()
-        .find(|e| e.accessible_value().as_deref() == Some(value))
-        .unwrap_or_else(|| panic!("no {label} {value}"));
-    target.invoke_accessible_default_action();
-    host.pump();
-    settle(host);
-}
-
-press(host, "default-system", "Library");
+host.press("default-system", "Library");
 ```
 
-`nexus_ui_host::vm_text(instance, "screen")` reads a `Vm` property as text.
+What the view holds, a test reads from `host.core().view()`, the view models the theme gets.
+What only the theme host holds, it reads from `host.ui`: `breakpoint()`, `input_mode()`,
+`clock()` and `trailer()`. Only the switching tests read the `Vm` globals: they check that a new
+theme's tree is bound with the state the old one showed.
 
 The theme test files:
 
@@ -646,7 +653,7 @@ The theme test files:
 | `tests/tests/seams/themes.rs` | The default theme compiles and renders every screen; inheritance; the rules above; options |
 | `tests/tests/seams/switching.rs` | Switching, rollback on a broken theme, dev-mode reload |
 | `tests/tests/seams/slots.rs` | Slot items in the default theme and in `fixture-grid` |
-| `tests/tests/seams/default_theme.rs` | The default theme's Home, Library, filters and options |
+| `tests/tests/seams/default_theme/` | The default theme, one module per screen: Home, the Library, the Game Hub, the Catalog, Downloads, Settings, the emulator pages, and the on-screen keyboard |
 | `tests/tests/seams/screenshots.rs` | The README's screenshots, rendered offscreen |
 
 ```sh

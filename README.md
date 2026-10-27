@@ -628,7 +628,7 @@ with the optional tools, is in [docs/development.md](docs/development.md#toolcha
 | `crates/nexus-core` | The core: plugin lifecycle, settings, downloads, torrents, installs, launches, updates. No UI code. |
 | `crates/nexus-ui-host` | Shows themes with Slint: inheritance, assets, input, switching with rollback. |
 | `crates/nexus-app` | The `nexus` binary: the desktop, controllers, sounds, trailers, archives, torrents and VPNs of each system. |
-| `crates/nexus-testkit` | The fake host, fakes for HTTP and processes, and the plugin contract suites. |
+| `crates/nexus-testkit` | The fake host, fakes for HTTP and processes, plugins built for tests, the theme driver, and the plugin contract suites. |
 | `plugins/emulators/kytyps5` | PS5, with KytyPS5: its builds, PS5 games, installs, community compatibility. |
 | `plugins/emulators/shadps4` | PS4, with shadPS4: its builds, PS4 games, installs with updates and DLC, community compatibility. |
 | `plugins/emulators/pc` | PC games: installs a release, finds what starts it, and runs it. |

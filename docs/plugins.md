@@ -797,6 +797,20 @@ desktop, torrents, VPNs and archives.
 for its `init`, `console(name)`, and `panics_on_init`, `hangs_on_init`, `fails_on_init`,
 `hangs_on_shutdown` to test the host's guards. It counts `init_calls` and `shutdown_calls`.
 
+Most tests need a plugin of a usual shape, and build it from a few choices:
+
+- `FakeCatalog::new(id).games(["Alpha", "Beta"]).build()` is an emulator with a catalog, with
+  `system(console)`, `playable()`, `tested()`, `key(button, keys)`, `requires(toml)`,
+  `needing_its_emulator()`, `installed(build)`, `waiting_installer()` and more.
+  `FakeCatalog::kyty()` is KytyPS5 for a console's catalog, with no games of its own.
+- `FakeStore::new(id).knows(title_id, score, tagline).build()` is a store that describes games;
+  `covers()` gives every game a cover.
+- `FakeService::new(id, name).section(slot, item, title, rows).build()` is a service that fills
+  slots.
+- `FakeEmulator::new(titles)` is an emulator a test scripts, from its catalog to the download,
+  install, launch and exit of its build: the core seam's tests drive the core with it. It
+  keeps every contract (`tests/tests/seams/contracts.rs`).
+
 ### The contract suite
 
 `nexus_testkit::contract::emulator(&test, &plugin_id)` checks a loaded plugin against the
@@ -831,8 +845,9 @@ let test = FakeHost::new()
 
 `tests/` (package `nexus-tests`) holds the seam tests: one module per area in `tests/tests/seams/` (one test binary), with
 shared helpers in `tests/tests/seams/common/mod.rs`. Each plugin has its own file: `kyty.rs`,
-`shadps4.rs`, `pc.rs`, `releases.rs`, `metadata.rs`, `catalog_refresh.rs`, `slots.rs` and
-more. A new plugin adds its crate to `[dev-dependencies]` in `tests/Cargo.toml`, a file
+`shadps4.rs`, `pc.rs`, `metadata.rs`, `catalog_refresh.rs`, `slots.rs` and more. An area with
+many tests is a folder with a module per part, such as `releases/`, `app/` and
+`default_theme/`. A new plugin adds its crate to `[dev-dependencies]` in `tests/Cargo.toml`, a file
 here, and its `mod` line in `main.rs`.
 
 ```sh

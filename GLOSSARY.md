@@ -74,9 +74,16 @@ optional page. Its `FactKind` tells the host what it is about, such as the publi
 release date or a compatibility tier.
 _Avoid_: attribute, property
 
+**Fake catalog** (`FakeCatalog`, nexus-testkit): an emulator plugin a test builds from a few
+choices: its games, its system, a launcher, a build to install and more. `FakeStore` builds a
+store the same way, and `FakeService` a service that fills slots.
+
 **Fake clock**: the clock in tests. Its time moves only when a test moves it, or when every task waits for a
 timer.
 _Avoid_: mock time, test time
+
+**Fake emulator** (`FakeEmulator`, nexus-testkit): an emulator a test scripts, from its catalog
+to the download, install, launch and exit of its build. It keeps every capability contract.
 
 **Flavor** (`Flavor`, emulator-kit): one emulator's description of its builds: release source,
 matching asset, archive format, program, test run, own-build search paths, and the hooks that
@@ -225,6 +232,10 @@ the launcher's update are subsystems.
 
 **Test run**: a new build runs once with `--help` before it becomes current. A build that fails
 it is removed.
+
+**Theme driver** (`ThemeDriver`, nexus-testkit): how a test drives a shown theme: by
+accessible labels and values, keys, clicks and Slint's clock, never by the `Vm` globals or the
+theme's callbacks.
 
 **Topic**: one release thread of a forum, as a catalog file lists it: the title, magnet link,
 size, peers and game info. `topic.rs` has its typed model, which the refresh and the reader

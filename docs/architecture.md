@@ -40,7 +40,7 @@ nexus-app (the binary)         ──▶ nexus-ui-host, nexus-core, every built-
 | `crates/nexus-ui-api` | The theme contract. View models (`vm.rs`: `AppView` and the rest), the theme manifest (`ThemeManifest`), design tokens, and `contract/types.slint` with the `Vm` and `Host` globals. No toolkit code. |
 | `crates/nexus-ui-host` | `ThemeSet` (finds themes, resolves `extends`), `ThemeHost`: compiles a theme with `slint-interpreter`, binds the view models, turns gamepad buttons into keys, and swaps themes. `AppShell` (`shell.rs`) owns the `ThemeHost` on the UI thread: it routes the theme's requests, coalesces renders, loads images (`loader.rs`) and runs the tick, through its `Platform` port. |
 | `crates/nexus-app` | The binary. The wiring (`main.rs`), the command line (`args.rs`), the launcher's update at startup (`update.rs`), the shell's platform (`platform.rs`), and the system adapters: `desktop.rs`, `processes.rs` (a running game's processes), `torrents.rs` (librqbit), `archives.rs` and `libarchive.rs`, `hardware.rs` and `gpu_probe.rs` (Vulkan), `trailer.rs` (libmpv), `gamepad.rs` (gilrs), `audio.rs` (rodio), `http.rs` (reqwest), `disk.rs`, `clock.rs`. |
-| `crates/nexus-testkit` | `FakeHost` (a real core over a temporary data folder), `FakeClock`, `StubPlugin`, fakes for every port, `FakePlatform` (the app shell's platform), `SpanRecorder`, and `contract::emulator`, the capability contract checks. |
+| `crates/nexus-testkit` | `FakeHost` (a real core over a temporary data folder), `FakeClock`, `StubPlugin`, fakes for every port, `FakePlatform` (the app shell's platform), `SpanRecorder`, `ThemeDriver` (drives a shown theme through its accessible labels and keys), `FakeCatalog`, `FakeStore`, `FakeService` and `FakeEmulator` (plugins built from a few choices), and `contract::emulator`, the capability contract checks. |
 | `plugins/emulators/*` | `emu-kyty` (KytyPS5, PS5), `emu-shadps4` (shadPS4, PS4), `emu-pc` (PC games), `emu-steam` (the games Steam installed, Linux). |
 | `plugins/services/*` | `playstation-store` (store art and details) and `release-catalog` (the Catalog's releases). |
 | `plugins/themes/default` | The built-in theme, id `default`. A crate only so its files are embedded in the binary. |
@@ -829,15 +829,16 @@ Four seams, from the highest:
    which checks `done` after each change in that area, or with `FakeClock::run_until_idle`,
    and for a timer with `advance`. No seam test sleeps; the screenshot tests move Slint's
    time themselves.
-2. **Capability contracts**: `nexus_testkit::contract::emulator`, run on KytyPS5, shadPS4 and
-   PC.
+2. **Capability contracts**: `nexus_testkit::contract::emulator`, run on KytyPS5, shadPS4, PC
+   and the testkit's `FakeEmulator`.
 3. **The composed host**: the core and the `AppShell` the app ships, on Slint's testing backend
    (`i-slint-backend-testing`, pinned with Slint), with `FakePlatform` and the core's
    `FakeClock`: theme completeness, inheritance, switching and rollback, slots, gamepad,
    screenshots, and the shell's own rules (`shell.rs`: render coalescing, the tick, the requests
    only the app carries out). `Composed::pump` hands the theme's requests to the shell and runs
    the work it started; the renders a test asks for load no images until it calls
-   `load_images`.
+   `load_images`. A test drives the theme through `ThemeDriver`, by accessible labels, keys and
+   clicks, and checks the view through `core.view()`, not the `Vm` globals.
 4. **The desktop adapter against real windows** (`crates/nexus-app/tests/desktop.rs`). It opens
    windows, so it runs only with `NEXUS_DESKTOP_TESTS=1`.
 
