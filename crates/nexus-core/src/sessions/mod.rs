@@ -348,14 +348,16 @@ impl SessionsSubsystem {
 
     /// Stop: the watch asks the game to close, and kills it if it doesn't.
     pub fn stop(&self, session: SessionId) -> CoreResult<()> {
-        {
+        let stop = {
             let mut state = self.state();
             let stop = state.stops.remove(&session).ok_or(CoreError::UnknownSession(session))?;
             if let Some(s) = state.sessions.get_mut(&session) {
                 s.stopping = true;
             }
-            let _ = stop.send(());
-        }
+            stop
+        };
+        // The watch may have ended the game already.
+        let _ = stop.send(());
         self.changed();
         Ok(())
     }
