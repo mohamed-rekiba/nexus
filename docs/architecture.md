@@ -36,7 +36,7 @@ nexus-app (the binary)         ──▶ nexus-ui-host, nexus-core, every built-
 | Crate | Owns |
 | --- | --- |
 | `crates/nexus-api` | The plugin API. The plugin traits, `PluginManifest`, `Capability`, `Provided`, `PluginContext` and its facades (`ConfigStore`, `Storage`, `Folders`, `Programs`, `HttpClient`, `Logger`, `EventSink`, `ServiceRegistry`), `RelPath` and `HostPath`, plans (`DownloadPlan`, `LaunchSpec`), slots, `Event`, `VpnGate`. Semver-versioned: a manifest's `host_api` must match `API_VERSION`, which is set by hand with the API, not from Nexus's version. |
-| `crates/nexus-core` | The kernel and the app. Plugin lifecycle and registry (`Kernel`), the event bus (`EventBus`), settings (`ConfigService`), the app state and commands (`Core`, `AppState`, `Command`), the subsystems (`torrents/`), view building (`view.rs`), HTTP downloads, unpacking, game installs, launches, VPN rules, catalogs, "This PC", the launcher update, and the port traits. |
+| `crates/nexus-core` | The kernel and the app. Plugin lifecycle and registry (`Kernel`), the event bus (`EventBus`), settings (`ConfigService`), the app state and commands (`Core`, `AppState`, `Command`), the subsystems (`torrents/`, `game_installs/`), view building (`view.rs`), HTTP downloads, unpacking, launches, VPN rules, catalogs, "This PC", the launcher update, and the port traits. |
 | `crates/nexus-ui-api` | The theme contract. View models (`vm.rs`: `AppView` and the rest), the theme manifest (`ThemeManifest`), design tokens, and `contract/types.slint` with the `Vm` and `Host` globals. No toolkit code. |
 | `crates/nexus-ui-host` | `ThemeSet` (finds themes, resolves `extends`) and `ThemeHost`: compiles a theme with `slint-interpreter`, binds the view models, loads images, turns gamepad buttons into keys, and swaps themes. |
 | `crates/nexus-app` | The binary. The event loop, render scheduling, the image loader, and the system adapters: `desktop.rs`, `processes.rs` (a running game's processes), `torrents.rs` (librqbit), `archives.rs` and `libarchive.rs`, `hardware.rs` and `gpu_probe.rs` (Vulkan), `trailer.rs` (libmpv), `gamepad.rs` (gilrs), `audio.rs` (rodio), `http.rs` (reqwest), `disk.rs`, `clock.rs`. |
@@ -322,8 +322,10 @@ installed into the `games` folders.
 
 ## Subsystems
 
-`Core` is splitting into subsystems, one for each area of its state. The torrents are the
-first (`crates/nexus-core/src/torrents/mod.rs`); the other areas follow the same shape:
+`Core` is splitting into subsystems, one for each area of its state. The torrents
+(`crates/nexus-core/src/torrents/mod.rs`) and the game installs
+(`crates/nexus-core/src/game_installs/mod.rs`) are subsystems; the other areas follow the same
+shape:
 
 - A subsystem owns its state behind its own lock, and its saved records (the torrents:
   `app.torrents` and `app.seed_downloads`). Nothing else takes that lock or writes those keys.
@@ -336,8 +338,9 @@ first (`crates/nexus-core/src/torrents/mod.rs`); the other areas follow the same
 - What other areas must do about it goes out as events (`TorrentEvent`), which the core turns
   into work: an unpack, a notice, a catalog refresh. A subsystem never calls into the core.
 - A command that needs another area first is resolved by the core, which hands the subsystem
-  plain data (`add(NewDownload)`). Fields another area still writes on a record (`HandOff`:
-  the unpack and the install) change through one call, `hand_off`.
+  plain data (`add(NewDownload)`, `begin(NewInstall)`). The fields the game installs write on
+  a download's record (`HandOff`: the unpack and the install) change through one call,
+  `hand_off`, which the game installs reach through a narrow port (`TorrentDownloads`).
 - The subsystem never calls out while it holds its lock, and the core takes a subsystem's lock
   only when it doesn't hold `AppState`.
 
@@ -369,24 +372,27 @@ paused. A finished download seeds while `app.seed_downloads` is on, at most `SEE
 check out (a seed-only start). One task (`TorrentsSubsystem::watch`) reads the running
 torrents' stats every `torrent_poll` (1 s) while any run. `phase::next` turns each reading
 into the download's next phase and a list of actions (unpause, stop, finished, stopped), and
-the task runs them in order. A finished download goes to the core as an event, which unpacks
-its archives and posts the notice.
+the task runs them in order. A finished download goes to the core as an event, which has the
+game installs unpack its archives, and posts the notice.
 
 The app's adapter (`crates/nexus-app/src/torrents.rs`) is librqbit 9.0.1: one session, made at
 first use, no local peer discovery, at most 50 peers, the upload cap above, and JSON
 persistence with fastresume in `torrents/resume/`.
 
-**Unpack.** When a download completes, the core finds its archive sets
-(`crates/nexus-core/src/archives.rs`) and unpacks them through the `Archives` port into
-`unpacked/<folder>/<name>/` in the download, through a `.part` folder. The unpack state is
-saved with the download. The app's `HostArchives` lists each archive first, and the core's
+**Unpack.** When a download completes, the torrents subsystem finds its archive sets
+(`crates/nexus-core/src/archives.rs`), and the game installs unpack them through the `Archives`
+port (`game_installs/unpacking.rs`) into `unpacked/<folder>/<name>/` in the download, through a
+`.part` folder. The unpack state is the download's hand-off, saved with the download. The app's `HostArchives` lists each archive first, and the core's
 archive plan refuses passwords, paths out of the folder and archives bigger than the free
 space, then the adapter writes. Its readers are `zip`, `tar` with `flate2`, `sevenz-rust2`, and libarchive loaded at run time for
 RAR and the rest. Details: [reference/archives-and-pc-games.md](reference/archives-and-pc-games.md).
 
 ## Game installs
 
-A `GameInstaller` decodes a package; the core owns the job (`game_installs.rs`).
+A `GameInstaller` decodes a package; the game installs subsystem owns the job
+(`crates/nexus-core/src/game_installs/`). Its ports are `Archives`, `Hardware`, `Clock` and
+`TorrentDownloads` (the downloads' records and their hand-off). The core resolves the plugin's
+installer and folders and hands them over (`begin(NewInstall)`).
 `GameInstaller::begin(source, job)` checks the source and returns a work folder at once; the
 plugin then writes in the background through its `Folders` and reports through the
 `InstallJob` the core gave it:
@@ -395,15 +401,23 @@ plugin then writes in the background through its `Folders` and reports through t
   gone).
 - `games_folder`: the game folder the player picked, or `None` (the emulator kit then uses
   `<console>` in the first `games` folder).
-- `take(from, to)`: move a folder instead of copying it. The core agrees only for a copy it made
+- `take(from, to)`: move a folder instead of copying it. The host agrees only for a copy it made
   itself (a download's `unpacked/` folder) on the same disk, and cleans up the folders the move
   emptied.
 
 The job shows in Downloads. If the plugin's work drops the job without finishing (a panic), the
-job fails. Work folders are saved under `app.game_installs`, and one a crash left is removed at
-the next start (`clean_up_game_installs`). `Command::InstallDownload` installs a finished
-torrent: it checks free space, unpacks first when needed, then calls the installer. A slot
-action `host:install-game` (`HOST_INSTALL_GAME`) installs a package the plugin listed.
+job fails. The subsystem tells the core what to do through `InstallEvent`s, and waits for each:
+the library refreshes before a job shows as done, and a failure's notice is up before the job
+shows it. Work folders are saved under `app.game_installs` (`game_installs/records.rs`), and
+one a crash left is removed at the next start (`GameInstallsSubsystem::clean_up`).
+
+The player's commands are `Command::GameInstall(GameInstallCmd)`. `Download` installs a
+finished torrent: the core checks free space in the game folder, then the subsystem unpacks
+first when needed, and the install starts after the unpack. `RemoveUnpacked` deletes a
+download's unpacked copy, and `Cancel` stops the install that runs from a download.
+`Package`, and the slot action `host:install-game` (`HOST_INSTALL_GAME`), install a package the
+plugin listed. `Command::CancelDownload` stops an install from the Downloads list, as it stops
+an emulator download.
 
 ## Launches and the game watcher
 
@@ -586,7 +600,7 @@ keyboard's (the default theme's on-screen keyboard opens for a controller only).
 3. A tokio runtime starts. `Kernel::builder` gets the ports, `built_in_plugins()`, the two
    `discover` folders, and `boot()`s.
 4. `Core::start` builds the `AppState`, spawns the download manager, removes work folders a
-   crash left (`clean_up_game_installs`), restores saved torrents, resumes installs and plan
+   crash left (`GameInstallsSubsystem::clean_up`), restores saved torrents, resumes installs and plan
    downloads, schedules emulator update checks, reads the hardware once in the background, and
    starts `watch_catalogs`.
 5. `--folder` mappings apply as `Command::SetFolders`. `quit_on_signal` is spawned.
