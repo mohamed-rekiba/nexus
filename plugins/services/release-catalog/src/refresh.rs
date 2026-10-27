@@ -28,13 +28,18 @@
 //! A catalog of several forums (`pc.json`) names each topic's forum in its `source`. Each
 //! forum's answers change only its own topics. A topic that names no forum of the catalog is
 //! not changed. A forum that doesn't answer leaves its topics as they are.
+//!
+//! The refresh changes the typed catalog file of [`crate::topic`]; [`crate::format`] reads the
+//! same model.
 
 use std::collections::{HashMap, HashSet};
 
 use nexus_api::Console;
-use nexus_api::serde_json::{self, Map, Value};
+use nexus_api::serde::Deserialize;
+use nexus_api::serde_json::{self, Value};
 
 use crate::format::{clean_name, pc_name};
+use crate::topic::{BORROWED, CatalogFile, Topic};
 
 /// The base address of the forum list API. The forum's number goes after it.
 pub const API: &str = "https://api.rutracker.cc/v1/static/pvc/f/";
@@ -55,28 +60,6 @@ pub fn feed_url(number: &str) -> String {
 /// The tracker the forum's own magnet links announce to.
 const TRACKER: &str = "http://bt3.t-ru.org/ann?magnet";
 
-/// Facts about the game, the same in every release of it. The other facts (region, edition,
-/// version, format, firmware, languages, the uploader's notes) are about one upload and are not
-/// borrowed.
-const GAME_FACTS: [&str; 16] = [
-    "name",
-    "title_id",
-    "genre",
-    "developer",
-    "publisher",
-    "release_date",
-    "release_year",
-    "age_rating",
-    "multiplayer",
-    "local_multiplayer",
-    "online_multiplayer",
-    "ps5_pro_enhanced",
-    "pssr_support",
-    "psvr2",
-    "image_urls",
-    "release_summary",
-];
-
 /// One release in a forum's feed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Entry {
@@ -91,28 +74,33 @@ pub struct Entry {
 /// A forum's list of topics with a torrent.
 #[derive(Clone, Debug)]
 pub struct ForumList {
-    /// The name of each field of a row, in order.
-    fields: Vec<String>,
     /// Each topic's row, by its number.
-    result: Map<String, Value>,
+    rows: HashMap<String, Row>,
     /// When the list was made, as an RFC 3339 time.
     observed: String,
 }
 
+/// What a forum list says of one topic. A field is `None` when the row has it as `null`, or
+/// the list has no such field.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct Row {
+    /// The torrent's info hash, as the list writes it.
+    hash: Option<String>,
+    seeders: Option<u64>,
+    leechers: Option<u64>,
+    size_bytes: Option<u64>,
+    /// When the torrent was uploaded, in seconds since 1970. `None` for 0.
+    registered: Option<i64>,
+}
+
 impl ForumList {
     /// The row of topic `id`. `None` when the list doesn't have it.
-    fn row(&self, id: &str) -> Option<&Vec<Value>> {
-        self.result.get(id)?.as_array()
+    fn row(&self, id: &str) -> Option<&Row> {
+        self.rows.get(id)
     }
 
     fn has(&self, id: &str) -> bool {
         self.row(id).is_some()
-    }
-
-    /// The field `name` of a row. `None` when it is null or the list has no such field.
-    fn field<'a>(&self, row: &'a [Value], name: &str) -> Option<&'a Value> {
-        let at = self.fields.iter().position(|f| f == name)?;
-        row.get(at).filter(|v| !v.is_null())
     }
 }
 
@@ -308,15 +296,54 @@ pub fn parse_feed(xml: &str) -> Result<Vec<Entry>, String> {
     Ok(entries)
 }
 
+/// A forum list answer, as the API writes it. A part with another type reads as missing.
+#[derive(Deserialize)]
+#[serde(crate = "nexus_api::serde")]
+struct Answer {
+    #[serde(default, deserialize_with = "crate::topic::lenient")]
+    format: Option<AnswerFormat>,
+    /// Each topic's row: its fields in the order [`AnswerFormat::topic_id`] names them.
+    #[serde(default, deserialize_with = "crate::topic::lenient")]
+    result: Option<HashMap<String, Value>>,
+    #[serde(default, deserialize_with = "crate::topic::lenient")]
+    update_time: Option<i64>,
+}
+
+#[derive(Deserialize)]
+#[serde(crate = "nexus_api::serde")]
+struct AnswerFormat {
+    /// The name of each field of a row, in order.
+    #[serde(default, deserialize_with = "crate::topic::lenient")]
+    topic_id: Option<Vec<Value>>,
+}
+
 /// Reads a forum list answer.
 pub fn parse_forum_list(bytes: &[u8]) -> Result<ForumList, String> {
-    let value: Value = serde_json::from_slice(bytes).map_err(|e| format!("not a forum list: {e}"))?;
-    let fields = value["format"]["topic_id"].as_array().ok_or("not a forum list: no format.topic_id")?;
+    let answer: Answer = serde_json::from_slice(bytes).map_err(|e| format!("not a forum list: {e}"))?;
+    let fields = answer.format.and_then(|f| f.topic_id).ok_or("not a forum list: no format.topic_id")?;
     let fields = fields.iter().map(|f| f.as_str().map(str::to_owned)).collect::<Option<Vec<_>>>();
     let fields = fields.ok_or("not a forum list: a field name is not text")?;
-    let result = value["result"].as_object().ok_or("not a forum list: no result")?.clone();
-    let time = value["update_time"].as_i64().ok_or("not a forum list: no update_time")?;
-    Ok(ForumList { fields, result, observed: iso_time(time) })
+    let result = answer.result.ok_or("not a forum list: no result")?;
+    let time = answer.update_time.ok_or("not a forum list: no update_time")?;
+    let at = |name: &str| fields.iter().position(|f| f == name);
+    let (hash, seeders, leechers, size, registered) =
+        (at("info_hash"), at("seeders"), at("leechers"), at("tor_size_bytes"), at("reg_time"));
+    let rows = result
+        .into_iter()
+        .filter_map(|(id, row)| {
+            let Value::Array(row) = row else { return None };
+            let field = |at: Option<usize>| at.and_then(|at| row.get(at)).filter(|v| !v.is_null());
+            let row = Row {
+                hash: field(hash).and_then(Value::as_str).map(str::to_owned),
+                seeders: field(seeders).and_then(Value::as_u64),
+                leechers: field(leechers).and_then(Value::as_u64),
+                size_bytes: field(size).and_then(Value::as_u64),
+                registered: field(registered).and_then(Value::as_i64).filter(|t| *t != 0),
+            };
+            Some((id, row))
+        })
+        .collect();
+    Ok(ForumList { rows, observed: iso_time(time) })
 }
 
 /// Console releases the launcher can't play, by the first `[…]` group of their title: games
@@ -375,55 +402,32 @@ pub fn normalize(name: &str) -> String {
     words.filter(|w| !SKIP.contains(&w.as_str())).collect::<Vec<_>>().join(" ")
 }
 
-fn id_of(topic: &Value) -> String {
-    match &topic["id"] {
-        Value::String(s) => s.clone(),
-        Value::Number(n) => n.to_string(),
-        _ => String::new(),
-    }
-}
-
-/// Whether a JSON value counts as set, as JavaScript's truth test has it.
-fn truthy(value: &Value) -> bool {
-    match value {
-        Value::Null => false,
-        Value::Bool(b) => *b,
-        Value::Number(n) => n.as_f64().is_some_and(|n| n != 0.0),
-        Value::String(s) => !s.is_empty(),
-        Value::Array(_) | Value::Object(_) => true,
-    }
-}
-
 /// Releases with no game info (new ones) take the game's facts from another release of the
-/// same game that has them: its title ID, genre, developer and cover. They are marked
-/// `borrowed`, so the catalog collector still reads their own details. The number of releases
-/// that took facts.
-pub fn borrow_details(topics: &mut [Value]) -> usize {
-    let key = |topic: &Value| normalize(&pc_name(&clean_name(topic["title"].as_str().unwrap_or(""))));
-    let mut donors: HashMap<String, (String, Value)> = HashMap::new();
+/// same game that has them: its title ID, genre, developer and cover (see
+/// [`crate::topic::GameInfo::game_facts`]). They are marked [`BORROWED`], so the catalog
+/// collector still reads their own details. The number of releases that took facts.
+pub fn borrow_details(topics: &mut [Topic]) -> usize {
+    let key = |topic: &Topic| normalize(&pc_name(&clean_name(topic.title.as_deref().unwrap_or(""))));
+    let mut donors = HashMap::new();
     for topic in topics.iter() {
-        if truthy(&topic["game_info"]["title_id"]) && topic["game_info_status"] != "borrowed" {
-            donors.entry(key(topic)).or_insert_with(|| (id_of(topic), topic["game_info"].clone()));
+        let Some(info) = &topic.game_info else { continue };
+        if info.title_id.as_deref().is_some_and(|id| !id.is_empty())
+            && topic.game_info_status.as_deref() != Some(BORROWED)
+        {
+            donors.entry(key(topic)).or_insert_with(|| (topic.id.clone(), info.game_facts()));
         }
     }
     let mut borrowed = 0;
     for topic in topics.iter_mut() {
-        if truthy(&topic["game_info"]) {
+        if topic.game_info.is_some() {
             continue;
         }
         let Some((donor, facts)) = donors.get(&key(topic)) else { continue };
-        let mut info = Map::new();
-        if !topic["url"].is_null() {
-            info.insert("source_url".into(), topic["url"].clone());
-        }
-        info.insert("borrowed_from".into(), donor.clone().into());
-        for fact in GAME_FACTS {
-            if !facts[fact].is_null() {
-                info.insert(fact.into(), facts[fact].clone());
-            }
-        }
-        topic["game_info"] = info.into();
-        topic["game_info_status"] = "borrowed".into();
+        let mut info = facts.clone();
+        info.source_url = topic.url.clone();
+        info.borrowed_from = Some(donor.clone());
+        topic.game_info = Some(info);
+        topic.game_info_status = Some(BORROWED.to_owned());
         borrowed += 1;
     }
     borrowed
@@ -524,39 +528,31 @@ fn magnet_hash(magnet: &str) -> Option<String> {
 }
 
 /// Fills a topic's peers, size, time of upload and magnet link from its row in the list. A
-/// magnet link with another hash is replaced: the torrent was uploaded again.
-fn apply_row(topic: &mut Value, list: &ForumList, row: &[Value]) {
-    let hash = list.field(row, "info_hash").and_then(Value::as_str).unwrap_or("").to_ascii_uppercase();
+/// magnet link with another hash is replaced: the torrent was uploaded again. A field the row
+/// doesn't have changes nothing.
+fn apply_row(topic: &mut Topic, row: &Row, observed: &str) {
+    let hash = row.hash.as_deref().unwrap_or("").to_ascii_uppercase();
     let valid = hash.len() == 40 && hash.bytes().all(|b| b.is_ascii_hexdigit());
-    let own = topic["magnet"].as_str().filter(|m| !m.is_empty()).map(str::to_owned);
+    let own = topic.magnet.take().filter(|m| !m.is_empty());
     let replaced = valid && own.as_deref().and_then(magnet_hash).as_deref() != Some(hash.as_str());
     let magnet = match own {
         Some(own) if !replaced => Some(own),
         _ if valid => Some(format!("magnet:?xt=urn:btih:{hash}&tr={}", encode(TRACKER))),
         _ => None,
     };
-    for name in ["seeders", "leechers"] {
-        if let Some(value) = list.field(row, name) {
-            topic[name] = value.clone();
-        }
+    topic.seeders = row.seeders.or(topic.seeders);
+    topic.leechers = row.leechers.or(topic.leechers);
+    topic.size_bytes = row.size_bytes.or(topic.size_bytes);
+    if let Some(time) = row.registered {
+        topic.registered_at = Some(iso_time(time));
     }
-    if let Some(size) = list.field(row, "tor_size_bytes") {
-        topic["size_bytes"] = size.clone();
-    } else if topic["size_bytes"].is_null() {
-        topic["size_bytes"] = Value::Null;
-    }
-    match list.field(row, "reg_time").filter(|t| truthy(t)).and_then(Value::as_i64) {
-        Some(time) => topic["registered_at"] = iso_time(time).into(),
-        None if topic["registered_at"].is_null() => topic["registered_at"] = Value::Null,
-        None => {}
-    }
-    topic["peers_observed"] = list.observed.clone().into();
-    topic["magnet_status"] = match (&magnet, &topic["magnet_status"]) {
-        (Some(_), _) => "available".into(),
-        (None, Value::Null) => "not_found".into(),
-        (None, status) => status.clone(),
+    topic.peers_observed = Some(observed.to_owned());
+    topic.magnet_status = match (&magnet, topic.magnet_status.take()) {
+        (Some(_), _) => Some("available".to_owned()),
+        (None, None) => Some("not_found".to_owned()),
+        (None, status) => status,
     };
-    topic["magnet"] = magnet.map_or(Value::Null, Value::from);
+    topic.magnet = magnet;
 }
 
 /// `text` as a URI component, as JavaScript's `encodeURIComponent` writes it.
@@ -573,14 +569,14 @@ fn encode(text: &str) -> String {
 }
 
 /// The forum number a topic names in its `source`, else the one the file names.
-fn named_forum(topic: &Value, file_forum: Option<&str>) -> Option<String> {
-    topic["source"].as_str().and_then(forum_number).or_else(|| file_forum.map(str::to_owned))
+fn named_forum(topic: &Topic, file_forum: Option<&str>) -> Option<String> {
+    topic.source.as_deref().and_then(forum_number).or_else(|| file_forum.map(str::to_owned))
 }
 
 /// Refreshes one forum's topics in `topics`. `single` is true when the catalog has only this
 /// forum: then a topic that names no forum is its topic.
 fn refresh_forum(
-    topics: &mut Vec<Value>,
+    topics: &mut Vec<Topic>,
     file_forum: Option<&str>,
     single: bool,
     forum: &ForumRef,
@@ -588,45 +584,49 @@ fn refresh_forum(
     list: &ForumList,
     now: &str,
 ) -> Counts {
-    let mine = |topic: &Value| match named_forum(topic, file_forum) {
+    let mine = |topic: &Topic| match named_forum(topic, file_forum) {
         Some(number) => number == forum.number,
         None => single,
     };
-    let mut known: HashSet<String> = topics.iter().map(id_of).collect();
+    let mut known: HashSet<String> = topics.iter().map(|t| t.id.clone()).collect();
     let mut counts = Counts::default();
     for entry in feed.iter().filter(|e| !unplayable(&e.title)) {
         if known.contains(&entry.id) || !list.has(&entry.id) {
             continue;
         }
         known.insert(entry.id.clone());
-        let mut topic = serde_json::json!({ "id": entry.id, "title": entry.title,
-            "url": format!("{}/forum/viewtopic.php?t={}", origin(&forum.url), entry.id),
-            "size": null, "seeders": null, "leechers": null, "author": entry.author, "magnet": null,
-            "magnet_status": "not_checked", "game_info": null, "game_info_status": "not_collected",
-            "added_at": if entry.updated.is_empty() { now } else { &entry.updated },
-            "platform": forum.console, "source": forum.url });
-        if let Some(system) = &forum.system {
-            topic["system"] = system.clone().into();
-            topic["wine_packed"] = forum.wine.into();
-        }
-        topics.push(topic);
+        let pc = forum.system.is_some();
+        topics.push(Topic {
+            id: entry.id.clone(),
+            title: Some(entry.title.clone()),
+            url: Some(format!("{}/forum/viewtopic.php?t={}", origin(&forum.url), entry.id)),
+            author: entry.author.clone(),
+            magnet_status: Some("not_checked".to_owned()),
+            game_info_status: Some("not_collected".to_owned()),
+            added_at: Some(if entry.updated.is_empty() { now } else { &entry.updated }.to_owned()),
+            platform: Some(forum.console.as_str().to_owned()),
+            source: Some(forum.url.clone()),
+            system: forum.system.clone(),
+            wine_packed: pc.then_some(forum.wine),
+            ..Topic::default()
+        });
         counts.new += 1;
     }
     let total = topics.iter().filter(|t| mine(t)).count();
-    let listed = topics.iter().filter(|t| mine(t) && list.has(&id_of(t))).count();
+    let listed = topics.iter().filter(|t| mine(t) && list.has(&t.id)).count();
     if listed as f64 >= total as f64 * 0.8 {
-        topics.retain(|t| !mine(t) || list.has(&id_of(t)));
+        topics.retain(|t| !mine(t) || list.has(&t.id));
         counts.removed = total - listed;
     }
     for topic in topics.iter_mut().filter(|t| mine(t)) {
-        let Some(row) = list.row(&id_of(topic)).cloned() else { continue };
-        apply_row(topic, list, &row);
+        let Some(row) = list.row(&topic.id) else { continue };
+        apply_row(topic, row, &list.observed);
         // The list's byte count wins: a label that doesn't match it (an upload of another size)
         // is replaced. A label that matches keeps the forum's own words.
-        let bytes = topic["size_bytes"].as_f64().unwrap_or(0.0);
-        let shown = topic["size"].as_str().and_then(label_bytes);
+        let bytes = topic.size_bytes.unwrap_or(0) as f64;
+        let shown = topic.size.as_deref().and_then(label_bytes);
         if bytes > 0.0 && !shown.is_some_and(|s| s > 0.0 && (s - bytes).abs() <= bytes * 0.01) {
-            topic["size"] = size_label(bytes).map_or(Value::Null, Value::from);
+            topic.size = size_label(bytes);
         }
     }
     counts
@@ -635,19 +635,20 @@ fn refresh_forum(
 /// Moves each topic that its own forum's list doesn't have, and another forum's list has, to
 /// that forum: its `source`, and its `system` and `wine_packed` for a PC forum. So a topic that
 /// moved from one forum of the catalog to another is kept, under its new forum.
-fn move_topics(topics: &mut [Value], file_forum: Option<&str>, forums: &[(ForumRef, Vec<Entry>, ForumList)]) {
+fn move_topics(topics: &mut [Topic], file_forum: Option<&str>, forums: &[(ForumRef, Vec<Entry>, ForumList)]) {
     for topic in topics.iter_mut() {
-        let id = id_of(topic);
         let Some(own) = named_forum(topic, file_forum) else { continue };
         let Some((_, _, own_list)) = forums.iter().find(|(f, ..)| f.number == own) else { continue };
-        if own_list.has(&id) {
+        if own_list.has(&topic.id) {
             continue;
         }
-        let Some((to, ..)) = forums.iter().find(|(f, _, list)| f.number != own && list.has(&id)) else { continue };
-        topic["source"] = to.url.clone().into();
+        let Some((to, ..)) = forums.iter().find(|(f, _, list)| f.number != own && list.has(&topic.id)) else {
+            continue;
+        };
+        topic.source = Some(to.url.clone());
         if let Some(system) = &to.system {
-            topic["system"] = system.clone().into();
-            topic["wine_packed"] = to.wine.into();
+            topic.system = Some(system.clone());
+            topic.wine_packed = Some(to.wine);
         }
     }
 }
@@ -657,18 +658,14 @@ fn move_topics(topics: &mut [Value], file_forum: Option<&str>, forums: &[(ForumR
 /// answer leaves its topics as they are. `now` is in seconds since 1970. Sets the file's
 /// `topic_count` and `refreshed_at`.
 pub fn refresh(
-    file: &mut Value,
+    file: &mut CatalogFile,
     forums: &[(ForumRef, Vec<Entry>, ForumList)],
     forum_count: usize,
     now: i64,
 ) -> Result<Counts, String> {
     let now = iso_time(now);
-    let file_forum = file["source"].as_str().and_then(forum_number);
-    let topics = file["topics"].as_array_mut().ok_or("the catalog has no topics list")?;
-    if !topics.iter().all(Value::is_object) {
-        return Err("a topic of the catalog is not an object".into());
-    }
-    let mut all = std::mem::take(topics);
+    let file_forum = file.source.as_deref().and_then(forum_number);
+    let mut all = file.topics.take().ok_or("the catalog has no topics list")?;
     move_topics(&mut all, file_forum.as_deref(), forums);
     let mut counts = Counts::default();
     for (forum, feed, list) in forums {
@@ -678,11 +675,11 @@ pub fn refresh(
     }
     counts.borrowed = borrow_details(&mut all);
     if let Some(list) = forums.last().map(|(_, _, l)| l) {
-        file["api_observed"] = list.observed.clone().into();
+        file.api_observed = Some(list.observed.clone());
     }
-    file["topic_count"] = all.len().into();
-    file["topics"] = all.into();
-    file["refreshed_at"] = now.into();
+    file.topic_count = Some(all.len() as u64);
+    file.topics = Some(all);
+    file.refreshed_at = Some(now);
     Ok(counts)
 }
 
@@ -716,6 +713,28 @@ mod tests {
 
     fn by_id(file: &Value, id: &str) -> Value {
         file["topics"].as_array().unwrap().iter().find(|t| t["id"] == id).cloned().unwrap_or(Value::Null)
+    }
+
+    /// [`refresh`] of the catalog file `file`, written as JSON: the file is read into the model,
+    /// refreshed, and written back.
+    fn refresh_json(
+        file: &mut Value,
+        forums: &[(ForumRef, Vec<Entry>, ForumList)],
+        forum_count: usize,
+        now: i64,
+    ) -> Result<Counts, String> {
+        let mut typed: CatalogFile = serde_json::from_value(file.clone()).unwrap();
+        let counts = refresh(&mut typed, forums, forum_count, now)?;
+        *file = serde_json::to_value(&typed).unwrap();
+        Ok(counts)
+    }
+
+    /// [`borrow_details`] of topics written as JSON.
+    fn borrow_json(topics: &mut Vec<Value>) -> usize {
+        let mut typed: Vec<Topic> = serde_json::from_value(Value::from(topics.clone())).unwrap();
+        let borrowed = borrow_details(&mut typed);
+        *topics = typed.iter().map(|t| serde_json::to_value(t).unwrap()).collect();
+        borrowed
     }
 
     #[test]
@@ -790,12 +809,9 @@ mod tests {
     fn the_forum_list_reads_its_rows_by_field_name() {
         let list = parse_forum_list(PVC.as_bytes()).unwrap();
         let row = list.row("6900001").unwrap();
-        assert_eq!(list.field(row, "seeders"), Some(&Value::from(42)));
-        assert_eq!(
-            list.field(row, "info_hash").and_then(Value::as_str),
-            Some("C12FE1C06BBA254A9DC9F519B335AA7C1367A88A")
-        );
-        assert_eq!(list.field(list.row("6900004").unwrap(), "leechers"), None, "null is not a value");
+        assert_eq!(row.seeders, Some(42));
+        assert_eq!(row.hash.as_deref(), Some("C12FE1C06BBA254A9DC9F519B335AA7C1367A88A"));
+        assert_eq!(list.row("6900004").unwrap().leechers, None, "null is not a value");
         assert_eq!(list.observed, "2026-10-07T14:07:32Z");
         assert!(!list.has("6900005"));
         assert!(parse_forum_list(b"{ not json").is_err());
@@ -813,7 +829,7 @@ mod tests {
         ]);
         catalog["topics"][0]["magnet"] = "magnet:?xt=urn:btih:c12fe1c06bba254a9dc9f519b335aa7c1367a88a&tr=x".into();
         let answers = [(forum(), parse_feed(FEED).unwrap(), parse_forum_list(PVC.as_bytes()).unwrap())];
-        let counts = refresh(&mut catalog, &answers, 1, 1_791_400_000).unwrap();
+        let counts = refresh_json(&mut catalog, &answers, 1, 1_791_400_000).unwrap();
         // 6912346 is VR only, 6900002 is known, 6900005 is gone from the list.
         assert_eq!(counts, Counts { new: 1, removed: 1, borrowed: 0 });
         assert_eq!(catalog["topic_count"], 5);
@@ -854,7 +870,7 @@ mod tests {
         let mut answer: Value = serde_json::from_str(PVC).unwrap();
         answer["result"].as_object_mut().unwrap().retain(|id, _| id == "6900001");
         let answers = [(forum(), Vec::new(), parse_forum_list(answer.to_string().as_bytes()).unwrap())];
-        assert_eq!(refresh(&mut catalog, &answers, 1, 0).unwrap().removed, 0);
+        assert_eq!(refresh_json(&mut catalog, &answers, 1, 0).unwrap().removed, 0);
         assert_eq!(catalog["topic_count"], 5);
     }
 
@@ -883,7 +899,7 @@ mod tests {
             wine: false,
         };
         let answers = [(forum, parse_feed(feed).unwrap(), parse_forum_list(list.as_bytes()).unwrap())];
-        let counts = refresh(&mut catalog, &answers, 2, 0).unwrap();
+        let counts = refresh_json(&mut catalog, &answers, 2, 0).unwrap();
         assert_eq!(counts, Counts { new: 1, removed: 0, borrowed: 0 });
         assert_eq!(by_id(&catalog, "1")["seeders"], 4);
         assert_eq!(by_id(&catalog, "2")["seeders"], Value::Null, "the Wine forum's topic is not changed");
@@ -923,7 +939,7 @@ mod tests {
         };
         // The Wine forum of the catalog failed: only the Linux forum answered.
         let answers = [(forum, Vec::new(), parse_forum_list(list.as_bytes()).unwrap())];
-        let counts = refresh(&mut catalog, &answers, 2, 0).unwrap();
+        let counts = refresh_json(&mut catalog, &answers, 2, 0).unwrap();
         assert_eq!(counts.removed, 0, "not the Linux forum's topic, so not dropped");
         assert_eq!(by_id(&catalog, "1")["seeders"], 4);
         assert_eq!(by_id(&catalog, "9")["title"], "Quake [Wine]");
@@ -964,7 +980,7 @@ mod tests {
             (forum("1992", linux, false), Vec::new(), list(&[(1, 4), (3, 4), (4, 4), (5, 4), (6, 4)])),
             (forum("2059", wine, true), Vec::new(), list(&[(2, 9)])),
         ];
-        let counts = refresh(&mut catalog, &answers, 2, 0).unwrap();
+        let counts = refresh_json(&mut catalog, &answers, 2, 0).unwrap();
         assert_eq!(counts, Counts { new: 0, removed: 0, borrowed: 0 });
         let moved = by_id(&catalog, "2");
         assert_eq!((&moved["source"], &moved["wine_packed"]), (&wine.into(), &true.into()), "{moved}");
@@ -984,7 +1000,7 @@ mod tests {
             "game_info_status": "not_collected" });
         let other = serde_json::json!({ "id": "1", "title": "[PS5] Little Nightmares II [EUR]", "game_info": null });
         let mut topics = vec![donor, fresh, other];
-        assert_eq!(borrow_details(&mut topics), 1);
+        assert_eq!(borrow_json(&mut topics), 1);
         assert_eq!(
             topics[1]["game_info"],
             serde_json::json!({ "source_url": "https://xyz.net/forum/viewtopic.php?t=6921989", "borrowed_from": "6910307",
@@ -993,7 +1009,7 @@ mod tests {
         );
         assert_eq!(topics[1]["game_info_status"], "borrowed");
         assert_eq!(topics[2]["game_info"], Value::Null, "another game");
-        assert_eq!(borrow_details(&mut topics), 0, "only once");
+        assert_eq!(borrow_json(&mut topics), 0, "only once");
     }
 
     #[test]
@@ -1004,16 +1020,19 @@ mod tests {
         donor["game_info"] = serde_json::json!({ "name": "Astro", "title_id": "PPSA01234", "genre": "Action, Platformer",
             "developer": "Team Asobi", "publisher": "Sony", "release_year": "2024", "multiplayer": "No",
             "image_urls": ["https://i1.imageban.ru/out/astro.jpg"], "version": "v01.05", "format": "exfat" });
-        let mut catalog = file(vec![
+        let mut catalog: CatalogFile = serde_json::from_value(file(vec![
             donor,
             topic("6900002", "[PS5] Bolt [EUR]", '2'),
             topic("6900003", "[PS5] Comet [EUR]", '3'),
             topic("6900004", "[PS5] Drift [EUR]", '4'),
-        ]);
+        ]))
+        .unwrap();
         let answers = [(forum(), parse_feed(FEED).unwrap(), parse_forum_list(PVC.as_bytes()).unwrap())];
         assert_eq!(refresh(&mut catalog, &answers, 1, 1_791_400_000).unwrap().borrowed, 1);
 
-        let list = crate::format::read(&serde_json::to_vec(&catalog).unwrap()).unwrap();
+        // The refreshed model reads as it is, with no file written and read again.
+        let forums = crate::sources::read(crate::BUNDLED_SOURCES).unwrap().forums();
+        let list = crate::format::releases(&catalog, &forums).unwrap();
         let fresh = list.releases.iter().find(|r| r.version.is_empty() && r.title == "Astro").expect("the new release");
         assert_eq!((fresh.seeders, fresh.leechers), (Some(5), Some(9)), "the forum list's counts");
         assert_eq!(fresh.counted_at, "2026-10-07T14:07:32Z");
