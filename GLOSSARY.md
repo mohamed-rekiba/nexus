@@ -66,6 +66,10 @@ run when the current build changes.
 **Forum list**: a forum's list of topics with a torrent, from the tracker's API: the hash, size,
 peers and upload time of each topic, with no titles.
 
+**Game record** (`GameRecord`): everything the core knows about one game, by its game key: the
+game as its plugin lists it, its badges, its details, a store's metadata, and for an installed
+game, the catalog's offer it is and that offer's cover. The library subsystem holds one per game.
+
 **Hand-off** (`HandOff`): the fields of a download that another area writes: the unpack of its
 archives and the install from it. They change only through the torrents subsystem's
 `hand_off` call.
@@ -81,8 +85,15 @@ storage, folders, programs, HTTP, settings and the log.
 a plugin's privileges.
 _Avoid_: type, category
 
+**Library subsystem** (`LibrarySubsystem`): the subsystem that holds the game records, the
+catalogs' copies and their offers, and the library's saved choices (hidden games, kept covers,
+the player's results). It asks no plugin; the core hands it the plugins' answers.
+
 **Listing** (`ArchiveEntry`): an archive's entries as a format reader gives them, unchecked: each
 name as the archive spells it, its size, its kind, and whether it needs a password.
+
+**Offer**: one game a catalog offers, grouped from its releases by title id or by title
+without its edition words. An installed game can be an offer too: its record names the offer.
 
 **Own build**: an emulator build the player built or installed, used instead of a downloaded
 one while the `own_build` setting is on. The host never updates it.
@@ -108,7 +119,7 @@ checks its files, and seeds only when every piece is there. It never downloads.
 
 **Subsystem**: one area of the core's state with its own lock, saved records and ports. The core
 sends it commands, reads its snapshot and turns its events into work. The torrents subsystem
-is the first.
+is the first, the library subsystem the second.
 
 **Test run**: a new build runs once with `--help` before it becomes current. A build that fails
 it is removed.
