@@ -252,6 +252,27 @@ async fn an_unpack_cut_by_a_restart_comes_back_failed_and_install_unpacks_first(
     assert_eq!(std::fs::read(s.folder().join("unpacked/Astro/game/game.pkg")).unwrap(), b"game");
 }
 
+/// Install pressed at once after a restart, before the download's first poll and before its
+/// check of the files ends, unpacks and installs: nothing in the restart holds the folder.
+#[tokio::test]
+async fn install_right_after_a_restart_cut_an_unpack_unpacks_and_installs() {
+    let s = setup(&[("Astro/game.rar", b"g")]).await;
+    s.t.archives.holds("game.rar", &[("game.pkg", b"game")]);
+    let _held = s.t.archives.hold();
+    s.finish().await;
+    until(&s.t.core, Area::Torrents, |r| r.unpack == "unpacking").await;
+    s.t.clock.run_until_idle().await;
+    // The first app closed: its unpack never ends.
+    s.t.archives.cut();
+
+    let again = nexus_core::Core::start(s.t.kernel.clone()).await;
+    assert!(!row(&again).seeding, "the check of its files hasn't ended: {:?}", row(&again));
+    act(&again, TorrentAction::Install).await;
+    until(&again, Area::Installs, |r| r.install == "done").await;
+    assert_eq!(std::fs::read(s.folder().join("unpacked/Astro/game/game.pkg")).unwrap(), b"game");
+    assert_eq!(s.sources.lock().unwrap().len(), 1, "installed once unpacked");
+}
+
 #[tokio::test]
 async fn remove_unpacked_files_keeps_the_download_and_its_seeding() {
     let s = setup(&[("Astro/game.rar", b"g")]).await;
