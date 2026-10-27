@@ -91,6 +91,7 @@ split into parts when it's over 2 GiB.
 33. As a player, I want a SHA-256 for the whole ISO and for each part, so that I can check my download.
 34. As a maintainer, I want OS releases published as "not latest", so that Nexus's updater keeps reading Nexus releases.
 35. As a maintainer, I want the OS images rebuilt daily and after every Nexus release, so that installed PCs get Fedora's fixes and new launchers.
+35a. As a maintainer, I want each Nexus release to open the OS release pull request, so that the ISO bundles the new Nexus too.
 36. As a maintainer, I want the image build to fail when a tool or library the OS needs is missing, so that a broken image is never published.
 37. As a maintainer, I want the launcher and the OS to share one written contract, so that changing either side doesn't break the other.
 38. As a maintainer, I want a test mode that builds the images and ISO under test tags no PC follows, so that I can try changes safely.
@@ -209,6 +210,9 @@ split into parts when it's over 2 GiB.
 **The OS release stream**
 - Release Please component `nexus-os`, with the OS folder's own version file and changelog, and
   tags `nexus-os-v<version>`. Its changes are left out of Nexus's stream.
+- Each published Nexus release writes its tag to the OS folder's `nexus.txt`, as a `feat(os)`
+  commit for a new major or minor Nexus and a `fix(os)` commit for a patch. Release Please then
+  opens the OS release pull request, so a new Nexus is never left out of the ISO.
 - **Merging its release pull request:**
   1. builds and checks the images, and tags them with the version;
   2. builds the ISO;
