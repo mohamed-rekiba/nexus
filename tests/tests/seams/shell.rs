@@ -88,7 +88,7 @@ fn the_clock_s_minute_renders_once() {
     host.platform.set_local_time("9:39 PM");
     host.on_tick();
     assert_eq!(host.renders(), before + 1);
-    assert_eq!(vm_text(&host, "clock"), "9:39 PM");
+    assert_eq!(host.ui.clock(), "9:39 PM");
 }
 
 #[test]
@@ -148,17 +148,16 @@ fn a_trailer_that_can_t_play_in_the_window_opens_in_the_browser_and_says_why() {
 fn the_tick_follows_the_trailer_and_closes_it_at_its_end() {
     let mut host = shown();
     host.on_request(UiRequest::Trailer(TrailerRequest::Play("https://art.example/a.mp4".into()))).unwrap();
-    assert_eq!(vm_field(&host, "trailer", "loading"), slint_interpreter::Value::Bool(true), "opening");
+    assert_eq!(host.ui.trailer().map(|t| t.loading), Some(true), "opening");
     let playing = TrailerStatus { playing: true, loading: false, position: 42.0, duration: 130.0 };
     host.platform.set_trailer(Some(TrailerPoll::Playing(playing)));
     host.on_tick();
-    assert_eq!(vm_field(&host, "trailer", "position"), slint_interpreter::Value::Number(42.0));
+    assert_eq!(host.ui.trailer().map(|t| t.position), Some(42.0));
 
     host.platform.set_trailer(Some(TrailerPoll::Ended));
     host.on_tick();
     assert_eq!(host.platform.calls().last(), Some(&PlatformCall::CloseTrailer));
-    let has = host.instance().get_global_property("Vm", "has-trailer").unwrap();
-    assert_eq!(has, slint_interpreter::Value::Bool(false));
+    assert_eq!(host.ui.trailer(), None);
 }
 
 #[test]
@@ -173,9 +172,4 @@ fn the_window_moves_once_to_the_monitor_picked_in_settings() {
     let moves: Vec<_> =
         host.platform.calls().into_iter().filter(|c| matches!(c, PlatformCall::MoveToMonitor { .. })).collect();
     assert_eq!(moves, [PlatformCall::MoveToMonitor { monitor: "DP-2".into(), fullscreen: true }]);
-}
-
-/// A `Vm` property's text.
-fn vm_text(host: &Composed, name: &str) -> String {
-    nexus_ui_host::vm_text(host.instance(), name).unwrap_or_default()
 }

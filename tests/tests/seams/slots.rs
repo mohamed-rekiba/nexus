@@ -2,7 +2,6 @@
 
 use crate::common::*;
 use nexus_core::Command;
-use slint_interpreter::Value;
 
 const GAMES: [&str; 3] = ["Alpha", "Beta", "Gamma"];
 
@@ -63,10 +62,7 @@ fn slot_actions_and_sections_render_on_the_detail_screen_of_both_themes() {
 fn the_desktop_grid_reflows_at_its_compact_breakpoint() {
     let wide = shown("fixture-grid", 1600.0, 900.0);
     let compact = shown("fixture-grid", 800.0, 700.0);
-    let breakpoint = |h: &Composed| match vm_field(h, "viewport", "breakpoint") {
-        Value::String(s) => s.to_string(),
-        other => panic!("{other:?}"),
-    };
+    let breakpoint = |h: &Composed| h.ui.breakpoint().expect("a theme is shown");
     assert_eq!(breakpoint(&wide), "wide");
     assert_eq!(breakpoint(&compact), "compact");
 

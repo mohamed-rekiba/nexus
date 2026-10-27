@@ -67,9 +67,8 @@ fn a_rating_counts_its_players_in_thousands() {
     });
     host.ui.start().unwrap();
     home_line(&mut host);
-    let detail = host.instance().get_global_property("Vm", "detail").unwrap();
-    let slint_interpreter::Value::Struct(detail) = detail else { panic!("a struct") };
-    assert_eq!(detail.get_field("rating-text"), Some(&slint_interpreter::Value::String("4.4 · 3.2K ratings".into())));
+    let detail = host.core().view().detail.expect("the game's details");
+    assert_eq!(detail.rating_text, "4.4 · 3.2K ratings");
 }
 
 #[test]

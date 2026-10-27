@@ -21,6 +21,17 @@ fn with_examples(h: nexus_testkit::FakeHost) -> nexus_testkit::FakeHost {
     h.discover(&fixture_themes()).plugin(FakeCatalog::new("emu-a").playable().games(["Alpha", "Beta", "Gamma"]).build())
 }
 
+/// A `Vm` struct property's field, from the live instance. The switching tests read the `Vm`
+/// globals themselves, where every other seam test reads `core.view()`: what they check is
+/// that a new theme's tree is bound with the state the old one showed, and the core's view
+/// doesn't change when the theme does.
+pub fn vm_field(host: &Composed, property: &str, field: &str) -> slint_interpreter::Value {
+    match host.instance().get_global_property("Vm", property).unwrap() {
+        slint_interpreter::Value::Struct(s) => s.get_field(field).cloned().unwrap_or_default(),
+        other => panic!("Vm.{property} is {other:?}"),
+    }
+}
+
 #[test]
 fn switching_keeps_screen_selection_and_running_games() {
     let mut host = composed(with_examples);

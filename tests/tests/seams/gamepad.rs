@@ -3,7 +3,7 @@
 use crate::common::*;
 use nexus_core::{Command, Route, SessionCmd};
 use nexus_ui_api::ScreenId;
-use nexus_ui_host::{PadButton, vm_text};
+use nexus_ui_host::PadButton;
 
 fn tv() -> Composed {
     let mut host =
@@ -32,7 +32,7 @@ fn the_d_pad_moves_the_selection_and_the_buttons_open_and_go_back() {
     press(&mut host, PadButton::Left);
     rest(&mut host);
     assert_eq!(host.core().view().home.selected, Some(1));
-    assert_eq!(vm_text(host.instance(), "input-mode").as_deref(), Some("gamepad"));
+    assert_eq!(host.ui.input_mode().as_deref(), Some("gamepad"));
 
     // A opens the Game Hub; B goes back to the row.
     press(&mut host, PadButton::South);

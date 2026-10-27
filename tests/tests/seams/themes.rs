@@ -31,12 +31,12 @@ fn every_default_screen_renders() {
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     let routes = [
-        ("home", "Home"),
-        ("catalog", "Catalog"),
-        ("downloads", "Downloads"),
-        ("settings", "Settings"),
-        ("emulators", "Emulators"),
-        ("themes", "Themes"),
+        (ScreenId::Home, "Home"),
+        (ScreenId::Catalog, "Catalog"),
+        (ScreenId::Downloads, "Downloads"),
+        (ScreenId::Settings, "Settings"),
+        (ScreenId::Emulators, "Emulators"),
+        (ScreenId::Themes, "Themes"),
     ];
     for (screen, route) in routes {
         let args = [
@@ -45,10 +45,10 @@ fn every_default_screen_renders() {
         ];
         host.instance().invoke_global("Host", "command", &args).unwrap();
         host.pump();
-        assert_eq!(nexus_ui_host::vm_text(host.instance(), "screen").as_deref(), Some(screen));
+        assert_eq!(host.core().view().screen, screen);
     }
     host.dispatch(Command::OpenGame("emu-a:G0".parse().unwrap()));
-    assert_eq!(nexus_ui_host::vm_text(host.instance(), "screen").as_deref(), Some("game-detail"));
+    assert_eq!(host.core().view().screen, ScreenId::GameDetail);
 }
 
 #[test]

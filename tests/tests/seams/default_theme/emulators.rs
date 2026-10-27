@@ -208,20 +208,10 @@ fn the_game_catalog_page_shows_its_sources_its_refresh_and_refresh_now() {
     host.dispatch(Command::Navigate(nexus_core::Route::Plugin(id("release-catalog"))));
     host.settle();
     // The blocks: the theme's section cards carry no label a test can find, so the blocks are
-    // checked in the Vm, and their place on the page by its label.
+    // checked in the view, and their place on the page by its label.
     assert_eq!(host.count("plugin-blocks"), 1, "the page draws the service's blocks");
-    let labels: Vec<String> = match vm_field(&host, "plugin-page", "sections") {
-        slint_interpreter::Value::Model(m) => slint::Model::iter(&m)
-            .filter_map(|v| match v {
-                slint_interpreter::Value::Struct(s) => match s.get_field("label") {
-                    Some(slint_interpreter::Value::String(l)) => Some(l.to_string()),
-                    _ => None,
-                },
-                _ => None,
-            })
-            .collect(),
-        other => panic!("sections is {other:?}"),
-    };
+    let page = host.core().view().plugin_page.expect("the plugin's page");
+    let labels: Vec<String> = page.sections.iter().map(|s| s.label.clone()).collect();
     for label in ["release-catalog:sources", "release-catalog:refresh"] {
         assert!(labels.iter().any(|l| l == label), "{label} in {labels:?}");
     }

@@ -1,49 +1,19 @@
-//! Seam 3: `Vm.home.groups` splits the library by platform, and selecting a game loads its
+//! Seam 3: Home's groups split the library by platform, and selecting a game loads its
 //! details while the player stays on the home screen.
 
 use crate::common::*;
 use nexus_core::Command;
-use slint::Model;
-use slint_interpreter::Value;
+use nexus_ui_api::ScreenId;
 
-fn field(value: &Value, name: &str) -> Value {
-    match value {
-        Value::Struct(s) => s.get_field(name).cloned().unwrap_or_else(|| panic!("no field {name}")),
-        other => panic!("{other:?} is not a struct"),
-    }
-}
-
-fn rows(value: &Value) -> Vec<Value> {
-    match value {
-        Value::Model(m) => m.iter().collect(),
-        other => panic!("{other:?} is not a list"),
-    }
-}
-
-fn text(value: &Value) -> String {
-    match value {
-        Value::String(s) => s.to_string(),
-        other => panic!("{other:?} is not text"),
-    }
-}
-
-fn number(value: &Value) -> f64 {
-    match value {
-        Value::Number(n) => *n,
-        other => panic!("{other:?} is not a number"),
-    }
-}
-
-/// Each group as (platform, count, titles, selected). The count is how many cards it has, as
-/// the theme reads it.
-fn groups(host: &Composed) -> Vec<(String, f64, Vec<String>, f64)> {
-    let home = host.instance().get_global_property("Vm", "home").unwrap();
-    rows(&field(&home, "groups"))
+/// Each group of Home as (platform, how many games, titles, the selected game's index).
+fn groups(host: &Composed) -> Vec<(String, usize, Vec<String>, Option<usize>)> {
+    let view = host.core().view();
+    view.home
+        .groups
         .iter()
         .map(|g| {
-            let games = rows(&field(g, "games"));
-            let titles = games.iter().map(|c| text(&field(c, "title"))).collect();
-            (text(&field(g, "platform")), games.len() as f64, titles, number(&field(g, "selected")))
+            let titles = g.games.iter().map(|c| c.title.clone()).collect();
+            (g.platform.clone(), g.games.len(), titles, g.selected)
         })
         .collect()
 }
@@ -70,8 +40,8 @@ fn the_library_is_grouped_by_platform() {
         found,
         [
             // The first game by title is selected once the library loads.
-            ("PS4".to_owned(), 2.0, vec!["Alpha".to_owned(), "Beta".to_owned()], 0.0),
-            ("PS5".to_owned(), 1.0, vec!["Gamma".to_owned()], -1.0),
+            ("PS4".to_owned(), 2, vec!["Alpha".to_owned(), "Beta".to_owned()], Some(0)),
+            ("PS5".to_owned(), 1, vec!["Gamma".to_owned()], None),
         ]
     );
 }
@@ -82,22 +52,23 @@ fn a_group_points_at_the_selected_game_when_it_holds_it() {
     host.dispatch(Command::Select("emu-a:G1".parse().unwrap()));
     let found = groups(&host);
     let ps4 = found.iter().find(|g| g.0 == "PS4").unwrap();
-    assert_eq!(ps4.2[ps4.3 as usize], "Beta");
-    assert_eq!(found.iter().find(|g| g.0 == "PS5").unwrap().3, -1.0);
+    assert_eq!(ps4.2[ps4.3.expect("PS4 holds the selected game")], "Beta");
+    assert_eq!(found.iter().find(|g| g.0 == "PS5").unwrap().3, None);
 }
 
 #[test]
 fn selecting_a_game_loads_its_details_and_stays_home() {
     let mut host = two_platforms();
     host.dispatch(Command::Select("emu-b:G0".parse().unwrap()));
-    assert_eq!(host.instance().get_global_property("Vm", "screen").unwrap(), Value::String("home".into()));
-    assert_eq!(host.instance().get_global_property("Vm", "has-detail").unwrap(), Value::Bool(true));
-    assert_eq!(text(&vm_field(&host, "detail", "title")), "Gamma");
-    assert_eq!(text(&vm_field(&host, "detail", "description")), "About Gamma");
+    let view = host.core().view();
+    assert_eq!(view.screen, ScreenId::Home);
+    let detail = view.detail.expect("the game's details");
+    assert_eq!(detail.title, "Gamma");
+    assert_eq!(detail.description, "About Gamma");
 }
 
 fn notices(host: &Composed) -> Vec<String> {
-    rows(&host.instance().get_global_property("Vm", "notices").unwrap()).iter().map(text).collect()
+    host.core().view().notices
 }
 
 #[test]

@@ -258,16 +258,9 @@ impl ThemeHost {
         resolved: &ResolvedTheme,
         view: &nexus_ui_api::AppView,
     ) -> Result<(), String> {
-        let size = instance.window().size();
-        let scale = instance.window().scale_factor();
-        let (width, height) = (size.width as f32 / scale, size.height as f32 / scale);
+        let (width, height, scale) = window_size(instance);
         let merged = &resolved.merged;
-        let input_mode = self.input_mode.clone().unwrap_or_else(|| {
-            serde_json::to_value(merged.input.first().copied().unwrap_or(nexus_ui_api::InputMode::Pointer))
-                .ok()
-                .and_then(|v| v.as_str().map(str::to_owned))
-                .unwrap_or_default()
-        });
+        let input_mode = self.input_mode_of(resolved);
         let size = self.size.unwrap_or(view.settings.scale);
         let aspect = if height > 0.0 { width / height } else { 0.0 };
         let breakpoint = merged.breakpoint(width, height, scale);
@@ -378,6 +371,37 @@ impl ThemeHost {
     /// The connected controller's name, or `None` when none is.
     pub fn set_pad_name(&mut self, name: Option<String>) {
         self.pad_name = name.unwrap_or_default();
+    }
+
+    /// The clock the theme shows, as the app last set it.
+    pub fn clock(&self) -> &str {
+        &self.clock
+    }
+
+    /// How the player drives the shown theme now, as the theme reads it in `Vm.input-mode`:
+    /// `gamepad` once a pad button came in, and the theme's first input mode before.
+    pub fn input_mode(&self) -> Option<String> {
+        self.live.as_ref().map(|live| self.input_mode_of(&live.resolved))
+    }
+
+    fn input_mode_of(&self, resolved: &ResolvedTheme) -> String {
+        self.input_mode.clone().unwrap_or_else(|| {
+            let first = resolved.merged.input.first().copied().unwrap_or(nexus_ui_api::InputMode::Pointer);
+            serde_json::to_value(first).ok().and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default()
+        })
+    }
+
+    /// The trailer playing, as the theme shows it, or `None` once it closed.
+    pub fn trailer(&self) -> Option<&TrailerStatus> {
+        self.trailer.as_ref()
+    }
+
+    /// The shown theme's breakpoint for its window's size, as the theme reads it in
+    /// `Vm.viewport`.
+    pub fn breakpoint(&self) -> Option<String> {
+        let live = self.live.as_ref()?;
+        let (width, height, scale) = window_size(&live.instance);
+        Some(live.resolved.merged.breakpoint(width, height, scale))
     }
 
     /// The trailer playing, or `None` once it closed.
@@ -636,6 +660,13 @@ fn int(args: &[Value], i: usize) -> usize {
 
 fn game(args: &[Value], i: usize) -> Option<GameKey> {
     arg(args, i).parse().ok()
+}
+
+/// The window's logical width and height, and its scale factor.
+fn window_size(instance: &ComponentInstance) -> (f32, f32, f32) {
+    let size = instance.window().size();
+    let scale = instance.window().scale_factor();
+    (size.width as f32 / scale, size.height as f32 / scale, scale)
 }
 
 /// For tests: the value of a `Vm` property on the live instance, as text when it is text.

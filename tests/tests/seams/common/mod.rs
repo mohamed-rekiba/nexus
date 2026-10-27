@@ -292,11 +292,3 @@ pub fn write_theme(parent: &Path, theme_id: &str, theme_section: &str, files: &[
 pub fn fixture_themes() -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/themes")
 }
-
-/// A `Vm` struct property's field, from the live instance.
-pub fn vm_field(host: &Composed, property: &str, field: &str) -> slint_interpreter::Value {
-    match host.instance().get_global_property("Vm", property).unwrap() {
-        slint_interpreter::Value::Struct(s) => s.get_field(field).cloned().unwrap_or_default(),
-        other => panic!("Vm.{property} is {other:?}"),
-    }
-}
