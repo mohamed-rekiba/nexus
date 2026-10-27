@@ -1,640 +1,784 @@
 # The default theme
 
-This page describes the default theme as it is today: its screens, what each shows, how the
-keys act, and its options. The theme is in `plugins/themes/default/theme/`. It follows the
-PlayStation 5 home screen look, and every other theme falls back to it. How themes work, and
-the contract between a theme and the host, are in [themes.md](../themes.md). The desktop side
-(the pad's focus rule, the PS button, full screen) is in [desktop.md](desktop.md). Downloads and
-installs are in [archives-and-pc-games.md](archives-and-pc-games.md).
-
-## Files
-
-| Path | What it holds |
-|---|---|
-| `theme.toml` | The manifest: screens, input, breakpoints, fonts, images, sounds, tokens, options |
-| `commands.slint` | What the player asks of the core (`Commands`): one function each, over `Host.command` |
-| `shell.slint` | The window, the screens, the overlays, the key handler and the key hints |
-| `screens/*.slint` | `home`, `catalog`, `game-detail`, `downloads`, `settings`, `emulators`, `themes`, `plugin`, `game-settings`, `running` |
-| `components/nav.slint` | The keys on Home, the Library and the Catalog (`Nav`) |
-| `components/look.slint` | Shared sizes, colours and words (`Look`) |
-| `components/*.slint` | Top bar, library view, cards, notices, boot screen, game menu, prompts, trailer player, settings rows |
-| `fonts/` | Inter (Regular, Medium, SemiBold, Bold) and Tajawal (Regular, Bold), with their OFL licences |
-| `sounds/` | `move`, `select`, `back`, `error`, `start` |
-| `images/logo.png` | The Nexus emblem, the `logo` asset |
-
-The window is titled "Nexus". Its preferred size is 1280 × 720, and it is at least 640 × 360.
-
-## Screens
-
-The screens are `Vm.screen` values: `home`, `game-detail` (the Game Hub), `catalog`,
-`downloads`, `settings`, `emulators`, `themes`, `plugin`, `game-settings` and `running`. Home
-stays in the tree under every other screen.
-
-### Boot screen and Welcome
-
-The boot screen (`components/boot.slint`, label `boot`) covers the start until the library is
-in and Home's art is loaded: it shows while `!(Vm.boot.ready && Vm.art-ready)`. The UI host sets
-`Vm.art-ready` once every image the screen wants is loaded or failed, or 5 s after the core is
-ready, whichever comes first. It never goes back to false. The status reads "Loading...", then
-"All set · N installed games found". The boot screen fades out over 600 ms.
-
-On the first run it is the Welcome screen (label `welcome`): "Welcome", "Setting up Nexus", a
-checklist, a bar with a percentage, and a Start pill (`welcome-start`). The checklist steps
-(`welcome-step`) are:
-
-| Step | Detail |
-|---|---|
-| "Game folders" | "Looking…", then "N games" |
-| "<Emulator> emulator" | "Your own build", "Installs on first play", "Update available" or "Latest build" |
-| "Official artwork & details" | "done/total", then "Done" |
-| "Covers & Home screen" | "Loading…", then "Ready" |
-
-The pill reads "Setting up…" until everything is ready, then "Start". Enter, Cross or a click
-is Start once ready. Every other key is ignored. Start calls `Commands.finish-welcome` (the
-command `Pref` `["welcomed", true]`), and the Welcome never shows again.
-
-### Home
-
-Home (`screens/home.slint`) has a top bar, a row of tiles, and the selected game's hero over its
-background art.
-
-- **Row.** Every game, the selected tile larger (172 px against 112 px at 1080p), then a Library
-  tile. The sub line under the selected tile (`default-sub`) reads "Playing now", "Last played
-  today", "Last played yesterday", "Last played 3 days ago" or "Not played yet".
-- **Hero.** A kicker ("PLAYED <time>", or "● PLAYING · <elapsed>" in green), the logo or title,
-  chips (the player's result as "<result> · your result", the plugin's badges, the rating, two
-  genres, the size, the release date), and one line about the game (`default-description`), cut
-  after a word at 75 characters with "…".
-- **Buttons.** "Play" (when the plugin can launch the game), "Game Hub", "Store" and "Options"
-  (`game-options`, the ⋯ button). While the game runs: "Resume" (`default-resume`) and "Stop"
-  (`default-stop`, red). When the emulator isn't installed, a line after the buttons says "Play
-  installs <emulator> first", and Play opens the install prompt.
-- **Library tile.** The hero says "Library", "N games" and "Every game, in a grid, by system.".
-  With no games: "No games yet" and "Add a games folder in Settings, or install an emulator.".
-- **Task pill** (`task`), bottom corner, Home only: work going on, such as fetching art.
-
-### Top bar
-
-From the near side: the tabs "Home" and "Library" (`default-system`; Library shows the game
-count). On the far side: a pill for the running game ("Resume", "Stop"), a pill for an active
-emulator download, round buttons "Search" (the Catalog), "Downloads", "Emulators", "Themes" and
-"Settings", then the clock (`clock`), as "9:38 PM".
-
-### Library and Catalog
-
-The Library is Home's second tab. The Catalog is its own screen. Both are the same component
-(`components/library-view.slint`), on `Vm.home.library` and `Vm.catalog`. The core searches,
-filters, sorts and pages them.
-
-- **Bar.** A search box ("Search games"), Sort (`library-sort`), and the card size: "Comfortable"
-  (or "Roomy" when the view is under 1000 px wide) and "Compact" (`density`). In the Catalog the
-  catalog plugin's first button follows, such as Refresh, with its last result beside it.
-- **Keys.** Up from the grid's first row goes to the genres, then the systems, then the bar;
-  Left and Right move along a row, Enter chooses, Escape goes back. The focused chip or button
-  has the cards' white ring; a chip that is on is white. While the keys are
-  on these rows the hint pill says so: "Move", "Choose", "Rows", "Back".
-- **Systems.** "All", each platform, then "In-game" when a game reaches gameplay (by the
-  player's own result first, then the community's), and in the Catalog "Installed", and
-  "Hidden" once a game is hidden: it shows only the hidden games. The Game Catalog's "Show the
-  Hidden filter" setting turns it off. Labels `filter:<label>`.
-- **The eye** (`card-hide`, valued "Hide <title>" or "Show <title>"). On a Catalog card's cover,
-  top left: on the focused or pointed card, and always on a hidden one, crossed out. It hides
-  the game from the Catalog, or shows it again (`Library` `Hide`). The Game Hub of a Catalog game
-  has the same as a "Hide" or "Show" button (`hub-hide`), and its menu has "Hide from the
-  Catalog" or "Show in the Catalog", the pad's way.
-- **The card's button**, on the focused or pointed card, above its badges: the game's main
-  action (`GameCard.can.primary`), the same on every card. "Play" (`card-play`, valued "Play
-  <title>") for an installed game, which starts it; else getting it (`card-get`): "Download",
-  which opens the Game Hub with the keys on its first release, or "Install in Steam", which asks
-  Steam at once. Uninstall is never the card's button: it is in the game's menu.
-- **Genres.** "GENRE", "All genres", then each genre. The row scrolls sideways; a fading edge
-  means more chips past it (`genres-more-start`, `genres-more-end`).
-- **Count** (`default-count`). The Library: "N games". The Catalog: "2 games · 3 releases", or
-  "1 of 2 games · 3 releases" while a search or filter hides some. A release is one download
-  (a version, a region, an update), so a game can have several. Hidden games count in neither. Under it, "List updated Oct
-  19, 2026" (`catalog-updated`).
-- **Grid.** Cards (`default-game`) with the cover, a console badge (`card-console`), the size
-  (`card-size`), and in the Catalog the release count (`card-releases`, "2 releases") and
-  "Availability: Good" (`card-availability`: Good in green, Low in amber, None and Unknown in
-  grey). A card whose every release can't run on this computer has the badge "Can't run here".
-- **Empty grid** (`grid-empty`): "Loading catalog…" while the catalogs haven't answered, "No game
-  matches "q"", "No catalog lists any game yet", or "No games here".
-
-Sorts:
-
-| View | Sorts |
-|---|---|
-| Library | "Title", "Recently played", "Size (largest first)", "Top rated", "Newest", "Runs best" |
-| Catalog | "Recently added", "Title", "Size (largest first)", "Size (smallest first)", "Top rated", "Newest", "Runs best" |
-
-The sort list opens under Sort ("SORT BY", options `sort-option`, a tick on `sort-current`).
-
-The search runs 300 ms after the last key in the box. A letter or digit typed in the grid starts
-a search with it at once. A grid asks for the next page (`LibraryMore`,
-`CatalogMore`) when it scrolls within two screens of the end, or the selection reaches
-the last two rows. Only the rows on screen and a screen around them build their cards; the
-others keep an empty place (`default-game`), so a long grid scrolls as fast as a short one.
-A thin bar under the header (`grid-progress`, valued "35%") shows how far down the grid the
-screen goes, against every game the search and filters leave, not only the loaded pages; only
-for a grid longer than the screen.
-Covers load for the cards on screen and one screen around them. Each grid
-keeps how far it is scrolled (`Nav.catalog-scroll`, `Nav.library-scroll`): back from a game's
-details, the grid is where it was, not at the top.
-
-**When no catalog is available** (`Vm.catalog-available` is false, for example with the Game
-Catalog plugin turned off), there is no Catalog: the top bar has no "Search" button, the keys
-step over its place, R1 from Home goes to Downloads, and L1 from Downloads goes Home. The core
-refuses to open the Catalog. "/" still opens the Library's search.
-
-### Game Hub
-
-The Game Hub (`screens/game-detail.slint`) is one game's page. Its cover (`hub-cover`) grows
-from the card or tile it opened from, or fades in when that place isn't known (the value is
-`grows` or `fades`).
-
-- Kicker ("PS5 · <developer> · <year> · <region>"), logo or title (`hub-title`), chips.
-- Buttons: "Play" or "Resume", "Stop" (`hub-stop`), the emulator's own actions, "Store"
-  (`hub-store`, opens the store page in the browser), "Trailer" (`hub-trailer`) and "Options"
-  (`game-options`). The launch hint goes under them.
-- **Releases** (for a game a catalog offers): "RELEASES · RUNS WITH <EMULATOR>", one row per
-  release (`release-<id>`): a New tag for one from the last 14 days, then version, region and,
-  for a PC release, its system, on one line that ends in "…" when it is too long; its place by
-  version, size and when the catalog got it (`release-version`); "Availability:"
-  (`release-availability`) and "5 seeders · 1 leecher" (`release-peers`); why it can't run here
-  (`release-not-here`) or a warning (`release-warning`), after an alert mark in the warning
-  colour. Its button (`release-download`) has a column of its own at the far end, the same width
-  on every row, and reads "Download", "Downloading N%", "Downloaded", "Paused", "Failed" or "In
-  Downloads".
-- **Fact cards**, three to a row: "COMPATIBILITY · <TESTED>" or "YOUR RESULT"; "ON THIS PC · <WHY>"
-  (`on-this-pc`, green good, warning colour slow, red no); "PLAYED"; "SIZE"; "PROTONDB"
-  (`protondb`); "AVAILABILITY" (`hub-availability`). A card the game doesn't have is left out.
-- "+ Technical details" (`technical-details`): rows with the fact's name (`fact-name:<id>`) and
-  value (`fact:<id>`), then the shader cache with "Clear", "SCREENSHOTS" (`screenshot`), the
-  plugin's sections, and "ABOUT" (`hub-about`).
-- A screenshot opens full screen. Left and Right move; Escape, Backspace or Enter close it.
-
-### The game's menu
-
-Options on a pad, the Menu key, or the "Options" button opens the menu for the game shown on
-Home or in the Game Hub (`components/game-menu.slint`). Items, in order, each left out when the
-game doesn't have it:
-
-1. "Game Hub" (not in the Game Hub)
-2. the emulator's own actions
-3. "Game settings"
-4. "Open game folder"
-5. "View emulator log"
-6. "Watch trailer"
-7. "Rate how it runs"
-8. "Compatibility list"
-9. "ProtonDB page"
-10. "Settings"
-11. "Uninstall", in red, when `Vm.detail.can.uninstall` names a game
-
-When Nexus is the whole screen (the Nexus session, Nexus OS), the menu leaves out "Open game
-folder", "View emulator log", "Compatibility list" and "ProtonDB page": no file manager or
-browser is on screen to open them in.
-
-Rows are labelled `game-menu`. The focus opens on the first item off the Game Hub, and on the
-second in it. "Uninstall" asks in the same card: "Uninstall <title>?" (`uninstall-title`), "Its
-folder is deleted from your game folder. A download it came from stays in Downloads.", then
-"Uninstall" and "Not now" (`uninstall-choice`), with the focus on "Not now". The rules are in
-[archives-and-pc-games.md](archives-and-pc-games.md#uninstalling-a-game).
-
-"Rate how it runs" opens the result prompt for that game. Open game folder and View emulator
-log name the game, never a path: the host resolves the folder through the plugin's grants.
-
-### The power menu
-
-Holding the PS, Xbox or Logitech button (`Vm.power-menu`) or Ctrl+P opens it over any screen
-(`components/power-menu.slint`); a tap still goes Home. While a game runs, the hold closes the
-game at once instead, and the menu doesn't open. Items, each `power-menu`:
-
-1. "Log out", when Nexus is the whole screen and not Nexus OS (`Host.log-out`)
-2. "Restart Nexus" when Nexus is the whole screen, else "Quit Nexus" (`Host.quit`)
-3. "Restart" and 4. "Shut down", when Nexus is the whole screen and the system can
-   (`System` `Restart`, `System` `ShutDown`)
-
-Restart and Shut down ask again: the first press turns the row red and says "Press again to
-restart" or "to shut down"; moving away cancels it. Up and down move, Enter picks, Escape closes.
-
-### Game settings
-
-"Game settings" opens a side sheet (`screens/game-settings.slint`) with the game's title
-(`game-settings-title`), "THIS GAME", and the game's own settings from its emulator
-(`setting:<key>`). A choice starts with "As the emulator", which leaves it to the emulator's
-setting.
-
-### Downloads
-
-Downloads (`screens/downloads.slint`) lists the catalogs' downloads, then the emulator
-downloads.
-
-- **Summary** (`downloads-summary`): "Protected by your VPN · <interface>" or "Waiting for your
-  VPN" (with the VPN rule on), then "X downloading · Y sharing · Z in all".
-- **Note** (`downloads-note`): transfers go on while Nexus is open, also minimized, and stop when
-  it closes; unfinished ones come back paused; and how finished ones share.
-- **Torrent cards** (`torrent`): title, version and region; the state (`torrent-state`); a bar;
-  one line with sizes, speed, peers and the time left ("12 min left"); while it waits for the
-  player, its files (`torrent-file-summary`, `torrent-files`, up to 100, "first 100 shown"); the
-  folder; and the error.
-- **Footer** (`downloads-footer`): "Cancel never deletes your downloaded files, and Remove asks
-  first whether they go too. Remove unpacked files deletes only the copies Nexus unpacked."
-- **Empty**: "Nothing downloading yet".
-
-Torrent states as the card reads them: "Reading its files", "Ready: look at the files, then
-download", "Checking", "Downloading", "Paused", "Paused · waiting for your VPN", "Complete",
-"Complete · sharing", "Complete · checking", "Unpacking", "Unpacking failed", "Installing",
-"Installed", "Failed", "Cancelled · the files stay".
-
-Buttons (`torrent-action:<action>`), as the core offers them:
-
-| Action | Label |
-|---|---|
-| `start` | "Download", "Resume" or "Retry" |
-| `pause` | "Pause" |
-| `cancel` | "Cancel", or "Stop unpacking" while unpacking |
-| `remove` | "Remove" (opens the remove sheet) |
-| `stop-seeding` | "Stop sharing" |
-| `install` | "Install", "Retry install" or "Unpack and install" (opens the install sheet) |
-| `remove-unpacked` | "Remove unpacked files" |
-| `cancel-install` | "Cancel install" |
-| `play` | "Play" |
-
-"Open folder" (`torrent-open-folder`) comes last, once the download has started. While a
-download reads its files or installs, a first button reads "Resolving…" or "Installing…"
-(`torrent-placeholder`), does nothing, and the keys skip it.
-
-Emulator downloads say their state in words (`download-state`): "Waiting", "Downloading",
-"Checking", "Unpacking", "Paused", "Installing", "Done", "Failed" or "Cancelled". Their buttons
-are "Resume", "Pause" and "Cancel".
-
-### Settings
-
-Settings (`screens/settings.slint`) is a side sheet: "Settings", "Changes are saved
-automatically". Sections, in order:
-
-| Section | Rows |
-|---|---|
-| GAMES | One row per folder (`folder:<name>`, with `~` for the home folder), "Rescan game folders" (`rescan`) |
-| UPDATES | "Update automatically" (`auto-update`), "Nexus updates" (`launcher-update`: check, download, restart) |
-| LAUNCHER | "Full screen", "Size of everything" (80% to 140%), "Back to the launcher", "Interface sounds", "Start at login" (installed builds only), "Screen" (two monitors or more), "Quit Nexus" (`quit`, red, hint "Ctrl+Q"), or "Restart Nexus" (`restart-nexus`) when Nexus is the whole screen, where the session starts it again |
-| DOWNLOADS | "Download only through a VPN" (`vpn-only`), one row per VPN (`vpn`) or "Your VPN" (`vpn-none`), "Add a VPN" (`vpn-import`, Linux with NetworkManager), "Keep sharing finished downloads" (`seed-downloads`) |
-| THIS PC | "Checking this PC…", then "Processor", "Memory", one "Graphics" row per card, and one row per emulator ("KytyPS5 games: May run slowly · Integrated GPU") |
-| SYSTEM | When Nexus is the whole screen: "Internet", "Sound", "Bluetooth", Nexus OS's updates, "Install Nexus OS on this PC" (its USB stick), "Log out" (`system-log-out`, the Nexus session on a desktop only: Nexus OS's session would start again), "Restart" (`system-restart`) and "Shut down" (`system-shut-down`). Log out, Restart and Shut down ask again: the first press arms them, the second acts. |
-| ABOUT | The logo, "Nexus", "N plugins · M emulators", "Games from every emulator, in one place" |
-
-"Size of everything" moves a tenth at a time. Left and Right stop at the ends; Enter goes round.
-When `NEXUS_SCALE` sets the size for the run, its hint says "NEXUS_SCALE sets it for this run".
-A refused "Start at login" keeps its toggle and shows the reason in red.
-
-### Emulators, Themes and plugin pages
-
-Emulators and Themes (`components/plugin-list.slint`) list the plugins under "AVAILABLE"
-(`plugin:<id>`). An emulator's hint is its build, "Installed · shadPS4 v.0.20.0", or "Not
-installed", or "No install needed" (PC). Enter opens the plugin's page.
-
-A plugin's page (`screens/plugin.slint`):
-
-- a theme: "Use this theme" (`theme-current`), then "OPTIONS" (`option:<key>`) while it is the
-  one in use;
-- an emulator or service: "Turned on" (`plugin-enabled`), its build ("Install", "Update to x",
-  "x · Up to date") and "Uninstall <version>", its actions, "SETTINGS", "FOLDERS", and its
-  blocks (`plugin-blocks`).
-
-### Running: the launch splash
-
-While a game starts (`Vm.running.state` is `starting`), the splash (`screens/running.slint`)
-shows the game's art, "Starting with <emulator>…" (`launch-title`), and what the game gets
-(`launch-input`): "Controller: DualSense Wireless Controller", or "Keyboard: the keys are on
-the <page> page". Without a controller, when the emulator lists its keys, they show under
-"Keyboard" in two columns (`launch-key`). The keys are then the game's: the shell takes every key
-but Escape and Ctrl+Q, shows no hints, and does nothing with them.
-
-### Result prompt
-
-When a game closes, once for each emulator build, "How far did <game> get?" (`result-prompt`)
-offers "In game: reaches gameplay", "Main menu, but not gameplay", "Intro logos, then stops",
-"Doesn't start" and "Not now" (`result:<level>`). Escape, or a click outside, is "Not now".
-
-### Trailer player
-
-Square, T, "Trailer" or "Watch trailer" plays the trailer full screen in the window. Enter (or
-Cross) pauses or plays, Left and Right go 10 s back or on, Escape (or Circle) closes. The game's
-name is at the top (`trailer-title`), the time at the bottom (`trailer-time`, "m:ss / m:ss").
-The controls and hints fade about 3 s after the last key while it plays; a paused trailer keeps
-them, with a large play sign (`trailer-paused`). Without libmpv (`Vm.can-play-trailers` false)
-the trailer opens in the browser.
-
-## Keys
-
-### Pad buttons
-
-The UI host turns each pad button into a key (`crates/nexus-ui-host/src/input.rs`), so the theme
-handles a keyboard and a pad the same way.
-
-| Pad | Key | What it does |
-|---|---|---|
-| D-pad, left stick | Arrows | Move |
-| Cross | Enter | Select, press |
-| Circle | Escape | Back, close |
-| Triangle | `/` | Search the Library, or the Catalog on its screen |
-| Square | Insert | Play the shown game's trailer |
-| Options | Menu | The game's menu |
-| L1 | Shift+Tab | The screen before |
-| R1 | Tab | The screen after |
-| L2, R2 | Page Up, Page Down | Page the grid, three rows at a time |
-| Create, Share or View | Delete | Close the newest notice |
-| PS, Xbox | (none) | A tap: Home; nothing while a game runs. Held: closes the running game, else the power menu |
-
-The pad acts only while the launcher's window has the focus and no game is in front. See
-[desktop.md](desktop.md#the-pad-acts-only-while-the-launchers-window-has-focus).
-
-### Keyboard
-
-| Key | What it does |
-|---|---|
-| Enter, Space (in sheets, lists, prompts, the trailer) | Select, press |
-| Escape, Backspace | Back, close |
-| Arrows | Move; Left and Right follow the reading direction |
-| Tab, Shift+Tab | The screen after, the screen before |
-| Menu | The game's menu |
-| `/` | Search |
-| T | The trailer, outside the Library and the Catalog (where T types) |
-| Ctrl+D | Downloads |
-| Ctrl+Q | Quit |
-| Ctrl+P | The power menu |
-| Page Up, Page Down | Page the grid |
-| Delete | Close the newest notice |
-| A letter or digit in the grid | Start a search with it |
-
-A held Enter doesn't repeat, so it can't play, download or install twice.
-
-### The order of the screens
-
-Tab and R1 go Home or Library → Catalog → Downloads → Emulators → Themes → Settings → Home.
-Shift+Tab and L1 go the other way from Home: Settings → Themes → Emulators → Downloads → Catalog
-→ Home. From any other screen (the Game Hub, a plugin page) both go Home. Without a catalog the
-Catalog is skipped. Neither works while a text row is open for typing.
-
-### Who takes a key
-
-The shell (`shell.slint`) offers each key in this order, and the first taker keeps it:
-
-1. the on-screen keyboard, while it is open;
-2. the power menu, while it is open, and Ctrl+P;
-3. the Welcome screen;
-4. Nexus OS's USB stick (`Setup`);
-5. an open panel of the machine's settings (`Sys`);
-6. the splash's game keys;
-7. Delete, while a notice shows;
-8. the trailer, the result prompt, the game's menu, the screenshot viewer, the sort list;
-9. Menu, for the game's menu;
-10. the emulator's install prompt;
-11. Ctrl+Q, Ctrl+D, `/`, Insert or T;
-12. Tab and Shift+Tab;
-13. the screen: `Nav` (Home, Library, Catalog), the sheet rows, the plugin list, the Game Hub,
-    Downloads;
-14. Escape or Backspace: back, with the `back` sound unless on Home.
-
-So Ctrl+D and Ctrl+Q do nothing while a menu, the viewer, the sort list, the trailer or the
-result prompt is open.
-
-### Zones on Home, the Library and the Catalog
-
-`Nav` (`components/nav.slint`) acts on one zone at a time.
-
-| Zone | Where | Left, Right | Up | Down | Enter |
-|---|---|---|---|---|---|
-| `tabs` | The top bar | Step over the tabs and buttons | | The bar (Library) or the row | Open the tab or screen |
-| `row` | Home's tiles | Step; after the last game, the Library tile | The tabs | The buttons | Open the Game Hub, or the Library from its tile |
-| `actions` | Home's buttons | Step | The row | | Press the button |
-| `bar` | Search, Sort, card sizes, catalog button | Step | The tabs (Library only) | The systems | Type, open the sorts, set the size, run the action |
-| `filters` | Systems | Step | The bar | The genres, or the grid | Apply |
-| `genres` | Genres | Step | The systems | The grid | Apply |
-| `grid` | Cards | Step | A row up; from the first, the genres or systems | A row down | Open the Game Hub |
-
-Escape from the Library's zones goes back to Home; in the Catalog it goes back. While the search
-box has the keys, Enter goes to the grid and Escape or Down goes back to the bar. While the sort
-list is open it takes every key: Up and Down move round it, Enter picks, Escape closes with no
-change.
-
-### Other screens
-
-- **Game Hub.** Left and Right move over the buttons. Down goes to the releases, then opens the
-  technical details, then the screenshots and the text below. Up goes back. Enter on a
-  screenshot opens it.
-- **Downloads** (`Dl`). Up and Down move between cards, Left and Right between a card's buttons,
-  with "Open folder" last. Enter presses the focused button, the same call a click makes; a click
-  also moves the focus there. When a card's buttons get fewer, the focus stays on its last one.
-  The list scrolls to keep the focused card in view.
-- **Sheets** (Settings, plugin pages, game settings). Up and Down move between rows, across
-  sections. Left and Right change a value. Enter changes or opens a row. A text row opens for
-  typing; Enter keeps the text, Escape drops it.
-- **Game menu.** Up and Down skip the items that aren't there. Escape, Backspace or Menu close
-  it. In the Uninstall question, any arrow moves between the two answers, and Escape or Menu is
-  "Not now".
-
-## Focus
-
-| Element | Focused look |
-|---|---|
-| Home tile, Library and Catalog card | A white 4 px ring with a blue glow; a card also grows to 1.05 |
-| Home tile | The selected one is larger |
-| Pill button | Turns white (red for danger), grows to 1.05, glows |
-| Button | A 3 px border: the accent on a white button, white on others |
-| Downloads card | A white 2 px border; its focused button has the ring |
-| Top bar tab | A white rounded outline; a round button turns white |
-| System or genre chip | A 3 px border, white, or the accent on the active chip |
-| Search box | A white border and a blue glow |
-| Settings row, release row | A 3 px white border (red for danger); a release row's button stays as it is |
-| Screenshot | A white border, grown to 1.04 |
-| Menu, sort and sheet answers | A white fill (red for danger) |
-
-The ring colour is `Look.ring` (white).
-
-## Key hints
-
-A pill 30 px from the bottom shows the keys that act now (each hint labelled `hint`). It sits
-in the far corner on screens and in the near corner over side sheets, mirrored right to left.
-It hides over the Library and Catalog views (unless a menu or sheet is open), over a playing
-trailer whose controls have faded, and over the splash's game keys.
-
-The hints draw the pad's signs: ✕ (blue), ○ (pink), △, □, ☰, "⮝  ⮟", "⮜  ⮞" and "R1". Each hint
-also carries a keyboard name ("Enter", "Esc", "Tab", "T", "Menu", "← →", "↑ ↓"), shown when
-`Vm.input-mode` isn't `gamepad`. The default theme starts in `gamepad` mode (the first of its
-`input` list), and only a pad press sets the mode, so the pad signs show.
-
-| Where | Hints |
-|---|---|
-| Home, top bar | "Select", "Next" |
-| Home | "Select", "Search" (R1; "Downloads" with no Catalog), "Trailer" (when there is one), "Options" (with a game) |
-| Game Hub | "Play", "View" (on a screenshot) or "Select"; "Back"; "Trailer"; "Options" |
-| Download sheet | "Look up metadata", "Not now" or "Change"; "Not now" |
-| Downloads | "Move", "Buttons", "Select", "Back" |
-| Install sheet | "Install", "Not now" or "Change"; "Not now" |
-| Remove sheet | "Choose", then "Remove", "Delete files" or "Not now"; "Not now" |
-| Install prompt | "Install and play" or "Not now"; "Not now" |
-| Game menu, sort list | "Pick", "Close" |
-| Trailer | "Pause" or "Play", "10 s", "Close" |
-| Screenshot viewer | "Move", "Close" |
-| Side sheets | "Change" (or "Open" in Emulators and Themes), "Back" |
-| Elsewhere | "Next", "Back" |
-
-The result prompt shows no hints of its own; the screen's hints stay.
-
-## Notices
-
-Notices (`components/notices.slint`, `Vm.notice-cards`) stack on the far side, oldest at the
-top. There are at most 3: the core drops the oldest when a fourth comes.
-
-| Kind | Sign | Colour | Used for |
-|---|---|---|---|
-| `error` | ! in a circle | red, `color-danger` #ff5a6a | A download that stopped, a failed install, update or launch, a game that crashed, an emulator this PC can't run, a problem the app reports |
-| `success` | a tick | green, `color-success` #3ddc97 | A finished download |
-| `info` | i in a circle | blue, `color-info` #7ab4ff | The rest, such as a missing desktop tool |
-
-A notice about a game shows the game's art in place of the sign. A notice with a subject has a
-link (`notice-open`): "Open Downloads", "Open the Catalog", "Open the Game Hub", "Open <plugin>"
-or "Open Settings", with " ›" (" ‹" right to left). The link opens it and closes the notice.
-
-Each card slides in, stays 4 s (10 s with a link), slides out, and the core closes it
-(`Notice` `Dismiss`). "Dismiss" starts the slide out at once. Delete, or Create on a pad,
-closes the newest card that isn't closing yet; the others keep their own time. A new error
-notice plays the `error` sound once.
-
-## Sheets and prompts
-
-Side sheets (Settings, Emulators, Themes, plugin pages, game settings) slide in from the far
-edge and back out. Each stays in the tree for the slide time after it closes (`Lingering`).
-Home dims under a sheet. Dialogs (the download, install and remove sheets, the prompts) rise
-over a dark wash.
-
-### Download sheet
-
-The Game Hub's Download button opens "Set up a download" (`download-title`): the game, "Version
-v · region · size · runs with <emulator>", any warning (it can't run here, a retail PS5 package,
-this PC can't run it, not enough room), the "Download folder" row (`download-folder`), what the
-player agrees to (`download-consent`, including the 128 KiB/s upload cap), who sees their address
-(`download-privacy`, naming the VPN's interface with the VPN rule on), and the steps
-(`download-steps`). Buttons: "Look up metadata" (`download-agree`, off without a packages folder)
-and "Not now" (`download-not-now`); the focus starts on Look up metadata. Up from the buttons
-reaches the folder row; Enter opens it for typing. When the core refuses, the sheet stays and
-says why in red (`download-error`).
-
-### Install sheet
-
-Install on a finished download opens "Install game" (`install-title`): the title, version and
-region, "Nexus copies or unpacks this finished download into your game folder. …", the "Game
-folder" row (`install-folder`), what the emulator installs from (`install-note`), and "Install"
-(`install-agree`) and "Not now" (`install-not-now`). The focus starts on Install. Without a game
-folder: "This emulator has no game folder: add one in Settings." The sheet closes once the
-install or its unpacking runs; a refusal shows in red (`install-error`).
-
-### Remove sheet
-
-Remove opens "Remove <title>?" (`remove-title`), the version and region, then three answers in
-a column, with the focus on the first:
-
-| Answer | Line under it |
-|---|---|
-| "Remove from Downloads" (`remove-keep`) | "The downloaded files stay in their folder." |
-| "Delete files too" (`remove-delete`, red) | "Deletes the folder and the copy Nexus unpacked. A game you installed stays." |
-| "Not now" (`remove-not-now`) | |
-
-The folder path is under the answers. Escape or a click beside the sheet is Not now.
-
-### Install prompt
-
-Play for a game whose emulator isn't installed opens "Install <emulator>?" (`install-prompt`):
-"To play <game>, <emulator> <version> downloads first (<size>). It checks the download, then the
-game starts." Buttons: "Install and play", with the focus, and "Not now".
-
-### Button order
-
-In the download sheet, the install sheet and the install prompt, the button that goes on comes
-first from the reading side, with "Not now" beside it: on the left, and on the right from right
-to left. Left and Right go to the button on that side.
+This page says what the built-in `default` theme does, screen by screen. It is for theme
+authors, who need to know what a child theme starts from, and for contributors who change the
+theme.
+
+Terms follow [GLOSSARY.md](../../GLOSSARY.md). For the contract between a theme and the host,
+read [../themes.md](../themes.md). For the layers around it, read
+[../architecture.md](../architecture.md). For plugins in general, read
+[../plugins.md](../plugins.md). For the check commands, read
+[../development.md](../development.md).
+
+Text in quotes is the exact text on screen, copied from the `.slint` files.
+
+## What the theme is
+
+The default theme is a theme plugin compiled into the app (`plugins/themes/default/src/lib.rs`,
+`DefaultTheme`). It is the default, and the app falls back to it when another theme fails to
+load. The code says every other theme extends it, directly or through a parent.
+
+| Path | What is in it |
+| --- | --- |
+| `plugins/themes/default/theme/theme.toml` | The manifest: id `default`, kind `theme`, screens, components, input, tokens, options, assets |
+| `plugins/themes/default/theme/shell.slint` | `Shell`: the window, the key router, the layers of screens, the hints |
+| `plugins/themes/default/theme/commands.slint` | `Commands`: one function for each thing the player asks of the core |
+| `plugins/themes/default/theme/screens/` | One file for each screen id in the manifest |
+| `plugins/themes/default/theme/components/` | The parts: top bar, library view, menus, prompts, sheets, keyboard, system panel |
+| `plugins/themes/default/theme/fonts/`, `images/`, `sounds/` | The assets the manifest names |
+
+`shell.slint` imports `types.slint` and `tokens.slint`. Those two files are not in the theme's
+folder. The host supplies them from `crates/nexus-ui-api/contract/`.
+
+### The manifest
+
+`theme.toml` declares these screens, as `ScreenId` in `crates/nexus-ui-api/src/vm.rs` names them:
+`home`, `game-detail`, `catalog`, `downloads`, `settings`, `emulators`, `themes`, `plugin`,
+`running` and `game-settings`.
+
+It declares these components, as `ComponentId` in `crates/nexus-ui-api/src/contract.rs` names
+them: `card`, `button`, `list-item`, `progress-bar`, `dialog`, `slot-badges`, `slot-actions` and
+`slot-sections`.
+
+Other settings in the manifest:
+
+- `input = ["gamepad", "pointer"]` and `navigation = "focus"`.
+- Two breakpoints: `compact` (up to a width of 900) and `regular`. No `.slint` file reads them.
+  The theme scales with the window height instead (see Sizes).
+- Fonts: Inter (regular, medium, semibold, bold) and Tajawal (regular, bold).
+- One image, `logo`, and five sounds.
+- `ui_api = "^0.2.0"` and `host_api = "^0.2"`.
+
+### Tokens
+
+`[theme.tokens]` holds the values a child theme can override.
+
+| Group | Names |
+| --- | --- |
+| Color | `color-bg`, `color-surface`, `color-surface-raised`, `color-text`, `color-text-muted`, `color-accent`, `color-on-accent`, `color-focus`, `color-success`, `color-warning`, `color-danger`, `color-info`, `color-overlay` |
+| Font | `font-family` (`Inter`), `font-size-s`, `-m`, `-l`, `-xl`, `font-weight-regular`, `font-weight-bold` |
+| Space and shape | `space-xs` to `space-xl`, `radius-s` to `radius-l`, `shadow-color`, `shadow-blur-1`, `shadow-blur-2` |
+| Motion | `motion-fast`, `motion-normal`, `motion-slow` |
+| Direction | `layout-direction` (`ltr`) |
+
+Screens use many colors that have no token. Those are in `components/look.slint` (`Look`).
 
 ## Options
 
-`theme.toml` has two options, on the theme's page under OPTIONS:
+The theme has two options. The player sets them on the page of the theme in Themes. They show
+only while the default theme is in use. Each choice sets tokens.
 
-| Option | Choices | Effect |
-|---|---|---|
-| "Layout direction" (`direction`) | "Left to right", "Right to left" | Sets the `layout-direction` token. `Look.rtl` mirrors the layout, the button order, the hints and the notices, and Left and Right follow it |
-| "Animations" (`motion`) | "On", "Off" | Sets `motion-fast`, `motion-normal` and `motion-slow` to 160, 260 and 420 ms, or to 0. Off turns every transition into a cut and stops the loading shimmer |
+| Option | Label | Choices | Effect |
+| --- | --- | --- | --- |
+| `direction` | "Layout direction" | `ltr`, `rtl` | Sets `layout-direction`. The whole layout mirrors. |
+| `motion` | "Animations" | `on`, `off` | `off` sets the three motion tokens to 0. |
+
+The sheet shows the choices as "Left to right", "Right to left", "On" and "Off"
+(`Look.choice`). The page sends `SetThemeOption` with the key and the value.
+
+Every animation time in the `.slint` files goes through `Look.timed(...)`, so "Animations: Off"
+cuts all of them. A test checks it (see Tests).
 
 ## Sizes
 
-Everything is laid out on a 1920 × 1080 canvas and scaled to the window (`Look`,
-`components/look.slint`):
+The theme lays out everything on a 1920 by 1080 canvas and scales it. `Look.k` is the window
+height divided by 1080, never below a window height of 360, times `Vm.viewport.size`. A size in
+a file is `N * Look.px`. `Look.tpx` is the same with a floor of 0.75, for text that must stay
+readable (Settings).
 
-- `Look.k = max(window height, 360 px) / 1080 px × size`. The shell sets the window height from
-  the first frame, so the first frame is already the right size.
-- `size` is `Vm.viewport.size`: "Size of everything", 0.8 to 1.4, or `NEXUS_SCALE` for a run. A
-  change shows at once.
-- `Look.px` is `1px × k`. `Look.tpx`, for text that must stay readable (Settings), never goes
-  below 0.75.
+The window asks for a width of 1280 and a height of 720 at the least, and 640 by 360 as the
+smallest.
 
-`theme.toml` defines two breakpoints, `compact` (up to 900 px wide) and `regular`. The UI host
-binds `Vm.viewport.breakpoint`, but the default theme's layout doesn't use it.
+The player changes `Vm.viewport.size` with "Size of everything" in Settings, or with the
+`NEXUS_SCALE` environment variable for one run. The row says "NEXUS_SCALE sets it for this run"
+while the variable differs from the setting.
 
-## Fonts
+## The shell
 
-The theme ships Inter in four weights (Regular, Medium, SemiBold, Bold) and Tajawal (Regular,
-Bold), each with its OFL licence. The `font-family` token is "Inter". Tajawal is loaded with the
-theme, but no element names it: it can only serve as a fallback for glyphs Inter lacks, such as
-Arabic. Right to left doesn't change the font.
+`Shell` in `shell.slint` is the window. It holds the layers, from the back to the front:
 
-## Sounds
+1. `Backdrop`: the art of the shown game behind every screen. It uses the game's background
+   once its details are loaded, and its cover until then. Home and the Game Hub draw it
+   without a wash. The Catalog and Downloads dim it. The sheets and the running card draw
+   their own wash.
+2. `HomeScreen`. It stays under the other screens so a return does not rebuild it. Under a side
+   sheet it steps back and dims.
+3. The screen for `Vm.screen`: Game Hub, Catalog or Downloads, or a sheet (Settings, Emulators,
+   Themes, a plugin, game settings). A sheet slides in from the edge and slides out before it
+   goes (`Lingering`).
+4. The top bar, over Home, Running, the Catalog and Downloads.
+5. The running card, the install prompt, the screenshot viewer, the trailer player, the game
+   menu, the result prompt, the Nexus OS installer and the power menu.
+6. The key hints, the notices, the task pill and the on-screen keyboard.
+7. The boot screen, over everything, from the first frame.
 
-The theme's sounds play through `Host.play-sound` (`crates/nexus-app/src/audio.rs`). "Interface
-sounds" in Settings turns them off.
+When a game starts (`Vm.has-running` turns true) the shell plays the sound `start`, selects the
+running game, goes to Home and puts the keys on the Resume button.
 
-| Sound | When |
-|---|---|
-| `move` | A step to the next item; at most once in 40 ms |
-| `select` | Enter that opens a game, the Library, a screen, the game's menu, a sheet, a filter or a sort; a menu pick; Resume |
-| `back` | Escape or Back that leaves a screen, the Library, a menu, the viewer or the trailer; Stop; Not now |
-| `start` | A game starts, or the Welcome closes |
-| `error` | A new error notice |
+### Who takes a key
 
-`docs/reference/make-sounds.py` makes `select`, `back`, `error` and `start`: synthesized tones,
-mono, 16 bit, 22050 Hz.
+`keys` in `Shell` receives every key. It tries these in order and stops at the first that takes
+the key:
 
-## Motion
+1. The on-screen keyboard, while it is open. `Vm.pad-key` tells the shell the key came from a
+   pad.
+2. The power menu, if open. `Ctrl+P` opens it, and so does `Vm.power-menu` going up (the PS or
+   Xbox button held with no game running).
+3. The Welcome screen: `Enter` is Start once the library and the art are in.
+4. The Nexus OS installer, if shown.
+5. A panel of the machine's settings, if open.
+6. The launch splash, when it lists the game's keys. It takes every key except Escape and
+   `Ctrl+Q`.
+7. `Delete` closes the newest notice.
+8. The trailer, the result prompt, the game menu, the screenshot viewer, the list of sorts, the
+   install prompt, each when open.
+9. `Menu` opens the game menu for the shown game.
+10. `Ctrl+Q` quits. `Ctrl+D` opens Downloads.
+11. `/` searches: the Catalog on its screen, else the Library.
+12. `Insert` (Square on a pad) or `T` plays the trailer of the shown game. `T` does not do
+    this in the Library or the Catalog, where a typed letter searches.
+13. `Backtab` (L1) goes to the screen before. `Tab` (R1) goes to the next screen.
+14. The keys of the screen that has them: Home and Catalog (`Nav`), Settings and plugin pages
+    (`Prefs`), the lists of plugins, the Game Hub (`Hub`), Downloads (`Dl`).
+15. `Escape` and `Backspace` send `Back`. A back sound plays unless the screen is Home.
 
-- A focused card grows to 1.05; Library cards come in as a wave on the first rows.
-- The hero's parts (kicker, logo, chips, line, buttons) come in one beat (55 ms) after another.
-  A new hero waits up to 450 ms for the game's details.
-- Side sheets slide from the edge over `motion-slow`; dialogs rise and fade.
-- The Game Hub's cover grows from its card into place.
-- Notices slide in from the far side.
+A held `Enter` does not repeat. It would play, download or install again.
 
-Durations are the `motion-*` tokens. Easings are written in the `.slint` files.
+The order of the screens for `Tab` is: Home, Search (the Catalog, only when
+`Vm.catalog-available`), Downloads, Emulators, Themes, Settings, then Home again. `Backtab`
+goes the other way.
 
-## Accessible labels: the test seam
+### The pad
 
-Every element a test or a screen reader needs has an `accessible-label`, and some an
-`accessible-value`. The labels quoted on this page are those. The theme tests find elements by
-label through `ThemeDriver` (`crates/nexus-testkit/src/driver.rs`) and check what the player
-sees: a value, a count, whether a screen shows. Only a few named layout tests check layout
-numbers.
+The host turns pad buttons into keys. The theme only sees keys. `Vm.pad-key` is true while the
+shell handles a key that came from the pad, and `Vm.input-mode` is `gamepad` after the last
+input came from it.
 
-The tests run on the composed core and theme host on Slint's testing backend:
+| Pad button | Key the theme gets | Meaning in the theme |
+| --- | --- | --- |
+| D-pad, left stick | Arrow keys | Move |
+| Cross (South) | `Enter` | Select |
+| Circle (East) | `Escape` | Back |
+| Triangle (North) | `/` | Search |
+| Square (West) | `Insert` | Trailer. Delete in the on-screen keyboard |
+| Options (Start) | `Menu` | Options: the game's menu |
+| Create (Select) | `Delete` | Close the newest notice |
+| L1 | `Backtab` | The screen before |
+| R1 | `Tab` | The next screen |
+| L2, R2 | Page up, Page down | A page in a grid |
+| PS button, tap | Not a key | Go to Home, host action |
+| PS button, hold | Not a key | Close the running game, else open the power menu |
 
-- `tests/tests/seams/default_theme/`: one module per screen: Home, the Library, the Catalog, the
-  Game Hub and its releases, Downloads, installs, play, the trailer, notices, Settings, the
-  emulator pages, the keyboards and the theme's files;
-- `tests/tests/seams/system_theme.rs`: the machine's settings, when Nexus is the whole screen;
-- `tests/tests/seams/gamepad.rs`: the pad and its focus rule;
-- `tests/tests/seams/sounds.rs`: which sounds play;
-- `tests/tests/seams/screenshots.rs`: PNGs of the main screens on the fake library, for a person to
-  look at.
+For how the host reads the buttons, see [desktop.md](desktop.md).
 
-## Limits
+### Key hints
 
-- Keyboard players see the pad's signs in the hints, since the theme stays in `gamepad` input
-  mode.
-- The monitor choice matches monitors by name, so two of the same model look alike.
+`Hints` draws a pill at the bottom corner that lists the keys that work now. A pad shows its
+buttons and a keyboard shows its keys, by `Vm.input-mode`. The pill sits at the bottom corner on the side away from the
+reading start, and moves to the other corner when a sheet is open. It hides over the Library's and Catalog's
+cards (it would cover the titles), and over a playing trailer while its controls are hidden,
+and over the launch splash's keys. Its text changes with the state. Examples:
+
+- Library or Catalog header row: "Move", "Choose", "Rows", "Back".
+- Home with a game: "Select", "Next" or "Search" or "Downloads", and "Options". With a trailer:
+  also "Trailer".
+- Game Hub: "Play" or "Select" or "View", "Back", "Options", and "Trailer" if the game has one.
+- Download remove sheet: "Choose" and "Remove" or "Delete files" or "Not now".
+- Trailer: "Pause" or "Play", "10 s", "Close".
+- On-screen keyboard: "Type", "Delete", "Space", "Done", "Close".
+
+### The task pill
+
+While `Vm.task` is not empty, on Home (not under a sheet), a pill at the bottom corner shows
+the text with a turning ring.
+
+### Sounds
+
+Five sounds ship in `sounds/`: `move`, `select`, `back`, `error` and `start`. The theme calls
+`Host.play-sound(name)`. The host returns nothing when the player turned "Interface sounds"
+off.
+
+- `move`: a move of the focus.
+- `select`: a pick.
+- `back`: Back, closing a menu, Stop.
+- `error`: a new notice of kind `error`.
+- `start`: a game starts, or the Welcome screen closes.
+
+## Screens
+
+### Boot and Welcome
+
+`components/boot.slint` (`BootScreen`) shows from the first frame. It fades out over Home when
+the library is in and Home's art is in (`Vm.boot.ready` and `Vm.art-ready`).
+
+It shows:
+
+- A slow wall of covers from `Vm.boot.covers`.
+- The emblem, and the word "NEXUS".
+- A progress bar from `Vm.boot.progress`, with the percentage, and `Vm.boot.status`.
+
+On the first run, `Vm.boot.welcome` is true. The screen then shows "Welcome" and "Setting up
+Nexus", the checklist `Vm.boot.steps` (each with a label and a detail), and a Start button. The
+button says "Setting up…" until the boot is ready, then "Start". It shows "Enter" on a
+keyboard and a drawn mark on a pad.
+
+Start runs `Commands.finish-welcome`, which sends the `Pref` command to set `welcomed`. A click
+on the screen does the same when ready.
+
+### Home
+
+`screens/home.slint` (`HomeScreen`) shows a row of tiles from `Vm.home.games`, the selected one
+larger with its name beside it, and the game's hero over the backdrop.
+
+The hero shows, for the selected game, once `Vm.detail` is loaded for that game:
+
+- A kicker line: "PLAYED " and `Vm.detail.played` in capitals, or while it runs "● PLAYING · "
+  and `Vm.running.elapsed`.
+- The title, or the game's logo (`Vm.detail.logo`) when it has one.
+- Chips: the player's result with " · your result" (`Vm.detail.your-result`), the game's badges,
+  the rating, the genres (the first two, joined by " · "), the size and the release.
+- The summary (`Vm.detail.summary`).
+- Buttons.
+
+A new game's hero waits for its details, so it fades in whole. It waits at most
+`Look.wait-for-details`.
+
+The line beside the selected tile is "Playing now", or "Last played " and the date in lower
+case, or "Not played yet".
+
+The buttons depend on state:
+
+| State | Buttons |
+| --- | --- |
+| A game runs | "Resume", "Stop", "Game Hub", "Store" if it has a store page, "Options" |
+| Game can start (`Vm.detail.can.play`) | "Play", "Game Hub", "Store", "Options" |
+| Game cannot start | "Game Hub", "Store", "Options" |
+| The Library tile is selected | "Open Library" |
+
+A launch hint (`Vm.detail.launch-hint`) shows beside the buttons when the game cannot be played.
+
+The tile after the last game is the Library tile. Its title is "Library" and its line is the
+number of games. With no game at all it says "No games yet" and "Add a games folder in
+Settings, or install an emulator.". With games it says "Every game, in a grid, by system.".
+
+A running game's tile has a green frame and the tag "● PLAYING".
+
+Commands used on Home:
+
+- `Select` (the theme tells the core which game is selected).
+- `OpenGame`, `Session` with `Launch`, `Stop` or `ShowGame`.
+- `Navigate`.
+- `Host.open-url` for Store.
+
+#### Keys on Home
+
+The keys act on one zone at a time. `Nav.zone` is one of `tabs`, `row`, `actions`, and in the
+Library `bar`, `filters`, `genres` and `grid`.
+
+| Zone | Keys |
+| --- | --- |
+| `row` | Left and right move along the tiles. Past the last game is the Library tile. Up goes to the tabs. Down goes to the buttons. `Enter` opens the Game Hub, or the Library on the Library tile. |
+| `actions` | Left and right move between buttons. `Enter` runs one. Up, `Escape` or `Backspace` go back to the row. |
+| `tabs` | Left and right move over Home, Library, Search (only with the Catalog), Downloads, Emulators, Themes, Settings, and when Nexus is the whole screen, the three status icons. `Enter` opens one. Down returns. |
+
+Left and right follow the reading direction, so right to left they swap.
+
+A move in the row shows at once. The theme tells the core about the selection with `Select`
+after `Look.select-after` without another move. A key that is not a move sends the selection
+first, so the core acts on the game on screen. The mouse wheel moves along the row, one game a
+notch.
+
+### Top bar
+
+`components/top-bar.slint` (`TopBar`) is over Home, Running, the Catalog and Downloads.
+
+- Tabs "Home" and "Library". "Library" carries the number of games.
+- A running game: its title, the time played, and the buttons "Resume" and "Stop"
+  (`Vm.running`).
+- The first download as a bar with its label (`Vm.downloads[0]`). A click opens Downloads.
+- Round buttons: "Search" (only with `Vm.catalog-available`), "Downloads", "Emulators",
+  "Themes", "Settings". Their accessible labels carry these names.
+- When Nexus is the whole screen (`Vm.system.whole-screen`): the network, sound and Bluetooth
+  icons. Each opens a panel (see System panels).
+- A battery icon when the PC has one (`Vm.system.battery-shown`), and the clock `Vm.clock`.
+
+### Library
+
+The Library is Home's second view (`Nav.view` is `library`). `components/library-view.slint`
+draws it, and the Catalog uses the same component.
+
+The core searches, filters and sorts (`Vm.home.library`). The theme sends a page at a time and
+asks for the next page as the grid nears its end (`LibraryMore`).
+
+- A header band: the search box ("Search games"), the sort button, the card size choice
+  ("Comfortable", or "Roomy" in a narrow window, and "Compact").
+- The system chips (`lib.systems`), and on the far side the count of games ("1 game" or "N
+  games").
+- The genre row (`lib.genres`), under the label "GENRE". It scrolls to the focused chip and
+  fades where chips are hidden.
+- The grid of cards (`GameCard`).
+
+The sorts for the Library, as `Look.sort-label` names them: "Title", "Recently played",
+"Size (largest first)", "Top rated", "Newest" and "Runs best". The list opens under the label
+"SORT BY".
+
+States of the grid:
+
+- Empty: "No games here". With a search that matches nothing: `No game matches "<text>"`.
+- The Catalog while it reads: "Loading catalog…". With no catalog game yet: "No catalog lists
+  any game yet".
+
+Commands: `LibrarySearch`, `LibrarySystem`, `LibraryGenre`, `LibrarySort`, `LibraryMore`,
+`GridColumns` (the grid tells the core how many columns it has). `Host.grid-window` tells the
+host which rows are on screen, so it loads only those covers.
+
+Keys in the Library:
+
+| Zone | Keys |
+| --- | --- |
+| `bar` | Left and right move over search, sort, Comfortable, Compact. `Enter` types, opens the sorts, or sets the size. Down goes to the systems. Up goes to the tabs. |
+| `filters` | Left and right move over the systems. `Enter` picks one. Down goes to the genres, or the grid. |
+| `genres` | Left and right move over the genres. `Enter` picks one. |
+| `grid` | Arrows move over cards. Up from the first row goes to the genres, or the systems. `Enter` opens the Game Hub. Page up and Page down move by three lines. A letter or a digit starts a search with it. |
+
+`Escape` and `Backspace` leave the Library for Home's row. Typing in the search box: `Escape` or
+Down gives the keys back. Search runs once typing stops for a moment, and `Enter` runs it now.
+On a pad, the search box opens the on-screen keyboard.
+
+The list of sorts takes every key while open: Up and Down move, `Enter` picks, `Escape` closes.
+
+### Catalog
+
+`screens/catalog.slint` is the same library view over the catalogs' games (`Vm.catalog`). It
+has the same zones, but not the tabs: `Escape` sends `Back`.
+
+Differences from the Library:
+
+- The sorts start with "Recently added", then "Title", "Size (largest first)", "Size (smallest
+  first)", "Top rated", "Newest", "Runs best".
+- The on-screen keyboard's title is "Search the catalog". The Library's is "Search games".
+- The count reads "<n> games · <m> releases", or "<n> of <all> games · <m> releases" while a
+  search or a filter narrows it. Under it: "List updated " and `Vm.catalog-updated`.
+- The catalog plugin's first button (`Vm.catalog-actions[0]`, such as Refresh) sits at the
+  far end of the bar. The status text of `Vm.catalog-status[0]` sits beside it.
+- A card has one line more: "Availability:" and how easy the game is to download.
+- The commands are `CatalogSearch`, `CatalogSystem`, `CatalogGenre`, `CatalogSort` and
+  `CatalogMore`.
+- A turned-off Game Catalog removes the "Search" button and the `Tab` stop for it
+  (`Vm.catalog-available` is false).
+
+The core fills the chip row (`Vm.catalog.systems`). The glossary names the grid filters it can
+add: "In-game", "Installed" and "Hidden".
+
+### Game Hub
+
+`screens/game-detail.slint` is the page of one game. It opens from the card the player was on
+(`Origin`). The cover grows out of that card's place and size. When the place is not known the
+cover fades in.
+
+The page has a cover on one side and a column that scrolls on the other. The column holds, from
+the top:
+
+1. A line over the title: the platform, the developer in capitals, the year and the region,
+   joined by " · ". While the game runs, "● PLAYING " and the time.
+2. The title, or the logo.
+3. Chips: badges, rating, age rating (or "Ages " and the age), and genres.
+4. Buttons: "Play" or "Resume", "Stop" while it runs, the plugin's actions
+   (`Vm.detail.actions`), "Store", "Trailer", "Show" or "Hide" for a catalog game, and "Options".
+5. The launch hint.
+6. For a game a catalog offers: "RELEASES · RUNS WITH " and the emulator, one row for each
+   release.
+7. Fact cards, three to a row: how the game runs ("YOUR RESULT" when the player rated the game, else "COMPATIBILITY" with the date last tested),
+   "ON THIS PC" with the reason, "PLAYED" (with the date) and "SIZE", the ProtonDB tier for a
+   Windows game packed with Wine, and the availability of a catalog game.
+8. "+  Technical details" (and "−  " when open): every fact the plugin gives
+   (`Vm.detail.facts`), and the compatibility notes.
+9. "SCREENSHOTS": a row of the store's shots.
+10. The plugins' sections (`SlotSections`) and "ABOUT" with the description.
+
+The compatibility card says "Not tested" when neither the player's result nor the community's
+exists. The size card says "Unknown" without a size. The played card says "Not yet".
+
+Commands: `Session` (`Launch`, `Stop`, `ShowGame`), `RunAction`, `Library` (`Hide`), `Torrent`
+(`Download`), `Navigate`, and `Host.open-url`.
+
+#### Release rows
+
+Each release row shows its version ("Version " and the number, or "Release"), the region, its
+place by version, its size and when the catalog got it, a tag "New" for a release the view marks as new (`release.new`), the line "Availability:" with the catalog's counts of seeders and
+leechers, and the warnings (`not-here`, `warning`).
+
+The row's button says:
+
+| State | Text |
+| --- | --- |
+| The release comes from a store | "Install in " and the store |
+| No download | "Download" |
+| Downloading | "Downloading " and the percent |
+| Complete | "Downloaded" |
+| Paused | "Paused" |
+| Failed | "Failed" |
+| Otherwise | "In Downloads" |
+
+`Enter` on a row with no download opens the download sheet. On a row with a download it opens
+Downloads. On a store's release it sends `Torrent` `Download` at once, because the store asks
+its own questions.
+
+#### The download sheet
+
+"Set up a download" asks before a release downloads. It shows the title, the version and
+region and "runs with " and the emulator, then warnings (the release may not start here, the PC
+warning, no room for it), the row "Download folder" (`Enter` types another folder), and the text of
+the consent. The text says what the download shares, at most "128 KiB/s" while it downloads, and
+whether finished downloads keep sharing (`Vm.seed-downloads`). Another line says who sees the
+player's address: with `Vm.vpn.only` and a route it names the VPN; with `Vm.vpn.only` and no
+route it warns.
+
+A line says what happens next: first Nexus looks up the torrent's metadata, then the player
+looks at the files in Downloads and presses Download.
+
+The buttons are "Look up metadata" and "Not now". "Look up metadata" is off while the emulator
+has no packages folder; a line then says "<emulator> can't install downloads: its packages
+folder isn't set.". When the core refuses, the sheet stays open and shows `Vm.detail.download-error`.
+
+Keys: Left and Right choose a button. Up goes to the folder row. `Escape` is "Not now".
+
+#### The screenshots and the reading
+
+Down from the buttons opens the technical details. Down again goes to the shots, or to the
+reading when there are no shots. Left and right move over the shots, and `Enter` opens one full
+screen. Down on the last shot scrolls the reading by steps. Up goes back.
+
+The screenshot viewer (`ShotViewer`) shows the shot and "N / M". Left and right move, and
+`Escape`, `Backspace` or `Enter` close it.
+
+### The game's menu
+
+`components/game-menu.slint` (`GameMenu`) opens from the Options button, the `Menu` key (the
+pad's Options button) or the "⋯" button. Items the game does not have are left out.
+
+| Item | Shown when | Does |
+| --- | --- | --- |
+| "Game Hub" | Not on the Game Hub | `OpenGame` |
+| The emulator's actions | The game has them | `RunAction` |
+| "Game settings" | The game has settings | `Navigate` to `GameSettings` |
+| "Open game folder" | The game has a folder, and Nexus is not the whole screen | `Host.open-game-folder` |
+| "View emulator log" | The game has a log, and Nexus is not the whole screen | `Host.open-game-log` |
+| "Watch trailer" | The game has a trailer | The trailer player |
+| "Rate how it runs" | Always | `AskResult` |
+| "Compatibility list" | The game has a page, and Nexus is not the whole screen | `Host.open-url` |
+| "ProtonDB page" | The game has one, and Nexus is not the whole screen | `Host.open-url` |
+| "Settings" | Always | `Navigate` to Settings |
+| "Show in the Catalog" or "Hide from the Catalog" | A catalog game | `Library` `Hide` |
+| "Uninstall" | The game can be uninstalled (`Vm.detail.can.uninstall`) | Asks, then `UninstallGame` |
+
+Up and down move. `Enter` picks. `Escape`, `Backspace` and `Menu` close.
+
+"Uninstall" asks in the same card: `Uninstall <title>?`, then "Its folder is deleted from your
+game folder, with its update and add-ons. A download it came from stays in Downloads.", with
+"Uninstall" and "Not now". The keys start on "Not now".
+
+### Game settings
+
+`screens/game-settings.slint` is a side sheet for one game's own settings from its emulator.
+The title is the game's title. The section is "THIS GAME", with one row for each field of
+`Vm.detail.settings`. A change sends `SetConfigField` with the plugin, scope, key and value.
+Back returns to the Game Hub. The rows and keys are those of every sheet (see Settings).
+
+### Downloads
+
+`screens/downloads.slint` lists one card for each torrent (`Vm.torrents`), then one card for
+each emulator download (`Vm.downloads`).
+
+The summary line shows the VPN state when "Download only through a VPN" is on ("Protected by
+your VPN · <route>" or "Waiting for your VPN"), then the counts: "<n> downloading · <n> sharing
+· <n> in all". A note says how transfers behave: they go on while Nexus is open and come back
+paused at the next start, and it says whether finished downloads keep sharing.
+
+With nothing to show: "Install an emulator in Emulators, or download a game from its Game
+Hub.".
+
+A torrent card shows the title (with version and region), its state, its bar, and its buttons.
+The state text is one of: "Installing", "Installed", "Queued", "Unpacking", "Unpacking
+failed", "Reading its files", "Ready: look at the files, then download", "Checking",
+"Downloading", "Paused" (or "Paused · waiting for your VPN"), "Complete" (with " · sharing" or
+" · checking"), "Failed", "Cancelled · the files stay". For a store's install it adds " in " and
+the store.
+
+A card in the "ready" state lists the files to look at, in a scroll area, before the player
+presses Download.
+
+The buttons come from the torrent's `actions`:
+
+| Action | Text |
+| --- | --- |
+| `start` | "Download" (ready), "Resume" (paused), "Retry" |
+| `pause` | "Pause" |
+| `cancel` | "Cancel" ("Stop unpacking" while unpacking) |
+| `remove` | "Remove" |
+| `stop-seeding` | "Stop sharing" |
+| `install` | "Install", "Retry install", or "Unpack and install" |
+| `remove-unpacked` | "Remove unpacked files" |
+| `cancel-install` | "Cancel install" |
+| `open-store` | "Open in " and the store |
+| `play` | "Play" |
+
+Then "Open folder" (`Host.open-download-folder`), once the folder exists. While a card looks up
+its files or installs, its first button reads "Resolving…" or "Installing…" and does nothing.
+The keys skip it.
+
+An emulator download's card shows its state ("Waiting", "Downloading", "Checking", "Unpacking",
+"Paused", "Installing", "Done", "Failed", "Cancelled") and the buttons "Resume", "Pause" and
+"Cancel", as `can-resume`, `can-pause` and `can-cancel` allow.
+
+A footer reads: "Cancel never deletes your downloaded files, and Remove asks first whether they
+go too. Remove unpacked files deletes only the copies Nexus unpacked."
+
+Keys: Up and Down move between cards. Left and right move between the buttons of a card.
+`Enter` presses one.
+
+Commands: `Torrent` (`Act`), `GameInstall` (`Download`, `RemoveUnpacked`, `Cancel`),
+`PauseDownload`, `ResumeDownload`, `CancelDownload`, `Session` `Launch` for "Play".
+
+#### The install sheet
+
+"Install" asks first. The sheet is titled "Install game", names the game, and says "Nexus
+copies or unpacks this finished download into your game folder. The install runs in the
+background and checks the free space first. It never writes over a game that is there, and the
+downloaded files stay.". Its row is "Game folder". If the emulator has no game folder, it says
+"This emulator has no game folder: add one in Settings.". The buttons are "Install" and "Not
+now". When the core refuses, the sheet stays open and shows `install-error`.
+
+#### The remove sheet
+
+"Remove" asks, with the question `Remove <title>?`, and three answers in a list: "Remove from
+Downloads" (first, and the keys start there), "Delete files too" (red) and "Not now". Each has
+a line that says what it does. Up and Down, or Left and Right, move. `Escape` is "Not now".
+
+### Settings
+
+`screens/settings.slint` is a side sheet. The sections and rows are below. Up and Down move,
+Left and Right change the row (`Prefs.act`), and `Enter` or `Space` presses it.
+
+| Section | Rows |
+| --- | --- |
+| "GAMES" | One row for each game folder (`Vm.folders`; `Enter` types a path, several separated by ";"), then "Rescan game folders" |
+| "UPDATES" | "Update automatically", "Nexus updates" |
+| "LAUNCHER" | "Full screen", "Size of everything", "Back to the launcher", "Interface sounds", "Start at login" (only when `Vm.can-start-at-login`), "Screen" (only with two or more monitors), "Quit Nexus" |
+| "DOWNLOADS" | "Download only through a VPN", one row for each VPN, "Add a VPN" (where the system can), "Keep sharing finished downloads" |
+| "THIS PC" | "Processor", "Memory", "Graphics", and a row for each emulator (`<emulator> games`) |
+| "SYSTEM" | Only when Nexus is the whole screen: "Internet", "Sound", "Bluetooth", "Nexus OS updates", "Install Nexus OS on this PC", "Log out", "Restart", "Shut down" |
+| "ABOUT" | The emblem, "Nexus", the counts of plugins and emulators, and "Games from every emulator, in one place" |
+
+Notes by row:
+
+- "Nexus updates": the button follows `Vm.launcher-update.state`. It checks, downloads, or
+  restarts (`Host.restart`). Commands: `LauncherUpdate` (`Check`, `Download`).
+- "Size of everything": ranges from 80% to 140% in steps of 10%. `Enter` goes round; Left and
+  Right stop at the ends. Command: `Pref` `scale`.
+- "Back to the launcher": "When a game closes, the launcher comes to the front"
+  (`return_on_exit`).
+- "Start at login": the hint is "Nexus opens when you log in", or the system's error
+  (`Vm.start-at-login-error`) in red. The pref write fails in a build that is not installed,
+  so the row is hidden there.
+- "Quit Nexus": "Restart Nexus" when Nexus is the whole screen (the session starts it again).
+  It calls `Host.quit`.
+- "Download only through a VPN": `Vpn` `SetOnly`. Each VPN row connects or disconnects
+  (`Vpn` `Connect`, `Disconnect`) where the system can switch a VPN, and otherwise picks the
+  network the VPN uses (`Vpn` `Choose`: "Use" or "Picked"). "Add a VPN" takes the path of a
+  WireGuard `.conf` or OpenVPN `.ovpn` file (`Vpn` `Import`). Without a VPN, a row "Your VPN"
+  says "None found" or "No network found".
+- "Keep sharing finished downloads": "Other players download from you, at most 128 KB/s".
+  Command: `Torrent` `SeedDownloads`.
+- "THIS PC": the rows only show. They take the focus so a pad can scroll to them. Before the
+  check ends, one row says "Checking this PC…".
+- "Log out", "Restart" and "Shut down" ask twice: the first press arms the row ("Press again to
+  log out", "Press again to restart", "Press again to shut down"), the second acts. "Log out"
+  calls `Host.log-out` and shows on a desktop's Nexus session, not on Nexus OS.
+- Folder rows: `SetFolders` with the name and the paths.
+- "Rescan game folders": `Library` `Refresh`.
+
+### Emulators, Themes and plugin pages
+
+Emulators and Themes (`screens/emulators.slint`, `screens/themes.slint`, both use
+`components/plugin-list.slint`) are side sheets that list plugins. The Emulators sheet is titled
+"Emulators" and its subtitle is "Open one to turn it on or off, install it and change its
+settings". The Themes sheet is titled "Themes" and its subtitle is "Open one to use it and
+change its options". Both list under "AVAILABLE": the plugin's name, its build or version, and
+its status, or "Off". Up and Down move; `Enter` opens the plugin (`Navigate` to `Plugin`).
+
+The plugin's page (`screens/plugin.slint`) opens at the edge beside the list, which stays and
+moves over. Its sections:
+
+- A theme: "THEME" with "Use this theme" (`Host.switch-theme`), then "OPTIONS" while it is the
+  one in use, else "Use it to change its options".
+- An emulator or a service: "PLUGIN" with the plugin's note and "Turned on"
+  (`SetPluginEnabled`), then "BUILD" or "ACTIONS", then "SETTINGS" (one panel for each slot),
+  "FOLDERS", and the plugin's blocks (`SlotSections`). An emulator shows "Controllers: " and
+  the controllers it supports.
+- The build row reads "Install" (`InstallEmulator`), "Update to <version>" (`UpdateEmulator`),
+  or "<version> · Up to date", or "Working…". "Uninstall <version>" removes the build
+  (`UninstallEmulator`). The plugin's actions run with `RunAction`.
+- A plugin that is turned off shows only the switch, with the hint "Turn it on to see its
+  settings".
+
+### Running
+
+`screens/running.slint` (`RunningScreen`) is the launch splash. It shows while
+`Vm.running.state` is `starting`: the game's art dimmed, its icon, the title (`Vm.running.title`),
+"Starting with <emulator>…" (or "Starting…"), and a turning ring. When the game's window shows,
+it fades. Home is under it, with the keys on Resume.
+
+A line names the input: "Controller: <name>" when a pad is connected (`Vm.pad-name`), else
+"Keyboard: the keys are on the <page> page" (or "the emulator's page").
+
+Without a controller, when the emulator names its keyboard keys (`Vm.running.keymap`), the splash
+lists them under "Keyboard" in two columns. The keys are the game's then, so the shell takes
+every key except `Escape` (Back) and `Ctrl+Q`.
+
+### Power menu
+
+`components/power-menu.slint` opens over any screen with `Ctrl+P`, or when the PS or Xbox
+button is held with no game running. The items are:
+
+- "Log out": when Nexus is the whole screen and not Nexus OS.
+- "Quit Nexus", or "Restart Nexus" when Nexus is the whole screen.
+- "Restart" and "Shut down": when Nexus is the whole screen and the power calls are available
+  (`Vm.system.power-available`). These ask twice, as in Settings.
+
+Up and Down move, `Enter` picks, `Escape` and `Backspace` close.
+
+### Result prompt
+
+After a game closes, the core may ask "How far did it get?" (`Vm.has-result-prompt`). The prompt
+reads `How far did <game> get?` and lists:
+
+- "In game: reaches gameplay" (`ingame`)
+- "Main menu, but not gameplay" (`menus`)
+- "Intro logos, then stops" (`boots`)
+- "Doesn't start" (`nothing`)
+- "Not now"
+
+`Enter` answers with `ReportResult`. `Escape` is "Not now". The same prompt opens from the
+game's menu with "Rate how it runs" (`AskResult`).
+
+### Install prompt
+
+A first play can ask before the emulator downloads. The prompt (`Vm.has-install-prompt`) reads
+`Install <emulator>?` and "To play <game>, <emulator> <version> downloads first<size>. It checks
+the download, then the game starts.". The buttons are "Install and play" and "Not now".
+`Enter` runs the focused one (`ConfirmInstall` or `CancelInstall`), and `Escape` cancels. It
+takes every key. The keys start on "Install and play".
+
+### Trailer player
+
+`Trailers.watch` plays the shown game's trailer. If the app can play video
+(`Vm.can-play-trailers`), `Host.play-trailer` plays it in the window. If not, `Host.open-url`
+opens it in the browser.
+
+In the window: `Enter` or `Space` pauses or goes on (`Host.pause-trailer`). Left and right seek
+back or on (`Host.seek-trailer`). `Escape` or `Backspace` closes it (`Host.close-trailer`). The
+screen shows "Loading the trailer…", the game's title, the time as "m:ss / m:ss" and a bar. The
+controls hide while it plays and no key comes for a while; any key or the pointer shows them. They
+stay while it is paused.
+
+### Notices
+
+Notices stack on the far side from the reading start, oldest at the top. The stack shows at
+most the three the core keeps (`Vm.notice-cards`). A card shows the game's art or the sign of
+its kind (info, success, error), the text, a "Dismiss" button, and, when the notice has a
+subject, a link that opens it (`Notice` `Open`, shown as the subject with " ›").
+
+A card slides in, stays, and slides out, and then the theme sends `Notice` `Dismiss`. A notice
+with something to open stays longer than one without. `Delete` closes the newest card that is
+not closing yet. A new notice of kind `error` plays the sound `error`.
+
+### System panels
+
+When Nexus is the whole screen, the top bar has the network, sound and Bluetooth icons. Each
+opens a panel under it (`components/system-panel.slint`, `Sys`). Left and right go to the panel
+beside. Up and Down move over rows. `Enter` or `Space` acts. `Escape` closes.
+
+| Panel | Rows | Commands |
+| --- | --- | --- |
+| Network | "Look for networks", then one row for each Wi-Fi network | `System` `ScanWifi`, `JoinWifi`; `Delete` forgets a saved network (`ForgetWifi`) |
+| Sound | The volume (left and right change it), mute, then one row for each output | `SetVolume`, `SetMuted`, `SetOutput` |
+| Bluetooth | On or off, "Pair a device", then one row for each device | `SetBluetooth`, `ScanBluetooth`, `Pair`, `ConnectDevice`, `DisconnectDevice`; `Delete` removes a device (`RemoveDevice`) |
+
+A secured network that is not saved asks for its password first, with the on-screen keyboard.
+When a part is not available, the panel shows why (`network-reason`, `audio-reason`,
+`bluetooth-reason`).
+
+### The on-screen keyboard
+
+`components/keyboard.slint` (`Osk`) is for a controller. Every text field in the theme is a
+`TextField`. It opens the keyboard when the field gets the focus with the pad and the last key
+was the pad's. A physical keyboard types straight into the field and the on-screen keyboard
+stays shut.
+
+It has rows of ten keys, a numbers row, three letter rows (or the symbols) and an action row:
+"Shift", "Symbols" (or "ABC"), "Space", "Delete", "Show" or "Hide" (for a password only) and
+"Done".
+
+On a pad: the d-pad moves, Cross presses the key, Square deletes, Triangle adds a space, L1 is
+Shift for one letter, R1 switches to the symbols, R2 or Options is Done, and Circle closes and
+keeps the text. On a keyboard, `Esc` closes and `Tab` shows a password.
+
+### Nexus OS installer
+
+When Nexus runs from the Nexus OS USB stick (`Vm.system.stick`), `components/install-os.slint`
+(`Setup`) shows before anything else, after Welcome. Its steps are `welcome`, `disks`,
+`confirm`, `installing`, `done` and `failed`.
+
+- Welcome: "Welcome to Nexus OS", with "Try it" and "Install on this PC".
+- Disks: "Where should Nexus OS go?", one row for each disk, "Choose partitions instead"
+  (`System` `ChoosePartitions`), and Back. With no disk of enough size: "No disk of 40 GB or
+  more is free to install on.".
+- Confirm: `Erase <model> (<size>)?` and "Erase and install" (`System` `InstallOs`).
+- Installing: "Installing Nexus OS". No keys; it cannot stop halfway.
+- Done: "Nexus OS is installed" and Restart (`System` `Restart`).
+- Failed: "Installation didn't finish" and Back.
+
+## Accessible labels
+
+The seam tests drive the theme only through accessible labels, values, keys and clicks. The
+labels are part of what the tests pin, so keep them when you change a screen. Examples:
+
+| Area | Labels |
+| --- | --- |
+| Boot | `boot`, `welcome`, `welcome-step`, `welcome-start` |
+| Home | `default-tile`, `default-library-tile`, `default-title`, `default-sub`, `default-description`, `default-resume`, `default-stop`, `game-options` |
+| Library | `default-game`, `library-sort`, `density`, `grid-empty`, `grid-progress`, `genres`, `default-count`, `catalog-updated`, `filter:<name>` |
+| Game Hub | `hub-cover`, `hub-title`, `hub-stop`, `hub-store`, `hub-trailer`, `hub-hide`, `hub-about`, `release-<id>`, `release-download`, `download-title`, `download-agree`, `download-not-now`, `download-folder` |
+| Downloads | `torrent`, `torrent-state`, `torrent-action:<action>`, `torrent-open-folder`, `downloads-summary`, `install-agree`, `remove-title` |
+| Settings | `rescan`, `auto-update`, `fullscreen`, `scale`, `start-at-login`, `monitor`, `vpn-only`, `seed-downloads`, `folder:<name>` |
+| Plugins | `plugin:<id>`, `plugin-enabled`, `build`, `uninstall`, `theme-current`, `option:<key>` |
+| Other | `launch-title`, `launch-input`, `result-prompt`, `install-prompt`, `notice`, `system-panel`, `status:network` |
+
+## Tests
+
+The tests of the theme are in `tests/tests/seams/`:
+
+- `default_theme/` has one module for each area: `home`, `library`, `catalog`, `game_hub`,
+  `releases`, `downloads`, `installs`, `emulators`, `settings`, `keyboard`, `notices`,
+  `trailer`, `play` and `theme_files`. Each drives the shown theme with keys, clicks and
+  accessible labels (the theme driver), against fake plugins.
+- `theme_files.rs` checks two rules of the files. Every font a file names ships in `fonts/`.
+  Every `duration:` and `delay:` time goes through `Look.timed`, so "Animations: Off" cuts it.
+- `screenshots.rs` renders the screens off screen with the software renderer and writes
+  pictures. It checks that the pictures of Home, Library, Game Hub, Settings and Running are
+  not blank. It renders the default screens right to left, and renders a child theme
+  (`fixture-grid`) over the same library.
+
+For how to run the tests, read [../development.md](../development.md).
+
+## Limitations
+
+- The theme reads no breakpoint. The `compact` and `regular` breakpoints in the manifest have
+  no effect on the default theme's layout.
+- The "Hide" and "Show" button on the Game Hub is for the pointer only, outside the key order.
+  A pad uses the "Hide from the Catalog" item of the game's menu.
+- The Welcome step labels and details, the boot status text, and the notice texts come from
+  the core, not from the theme. This page does not list them.
+- I did not run the theme or look at a screenshot for this page. Every statement comes from
+  reading the files and the tests.
