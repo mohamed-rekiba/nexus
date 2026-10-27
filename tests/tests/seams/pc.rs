@@ -387,10 +387,7 @@ async fn a_game_a_catalog_download_installed_has_the_offer_s_art_and_the_repack_
         }
     }
     t.core
-        .dispatch(Command::Torrent(nexus_core::TorrentCmd::Act {
-            id: HASH.into(),
-            action: nexus_core::TorrentAction::Install,
-        }))
+        .dispatch(Command::GameInstall(nexus_core::GameInstallCmd::Download { id: HASH.into(), folder: None }))
         .await
         .unwrap();
     t.until(Area::Installs, |_| row(t).is_some_and(|r| r.install == "done")).await;

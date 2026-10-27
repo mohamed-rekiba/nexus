@@ -1,5 +1,5 @@
-//! The archives in a finished download, and unpacking them through the host's [`Archives`]
-//! port before the emulator installs.
+//! The archives in a finished download, which the game installs unpack through the host's
+//! [`crate::Archives`] port before the emulator installs ([`crate::game_installs`]).
 //!
 //! An archive set is one archive, or one cut into parts: `game.part1.rar`, `game.part2.rar`;
 //! `game.rar` with `game.r00`; `game.7z.001`, `game.7z.002`. Sets are found by their names, at
@@ -10,13 +10,11 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::AtomicBool;
 
 use serde::{Deserialize, Serialize};
 
 use crate::ArchiveKind;
-use crate::app::Core;
-use crate::torrents::TorrentState;
 
 /// The folder in a download that unpacked sets go to.
 pub(crate) const UNPACKED: &str = "unpacked";
@@ -286,128 +284,13 @@ impl Unpack {
 }
 
 /// Where a set goes in the download at `folder`.
-fn unpacked_folder(folder: &Path, set: &ArchiveSet) -> PathBuf {
+pub(crate) fn unpacked_folder(folder: &Path, set: &ArchiveSet) -> PathBuf {
     folder.join(UNPACKED).join(&set.name)
 }
 
 /// Where a set is written before it moves into place.
-fn work_folder(folder: &Path, set: &ArchiveSet) -> PathBuf {
+pub(crate) fn work_folder(folder: &Path, set: &ArchiveSet) -> PathBuf {
     folder.join(UNPACKED).join(format!("{}.part", set.name))
-}
-
-impl Core {
-    /// Unpacks the download's archives in the background, then installs it when `install`.
-    /// Sets already unpacked stay as they are.
-    pub(crate) fn unpack_download(&self, id: &str, install: bool) {
-        let cancel = Arc::new(AtomicBool::new(false));
-        let mut started = false;
-        self.torrents().hand_off(id, |state, h| {
-            if *state != TorrentState::Complete || h.unpack.phase == UnpackPhase::Unpacking {
-                return;
-            }
-            h.unpack.phase = UnpackPhase::Unpacking;
-            h.unpack.error.clear();
-            h.unpack.progress = 0.0;
-            h.unpack.cancel = Some(cancel.clone());
-            started = true;
-        });
-        if !started {
-            return;
-        }
-        let core = self.clone();
-        let id = id.to_owned();
-        tokio::spawn(async move {
-            let (phase, error) = match core.run_unpack(&id, cancel.clone()).await {
-                Ok(()) => (UnpackPhase::Unpacked, String::new()),
-                Err(_) if cancel.load(Ordering::Acquire) => (UnpackPhase::Cancelled, String::new()),
-                Err(e) => (UnpackPhase::Failed, e),
-            };
-            core.torrents().hand_off(&id, |_, h| {
-                h.unpack.phase = phase;
-                h.unpack.error = error;
-                h.unpack.cancel = None;
-                if phase == UnpackPhase::Unpacked {
-                    h.unpack.progress = 1.0;
-                }
-            });
-            let job = core.torrents().job(&id);
-            if let Some(job) = job.filter(|_| install && phase == UnpackPhase::Unpacked)
-                && let Err(e) =
-                    core.install_game(&job.emulator, job.source.clone(), job.hand_off.install_into.clone()).await
-            {
-                core.notice_opening(
-                    nexus_ui_api::NoticeKind::Error,
-                    crate::Route::Downloads,
-                    format!("{} couldn't install: {e}", job.title),
-                );
-            }
-        });
-    }
-
-    async fn run_unpack(&self, id: &str, cancel: Arc<AtomicBool>) -> Result<(), String> {
-        let Some(job) = self.torrents().job(id) else { return Err("no such download".into()) };
-        let sets = job.hand_off.unpack.sets.clone();
-        if let Some(problem) = sets.iter().find_map(|s| s.problem.clone()) {
-            return Err(problem);
-        }
-        let port = self.kernel().archives().clone();
-        let count = sets.len().max(1) as f32;
-        // What this run unpacked, removed again when a later set fails.
-        let mut written: Vec<PathBuf> = Vec::new();
-        for (i, set) in sets.iter().enumerate() {
-            let dest = unpacked_folder(&job.folder, set);
-            if dest.exists() {
-                continue;
-            }
-            let work = work_folder(&job.folder, set);
-            let _ = tokio::fs::remove_dir_all(&work).await;
-            tokio::fs::create_dir_all(&work).await.map_err(|e| format!("The unpack folder couldn't be made: {e}"))?;
-            let parts: Vec<PathBuf> = set.parts.iter().map(|p| job.folder.join(p)).collect();
-            // Saved at each whole percent, not at each piece.
-            let shown = Arc::new(AtomicU32::new(0));
-            let progress: crate::UnpackProgress = {
-                let core = self.clone();
-                let id = id.to_owned();
-                Arc::new(move |done, total| {
-                    let part = if total > 0 { done as f32 / total as f32 } else { 0.0 };
-                    let percent = (((i as f32 + part.min(1.0)) / count) * 100.0) as u32;
-                    if shown.swap(percent, Ordering::AcqRel) != percent {
-                        core.torrents().hand_off(&id, |_, h| h.unpack.progress = percent as f32 / 100.0);
-                    }
-                })
-            };
-            // The folder exists now, so the disk that holds it can say its free space.
-            let free = self.kernel().hardware().free_bytes(&work);
-            let unpacked = port.unpack(set.kind, &parts, &work, free, progress, cancel.clone()).await;
-            let moved = match unpacked {
-                Ok(()) => tokio::fs::rename(&work, &dest).await.map_err(|e| format!("{}: {e}", set.name)),
-                Err(e) => Err(format!("{}: {e}", set.name)),
-            };
-            if let Err(e) = moved {
-                let _ = tokio::fs::remove_dir_all(&work).await;
-                for dest in &written {
-                    let _ = tokio::fs::remove_dir_all(dest).await;
-                }
-                return Err(e);
-            }
-            written.push(dest);
-        }
-        Ok(())
-    }
-
-    /// Deletes the download's unpacked files. The torrent's own files stay.
-    pub(crate) async fn remove_unpacked(&self, id: &str) {
-        let Some(job) = self.torrents().job(id) else { return };
-        if job.hand_off.unpack.phase == UnpackPhase::Unpacking {
-            return;
-        }
-        let _ = tokio::fs::remove_dir_all(job.folder.join(UNPACKED)).await;
-        self.torrents().hand_off(id, |_, h| {
-            h.unpack.phase = UnpackPhase::Waiting;
-            h.unpack.progress = 0.0;
-            h.unpack.error.clear();
-        });
-    }
 }
 
 #[cfg(test)]

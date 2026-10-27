@@ -74,9 +74,13 @@ run when the current build changes.
 **Forum list**: a forum's list of topics with a torrent, from the tracker's API: the hash, size,
 peers and upload time of each topic, with no titles.
 
-**Hand-off** (`HandOff`): the fields of a download that another area writes: the unpack of its
-archives and the install from it. They change only through the torrents subsystem's
-`hand_off` call.
+**Game install**: a plugin's `GameInstaller` decoding a package or a finished download into a
+game folder, in the background. The game installs subsystem owns the job; the plugin reports
+through an `InstallJob`.
+
+**Hand-off** (`HandOff`): the fields of a download that the game installs write: the unpack of
+its archives and the install from it. They are saved with the download, and change only
+through the torrents subsystem's `hand_off` call.
 
 **Hold**: the wait of a fetch or a refresh that failed or waits for the VPN. The work doesn't
 try again before the hold ends. Each hold is twice as long as the one before, at most the
@@ -84,6 +88,10 @@ fresh time.
 
 **Host facades** (`Host`, emulator-kit): the narrow parts of a `PluginContext` the kit takes:
 storage, folders, programs, HTTP, settings and the log.
+
+**Install event** (`InstallEvent`): what the game installs subsystem asks of the core: refresh
+the library for a new game, tell the player of a failure, or start the install of a download
+whose archives just unpacked. The subsystem waits until the core is done with each.
 
 **Install warning**: why a release may not install, shown beside it in the Game Hub. The
 plugin that lists the release sets it; the release stays listed.

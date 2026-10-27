@@ -45,6 +45,7 @@ pub use changes::{Area, Change};
 pub use config::ConfigService;
 pub use downloads::{Job, JobPhase};
 pub use error::{CoreError, CoreResult, LoadError};
+pub use game_installs::GameInstallCmd;
 pub use kernel::{BootReport, HostConfig, Kernel, KernelBuilder, Loader, Origin, PluginInfo, PluginStatus, Rejection};
 pub use ports::{ArchiveError, Escape};
 pub use ports::{
