@@ -8,7 +8,8 @@ use tempfile::TempDir;
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::{
-    FakeArchives, FakeClock, FakeDesktop, FakeHttp, FakeNetwork, FakeProcessTree, FakeSpawner, FakeTorrents, StubPlugin,
+    FakeArchives, FakeClock, FakeHttp, FakeLoginSession, FakeNetwork, FakeOpener, FakeProcessTree, FakeSpawner,
+    FakeTorrents, FakeWindows, StubPlugin,
 };
 
 /// How long [`TestCore::until`] waits on the fake clock. Its time moves only while every task
@@ -27,7 +28,9 @@ pub struct FakeHost {
     http: FakeHttp,
     spawner: FakeSpawner,
     processes: FakeProcessTree,
-    desktop: FakeDesktop,
+    windows: FakeWindows,
+    login_session: FakeLoginSession,
+    opener: FakeOpener,
     torrents: FakeTorrents,
     network: FakeNetwork,
     archives: FakeArchives,
@@ -73,7 +76,9 @@ impl FakeHost {
             http: FakeHttp::default(),
             spawner: FakeSpawner::default(),
             processes: FakeProcessTree::default(),
-            desktop: FakeDesktop::default(),
+            windows: FakeWindows::default(),
+            login_session: FakeLoginSession::default(),
+            opener: FakeOpener::default(),
             torrents: FakeTorrents::default(),
             network: FakeNetwork::default(),
             archives: FakeArchives::default(),
@@ -212,17 +217,31 @@ impl FakeHost {
         self.dir.path()
     }
 
-    /// The kernel builder this host would boot, for tests that wire more on top.
-    pub fn desktop(&self) -> &FakeDesktop {
-        &self.desktop
+    /// The desktop's windows the core sees.
+    pub fn windows(&self) -> &FakeWindows {
+        &self.windows
     }
 
-    pub fn into_builder(self) -> (KernelBuilder, TempDir, FakeHttp, FakeSpawner, FakeDesktop) {
+    /// The login session the core starts the launcher at login and installs packages through.
+    pub fn login_session(&self) -> &FakeLoginSession {
+        &self.login_session
+    }
+
+    /// The opener the core opens plugins' links with.
+    pub fn opener(&self) -> &FakeOpener {
+        &self.opener
+    }
+
+    /// The kernel builder this host would boot, for tests that wire more on top, with the
+    /// windows it plugs in.
+    pub fn into_builder(self) -> (KernelBuilder, TempDir, FakeHttp, FakeSpawner, FakeWindows) {
         let mut builder = Kernel::builder(self.host)
             .http(Arc::new(self.http.clone()))
             .spawner(Arc::new(self.spawner.clone()))
             .processes(Arc::new(self.processes.clone()))
-            .desktop(Arc::new(self.desktop.clone()))
+            .windows(Arc::new(self.windows.clone()))
+            .login_session(Arc::new(self.login_session.clone()))
+            .opener(Arc::new(self.opener.clone()))
             .torrents(Arc::new(self.torrents.clone()))
             .network(Arc::new(self.network.clone()))
             .archives(Arc::new(self.archives.clone()))
@@ -240,7 +259,7 @@ impl FakeHost {
         for loader in self.loaders {
             builder = builder.loader(loader);
         }
-        (builder, self.dir, self.http, self.spawner, self.desktop)
+        (builder, self.dir, self.http, self.spawner, self.windows)
     }
 
     /// Boots the kernel. From here on the runtime's time is the fake clock's.
@@ -251,9 +270,24 @@ impl FakeHost {
         let torrents = self.torrents.clone();
         let network = self.network.clone();
         let archives = self.archives.clone();
-        let (builder, dir, http, spawner, desktop) = self.into_builder();
+        let (login_session, opener) = (self.login_session.clone(), self.opener.clone());
+        let (builder, dir, http, spawner, windows) = self.into_builder();
         let (kernel, report) = builder.boot().await;
-        TestHost { kernel, report, http, spawner, processes, desktop, torrents, network, archives, clock, _dir: dir }
+        TestHost {
+            kernel,
+            report,
+            http,
+            spawner,
+            processes,
+            windows,
+            login_session,
+            opener,
+            torrents,
+            network,
+            archives,
+            clock,
+            _dir: dir,
+        }
     }
 
     /// Boots the kernel and starts the app on it.
@@ -319,7 +353,9 @@ pub struct TestHost {
     pub spawner: FakeSpawner,
     /// The running games' processes, beyond the one each started.
     pub processes: FakeProcessTree,
-    pub desktop: FakeDesktop,
+    pub windows: FakeWindows,
+    pub login_session: FakeLoginSession,
+    pub opener: FakeOpener,
     pub torrents: FakeTorrents,
     pub network: FakeNetwork,
     pub archives: FakeArchives,

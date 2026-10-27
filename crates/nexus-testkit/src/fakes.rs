@@ -5,7 +5,8 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use nexus_api::{HttpRequest, HttpResponse, PluginError, PluginResult};
 use nexus_core::{
-    Body, Desktop, Front, HttpTransport, Opened, ProcessExit, ProcessHandle, ProcessSpawner, SpawnCommand,
+    Body, Front, HttpTransport, LoginSession, Opened, Opener, ProcessExit, ProcessHandle, ProcessSpawner, SpawnCommand,
+    Windows,
 };
 use sha2::{Digest, Sha256};
 use tokio::sync::{oneshot, watch};
@@ -450,47 +451,33 @@ pub enum Shown {
     Launcher,
 }
 
-/// A desktop the test controls. A game's window shows at once unless the test calls
-/// [`FakeDesktop::no_windows`]. Bringing a window to the front puts it in front, until the
-/// test says otherwise with [`FakeDesktop::set_front`].
+/// Windows the test controls. A game's window shows at once unless the test calls
+/// [`FakeWindows::no_windows`]. Bringing a window to the front puts it in front, until the
+/// test says otherwise with [`FakeWindows::set_front`].
 #[derive(Clone)]
-pub struct FakeDesktop {
+pub struct FakeWindows {
     front: Arc<Mutex<Front>>,
     windows: Arc<std::sync::atomic::AtomicBool>,
     shown: Arc<Mutex<Vec<Shown>>>,
     problem: Arc<Mutex<Option<String>>>,
-    /// The build can start at login, as an installed one.
-    login: Arc<std::sync::atomic::AtomicBool>,
-    logins: Arc<Mutex<Vec<bool>>>,
-    login_refusal: Arc<Mutex<Option<String>>>,
-    packages: Arc<Mutex<Vec<(std::path::PathBuf, nexus_core::PackageManager)>>>,
-    package_refusal: Arc<Mutex<Option<nexus_core::PackageError>>>,
     /// A game whose windows all closed is over, as on macOS.
     window_ends_game: Arc<std::sync::atomic::AtomicBool>,
-    /// Each link the core opened.
-    links: Arc<Mutex<Vec<String>>>,
 }
 
-impl Default for FakeDesktop {
+impl Default for FakeWindows {
     fn default() -> Self {
         Self {
             front: Arc::new(Mutex::new(Front::Launcher)),
             windows: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             shown: Arc::default(),
             problem: Arc::default(),
-            login: Arc::new(std::sync::atomic::AtomicBool::new(true)),
-            logins: Arc::default(),
-            login_refusal: Arc::default(),
-            packages: Arc::default(),
-            package_refusal: Arc::default(),
             window_ends_game: Arc::default(),
-            links: Arc::default(),
         }
     }
 }
 
-impl FakeDesktop {
-    /// The desktop's problem, for example a missing tool: what `Desktop::problem` says.
+impl FakeWindows {
+    /// The desktop's problem, for example a missing tool: what `Windows::problem` says.
     pub fn set_problem(&self, problem: &str) {
         *self.problem.lock().unwrap() = Some(problem.into());
     }
@@ -514,44 +501,13 @@ impl FakeDesktop {
         self.windows.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
-    /// The build can't start at login, as one that isn't installed.
-    pub fn no_login(&self) {
-        self.login.store(false, std::sync::atomic::Ordering::SeqCst);
-    }
-
-    /// The system refuses each change to start at login, with `error`.
-    pub fn refuse_login(&self, error: &str) {
-        *self.login_refusal.lock().unwrap() = Some(error.into());
-    }
-
-    /// Each change to start at login the system carried out, in order.
-    pub fn logins(&self) -> Vec<bool> {
-        self.logins.lock().unwrap().clone()
-    }
-
     /// What the host brought to the front, in order.
     pub fn shown(&self) -> Vec<Shown> {
         self.shown.lock().unwrap().clone()
     }
-
-    /// The package manager refuses each launcher package with `error`.
-    pub fn refuse_packages(&self, error: nexus_core::PackageError) {
-        *self.package_refusal.lock().unwrap() = Some(error);
-    }
-
-    /// Each launcher package the package manager installed, with the file it was given (which
-    /// existed then), in order.
-    pub fn packages(&self) -> Vec<(std::path::PathBuf, nexus_core::PackageManager)> {
-        self.packages.lock().unwrap().clone()
-    }
-
-    /// Each link the core opened, in order.
-    pub fn links(&self) -> Vec<String> {
-        self.links.lock().unwrap().clone()
-    }
 }
 
-impl Desktop for FakeDesktop {
+impl Windows for FakeWindows {
     fn front(&self) -> Front {
         *self.front.lock().unwrap()
     }
@@ -574,6 +530,75 @@ impl Desktop for FakeDesktop {
         self.problem.lock().unwrap().clone()
     }
 
+    fn has_window(&self, _ids: &[u32]) -> Option<bool> {
+        Some(self.windows.load(std::sync::atomic::Ordering::SeqCst))
+    }
+
+    fn window_close_ends_game(&self) -> bool {
+        self.window_ends_game.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn show_launcher(&self) {
+        self.shown.lock().unwrap().push(Shown::Launcher);
+        let mut front = self.front.lock().unwrap();
+        if *front != Front::Unknown {
+            *front = Front::Launcher;
+        }
+    }
+}
+
+/// A login session the test controls. The build can start at login, as an installed one,
+/// unless the test calls [`FakeLoginSession::no_login`].
+#[derive(Clone)]
+pub struct FakeLoginSession {
+    login: Arc<std::sync::atomic::AtomicBool>,
+    logins: Arc<Mutex<Vec<bool>>>,
+    login_refusal: Arc<Mutex<Option<String>>>,
+    packages: Arc<Mutex<Vec<(std::path::PathBuf, nexus_core::PackageManager)>>>,
+    package_refusal: Arc<Mutex<Option<nexus_core::PackageError>>>,
+}
+
+impl Default for FakeLoginSession {
+    fn default() -> Self {
+        Self {
+            login: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            logins: Arc::default(),
+            login_refusal: Arc::default(),
+            packages: Arc::default(),
+            package_refusal: Arc::default(),
+        }
+    }
+}
+
+impl FakeLoginSession {
+    /// The build can't start at login, as one that isn't installed.
+    pub fn no_login(&self) {
+        self.login.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// The system refuses each change to start at login, with `error`.
+    pub fn refuse_login(&self, error: &str) {
+        *self.login_refusal.lock().unwrap() = Some(error.into());
+    }
+
+    /// Each change to start at login the system carried out, in order.
+    pub fn logins(&self) -> Vec<bool> {
+        self.logins.lock().unwrap().clone()
+    }
+
+    /// The package manager refuses each launcher package with `error`.
+    pub fn refuse_packages(&self, error: nexus_core::PackageError) {
+        *self.package_refusal.lock().unwrap() = Some(error);
+    }
+
+    /// Each launcher package the package manager installed, with the file it was given (which
+    /// existed then), in order.
+    pub fn packages(&self) -> Vec<(std::path::PathBuf, nexus_core::PackageManager)> {
+        self.packages.lock().unwrap().clone()
+    }
+}
+
+impl LoginSession for FakeLoginSession {
     fn can_start_at_login(&self) -> bool {
         self.login.load(std::sync::atomic::Ordering::SeqCst)
     }
@@ -584,14 +609,6 @@ impl Desktop for FakeDesktop {
         }
         self.logins.lock().unwrap().push(on);
         Ok(())
-    }
-
-    fn has_window(&self, _ids: &[u32]) -> Option<bool> {
-        Some(self.windows.load(std::sync::atomic::Ordering::SeqCst))
-    }
-
-    fn window_close_ends_game(&self) -> bool {
-        self.window_ends_game.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     fn install_package(
@@ -606,17 +623,35 @@ impl Desktop for FakeDesktop {
         self.packages.lock().unwrap().push((file.to_path_buf(), manager));
         Ok(())
     }
+}
 
-    fn show_launcher(&self) {
-        self.shown.lock().unwrap().push(Shown::Launcher);
-        let mut front = self.front.lock().unwrap();
-        if *front != Front::Unknown {
-            *front = Front::Launcher;
-        }
+/// An opener that keeps what it was asked to open, and opens nothing.
+#[derive(Clone, Default)]
+pub struct FakeOpener {
+    links: Arc<Mutex<Vec<String>>>,
+    paths: Arc<Mutex<Vec<std::path::PathBuf>>>,
+}
+
+impl FakeOpener {
+    /// Each link opened, in order.
+    pub fn links(&self) -> Vec<String> {
+        self.links.lock().unwrap().clone()
     }
 
+    /// Each file or folder opened, in order.
+    pub fn paths(&self) -> Vec<std::path::PathBuf> {
+        self.paths.lock().unwrap().clone()
+    }
+}
+
+impl Opener for FakeOpener {
     fn open_link(&self, link: &str) -> Result<(), String> {
         self.links.lock().unwrap().push(link.to_owned());
+        Ok(())
+    }
+
+    fn open_path(&self, path: &std::path::Path) -> Result<(), String> {
+        self.paths.lock().unwrap().push(path.to_path_buf());
         Ok(())
     }
 }

@@ -328,7 +328,7 @@ impl Core {
             return Err(CoreError::PermissionDenied { plugin, action: format!("open {}", install.open) });
         }
         let link = install.open.clone();
-        crate::running::blocking(self, move |desktop, _| desktop.open_link(&link)).await.map_err(CoreError::Invalid)
+        crate::running::open_link(self, link).await.map_err(CoreError::Invalid)
     }
 
     /// A release its store installs: the store's link opens (`steam://install/440`), if the
@@ -344,7 +344,7 @@ impl Core {
             });
         }
         let link = release.store.clone();
-        crate::running::blocking(self, move |desktop, _| desktop.open_link(&link)).await.map_err(CoreError::Invalid)?;
+        crate::running::open_link(self, link).await.map_err(CoreError::Invalid)?;
         let store = crate::view::system_of(self.kernel(), &release.platform).name;
         tracing::info!(%offer, link = %release.store, "asked the store to install");
         // The store writes its install down a moment later: its progress is read often for now.

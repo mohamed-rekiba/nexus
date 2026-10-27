@@ -22,9 +22,9 @@ use crate::guard::guarded;
 use crate::resolve::{dependency_ids, resolve};
 use crate::themes::DataThemeLoader;
 use crate::{
-    Archives, Clock, CoreError, CoreResult, Desktop, DirStorage, EventBus, GroupTree, Hardware, HttpTransport,
-    LoadError, Network, NoArchives, NoDesktop, NoHardware, NoNetwork, NoTorrents, NoVpn, ProcessSpawner, ProcessTree,
-    TokioClock, TokioSpawner, Torrents,
+    Archives, Clock, CoreError, CoreResult, DirStorage, EventBus, GroupTree, Hardware, HttpTransport, LoadError,
+    LoginSession, Network, NoArchives, NoHardware, NoLoginSession, NoNetwork, NoOpener, NoTorrents, NoVpn, NoWindows,
+    Opener, ProcessSpawner, ProcessTree, TokioClock, TokioSpawner, Torrents, Windows,
 };
 
 /// Settings for one run of the host.
@@ -155,7 +155,9 @@ pub struct KernelBuilder {
     http: Arc<dyn HttpTransport>,
     spawner: Arc<dyn ProcessSpawner>,
     processes: Arc<dyn ProcessTree>,
-    desktop: Arc<dyn Desktop>,
+    windows: Arc<dyn Windows>,
+    login_session: Arc<dyn LoginSession>,
+    opener: Arc<dyn Opener>,
     hardware: Arc<dyn Hardware>,
     torrents: Arc<dyn Torrents>,
     network: Arc<dyn Network>,
@@ -173,7 +175,9 @@ impl KernelBuilder {
             http: Arc::new(NoNetwork),
             spawner: Arc::new(TokioSpawner),
             processes: Arc::new(GroupTree),
-            desktop: Arc::new(NoDesktop),
+            windows: Arc::new(NoWindows),
+            login_session: Arc::new(NoLoginSession),
+            opener: Arc::new(NoOpener),
             hardware: Arc::new(NoHardware),
             torrents: Arc::new(NoTorrents),
             network: Arc::new(NoVpn),
@@ -255,8 +259,20 @@ impl KernelBuilder {
     }
 
     /// The desktop's windows, to bring a game or the launcher to the front.
-    pub fn desktop(mut self, desktop: Arc<dyn Desktop>) -> Self {
-        self.desktop = desktop;
+    pub fn windows(mut self, windows: Arc<dyn Windows>) -> Self {
+        self.windows = windows;
+        self
+    }
+
+    /// The player's login session: start at login, and installing the launcher's package.
+    pub fn login_session(mut self, login_session: Arc<dyn LoginSession>) -> Self {
+        self.login_session = login_session;
+        self
+    }
+
+    /// The system's opener, for the links a plugin opens.
+    pub fn opener(mut self, opener: Arc<dyn Opener>) -> Self {
+        self.opener = opener;
         self
     }
 
@@ -378,7 +394,9 @@ struct Inner {
     http: Arc<dyn HttpTransport>,
     spawner: Arc<dyn ProcessSpawner>,
     processes: Arc<dyn ProcessTree>,
-    desktop: Arc<dyn Desktop>,
+    windows: Arc<dyn Windows>,
+    login_session: Arc<dyn LoginSession>,
+    opener: Arc<dyn Opener>,
     hardware: Arc<dyn Hardware>,
     torrents: Arc<dyn Torrents>,
     /// The VPNs: the port the app plugged in, until a system plugin provides them.
@@ -410,7 +428,9 @@ impl Kernel {
             http,
             spawner,
             processes,
-            desktop,
+            windows,
+            login_session,
+            opener,
             hardware,
             torrents,
             network,
@@ -519,7 +539,9 @@ impl Kernel {
                 http,
                 spawner,
                 processes,
-                desktop,
+                windows,
+                login_session,
+                opener,
                 hardware,
                 torrents,
                 network: crate::vpn::NetworkSource::new(network),
@@ -563,8 +585,16 @@ impl Kernel {
         &self.inner.processes
     }
 
-    pub(crate) fn desktop(&self) -> &Arc<dyn Desktop> {
-        &self.inner.desktop
+    pub(crate) fn windows(&self) -> &Arc<dyn Windows> {
+        &self.inner.windows
+    }
+
+    pub(crate) fn login_session(&self) -> &Arc<dyn LoginSession> {
+        &self.inner.login_session
+    }
+
+    pub(crate) fn opener(&self) -> &Arc<dyn Opener> {
+        &self.inner.opener
     }
 
     pub(crate) fn hardware(&self) -> &Arc<dyn Hardware> {

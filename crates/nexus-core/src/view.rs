@@ -1651,7 +1651,7 @@ fn settings_vm(core: &Core, state: &AppState) -> SettingsVm {
         return_on_exit: core.return_on_exit_on(),
         auto_update: core.auto_update_on(),
         scale: core.scale(),
-        can_start_at_login: kernel.desktop().can_start_at_login(),
+        can_start_at_login: kernel.login_session().can_start_at_login(),
         start_at_login: core.start_at_login_on(),
         start_at_login_error: state.login_error.clone().unwrap_or_default(),
         vpn: vpn_vm(core, state),

@@ -1088,7 +1088,7 @@ impl Core {
                 Ok(())
             }
             Command::SetStartAtLogin(on) => {
-                let desktop = self.inner.kernel.desktop().clone();
+                let desktop = self.inner.kernel.login_session().clone();
                 if !desktop.can_start_at_login() {
                     return Err(CoreError::Invalid("this build can't start when you log in".into()));
                 }
@@ -1837,9 +1837,7 @@ impl Core {
                 });
             }
             let opening = link.clone();
-            crate::running::blocking(self, move |desktop, _| desktop.open_link(&opening))
-                .await
-                .map_err(CoreError::Invalid)?;
+            crate::running::open_link(self, opening).await.map_err(CoreError::Invalid)?;
             let store = crate::view::system_of(&self.inner.kernel, &platform).name;
             tracing::info!(%game, %link, "asked the store to uninstall");
             self.notice(format!("{store} is uninstalling {title}: it leaves your Library when it's done"));

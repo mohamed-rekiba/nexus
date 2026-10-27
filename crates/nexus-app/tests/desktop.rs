@@ -18,12 +18,18 @@ mod desktop;
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
-use desktop::SystemDesktop;
-use nexus_core::{Desktop, Front};
+use desktop::{SystemLoginSession, SystemWindows};
+use nexus_core::{Front, LoginSession, Windows};
 use slint::winit_030::winit;
 
 /// Set in a helper: it opens a window, and hides it after this many milliseconds (0: never).
 const HELPER: &str = "NEXUS_DESKTOP_HELPER_HIDE_MS";
+
+/// The system's windows and login session, as the app plugs them in.
+struct SystemDesktop {
+    windows: SystemWindows,
+    session: SystemLoginSession,
+}
 
 /// One test: it gets the system's desktop.
 type Test = fn(&SystemDesktop) -> Outcome;
@@ -76,7 +82,7 @@ fn window_of(desktop: &SystemDesktop, helper: &Helper) -> Result<(), Outcome> {
     let id = helper.id();
     let mut answer = None;
     until(Duration::from_secs(20), || {
-        answer = desktop.has_window(&[id]);
+        answer = desktop.windows.has_window(&[id]);
         answer == Some(true)
     });
     match answer {
@@ -87,7 +93,7 @@ fn window_of(desktop: &SystemDesktop, helper: &Helper) -> Result<(), Outcome> {
 }
 
 fn in_front(desktop: &SystemDesktop, id: u32) -> bool {
-    desktop.front() == Front::Other(id)
+    desktop.windows.front() == Front::Other(id)
 }
 
 fn a_window_shown_comes_to_the_front(desktop: &SystemDesktop) -> Outcome {
@@ -95,16 +101,16 @@ fn a_window_shown_comes_to_the_front(desktop: &SystemDesktop) -> Outcome {
     if let Err(outcome) = window_of(desktop, &a).and_then(|()| window_of(desktop, &b)) {
         return outcome;
     }
-    if desktop.front() == Front::Unknown {
+    if desktop.windows.front() == Front::Unknown {
         return Outcome::Skip("the desktop doesn't say which window is in front".into());
     }
     for helper in [&a, &b, &a] {
         let id = helper.id();
-        if !desktop.show_game(&[id]) {
+        if !desktop.windows.show_game(&[id]) {
             return Outcome::Fail(format!("show_game({id}) said no"));
         }
         if !until(Duration::from_secs(5), || in_front(desktop, id)) {
-            let why = format!("helper {id} isn't in front: {:?} is", desktop.front());
+            let why = format!("helper {id} isn't in front: {:?} is", desktop.windows.front());
             // Windows decides who may take the front; a runner's session can refuse it.
             if cfg!(windows) {
                 return Outcome::Skip(format!("Windows didn't let the window come to the front here: {why}"));
@@ -121,7 +127,7 @@ fn a_window_that_closed_is_gone_while_its_program_runs(desktop: &SystemDesktop) 
         return outcome;
     }
     let id = helper.id();
-    if !until(Duration::from_secs(10), || desktop.has_window(&[id]) == Some(false)) {
+    if !until(Duration::from_secs(10), || desktop.windows.has_window(&[id]) == Some(false)) {
         return Outcome::Fail(format!("helper {id} still has a window after it hid it"));
     }
     if !helper.running() {
@@ -152,19 +158,19 @@ fn login_entry() -> bool {
 fn start_at_login_writes_the_system_s_entry_and_takes_it_out(desktop: &SystemDesktop) -> Outcome {
     let before = login_entry();
     let outcome = (|| {
-        desktop.start_at_login(true).map_err(|e| format!("on: {e}"))?;
+        desktop.session.start_at_login(true).map_err(|e| format!("on: {e}"))?;
         if !login_entry() {
             return Err("on, but the entry isn't there".to_owned());
         }
-        desktop.start_at_login(false).map_err(|e| format!("off: {e}"))?;
+        desktop.session.start_at_login(false).map_err(|e| format!("off: {e}"))?;
         if login_entry() {
             return Err("off, but the entry is still there".to_owned());
         }
         // Off again: an entry that is gone already is fine.
-        desktop.start_at_login(false).map_err(|e| format!("off again: {e}"))
+        desktop.session.start_at_login(false).map_err(|e| format!("off again: {e}"))
     })();
     if before {
-        let _ = desktop.start_at_login(true);
+        let _ = desktop.session.start_at_login(true);
     }
     match outcome {
         Ok(()) => Outcome::Pass,
@@ -181,8 +187,11 @@ fn main() {
         println!("SKIPPED: set NEXUS_DESKTOP_TESTS=1 to test the desktop adapter (it opens windows)");
         return;
     }
-    let desktop = SystemDesktop { raise: Box::new(|| {}), login: std::env::current_exe().ok() };
-    if let Some(problem) = desktop.problem() {
+    let desktop = SystemDesktop {
+        windows: SystemWindows { raise: Box::new(|| {}) },
+        session: SystemLoginSession { login: std::env::current_exe().ok() },
+    };
+    if let Some(problem) = desktop.windows.problem() {
         println!("the desktop says: {problem}");
     }
     let tests: [(&str, Test); 3] = [

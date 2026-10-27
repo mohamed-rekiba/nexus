@@ -388,7 +388,7 @@ async fn install_asks_steam_to_install_the_game_and_downloads_nothing() {
     assert_eq!(release.store, "Steam", "its Game Hub says Steam installs it");
 
     s.test.core.dispatch(Command::DownloadRelease { offer: key, release: release.id, folder: None }).await.unwrap();
-    assert_eq!(s.test.desktop.links(), ["steam://install/440"]);
+    assert_eq!(s.test.opener.links(), ["steam://install/440"]);
     assert!(s.test.core.view().downloads.jobs.is_empty(), "nothing downloads");
     let notices = s.test.core.view().notices;
     assert!(notices.iter().any(|n| n.contains("Steam is installing Team Fortress 2")), "{notices:?}");
@@ -471,7 +471,7 @@ async fn uninstall_asks_steam_to_uninstall_its_game() {
     let dota: GameKey = "emu-steam:570".parse().unwrap();
     s.test.core.dispatch(Command::OpenGame(dota.clone())).await.unwrap();
     s.test.core.dispatch(Command::UninstallGame(dota)).await.unwrap();
-    assert_eq!(s.test.desktop.links(), ["steam://uninstall/570"]);
+    assert_eq!(s.test.opener.links(), ["steam://uninstall/570"]);
     assert!(s.root.path().join("steamapps/common/dota 2 beta").is_dir(), "Steam removes it, not Nexus");
     let notices = s.test.core.view().notices;
     assert!(notices.iter().any(|n| n.contains("Steam is uninstalling Dota 2")), "{notices:?}");
@@ -533,7 +533,7 @@ async fn steam_s_install_shows_in_downloads_until_the_game_is_installed() {
         .dispatch(Command::Torrent { id: card.id.clone(), action: nexus_core::TorrentAction::OpenStore })
         .await
         .unwrap();
-    assert_eq!(s.test.desktop.links(), ["steam://open/downloads"]);
+    assert_eq!(s.test.opener.links(), ["steam://open/downloads"]);
 
     // Downloaded: Steam writes it into place.
     installing_tf2(s.library.path(), 1026 | (1 << 21), 1000, 500);

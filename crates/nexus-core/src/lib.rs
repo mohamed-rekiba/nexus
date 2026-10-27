@@ -48,10 +48,11 @@ pub use error::{CoreError, CoreResult, LoadError};
 pub use kernel::{BootReport, HostConfig, Kernel, KernelBuilder, Loader, Origin, PluginInfo, PluginStatus, Rejection};
 pub use ports::{ArchiveError, Escape};
 pub use ports::{
-    ArchiveKind, Archives, Body, Clock, Desktop, Front, Gpu, GroupTree, Hardware, HttpTransport, Network, NoArchives,
-    NoDesktop, NoHardware, NoNetwork, NoTorrents, NoVpn, Opened, PackageError, PackageManager, ProcessExit,
-    ProcessHandle, ProcessSpawner, ProcessTree, SEED_UPLOAD_LIMIT, SpawnCommand, Specs, TokioClock, TokioSpawner,
-    TorrentFile, TorrentInfo, TorrentPhase, TorrentStart, TorrentStatus, Torrents, UnpackProgress, Vpn,
+    ArchiveKind, Archives, Body, Clock, Front, Gpu, GroupTree, Hardware, HttpTransport, LoginSession, Network,
+    NoArchives, NoHardware, NoLoginSession, NoNetwork, NoOpener, NoTorrents, NoVpn, NoWindows, Opened, Opener,
+    PackageError, PackageManager, ProcessExit, ProcessHandle, ProcessSpawner, ProcessTree, SEED_UPLOAD_LIMIT,
+    SpawnCommand, Specs, TokioClock, TokioSpawner, TorrentFile, TorrentInfo, TorrentPhase, TorrentStart, TorrentStatus,
+    Torrents, UnpackProgress, Vpn, Windows,
 };
 pub use storage::DirStorage;
 pub use themes::{DataTheme, DirFiles};

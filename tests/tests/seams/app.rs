@@ -678,7 +678,7 @@ async fn a_started_game_comes_to_the_front_and_the_launcher_comes_back_when_it_c
     let (_, process) = play(&t).await;
 
     until(&t, "the game is in front", || t.core.game_in_front()).await;
-    assert_eq!(t.desktop.shown(), [Shown::Game(process.id)]);
+    assert_eq!(t.windows.shown(), [Shown::Game(process.id)]);
     let running = t.core.view().running.unwrap();
     assert_eq!(running.state, "running", "its window showed");
     assert!(running.in_front);
@@ -686,7 +686,7 @@ async fn a_started_game_comes_to_the_front_and_the_launcher_comes_back_when_it_c
     process.exit(0);
     closed(&mut events).await;
 
-    assert_eq!(t.desktop.shown().last(), Some(&Shown::Launcher));
+    assert_eq!(t.windows.shown().last(), Some(&Shown::Launcher));
     assert!(!t.core.game_in_front());
     assert_eq!(process.signals(), [Signal::Kill], "what the game left running stops with it");
 }
@@ -695,16 +695,16 @@ async fn a_started_game_comes_to_the_front_and_the_launcher_comes_back_when_it_c
 async fn a_game_whose_window_closed_is_stopped_and_the_launcher_comes_back() {
     let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
     // On macOS a program can keep running after its last window closed.
-    t.desktop.windows_end_games();
+    t.windows.windows_end_games();
     let mut events = t.core.events();
     let (_, process) = play(&t).await;
     until(&t, "the game is in front", || t.core.game_in_front()).await;
 
-    t.desktop.no_windows();
+    t.windows.no_windows();
     closed(&mut events).await;
 
     assert_eq!(process.signals().first(), Some(&Signal::Terminate), "asked to close, as Stop does");
-    assert_eq!(t.desktop.shown().last(), Some(&Shown::Launcher));
+    assert_eq!(t.windows.shown().last(), Some(&Shown::Launcher));
     assert!(t.core.view().notices.is_empty(), "the player closed it: no crash notice");
 }
 
@@ -715,7 +715,7 @@ async fn a_launcher_s_own_window_closing_before_the_game_s_opens_leaves_the_game
     until(&t, "the launcher's menu is in front", || t.core.game_in_front()).await;
 
     // The player picked "Start Game": the menu closed, and the game takes a while to open.
-    t.desktop.no_windows();
+    t.windows.no_windows();
     t.clock.advance(Duration::from_millis(300)).await;
     assert!(process.signals().is_empty(), "nothing stopped it: {:?}", process.signals());
     assert!(t.core.view().running.is_some(), "the game keeps its session");
@@ -749,9 +749,9 @@ async fn the_window_in_front_is_the_game_s_when_a_process_below_it_owns_it() {
     let sandboxed = process.id + 1000;
     t.processes.add(process.id, sandboxed);
 
-    t.desktop.set_front(Front::Launcher);
+    t.windows.set_front(Front::Launcher);
     until(&t, "the launcher is in front", || !t.core.game_in_front()).await;
-    t.desktop.set_front(Front::Other(sandboxed));
+    t.windows.set_front(Front::Other(sandboxed));
     until(&t, "the sandboxed window counts as the game's", || t.core.game_in_front()).await;
 }
 
@@ -790,7 +790,7 @@ async fn a_game_another_program_starts_runs_until_its_own_process_ends() {
 
     t.clock.advance(Duration::from_millis(700)).await;
     assert!(t.core.view().running.is_some(), "the game runs, past the time a game has to show");
-    until(&t, "the game's window came to the front", || t.desktop.shown().contains(&Shown::Game(game))).await;
+    until(&t, "the game's window came to the front", || t.windows.shown().contains(&Shown::Game(game))).await;
 
     t.processes.exit(game + 1);
     t.processes.exit(game);
@@ -861,7 +861,7 @@ async fn the_same_game_already_running_before_play_isn_t_taken_for_the_one_play_
     t.clock.advance(Duration::from_millis(100)).await;
     let game = 9000;
     t.processes.start(game, STEAM_GAME);
-    until(&t, "the new game came to the front", || t.desktop.shown().contains(&Shown::Game(game))).await;
+    until(&t, "the new game came to the front", || t.windows.shown().contains(&Shown::Game(game))).await;
 
     t.processes.exit(8000);
     t.clock.advance(Duration::from_millis(200)).await;
@@ -892,7 +892,7 @@ async fn only_the_newest_three_notices_stay_and_each_closes_on_its_own() {
 #[tokio::test]
 async fn what_the_desktop_is_missing_is_said_once_a_run() {
     let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
-    t.desktop.set_problem("Install xdotool so games come to the front and the launcher comes back");
+    t.windows.set_problem("Install xdotool so games come to the front and the launcher comes back");
     let mut events = t.core.events();
     let (_, process) = play(&t).await;
     until(&t, "the notice shows", || !t.core.view().notices.is_empty()).await;
@@ -1007,8 +1007,8 @@ async fn two_presses_of_play_start_one_game() {
 async fn a_desktop_that_can_t_say_leaves_the_pad_to_the_game() {
     let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
     // As on Windows: no window can be shown, and the front is unknown.
-    t.desktop.set_front(Front::Unknown);
-    t.desktop.no_windows();
+    t.windows.set_front(Front::Unknown);
+    t.windows.no_windows();
     let (_, _process) = play(&t).await;
 
     until(&t, "the launcher stops waiting", || t.core.view().running.is_some_and(|r| r.state == "running")).await;
@@ -1021,8 +1021,8 @@ async fn a_desktop_that_can_t_say_leaves_the_pad_to_the_game() {
 async fn a_game_whose_window_the_desktop_never_saw_is_not_taken_for_closed() {
     let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
     // As on Wayland: xdotool sees no window of a game that draws to a Wayland surface.
-    t.desktop.set_front(Front::Unknown);
-    t.desktop.no_windows();
+    t.windows.set_front(Front::Unknown);
+    t.windows.no_windows();
     let (_, process) = play(&t).await;
     until(&t, "the launcher stops waiting", || t.core.view().running.is_some_and(|r| r.state == "running")).await;
 
@@ -1048,13 +1048,13 @@ async fn the_log_of_the_run_before_is_kept() {
 #[tokio::test]
 async fn the_running_screen_says_starting_until_the_game_shows_a_window() {
     let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
-    t.desktop.no_windows();
+    t.windows.no_windows();
     let (_, _process) = play(&t).await;
 
     assert_eq!(t.core.view().running.unwrap().state, "starting");
     // The host's show_timeout is short in tests: the launcher stops waiting.
     until(&t, "the launcher stops waiting", || t.core.view().running.is_some_and(|r| r.state == "running")).await;
-    assert!(t.desktop.shown().is_empty());
+    assert!(t.windows.shown().is_empty());
     assert!(!t.core.game_in_front(), "no window came to the front");
 }
 
@@ -1070,7 +1070,7 @@ async fn the_launcher_stays_behind_a_closed_game_when_the_player_says_so() {
     process.exit(0);
     closed(&mut events).await;
 
-    assert!(!t.desktop.shown().contains(&Shown::Launcher), "{:?}", t.desktop.shown());
+    assert!(!t.windows.shown().contains(&Shown::Launcher), "{:?}", t.windows.shown());
 }
 
 #[tokio::test]
@@ -1081,11 +1081,11 @@ async fn the_ps_button_goes_from_the_game_to_the_launcher_and_back() {
 
     t.core.dispatch(Command::ToggleFocus).await.unwrap();
     assert!(!t.core.game_in_front());
-    assert_eq!(t.desktop.shown().last(), Some(&Shown::Launcher));
+    assert_eq!(t.windows.shown().last(), Some(&Shown::Launcher));
 
     t.core.dispatch(Command::ToggleFocus).await.unwrap();
     assert!(t.core.game_in_front());
-    assert_eq!(t.desktop.shown().last(), Some(&Shown::Game(process.id)));
+    assert_eq!(t.windows.shown().last(), Some(&Shown::Game(process.id)));
 }
 
 #[tokio::test]
@@ -1095,19 +1095,19 @@ async fn the_desktop_says_which_window_is_in_front() {
     until(&t, "the game is in front", || t.core.game_in_front()).await;
 
     // The player clicked the launcher's window.
-    t.desktop.set_front(Front::Launcher);
+    t.windows.set_front(Front::Launcher);
     until(&t, "the launcher is in front", || !t.core.game_in_front()).await;
 
     // Resume, from the Running screen.
     t.core.dispatch(Command::ShowGame(session)).await.unwrap();
     assert!(t.core.game_in_front());
-    assert_eq!(t.desktop.shown().last(), Some(&Shown::Game(process.id)));
+    assert_eq!(t.windows.shown().last(), Some(&Shown::Game(process.id)));
 }
 
 #[tokio::test]
 async fn without_the_desktop_s_answer_the_last_window_shown_counts() {
     let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
-    t.desktop.set_front(Front::Unknown);
+    t.windows.set_front(Front::Unknown);
     let (_, _process) = play(&t).await;
 
     until(&t, "the game is in front", || t.core.game_in_front()).await;
@@ -1534,9 +1534,9 @@ async fn start_at_login_goes_through_the_desktop_and_stays_off_when_the_system_r
     assert!(t.core.view().settings.start_at_login);
     t.core.dispatch(Command::SetStartAtLogin(false)).await.unwrap();
     assert!(!t.core.view().settings.start_at_login);
-    assert_eq!(t.desktop.logins(), [true, false]);
+    assert_eq!(t.login_session.logins(), [true, false]);
 
-    t.desktop.refuse_login("reg.exe: access is denied");
+    t.login_session.refuse_login("reg.exe: access is denied");
     let refused = t.core.dispatch(Command::SetStartAtLogin(true)).await.unwrap_err();
     assert!(refused.to_string().contains("access is denied"), "{refused}");
     let settings = t.core.view().settings;
@@ -1547,11 +1547,11 @@ async fn start_at_login_goes_through_the_desktop_and_stays_off_when_the_system_r
 #[tokio::test]
 async fn start_at_login_is_hidden_when_this_build_isn_t_installed() {
     let host = FakeHost::new();
-    host.desktop().no_login();
+    host.login_session().no_login();
     let t = host.boot_core().await;
     assert!(!t.core.view().settings.can_start_at_login);
     assert!(t.core.dispatch(Command::SetStartAtLogin(true)).await.is_err());
-    assert!(t.desktop.logins().is_empty(), "the desktop is not asked");
+    assert!(t.login_session.logins().is_empty(), "the desktop is not asked");
 }
 
 #[tokio::test]
@@ -1619,7 +1619,7 @@ async fn the_game_watcher_reads_the_desktop_every_round_on_the_clock_and_not_bet
     t.until(Area::Sessions, |core| core.game_in_front()).await;
 
     // A round just saw the game in front: the next is `watch_every` away.
-    t.desktop.set_front(Front::Launcher);
+    t.windows.set_front(Front::Launcher);
     t.clock.advance(WATCH_EVERY / 2).await;
     assert!(t.core.game_in_front(), "not read between two rounds");
     t.clock.advance(WATCH_EVERY / 2 + Duration::from_millis(3)).await;

@@ -809,7 +809,7 @@ fn shoot_splash(window: &MinimalSoftwareWindow, out: &Path) {
         host.dispatch(Command::SetThemeOption { key: "direction".into(), value: direction.into() });
         host.dispatch(Command::RefreshLibrary);
         // No window yet: the game stays "starting", behind the splash.
-        host.test.desktop.no_windows();
+        host.test.windows.no_windows();
         host.dispatch(Command::Launch("emu-a:G0".parse().unwrap()));
         host.load_images();
         shoot(window, &out.join(format!("{prefix}-splash-keys.png")));

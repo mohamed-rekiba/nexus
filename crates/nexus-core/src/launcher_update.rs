@@ -254,7 +254,7 @@ pub(crate) async fn update(core: &Core, version: &str, asset: &Asset, install: I
     // Nothing for the next start: the package manager puts it in now.
     let updates = core.kernel().host().data_dir.join("updates");
     let _ = tokio::fs::remove_file(updates.join("ready.json")).await;
-    let desktop = core.kernel().desktop().clone();
+    let desktop = core.kernel().login_session().clone();
     let file = staged.file.clone();
     let done = tokio::task::spawn_blocking(move || desktop.install_package(&file, manager))
         .await

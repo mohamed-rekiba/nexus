@@ -16,7 +16,7 @@ use nexus_api::SessionId;
 use tokio::sync::oneshot;
 
 use crate::changes::Area;
-use crate::{Core, Desktop, Front, ProcessExit, ProcessHandle, ProcessTree};
+use crate::{Core, Front, ProcessExit, ProcessHandle, ProcessTree, Windows};
 
 /// How often the module looks for a started game's window, until it shows.
 const SHOW_EVERY: Duration = Duration::from_millis(250);
@@ -40,12 +40,12 @@ enum Followed {
     Found(u32),
 }
 
-/// Runs a desktop or process-list call, which may run a helper program, off the async threads.
+/// Runs a window or process-list call, which may run a helper program, off the async threads.
 pub(crate) async fn blocking<T: Send + 'static>(
     core: &Core,
-    call: impl FnOnce(&dyn Desktop, &dyn ProcessTree) -> T + Send + 'static,
+    call: impl FnOnce(&dyn Windows, &dyn ProcessTree) -> T + Send + 'static,
 ) -> T {
-    let (desktop, processes) = (core.kernel().desktop().clone(), core.kernel().processes().clone());
+    let (desktop, processes) = (core.kernel().windows().clone(), core.kernel().processes().clone());
     tokio::task::spawn_blocking(move || call(desktop.as_ref(), processes.as_ref()))
         .await
         .expect("desktop and process calls don't panic")
@@ -323,6 +323,13 @@ async fn close(core: &Core, followed: &mut Followed, root: Option<u32>, mut firs
 /// The desktop's call for the launcher's window, off the async threads.
 pub(crate) async fn show_launcher(core: &Core) {
     blocking(core, |desktop, _| desktop.show_launcher()).await;
+}
+
+/// Opens `link` with the system's opener, off the async threads. The caller checked it against
+/// the plugin's `permissions.links`.
+pub(crate) async fn open_link(core: &Core, link: String) -> Result<(), String> {
+    let opener = core.kernel().opener().clone();
+    tokio::task::spawn_blocking(move || opener.open_link(&link)).await.expect("the opener doesn't panic")
 }
 
 /// Why the desktop can't do its part, once a run: a missing tool or permission.

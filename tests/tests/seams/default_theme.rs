@@ -866,7 +866,7 @@ fn the_launch_splash_shows_the_emulator_s_keys_and_takes_every_key_but_back_and_
     host.dispatch(Command::RefreshLibrary);
     // Play from the game's Game Hub. No window yet: the game stays "starting", behind the splash.
     host.dispatch(Command::OpenGame("emu-a:G0".parse().unwrap()));
-    host.test.desktop.no_windows();
+    host.test.windows.no_windows();
     host.dispatch(Command::Launch("emu-a:G0".parse().unwrap()));
     settle(&mut host);
     assert_eq!(values(&host, "launch-key"), ["Cross J", "Circle L"]);
@@ -1051,7 +1051,7 @@ fn the_launch_splash_names_the_controller_or_the_keyboard() {
     host.ui.start().unwrap();
     host.dispatch(Command::RefreshLibrary);
     // No window yet: the game stays "starting", behind the splash.
-    host.test.desktop.no_windows();
+    host.test.windows.no_windows();
     host.dispatch(Command::Launch("emu-a:G0".parse().unwrap()));
     settle(&mut host);
     assert_eq!(values(&host, "launch-input"), ["Keyboard: the keys are on the emu-a page"]);
@@ -1849,10 +1849,10 @@ fn settings_start_the_launcher_at_login_and_say_why_the_system_refused() {
     settle(&mut host);
     press(&mut host, "start-at-login", "off");
     assert_eq!(values(&host, "start-at-login"), ["on"]);
-    assert_eq!(host.test.desktop.logins(), [true]);
+    assert_eq!(host.test.login_session.logins(), [true]);
 
     // The app logs a command that fails; the row says why.
-    host.test.desktop.refuse_login("reg.exe: access is denied");
+    host.test.login_session.refuse_login("reg.exe: access is denied");
     host.first("start-at-login").invoke_accessible_default_action();
     let asked: Vec<_> = host.requests.borrow_mut().drain(..).collect();
     for request in asked {
@@ -1870,7 +1870,7 @@ fn settings_start_the_launcher_at_login_and_say_why_the_system_refused() {
 #[test]
 fn settings_hide_start_at_login_for_a_build_that_isn_t_installed() {
     let mut host = composed(|h| {
-        h.desktop().no_login();
+        h.login_session().no_login();
         h
     });
     host.ui.start().unwrap();

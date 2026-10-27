@@ -166,7 +166,7 @@ async fn a_packaged_install_hands_the_checked_package_to_its_package_manager_the
         (Install::Arch, "nexus-9.9.9-1-x86_64.pkg.tar.zst", PackageManager::Pacman),
     ] {
         let (host, _) = packaged(install, file).await;
-        let desktop = host.desktop().clone();
+        let login_session = host.login_session().clone();
         let t = host.boot_core().await;
         t.core.kernel().config().set(&["app", "update_repo"], "owner/nexus".into()).unwrap();
 
@@ -178,7 +178,7 @@ async fn a_packaged_install_hands_the_checked_package_to_its_package_manager_the
         let update = t.core.view().settings.launcher_update;
         assert_eq!(update.state, "installed", "{}", update.text);
         assert!(update.text.contains("restart"), "{}", update.text);
-        let handed = desktop.packages();
+        let handed = login_session.packages();
         assert_eq!(handed.len(), 1, "{install:?}");
         assert_eq!(handed[0].1, manager);
         assert_eq!(handed[0].0.file_name().unwrap(), file);
@@ -193,7 +193,7 @@ async fn a_closed_password_prompt_or_a_package_manager_error_leaves_this_version
         (PackageError::Failed("nothing provides libmpv".into()), "nothing provides libmpv"),
     ] {
         let (host, _) = packaged(Install::Rpm, "nexus-9.9.9.x86_64.rpm").await;
-        host.desktop().refuse_packages(refusal);
+        host.login_session().refuse_packages(refusal);
         let t = host.boot_core().await;
         t.core.kernel().config().set(&["app", "update_repo"], "owner/nexus".into()).unwrap();
 
@@ -212,14 +212,14 @@ async fn a_package_that_doesn_t_match_its_sha256_never_reaches_the_package_manag
     let url = "https://github.com/owner/nexus/releases/download/v9.9.9/nexus_9.9.9_amd64.deb";
     host.http().serve(url, b"altered".to_vec());
     host.http().serve(LATEST, manifest_for(Install::Deb, "9.9.9", url, &"0".repeat(64)));
-    let desktop = host.desktop().clone();
+    let login_session = host.login_session().clone();
     let t = host.boot_core().await;
     t.core.kernel().config().set(&["app", "update_repo"], "owner/nexus".into()).unwrap();
 
     t.core.dispatch(Command::CheckLauncherUpdate).await.unwrap();
     t.core.dispatch(Command::DownloadLauncherUpdate).await.unwrap();
     assert_eq!(t.core.view().settings.launcher_update.state, "failed");
-    assert!(desktop.packages().is_empty());
+    assert!(login_session.packages().is_empty());
 }
 
 #[tokio::test]
@@ -228,7 +228,7 @@ async fn an_installer_install_keeps_the_new_installer_for_the_next_start() {
     let url = "https://github.com/owner/nexus/releases/download/v9.9.9/nexus-windows-x86_64-setup.exe";
     let sha = host.http().serve(url, b"an installer".to_vec());
     host.http().serve(LATEST, manifest_for(Install::WindowsSetup, "9.9.9", url, &sha));
-    let desktop = host.desktop().clone();
+    let login_session = host.login_session().clone();
     let t = host.boot_core().await;
     t.core.kernel().config().set(&["app", "update_repo"], "owner/nexus".into()).unwrap();
 
@@ -238,7 +238,7 @@ async fn an_installer_install_keeps_the_new_installer_for_the_next_start() {
     assert_eq!(t.core.view().settings.launcher_update.state, "ready");
     let kept = staged(t.data_dir()).expect("kept for the next start");
     assert_eq!(kept.file.file_name().unwrap(), "nexus-windows-x86_64-setup.exe");
-    assert!(desktop.packages().is_empty());
+    assert!(login_session.packages().is_empty());
 }
 
 #[tokio::test]

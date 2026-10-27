@@ -19,7 +19,10 @@ mod torrents;
 
 pub use archives::FakeArchives;
 pub use clock::FakeClock;
-pub use fakes::{FIRST_PID, FakeDesktop, FakeHttp, FakeProcessTree, FakeSpawner, Gate, Shown, Signal, SpawnedProcess};
+pub use fakes::{
+    FIRST_PID, FakeHttp, FakeLoginSession, FakeOpener, FakeProcessTree, FakeSpawner, FakeWindows, Gate, Shown, Signal,
+    SpawnedProcess,
+};
 pub use host::{FakeHost, TestCore, TestHost, until};
 pub use network::FakeNetwork;
 pub use spans::SpanRecorder;
