@@ -93,8 +93,8 @@ Steam** opens Steam's install dialog, and Downloads shows its progress. **Uninst
 game's menu, asks Steam, which confirms in its own dialog. A game you never put in a collection is
 not in those files, so it is not listed.
 
-Steam may ask to sign in or update before the game starts. Nexus waits for the game for
-`hand_over_timeout` (2 minutes), then says it did not start. Steam Input may take the controller
+Steam may ask to sign in or update before the game starts. Nexus waits about 2 minutes for the
+game, then says it did not start. Steam Input may take the controller
 while Steam runs: turn it off for a game in Steam if both read the controller.
 
 ### gamescope, for old games

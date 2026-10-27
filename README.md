@@ -277,8 +277,8 @@ The full list is in [docs/development.md](docs/development.md#ci).
 - "This PC" judges by the numbers in each emulator's manifest, not by how fast a game runs here.
 - "Download only through a VPN" is not available on Windows, because the torrent library
   (librqbit) cannot bind a connection to an interface there.
-- Nexus finds a game that another program starts (Steam) only on Linux and macOS: the process search
-  is Unix only.
+- Following a game that another program starts, as Steam does, needs the Unix process search, so it
+  does not work on Windows.
 - On a Wayland desktop other than KDE Plasma, a native Wayland game does not come to the front by
   itself.
 - On macOS, without the Accessibility permission a notice says so, and the controller stays with
