@@ -275,42 +275,42 @@ boot menu. On a PC with an NVIDIA card it gets NVIDIA's driver by itself. It nee
 that starts with UEFI.
 
 <!-- x-release-please-start-version -->
-The current version is Nexus OS 0.3.0:
-[its release](https://github.com/mohamed-rekiba/nexus/releases/tag/nexus-os-v0.3.0).
+The current version is Nexus OS 0.4.0:
+[its release](https://github.com/mohamed-rekiba/nexus/releases/tag/nexus-os-v0.4.0).
 All Nexus OS releases are tagged `nexus-os-v…` on the
 [releases page](https://github.com/mohamed-rekiba/nexus/releases?q=nexus-os).
 
-The release has one ISO, named with its version (`nexus-os-x86_64-0.3.0.iso`), to write to a USB
+The release has one ISO, named with its version (`nexus-os-x86_64-0.4.0.iso`), to write to a USB
 stick of 8 GB or more. When the ISO is over 2 GiB it comes in parts
-(`nexus-os-x86_64-0.3.0.iso.part-aa`, `-ab`, …): download them all and join them into the ISO.
+(`nexus-os-x86_64-0.4.0.iso.part-aa`, `-ab`, …): download them all and join them into the ISO.
 
 - Linux and macOS:
 
   ```sh
-  v=0.3.0
+  v=0.4.0
   cat nexus-os-x86_64-$v.iso.part-* > nexus-os-x86_64-$v.iso
   ```
 
 - Windows (Command Prompt), naming every part in order:
 
   ```bat
-  set v=0.3.0
+  set v=0.4.0
   copy /b nexus-os-x86_64-%v%.iso.part-aa + nexus-os-x86_64-%v%.iso.part-ab nexus-os-x86_64-%v%.iso
   ```
 
-Then check the ISO against `nexus-os-x86_64-0.3.0.iso.sha256` (each part also has its own
+Then check the ISO against `nexus-os-x86_64-0.4.0.iso.sha256` (each part also has its own
 `.sha256`):
 
-- Linux: `sha256sum -c nexus-os-x86_64-0.3.0.iso.sha256`
-- macOS: `shasum -a 256 -c nexus-os-x86_64-0.3.0.iso.sha256`
-- Windows (PowerShell): `Get-FileHash nexus-os-x86_64-0.3.0.iso`, and compare it with the file's
+- Linux: `sha256sum -c nexus-os-x86_64-0.4.0.iso.sha256`
+- macOS: `shasum -a 256 -c nexus-os-x86_64-0.4.0.iso.sha256`
+- Windows (PowerShell): `Get-FileHash nexus-os-x86_64-0.4.0.iso`, and compare it with the file's
   first word.
 
 To try the ISO in a virtual machine first, on Fedora, from a clone of this repository:
 
 ```sh
 sudo dnf install qemu-kvm qemu-img edk2-ovmf
-os/run-vm.sh path/to/nexus-os-x86_64-0.3.0.iso
+os/run-vm.sh path/to/nexus-os-x86_64-0.4.0.iso
 ```
 
 <!-- x-release-please-end -->
