@@ -1,0 +1,110 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 710" width="1100" height="710" font-family="system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
+  <title id="t">Nexus application overview</title>
+  <desc id="d">The player uses a theme, which sends commands to the Nexus core and draws the view the core builds. The core holds the library, downloads, installs, launches, updates and settings. It works with plugins: emulators, services and a system plugin. Both the core and the plugins reach the outside world through adapters in the app: windows, processes, BitTorrent, archives, HTTP, hardware, audio and gamepads. Outside are the emulator programs and games, catalogs and stores on the web, the game and package folders, and the operating system.</desc>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#2563a8"/></marker>
+    <marker id="b" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#2563a8"/></marker>
+    <style>
+      .box { fill: #eaf5ee; stroke: #2f7d4f; stroke-width: 1.5; }
+      .grp { fill: #f7fbf8; stroke: #2f7d4f; stroke-width: 1.5; }
+      .ext { fill: #f4f4f4; stroke: #777; stroke-width: 1.5; }
+      .name { font-size: 15px; font-weight: 600; fill: #17361f; }
+      .sub { font-size: 12.5px; fill: #3d5a47; }
+      .gname { font-size: 14px; font-weight: 700; fill: #17361f; letter-spacing: 0.02em; }
+      .ename { font-size: 14px; font-weight: 600; fill: #333; }
+      .esub { font-size: 12.5px; fill: #555; }
+      .flow { stroke: #2563a8; stroke-width: 1.6; fill: none; }
+      .lab { font-size: 12px; fill: #2563a8; }
+      .cap { font-size: 14px; fill: #333; }
+      .leg { font-size: 12.5px; fill: #444; }
+    </style>
+  </defs>
+  <rect width="1100" height="710" fill="#ffffff"/>
+
+  <!-- player -->
+  <rect class="ext" x="380" y="14" width="340" height="52" rx="12"/>
+  <text class="ename" x="550" y="38" text-anchor="middle">The player</text>
+  <text class="esub" x="550" y="56" text-anchor="middle">controller, keyboard or pointer</text>
+
+  <!-- theme -->
+  <rect class="box" x="300" y="96" width="500" height="68" rx="12"/>
+  <text class="name" x="550" y="124" text-anchor="middle">Theme (Slint markup)</text>
+  <text class="sub" x="550" y="144" text-anchor="middle">draws the screens, can be swapped, holds no state</text>
+
+  <!-- core -->
+  <rect class="grp" x="40" y="204" width="620" height="226" rx="14"/>
+  <text class="gname" x="58" y="228">NEXUS CORE · no UI toolkit</text>
+  <rect class="box" x="58" y="244" width="186" height="64" rx="10"/>
+  <text class="name" x="151" y="270" text-anchor="middle">Library</text>
+  <text class="sub" x="151" y="290" text-anchor="middle">games, art, facts</text>
+  <rect class="box" x="258" y="244" width="186" height="64" rx="10"/>
+  <text class="name" x="351" y="270" text-anchor="middle">Downloads</text>
+  <text class="sub" x="351" y="290" text-anchor="middle">plans, BitTorrent, VPN rule</text>
+  <rect class="box" x="458" y="244" width="186" height="64" rx="10"/>
+  <text class="name" x="551" y="270" text-anchor="middle">Installs</text>
+  <text class="sub" x="551" y="290" text-anchor="middle">unpack, install, clean up</text>
+  <rect class="box" x="58" y="326" width="186" height="64" rx="10"/>
+  <text class="name" x="151" y="352" text-anchor="middle">Launches</text>
+  <text class="sub" x="151" y="372" text-anchor="middle">start, watch, stop, play time</text>
+  <rect class="box" x="258" y="326" width="186" height="64" rx="10"/>
+  <text class="name" x="351" y="352" text-anchor="middle">Updates</text>
+  <text class="sub" x="351" y="372" text-anchor="middle">emulator builds, Nexus</text>
+  <rect class="box" x="458" y="326" width="186" height="64" rx="10"/>
+  <text class="name" x="551" y="352" text-anchor="middle">Settings and view</text>
+  <text class="sub" x="551" y="372" text-anchor="middle">preferences, view::build</text>
+  <text class="sub" x="58" y="418">Kernel: loads plugins, guards every call into them</text>
+
+  <!-- plugins -->
+  <rect class="grp" x="700" y="204" width="360" height="226" rx="14"/>
+  <text class="gname" x="718" y="228">PLUGINS · built into Nexus</text>
+  <rect class="box" x="718" y="244" width="324" height="52" rx="10"/>
+  <text class="name" x="880" y="266" text-anchor="middle">Emulators</text>
+  <text class="sub" x="880" y="285" text-anchor="middle">KytyPS5 · shadPS4 · PC · Steam</text>
+  <rect class="box" x="718" y="306" width="324" height="52" rx="10"/>
+  <text class="name" x="880" y="328" text-anchor="middle">Services</text>
+  <text class="sub" x="880" y="347" text-anchor="middle">Game Catalog · PlayStation Store</text>
+  <rect class="box" x="718" y="368" width="324" height="52" rx="10"/>
+  <text class="name" x="880" y="390" text-anchor="middle">System</text>
+  <text class="sub" x="880" y="409" text-anchor="middle">network, VPN, Bluetooth, sound, power</text>
+
+  <!-- adapters -->
+  <rect class="grp" x="40" y="476" width="1020" height="64" rx="14"/>
+  <text class="gname" x="58" y="500">ADAPTERS · how Nexus reaches the system</text>
+  <text class="sub" x="58" y="523">windows and focus · processes · BitTorrent · archives · HTTP · hardware · audio · gamepads · trailers</text>
+
+  <!-- outside world -->
+  <rect class="ext" x="40" y="590" width="240" height="56" rx="12"/>
+  <text class="ename" x="160" y="613" text-anchor="middle">Emulators and games</text>
+  <text class="esub" x="160" y="632" text-anchor="middle">programs Nexus starts</text>
+  <rect class="ext" x="305" y="590" width="240" height="56" rx="12"/>
+  <text class="ename" x="425" y="613" text-anchor="middle">Catalogs and stores</text>
+  <text class="esub" x="425" y="632" text-anchor="middle">on the web, and torrents</text>
+  <rect class="ext" x="570" y="590" width="240" height="56" rx="12"/>
+  <text class="ename" x="690" y="613" text-anchor="middle">Your folders</text>
+  <text class="esub" x="690" y="632" text-anchor="middle">game and package folders</text>
+  <rect class="ext" x="835" y="590" width="225" height="56" rx="12"/>
+  <text class="ename" x="947" y="613" text-anchor="middle">The operating system</text>
+  <text class="esub" x="947" y="632" text-anchor="middle">windows, network, devices</text>
+
+  <!-- flows -->
+  <path class="flow" marker-end="url(#a)" d="M550 66 L550 96"/>
+  <path class="flow" marker-end="url(#a)" d="M470 164 L470 204"/>
+  <path class="flow" marker-end="url(#a)" d="M630 204 L630 164"/>
+  <text class="lab" x="458" y="188" text-anchor="end">commands</text>
+  <text class="lab" x="642" y="188">the view</text>
+  <path class="flow" marker-start="url(#b)" marker-end="url(#a)" d="M660 317 L700 317"/>
+  <path class="flow" marker-end="url(#a)" d="M350 430 L350 476"/>
+  <path class="flow" marker-end="url(#a)" d="M880 430 L880 476"/>
+  <path class="flow" marker-end="url(#a)" d="M160 540 L160 590"/>
+  <path class="flow" marker-end="url(#a)" d="M425 540 L425 590"/>
+  <path class="flow" marker-end="url(#a)" d="M690 540 L690 590"/>
+  <path class="flow" marker-end="url(#a)" d="M947 540 L947 590"/>
+
+  <text class="cap" x="550" y="676" text-anchor="middle">The core has no emulator code and no UI toolkit. Plugins supply the emulators, and adapters reach the system.</text>
+  <rect x="40" y="690" width="14" height="14" rx="3" class="box"/>
+  <text class="leg" x="62" y="702">part of Nexus</text>
+  <rect x="190" y="690" width="14" height="14" rx="3" class="ext"/>
+  <text class="leg" x="212" y="702">outside Nexus</text>
+  <line x1="340" y1="697" x2="368" y2="697" class="flow" marker-end="url(#a)"/>
+  <text class="leg" x="376" y="702">a request or an answer</text>
+</svg>

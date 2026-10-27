@@ -1,20 +1,27 @@
 # Nexus
 
-Nexus is a game launcher that helps players run their games from one screen made for a TV and a
-controller. It runs on Linux, macOS and Windows. Nexus starts games through plugins: each emulator
-or game source is a plugin, and each look is a theme that changes the whole layout, not only the
-colors.
+Nexus is a game launcher that helps players run games from different sources in one place, on a
+screen made for a TV and a controller. It runs on Linux, macOS and Windows.
 
-These plugins ship with Nexus today:
+Nexus does not hard-code any emulator. Each way of finding and starting games is a plugin, and each
+look is a theme that changes the whole layout, not only the colors. The core handles what every
+game needs: the library, downloads, installs, launching, controller input and updates.
 
-- **PS5**, with [KytyPS5](https://github.com/KytyPS5/KytyPS5).
-- **PS4**, with [shadPS4](https://github.com/shadps4-emu/shadPS4).
-- **PC games**, natively or through Wine or Proton.
-- **Steam games**, on Linux.
+### Supported today
 
-They are the ones supported so far, not the limit of the design. Support for another emulator or
-game source is another plugin, written against `nexus-api` and built into Nexus (a plugin found on
-disk can only be a theme): see [docs/plugins.md](docs/plugins.md).
+| Plugin | What it plays | Systems |
+|---|---|---|
+| PS5 | PS5 games, with [KytyPS5](https://github.com/KytyPS5/KytyPS5) | Linux, macOS, Windows |
+| PS4 | PS4 games, with [shadPS4](https://github.com/shadps4-emu/shadPS4) | Linux, macOS, Windows |
+| PC | PC games, natively or through Wine or Proton | Linux, macOS, Windows |
+| Steam | The games Steam installed, played through Steam | Linux |
+
+Two service plugins add data: the Game Catalog (the releases each console's catalog offers) and the
+PlayStation Store (official art and details for PS4 and PS5 games).
+
+These are the sources supported so far, not the limit of the design. Support for another emulator
+or game source is another plugin, written against `nexus-api` and built into Nexus (a plugin found
+on disk can only be a theme): see [docs/plugins.md](docs/plugins.md).
 
 | Home | Library |
 |---|---|
@@ -31,32 +38,31 @@ games. The tests also render every screen offscreen with made-up games: run
 
 ## The problem
 
-Emulators are separate programs. Each has its own builds, which change often, its own settings and
-its own command line. PC games sit in folders, and the Windows ones need Wine or Proton set up.
-None of this is made for a couch: you need a keyboard and a mouse to start a game.
+Games come from many places. Emulators are separate programs, each with its own builds, which
+change often, its own settings and its own command line. PC games sit in folders, and the Windows
+ones need Wine or Proton set up. Other games live in a store's client. None of this is made for a
+couch: you need a keyboard and a mouse to start a game.
 
 Nexus puts all of it behind one library that works with a controller. It finds your games, shows
-their art and facts, downloads and updates the official emulator builds, installs games, starts
-them, and brings itself back when they close.
+their art and facts, downloads and updates the emulator builds, installs games, starts them, and
+brings itself back when they close.
 
 ## What it does
 
-- **Library.** It finds your PS5, PS4 and PC games in your game folders, and on Linux the games
-  that Steam installed. Home is a row of games over the selected game's art. Library is a grid
-  with search, sort and filters.
+- **Library.** Every plugin lists its games into one library. Home is a row of games over the
+  selected game's art. Library is a grid with search, sort and filters.
 - **Game Hub.** One game's page: official art, facts, the community's compatibility result, your
   own result, how it should run on this PC, screenshots and the trailer.
-- **Catalog and Downloads.** The games each console's catalog offers. Nexus downloads a release by
-  BitTorrent into your packages folder, and can bind the download to your VPN and pause it when the
-  VPN drops.
-- **Installs.** Unsigned PS5 packages, exFAT disc images, PS4 fake packages and PC releases install
-  into your game folders, with progress in Downloads.
-- **Emulators.** Nexus downloads and updates the official KytyPS5 and shadPS4 builds, or runs a
-  build of your own.
+- **Catalog and Downloads.** The games a catalog offers. Nexus downloads a release by BitTorrent
+  into your packages folder, and can bind the download to your VPN and pause it when the VPN drops.
+- **Installs.** Each plugin installs the packages it understands, with progress in Downloads.
+  Today that is unsigned PS5 packages, exFAT disc images, PS4 fake packages and PC releases.
+- **Emulator builds.** For an emulator plugin, Nexus downloads and updates the official builds, or
+  runs a build of your own. Today that is KytyPS5 and shadPS4.
 - **Themes.** Switching the theme keeps the screen you are on, your selection, the downloads and a
   running game.
 - **Controller.** Every screen works with a gamepad, a keyboard or a pointer.
-- **Updates.** Nexus updates its emulators, and itself from its GitHub releases.
+- **Updates.** Nexus updates its emulator builds, and itself from its GitHub releases.
 
 ## Does it work?
 
@@ -205,17 +211,29 @@ and Secure Boot on, a blue "MOK management" screen appears once at the next rest
 is in [os/README.md](os/README.md), and what Nexus and the OS expect from each other is in
 [docs/nexus-os.md](docs/nexus-os.md).
 
-## How it is built
+## How it works
+
+![Nexus application overview](docs/images/overview.svg)
+
+The overview: the player uses a theme, which sends commands to the Nexus core and draws the view the
+core builds. The core works with plugins for the emulators, the catalogs and the machine, and
+reaches the system through adapters.
 
 Nexus is one binary built from crates in one Cargo workspace. A small core runs plugins. Emulator,
 service and system plugins are compiled in and reach the host only through `nexus-api`. Themes are
-data that the UI host loads, swaps and rolls back. Data flows one way: the UI sends a command, the
-core changes its state, and the UI draws a new view of that state.
+data that the UI host loads, swaps and rolls back.
+
+### How data moves
+
+Data flows one way: the UI sends a command, the core changes its state, and the UI draws a new view
+of that state.
 
 ![How data flows one way](docs/images/data-flow.svg)
 
 The flow: a theme sends a command, the core changes its state and signals a change, the shell
 renders, and the view builds from one snapshot and binds back into the theme.
+
+### Project structure
 
 | Path | What it is |
 |---|---|
@@ -230,6 +248,17 @@ renders, and the view builds from one snapshot and binds back into the theme.
 | `assets/`, `scripts/`, `packaging/`, `os/` | The bundled catalogs and icons, the check and packaging scripts, the Linux, macOS and Windows packaging, and Nexus OS. |
 
 [docs/architecture.md](docs/architecture.md) explains each part.
+
+### Plugins
+
+A plugin has a kind (`emulator`, `service`, `theme` or `system`) and declares the capabilities it
+provides. Each capability is one trait in `nexus-api`: `catalog` lists a plugin's games, `launcher`
+starts one, `downloader` and `installer` manage an emulator's builds, `game_installer` installs a
+package, `releases` offers a catalog's games, and `metadata` adds art and details. The core joins
+the answers of every plugin that provides the same capability. The kind governs privileges only.
+The capability table and the plugin lifecycle are in
+[docs/architecture.md](docs/architecture.md#plugins), and the guide to writing one is
+[docs/plugins.md](docs/plugins.md).
 
 ### Decisions and trade-offs
 
@@ -270,10 +299,10 @@ The full list is in [docs/development.md](docs/development.md#ci).
 
 ## Limitations
 
-- Retail PS5 packages do not install, because the console holds their keys. Only unsigned PS5
-  packages, exFAT images and PS4 fake packages do.
-- Steam games play on Linux only, and the Nexus OS image does not include Steam.
-- Nexus finds PC games in the game folders you set, and Steam's games through the Steam plugin.
+Limits of the design:
+
+- Nexus runs no third-party code. A plugin found on disk can only be a theme, so a new emulator
+  needs a Nexus build that includes its plugin.
 - "This PC" judges by the numbers in each emulator's manifest, not by how fast a game runs here.
 - "Download only through a VPN" is not available on Windows, because the torrent library
   (librqbit) cannot bind a connection to an interface there.
@@ -284,7 +313,14 @@ The full list is in [docs/development.md](docs/development.md#ci).
 - On macOS, without the Accessibility permission a notice says so, and the controller stays with
   the game until the PS button.
 - The catalog refresh brings an existing catalog up to date. It cannot build one from nothing.
-- Nexus runs no third-party code. Third-party plugins are themes only.
+
+Limits of the plugins that ship today:
+
+- Retail PS5 packages do not install, because the console holds their keys. Only unsigned PS5
+  packages, exFAT images and PS4 fake packages do.
+- Steam games play on Linux only, and the Nexus OS image does not include Steam.
+- The PC plugin finds games in the game folders you set. Steam's games come through the Steam
+  plugin.
 
 ## Documentation
 

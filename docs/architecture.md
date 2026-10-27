@@ -10,6 +10,14 @@ want the mental model first. Every name below is a name in the code; search for 
 - Archives and PC games: [reference/archives-and-pc-games.md](reference/archives-and-pc-games.md).
 - The words this page uses: [../GLOSSARY.md](../GLOSSARY.md).
 
+## Overview
+
+![Nexus application overview](images/overview.svg)
+
+The overview: the player uses a theme, which sends commands to the Nexus core and draws the view the
+core builds. The core works with plugins and reaches the system through adapters. The sections below
+take each part in turn.
+
 ## Shape
 
 Nexus is one binary built from crates in one Cargo workspace (`Cargo.toml`). The crate graph is
