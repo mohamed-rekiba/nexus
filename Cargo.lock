@@ -1603,6 +1603,7 @@ name = "emulator-kit"
 version = "0.6.2"
 dependencies = [
  "nexus-api",
+ "nexus-testkit",
  "oozextract",
  "tempfile",
  "tokio",
@@ -5593,6 +5594,7 @@ name = "release-catalog"
 version = "0.6.2"
 dependencies = [
  "nexus-api",
+ "nexus-testkit",
  "tokio",
 ]
 

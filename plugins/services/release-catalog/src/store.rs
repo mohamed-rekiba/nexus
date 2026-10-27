@@ -127,55 +127,17 @@ impl CopyStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeMap;
-    use std::sync::Mutex;
 
-    use nexus_api::{LogLevel, LogSink, PluginError, PluginResult, async_trait};
-
-    /// Files in memory, by path.
-    #[derive(Default)]
-    struct Memory(Mutex<BTreeMap<String, Vec<u8>>>);
-
-    #[async_trait]
-    impl Storage for Memory {
-        async fn read(&self, path: &RelPath) -> PluginResult<Vec<u8>> {
-            let files = self.0.lock().unwrap();
-            files.get(path.as_str()).cloned().ok_or_else(|| PluginError::NotFound(path.as_str().to_owned()))
-        }
-        async fn write(&self, path: &RelPath, data: &[u8]) -> PluginResult<()> {
-            self.0.lock().unwrap().insert(path.as_str().to_owned(), data.to_vec());
-            Ok(())
-        }
-        async fn write_at(&self, _path: &RelPath, _offset: u64, _data: &[u8]) -> PluginResult<()> {
-            unimplemented!("the copies are written whole")
-        }
-        async fn exists(&self, path: &RelPath) -> PluginResult<bool> {
-            Ok(self.0.lock().unwrap().contains_key(path.as_str()))
-        }
-        async fn list(&self, dir: &RelPath) -> PluginResult<Vec<String>> {
-            let prefix = format!("{}/", dir.as_str());
-            let files = self.0.lock().unwrap();
-            Ok(files.keys().filter_map(|k| k.strip_prefix(&prefix)).map(str::to_owned).collect())
-        }
-        async fn remove(&self, path: &RelPath) -> PluginResult<()> {
-            self.0.lock().unwrap().remove(path.as_str());
-            Ok(())
-        }
-        async fn rename(&self, _from: &RelPath, _to: &RelPath) -> PluginResult<()> {
-            unimplemented!("the copies are not renamed")
-        }
-        async fn set_executable(&self, _path: &RelPath) -> PluginResult<()> {
-            unimplemented!("the copies are not programs")
-        }
-    }
+    use nexus_api::{LogLevel, LogSink};
+    use nexus_testkit::MemStorage;
 
     struct Quiet;
     impl LogSink for Quiet {
         fn log(&self, _level: LogLevel, _message: &str) {}
     }
 
-    fn store(folder: &'static str) -> (Arc<Memory>, CopyStore) {
-        let memory = Arc::new(Memory::default());
+    fn store(folder: &'static str) -> (Arc<MemStorage>, CopyStore) {
+        let memory = Arc::new(MemStorage::default());
         (memory.clone(), CopyStore::new(memory, Logger::new(Arc::new(Quiet)), folder))
     }
 
@@ -203,7 +165,7 @@ mod tests {
             let named: String = store.latest("ps5").await.unwrap();
             assert_eq!(store.read("ps5", &named).await.unwrap(), b"one");
             store.write("ps5", CopyFile::Kept, &named).await.unwrap();
-            assert_eq!(memory.0.lock().unwrap().len(), 2, "the copy and its meta file");
+            assert_eq!(memory.paths().len(), 2, "the copy and its meta file");
             assert!(store.read("ps5", "ps5.meta.json").await.is_err(), "not a copy");
         });
     }
@@ -224,10 +186,10 @@ mod tests {
         runtime().block_on(async {
             let (memory, store) = store("refreshed");
             for file in ["ps5.1.json", "ps5.2.json", "ps5.3.json", "ps5.meta.json", "ps4.1.json"] {
-                memory.0.lock().unwrap().insert(format!("refreshed/{file}"), Vec::new());
+                memory.put(&format!("refreshed/{file}"), &[]);
             }
             store.prune("ps5", &["ps5.3.json", "ps5.2.json"]).await;
-            let left: Vec<String> = memory.0.lock().unwrap().keys().cloned().collect();
+            let left = memory.paths();
             assert_eq!(
                 left,
                 ["refreshed/ps4.1.json", "refreshed/ps5.2.json", "refreshed/ps5.3.json", "refreshed/ps5.meta.json"]

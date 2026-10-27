@@ -8,6 +8,7 @@
 //! - [`FakeSystem`]: a system plugin over a machine the test controls.
 //! - [`ThemeDriver`]: drives a shown theme through its accessible labels, keys and clicks.
 //! - [`FakePlatform`]: the app shell's platform, which records each call.
+//! - [`MemStorage`]: a plugin's data folder in memory.
 //! - [`contract`]: checks any emulator plugin against the capability contracts.
 
 mod archives;
@@ -21,6 +22,7 @@ mod host;
 mod network;
 mod platform;
 mod spans;
+mod storage;
 mod stub;
 mod system;
 mod torrents;
@@ -38,6 +40,7 @@ pub use host::{FakeHost, TestCore, TestHost, until};
 pub use network::FakeNetwork;
 pub use platform::{FakePlatform, PlatformCall};
 pub use spans::SpanRecorder;
+pub use storage::MemStorage;
 pub use stub::StubPlugin;
 pub use system::{FakeMachine, FakeSystem};
 pub use torrents::FakeTorrents;
