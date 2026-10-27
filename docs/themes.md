@@ -1,15 +1,14 @@
 # Writing a theme
 
-A theme is a folder of data: `theme.toml`, Slint markup and asset files. It owns the whole
-presentation, from layout and navigation to components, colors and motion. It has no code: the
-host compiles its markup with the Slint interpreter, binds the core's view models to it, and
-carries out what it asks for. Switching themes keeps the screen, the selection, downloads and
-running games.
+A theme is a folder of Slint markup, a `theme.toml` manifest and optional images, fonts and
+sounds. It has no code. The launcher compiles the markup at run time, fills the `Vm` global
+with the view, and carries out what the theme asks for through the `Host` global.
 
-The default theme, `plugins/themes/default`, has every screen, component and token, and every
-other theme extends it. Its behaviour, screen by screen, is in
-[docs/reference/default-theme.md](reference/default-theme.md). The design is in
-[docs/architecture.md](architecture.md), and code plugins are in [docs/plugins.md](plugins.md).
+This page is for people who write a theme. It uses the words in [the glossary](../GLOSSARY.md).
+The built-in theme is described in [reference/default-theme.md](reference/default-theme.md).
+How plugins load is in [plugins.md](plugins.md). How to build and test the repository is in
+[development.md](development.md). How the crates fit together is in
+[architecture.md](architecture.md). The project overview is in [../README.md](../README.md).
 
 ## Contents
 
@@ -18,36 +17,76 @@ other theme extends it. Its behaviour, screen by screen, is in
 - [The manifest](#the-manifest)
 - [Inheritance](#inheritance)
 - [The contract](#the-contract)
+- [Host: what to ask for](#host-what-to-ask-for)
+- [Torrent actions](#torrent-actions)
+- [Slots](#slots)
 - [Tokens and options](#tokens-and-options)
 - [Responsive layout](#responsive-layout)
 - [Input modes and pad keys](#input-modes-and-pad-keys)
-- [Images](#images)
-- [Fonts and sounds](#fonts-and-sounds)
+- [Images, fonts and sounds](#images-fonts-and-sounds)
 - [Rules the host checks](#rules-the-host-checks)
 - [Dev mode](#dev-mode)
+- [Switching and rollback](#switching-and-rollback)
 - [Testing a theme](#testing-a-theme)
+- [Limitations](#limitations)
 
 ## Where themes live
 
-The host finds a theme in any folder it discovers: each subfolder with a `theme.toml` is one
-theme (`KernelBuilder::discover` in `crates/nexus-core/src/kernel.rs`). The app discovers:
+The default theme is built into the binary. Its files are in `plugins/themes/default/theme/`,
+and `plugins/themes/default/build.rs` embeds them. Its id is `default` (`BASE_THEME` in
+`crates/nexus-ui-host/src/host.rs`). Every other theme is a folder on disk.
 
-- the folder given with `--extensions <folder>`, by default `<data-dir>/extensions`;
-- `extensions/` next to the binary, which the release package ships empty.
+The launcher looks in two places for theme folders. Both are set in
+`crates/nexus-app/src/args.rs` and used in `crates/nexus-app/src/main.rs`.
 
-`<data-dir>` is `~/.local/share/nexus` on Linux, `~/Library/Application Support/nexus` on
-macOS and `%APPDATA%\nexus` on Windows, or `--data-dir`. A theme from a folder is third-party
-and must declare `[runtime] type = "data"`. `--safe-mode` loads none of them and shows the
-default theme.
+- The extensions folder. It is the `--extensions <path>` argument, or `<data-dir>/extensions`
+  when you give none. `--data-dir <path>` sets the data folder.
+- The bundled folder, `extensions` next to the binary (`bundled_extensions`). In a macOS app
+  bundle it is `../Resources/extensions` when that exists.
 
-The default theme is different: it is a built-in crate whose `build.rs` embeds every file under
-`plugins/themes/default/theme/` into the binary (`theme_default::DefaultTheme`).
+Each subfolder that holds a `theme.toml` (or a `plugin.toml`) is read as a plugin
+(`Kernel::discover` in `crates/nexus-core/src/kernel.rs`). Folders are read in sorted order. When
+two plugins have the same id, the first one found stays and the other is rejected as a
+duplicate. The built-in plugins are registered before the folders, so no folder can replace
+`default`.
+
+The host rejects a theme at boot, with a warning in the log, when any of these hold
+(`validate` in `kernel.rs`):
+
+- The manifest does not read.
+- `host_api` does not match the host's API version.
+- `platforms` is set and does not include this system. Themes cannot be turned off, so the
+  host leaves them out.
+- The theme is third-party and its `[runtime] type` is not `"data"`.
+- `capabilities` is anything other than `["theme"]`.
+- `extends` names a theme that is not installed, or the chain of `extends` loops
+  (`crates/nexus-core/src/resolve.rs`: `extends` counts as a load dependency).
+
+`ThemeSet::from_core` (`crates/nexus-ui-host/src/themes.rs`) then collects the themes that
+loaded. A theme whose `[theme]` section does not read is skipped with a warning.
+
+`--safe-mode` loads built-in plugins and the default theme only. It rejects every folder theme.
+
+`crates/nexus-core/src/themes.rs` has the loader. `DirFiles` reads a folder and refuses any
+path that leaves it, symlinks included. `DataTheme` is a theme with no code.
 
 ## A minimal theme
 
-The test theme `tests/fixtures/themes/fixture-grid` is a complete example. It replaces Home with
-a grid, replaces the card, ships its own `shell.slint`, and takes everything else from
-`default`. Its `theme.toml`, trimmed:
+The smallest real theme in the repository is `tests/fixtures/themes/fixture-grid/`. It extends
+`default`, so it ships only the files it changes: a shell, one screen, one component and two
+fonts.
+
+```text
+fixture-grid/
+  theme.toml
+  shell.slint
+  screens/home.slint
+  components/card.slint
+  fonts/Inter-Regular.ttf
+  fonts/Inter-Bold.ttf
+```
+
+Its manifest, `tests/fixtures/themes/fixture-grid/theme.toml`:
 
 ```toml
 id = "fixture-grid"
@@ -80,9 +119,18 @@ fonts = ["fonts/Inter-Regular.ttf", "fonts/Inter-Bold.ttf"]
 
 [theme.tokens]
 color-bg = "#eef0f4"
+color-surface = "#ffffff"
+color-surface-raised = "#e3e7ef"
+color-text = "#151821"
+color-text-muted = "#5b6475"
 color-accent = "#0f9d8a"
+color-on-accent = "#ffffff"
+color-focus = "#0f9d8a"
+color-overlay = "#151821b3"
+shadow-color = "#1518212e"
 font-family = "Inter"
 radius-m = 10
+radius-l = 14
 
 [theme.options.accent]
 label = "Accent color"
@@ -91,31 +139,62 @@ token = "color-accent"
 default = "#0f9d8a"
 ```
 
-Its folder:
+Its shell, `tests/fixtures/themes/fixture-grid/shell.slint`, shortened. The shell exports
+`Shell`, which inherits `Window`. It picks the screen to show from `Vm.screen`.
 
-```text
-fixture-grid/
-  theme.toml
-  shell.slint
-  screens/home.slint
-  components/card.slint
-  fonts/Inter-Regular.ttf
-  fonts/Inter-Bold.ttf
+```slint
+import { Vm, Host, Json } from "types.slint";
+import { Tokens } from "tokens.slint";
+import { Button } from "components/button.slint";
+import { ListItem } from "components/list-item.slint";
+import { HomeScreen } from "screens/home.slint";
+// ... one import for each other screen the shell shows
+
+component NavItem inherits ListItem {
+    in property <string> screen;
+    // The screen's route, the name the command Navigate takes.
+    in property <string> route;
+    selected: Vm.screen == self.screen;
+    clicked => { Host.command("Navigate", Json.text(self.route)); }
+}
+
+// A desktop layout: a sidebar of sections next to the current screen.
+export component Shell inherits Window {
+    title: "Launcher";
+    background: Tokens.color-bg;
+    preferred-width: 1280px;
+    preferred-height: 760px;
+    default-font-family: Tokens.font-family;
+    default-font-size: Tokens.font-size-m;
+
+    // ... a sidebar of NavItem, then:
+    if Vm.screen == "home" || Vm.screen == "running" : HomeScreen { width: parent.width; height: parent.height; }
+    // ... one line for each other screen
+}
 ```
 
-Its Home screen (`screens/home.slint`), shortened:
+Its Home screen, `tests/fixtures/themes/fixture-grid/screens/home.slint`, shortened:
 
 ```slint
 import { Vm, Host, Json } from "../types.slint";
 import { Tokens } from "../tokens.slint";
 import { Card } from "../components/card.slint";
 
+// The library as a grid. Narrow windows get two columns.
 export component HomeScreen inherits Rectangle {
-    property <int> columns: Vm.viewport.breakpoint == "compact" ? 2 : 4;
+    property <length> gap: Tokens.space-m;
+    property <length> cell: 168px;
+    property <length> row-height: 268px;
+    property <int> columns: Vm.viewport.breakpoint == "compact"
+        ? 2
+        : Math.max(3, Math.floor((self.width - 2 * Tokens.space-l + root.gap) / (root.cell + root.gap)));
+
     Flickable {
+        viewport-height: Math.ceil(Vm.home.games.length / root.columns) * (root.row-height + root.gap);
         for game[i] in Vm.home.games : Card {
-            x: Math.mod(i, root.columns) * 184px;
-            y: Math.floor(i / root.columns) * 284px;
+            x: Math.mod(i, root.columns) * (root.cell + root.gap);
+            y: Math.floor(i / root.columns) * (root.row-height + root.gap);
+            width: root.cell;
             game: game;
             activated => { Host.command("OpenGame", Json.text(game.key)); }
         }
@@ -123,272 +202,359 @@ export component HomeScreen inherits Rectangle {
 }
 ```
 
-To try a theme in the app:
+Its card, `tests/fixtures/themes/fixture-grid/components/card.slint`, first lines:
 
-```sh
-cargo run -p nexus-app -- --extensions path/to/folder --theme fixture-grid --dev --windowed
+```slint
+import { GameCard } from "../types.slint";
+import { Tokens } from "../tokens.slint";
+import { SlotBadges } from "slot-badges.slint";
+
+// A tile: the cover fills it, the title sits on a strip at the bottom.
+export component Card inherits Rectangle {
+    in property <GameCard> game;
+    in property <length> cover-height: 200px;
+    callback activated();
+    // ...
+}
 ```
 
-`--theme <id>` shows that theme for this run without saving it. Otherwise pick it under Themes.
+The card imports `slot-badges.slint`, which this theme does not ship. The import resolves in
+the parent theme (see [Inheritance](#inheritance)).
+
+Run it with the `--extensions` argument. Warning: `--extensions` replaces the default
+extensions folder for that run. Themes in `<data-dir>/extensions` do not load.
+
+```sh
+cargo run -p nexus-app -- --extensions tests/fixtures/themes --theme fixture-grid --dev --windowed
+```
+
+`--theme <id>` shows that theme for this run and does not save it. `--dev` reloads the theme
+when a file changes. `--windowed` opens a normal window. Without `--theme`, the player picks the
+theme on the Themes screen.
 
 ## The manifest
 
-`theme.toml` is a plugin manifest (`nexus_api::PluginManifest`, see
-[docs/plugins.md](plugins.md#the-manifest)) with `kind = "theme"`, `capabilities = ["theme"]`
-and a `[theme]` section. The section parses into `ThemeSection`
-(`crates/nexus-ui-api/src/theme.rs`); unknown keys are errors.
+`theme.toml` holds the plugin fields and a `[theme]` section. The plugin fields are read as a
+plugin manifest (`PluginManifest` in `crates/nexus-api/src/manifest.rs`). A folder theme needs
+these:
+
+| Key | Value |
+|---|---|
+| `id` | The theme's id. |
+| `kind` | `"theme"`. |
+| `name` | The name the player sees. |
+| `version` | A semver version. |
+| `host_api` | A semver range of the host API. |
+| `capabilities` | `["theme"]`, and nothing else. |
+| `[runtime] type` | `"data"`. |
+
+The `[theme]` section is `ThemeSection` in `crates/nexus-ui-api/src/theme.rs`. An unknown key
+in it is an error (`deny_unknown_fields`).
 
 | Key | Meaning |
 |---|---|
-| `ui_api` | The `nexus-ui-api` versions the theme works with, a semver range. Every theme in the chain must match `UI_API_VERSION`, which changes by hand with the contract, not with Nexus's releases. |
-| `extends` | The parent theme's id. What the theme leaves out comes from the parent. |
-| `screens` | The `ScreenId`s this theme defines itself, as kebab-case names. Each needs `screens/<name>.slint`. |
-| `components` | The `ComponentId`s this theme defines itself. Each needs `components/<name>.slint`. |
-| `input` | `pointer`, `gamepad`, `touch`: the input devices it supports, the main one first. |
-| `navigation` | `pointer` (point and click) or `focus` (one focused element, moved with keys or a pad). It describes the theme; the theme's own markup implements it. |
-| `tokens` | Values for design tokens, by name. |
-| `breakpoints` | `[[theme.breakpoints]]`, see [Responsive layout](#responsive-layout). Replaces the parent's list when not empty. |
-| `assets` | `images`, `fonts` and `sounds`, see below. |
-| `options` | Settings the player can change, which set tokens. |
+| `ui_api` | Required. A semver range that must include `UI_API_VERSION` (`0.2.0` in `crates/nexus-ui-api/src/lib.rs`). |
+| `extends` | The parent theme's id. See [Inheritance](#inheritance). |
+| `screens` | The screens this theme defines itself, by id (see below). |
+| `components` | The components this theme defines itself, by id (see below). |
+| `input` | Input modes the theme supports, the main one first: `pointer`, `gamepad` or `touch`. |
+| `navigation` | `pointer` or `focus`. See [Limitations](#limitations). |
+| `tokens` | Design token values. See [Tokens and options](#tokens-and-options). |
+| `breakpoints` | Named window classes. See [Responsive layout](#responsive-layout). |
+| `assets` | `images`, `fonts` and `sounds`. See [Images, fonts and sounds](#images-fonts-and-sounds). |
+| `options` | Settings the player can change. See [Tokens and options](#tokens-and-options). |
 
-The screens (`ScreenId`, in `crates/nexus-ui-api/src/vm.rs`) and the components each file must
-export (`crates/nexus-ui-api/src/contract.rs`):
+A theme can define these screens (`ScreenId` in `crates/nexus-ui-api/src/vm.rs`). Each screen
+file is `screens/<id>.slint` and exports the component in the second column
+(`ScreenId::component`).
 
-| Screen | File | Component |
-|---|---|---|
-| `home` (Home and Library) | `screens/home.slint` | `HomeScreen` |
-| `game-detail` | `screens/game-detail.slint` | `GameDetailScreen` |
-| `catalog` (Catalog and Search) | `screens/catalog.slint` | `CatalogScreen` |
-| `downloads` | `screens/downloads.slint` | `DownloadsScreen` |
-| `settings` | `screens/settings.slint` | `SettingsScreen` |
-| `emulators` | `screens/emulators.slint` | `EmulatorsScreen` |
-| `themes` | `screens/themes.slint` | `ThemesScreen` |
-| `plugin` | `screens/plugin.slint` | `PluginScreen` |
-| `game-settings` | `screens/game-settings.slint` | `GameSettingsScreen` |
-| `running` | `screens/running.slint` | `RunningScreen` |
+| Id | Component |
+|---|---|
+| `home` | `HomeScreen` |
+| `game-detail` | `GameDetailScreen` |
+| `catalog` | `CatalogScreen` |
+| `downloads` | `DownloadsScreen` |
+| `settings` | `SettingsScreen` |
+| `emulators` | `EmulatorsScreen` |
+| `themes` | `ThemesScreen` |
+| `plugin` | `PluginScreen` |
+| `game-settings` | `GameSettingsScreen` |
+| `running` | `RunningScreen` |
 
-| Component | File | Component name |
-|---|---|---|
-| `card` | `components/card.slint` | `Card` |
-| `button` | `components/button.slint` | `Button` |
-| `list-item` | `components/list-item.slint` | `ListItem` |
-| `progress-bar` | `components/progress-bar.slint` | `ProgressBar` |
-| `dialog` | `components/dialog.slint` | `Dialog` |
-| `slot-badges` | `components/slot-badges.slint` | `SlotBadges` |
-| `slot-actions` | `components/slot-actions.slint` | `SlotActions` |
-| `slot-sections` | `components/slot-sections.slint` | `SlotSections` |
+A theme can define these components (`ComponentId` in `crates/nexus-ui-api/src/contract.rs`).
+Each file is `components/<id>.slint` and exports the component in the second column.
 
-`shell.slint` exports `Shell`, which inherits `Window`: the window, and which screen shows for
-`Vm.screen`. A theme may leave it out when a parent has one.
+| Id | Component |
+|---|---|
+| `card` | `Card` |
+| `button` | `Button` |
+| `list-item` | `ListItem` |
+| `progress-bar` | `ProgressBar` |
+| `dialog` | `Dialog` |
+| `slot-badges` | `SlotBadges` |
+| `slot-actions` | `SlotActions` |
+| `slot-sections` | `SlotSections` |
+
+`ThemeManifest::from_plugin` also refuses an image name that is not lowercase letters, digits
+and `-`, starting with a letter.
+
+`ui_api` is checked when the theme is resolved (when it starts or when the player switches to
+it), for the theme and every parent. A mismatch fails with `ThemeError::UiApi`.
 
 ## Inheritance
 
-`extends` builds a chain from the theme up to the root, usually `default`
-(`ThemeSet::chain` in `crates/nexus-ui-host/src/themes.rs`). A missing parent or a cycle refuses
-the theme. The chain is resolved once, at load:
+`extends = "<id>"` makes the theme a child of another theme. A child writes only what differs.
+Every theme chain should end in `default`, but nothing forces it: a theme with no `extends`
+must supply every token and every file its shell imports.
 
-- **Files.** Every `.slint` import goes through the interpreter's file loader, which serves one
-  virtual folder. Each path is looked up in the theme first, then in each parent. So a theme that
-  ships only `components/card.slint` gets its card on every screen of `default` that draws a
-  `Card`. `tests/tests/seams/themes.rs` (`a_child_theme_falls_back_to_its_parent_for_what_it_leaves_out`)
-  checks exactly that.
-- **Tokens, images, fonts, sounds and options** merge, the child winning. Every token must have
-  a value somewhere in the chain.
-- **Breakpoints** come from the nearest theme that lists any; **input** likewise; **navigation**
-  from the nearest theme that sets it.
+`ThemeSet::chain` walks the `extends` links, the theme first. `merge_chain` in
+`crates/nexus-ui-api/src/theme.rs` merges the chain from the root down, so the child wins:
 
-Because a parent's screens use a child's components, a component's interface is a contract.
-The default screens pass a `Card` only `game` and `cover-height`, and handle `activated`, so a
-child's card declares those and may have nothing else. Keep the same properties and callbacks
-when you replace a component.
+| Part | Merge rule |
+|---|---|
+| Tokens | Per name. The child's value replaces the parent's. |
+| Images and sounds | Per name. The child's file replaces the parent's. |
+| Fonts | Added up. Every theme in the chain registers its fonts. |
+| Breakpoints | A child with any breakpoint replaces the parent's whole list. |
+| `input` | The first non-empty list in the chain, the theme first. |
+| `navigation` | The first one set in the chain. |
+| Options | Per name. The child's replaces the parent's. |
+
+Slint files merge by path (`ResolvedTheme::slint_sources`). A file in the child replaces the
+file with the same path in a parent. An import resolves in the child first, then in each
+parent. This is how `components/card.slint` in the fixture imports `slot-badges.slint` and gets
+the default theme's.
+
+`ResolvedTheme::check` runs before compiling:
+
+- No theme in the chain may ship a reserved file (see [The contract](#the-contract)).
+- Every screen and component a theme lists must exist in that theme.
+- Some theme in the chain must have a `shell.slint`.
+
+A screen that a theme does not list still comes from the nearest parent that has the file.
+Every token in `TOKENS` must have a value somewhere in the chain. A missing one fails with
+`ThemeError::Token`, which names it.
 
 ## The contract
 
-The host serves four files in every theme. Import them; never ship a file with these names
-(`RESERVED_FILES`):
+A theme sees four globals. The host serves them as virtual files. A theme imports them and
+never ships its own copy.
 
-| File | Global | What it holds |
+| File | Global | Holds |
 |---|---|---|
-| `types.slint` | `Vm`, `Host`, `Json`, and the structs | The data to show, the callbacks, and the helpers that build a command's args. Fixed: `crates/nexus-ui-api/contract/types.slint`. |
-| `tokens.slint` | `Tokens` | One property per design token, with the merged values. |
-| `assets.slint` | `Assets` | One `image` per name in `[theme.assets.images]`, and `loaded`. |
-| `options.slint` | `Options` | One property per theme option, holding its value. |
+| `types.slint` | `Vm`, `Host`, `Json` | The data, the callbacks, and a helper for JSON text. |
+| `tokens.slint` | `Tokens` | One property per design token. |
+| `assets.slint` | `Assets` | One `image` per name in `[theme.assets.images]`, and a `loaded` bool. |
+| `options.slint` | `Options` | One property per theme option. |
 
-Import with a path relative to the importing file: `"types.slint"` from `shell.slint`,
-`"../types.slint"` from a screen or component.
+These four names are reserved (`RESERVED_FILES` in `crates/nexus-ui-api/src/contract.rs`). A
+theme that ships a file with one of these names fails with `is served by the host; remove it`.
 
-`crates/nexus-ui-api/contract/types.slint` is the reference. Every field has a comment there;
-read it before writing a screen. This section gives the shape.
+`types.slint` is `crates/nexus-ui-api/contract/types.slint`. It is the source of truth for
+every field. It follows the core's view models (`AppView` in
+`crates/nexus-ui-api/src/vm.rs`) field for field, with names in kebab case. A test in
+`crates/nexus-ui-host/src/drift.rs` fails when the two disagree. Read the comments in
+`types.slint` for what each field means. This page does not repeat them.
 
-### Vm: what to show
+`Vm` is read-only for a theme. The host sets it after every change. The main groups are:
 
-`Vm` is a global of `in-out` properties. The host sets them after every change; themes only read
-them. They are the core's view models, `AppView` in `crates/nexus-ui-api/src/vm.rs`, field for
-field with the names kebab-cased: one converter turns them into Slint values
-(`crates/nexus-ui-host/src/values.rs`), and a drift test fails when `types.slint` and the view
-models name other fields. An optional part comes with a `has-` flag, such as `has-detail`. The
-main groups:
-
-| Properties | What they are |
+| Property | Holds |
 |---|---|
-| `screen`, `game`, `can-go-back` | The current screen id, the selected game's key, whether Back goes anywhere |
-| `home` (`Home`) | The games, the selection, `loading`, the games by platform (`groups: [Group]`), and the Library (`library: Library`) |
-| `has-detail`, `detail` (`GameDetail`) | The open game: text, art, slots, compatibility, releases, "This PC", and what it can do |
-| `catalog` (`Library`), `catalog-sources`, `catalog-releases`, `catalog-updated`, `catalog-loading`, `catalog-available`, `catalog-actions`, `catalog-status` | The games the catalogs offer, and the catalog plugins' state and buttons |
-| `downloads` (`[Download]`) | Emulator build downloads |
-| `torrents` (`[Torrent]`), `seed-downloads`, `torrents-downloading`, `torrents-sharing`, `vpn` | The catalogs' downloads, and "Download only through a VPN" |
-| `settings` (`[SettingsPanel]`), `folders` (`[Folder]`), `sounds`, `fullscreen`, `return-on-exit`, `auto-update`, `scale`, `can-start-at-login`, `start-at-login`, `start-at-login-error`, `monitors`, `monitor` | Settings |
-| `themes` (`[ThemeChoice]`), `theme-options` (`[Field]`) | The themes, and the current theme's options as fields |
-| `emulators`, `plugins`, `emulator-plugins`, `theme-plugins`, `has-plugin-page`, `plugin-page` | The plugin lists and the open plugin's page |
-| `boot`, `art-ready` | The boot and Welcome screens |
-| `has-running`, `running` | The running game |
-| `has-install-prompt`, `install-prompt` | "Install the emulator first?" before a first play |
-| `has-result-prompt`, `result-prompt` | "How far did it get?" after a game closes |
-| `notices`, `notice-cards`, `notice-art`, `notice-opens` | Messages for the player, newest last, at most 3 |
-| `hardware`, `launcher-update`, `task`, `clock` | This PC, the launcher's update, background work, the time |
-| `can-play-trailers`, `has-trailer`, `trailer`, `trailer-frame` | The trailer player |
-| `viewport` (`Viewport`) | Window size, scale, size of everything, aspect, breakpoint |
-| `input-mode`, `pad-name` | `pointer`, `gamepad` or `touch`; the controller's name |
-| `system` (`System`) | The machine: `whole-screen`, `nexus-os`, `stick`; the network, Wi-Fi list, sound, Bluetooth and devices, battery, power, Nexus OS's update, the stick's disks, and running jobs. Each part has `*-available` and a `*-reason`. The `System` commands change it. `Host.log-out` ends the Nexus session on a desktop |
-| `pad-key` | True while a controller's button is delivered as a key: a keyboard's keys leave it false |
-| `power-menu` | Goes up by one each time the PS or Xbox button is held with no game running (UI API 0.1.1): a theme opens its power menu when it changes |
+| `screen`, `game`, `can-go-back` | Where the player is. `screen` is one of the screen ids. |
+| `home`, `catalog` | The Library and the Catalog grids (`Library`, `GameCard`). |
+| `detail`, `has-detail` | The Game Hub of the selected game (`GameDetail`). |
+| `downloads`, `torrents` | Emulator downloads, and the catalogs' downloads (`Torrent`). |
+| `settings`, `folders`, `vpn`, `system` | The Settings screen's data. |
+| `themes`, `theme-plugins`, `theme-options` | The Themes screen's data. |
+| `emulators`, `plugins`, `plugin-page` | The plugin screens' data. |
+| `boot`, `art-ready`, `task` | The Welcome and boot screen. |
+| `running`, `has-running` | The running game. |
+| `notices`, `notice-cards` | Notices for the player. |
+| `viewport`, `input-mode`, `pad-key`, `pad-name`, `power-menu`, `clock`, `monitors`, `monitor` | What the host knows about the window and the input. |
 
-Recent additions to know about:
+`Assets` is one `image` property for each image you declare, such as `Assets.logo` in
+`plugins/themes/default/theme/components/boot.slint`:
 
-- `Vm.catalog-available` is true while a plugin that gives release catalogs is turned on.
-  Without one there is no Catalog: the core refuses to open it, and a theme hides the ways to
-  it. The default theme hides Search, and its shoulder buttons skip the Catalog.
-- **A game's actions**, `GameCard.can` and `GameDetail.can` (`GameActions`), are worked out by
-  the core, the same for every game of every plugin, Library or Catalog: draw them, don't work
-  them out. `primary` is the main action: `play` when it is installed (the command `Session` `Launch`;
-  a Catalog game starts the installed game it is), else `get` (its label in `get`: "Download"
-  opens its Game Hub's releases; with a `get-store`, "Install in Steam",
-  the command `Torrent` `Download` of `get-release` asks the store). `uninstall` is the key for
-  the command `UninstallGame`, after asking; `uninstall-store` names the store that then asks its
-  own way. Uninstall is never the main action: the default theme puts it in the game's menu.
-- `GameCard.system-name` and `system-color` (and `GameDetail`'s) are the game's system as its
-  plugin describes it (`[system]` in the plugin's manifest): its full name, "PlayStation 5",
-  and its color. The color is transparent when the plugin gives none: draw the neutral look.
-  Draw systems from these, never from `platform`'s code, so a new plugin's games need no
-  change to the theme. The default theme makes the badge's fill, edge and text, and the art of
-  a game without a cover, from the one color.
-- `Torrent.store` names the store doing an install ("Steam"): its card is the store's install
-  of a game, with the state `queued`, `downloading` or `paused` (or `install` `installing`),
-  one action, `open-store` (the store's own Downloads page), and no folder. Empty for a torrent.
-- `Release.store` names the store that installs a release ("Steam"); empty for a torrent. Its
-  Download asks the store, with no download sheet: send `Torrent` `Download` with no folder,
-  and stay on the Game Hub. The default theme's button says "Install in Steam".
-- `GameCard.hidden` and `GameDetail.hidden` say the player hid a Catalog game. Send
-  `Library` `Hide` to hide one or show it again. A hidden game leaves the Catalog,
-  but for the systems row's "Hidden" filter (id `hidden`), which shows only hidden games. The
-  default theme puts an eye on the Catalog's cards and in the Game Hub, and an item in the
-  game's menu.
+```slint
+Image { source: Assets.logo; width: parent.width; height: parent.height; image-fit: contain; }
+```
 
-### Host: what to ask for
+`Options` is one property for each option, named as the option. A choice option is a `string`
+that holds the chosen choice. A color option is a `color`. `options_slint` in `contract.rs`
+builds it. The default theme declares options and does not read the `Options` global, so this
+page has no sample for it.
 
-`Host` is a global of callbacks. One, `command(name, args)`, asks the core; the others are the
-app's own and never reach it.
+The host compiles the theme from a virtual folder. `VFS_ROOT` in
+`crates/nexus-ui-host/src/compile.rs` is `/launcher-theme`. No file is read from disk under it.
+An import that leaves the folder is refused.
 
-`name` is a command of the core's `Command` enum (`crates/nexus-core/src/app.rs`), and `args` its
-payload as JSON, `""` for a command with none. The host reads the two with `serde`, as
-`{name: args}`, so a command is declared once, in the core. A command whose args don't read is
-dropped, with a warning in the log. Build the args with the `Json` global: `Json.text(s)` is a
-JSON string, escaped; `Json.text-or-null(s)` is `null` for `""`; `Json.flag(b)` is `true` or
-`false`. Text fields that hold JSON (`Slot.args`, `Slot.scope`) go in as they are.
+## Host: what to ask for
+
+A theme changes nothing itself. It asks the host through `Host`. The `Host` global is in
+`types.slint`.
+
+`Host.command(name, args)` is the Host command. It sends a core `Command`
+(`crates/nexus-core/src/app.rs`). `name` is the variant's name. `args` is its payload as JSON
+text, or `""` for a variant with no payload. The host builds a `serde` value from the two
+(`command` in `crates/nexus-ui-host/src/host.rs`):
+
+- With `args` empty, the value is the bare name: `Host.command("Back", "")` reads as `"Back"`.
+- With `args`, the value is `{ name: args }`: `Host.command("Select", "\"emu:astro\"")` reads as
+  `{"Select": "emu:astro"}`.
+
+If the args are not JSON, or do not fit the variant, the host drops the command and writes a
+warning to the log (`the theme sent a command that doesn't read`). The theme gets no error.
+
+Build the args with the `Json` global. `Json.text(s)` makes a JSON string with the escapes.
+`Json.text-or-null(s)` gives `null` for `""`. `Json.flag(b)` gives `true` or `false`. Examples
+from the comment in `types.slint`:
 
 ```slint
 Host.command("Back", "");
 Host.command("Select", Json.text(game.key));
 Host.command("Session", "{\"Launch\":" + Json.text(game.key) + "}");
-Host.command("Pref", "[\"sounds\"," + Json.flag(on) + "]");
 ```
 
-The default theme puts its commands in one global, `Commands` in `commands.slint`, one function
-per thing the player does. Copy it to start a theme.
+`plugins/themes/default/theme/commands.slint` wraps the commands, one function each. Read it
+for working args of most commands.
 
-The commands, by name. A key is a game's key; `?` marks a value that may be `null`.
+### The commands
 
-| Name | Args | What it does |
+`Command` has these variants. A variant with a sub-enum takes that enum, written as JSON the
+same way.
+
+| Variant | Payload |
+|---|---|
+| `Navigate` | A `Route`: `"Home"`, `"Catalog"`, `"Downloads"`, `"Settings"`, `"Emulators"`, `"Themes"`, `{"GameDetail": key}`, `{"Plugin": id}`, `{"GameSettings": key}`, `{"Running": session}`. |
+| `Back` | None. |
+| `Select`, `OpenGame` | A game key. |
+| `Library` | `LibraryCmd`: `"Refresh"`, `{"Hide": {"game": key, "hidden": bool}}`. |
+| `Search` | Text. |
+| `LibrarySearch`, `CatalogSearch` | Text. |
+| `LibrarySystem`, `CatalogSystem` | A system name or a grid filter (`ingame`, `installed`, `hidden`), or `null` for all. |
+| `LibraryGenre`, `CatalogGenre` | A genre, or `null`. |
+| `LibrarySort`, `CatalogSort` | `title`, `played`, `size`, `smallest`, `rating`, `release`, `compat` or `added`. |
+| `LibraryMore`, `CatalogMore` | None. Shows the next page. |
+| `GridColumns` | `{"grid": "Library" or "Catalog", "columns": n}`. |
+| `Session` | `SessionCmd`: `{"Launch": key}`, `{"Stop": session}`, `{"ShowGame": session}`, `"ToggleFocus"`. |
+| `AskResult`, `ReportResult` | A game key, or an answer (`ingame`, `menus`, `boots`, `nothing`, or `null`). |
+| `ConfirmInstall`, `CancelInstall` | None. |
+| `Torrent` | `TorrentCmd`: `Download`, `Act`, `SeedDownloads`. See [Torrent actions](#torrent-actions). |
+| `GameInstall` | `GameInstallCmd`: `Download`, `Package`, `RemoveUnpacked`, `Cancel`. |
+| `Vpn` | `VpnCmd`: `SetOnly`, `Choose`, `Connect`, `Disconnect`, `Import`. |
+| `Notice` | `NoticeCmd`: `"DismissAll"`, `{"Dismiss": id}`, `{"Open": id}`. |
+| `LauncherUpdate` | `LauncherUpdateCmd`: `"Check"`, `"Download"`. |
+| `System` | `SystemCommand` (`crates/nexus-core/src/system.rs`). |
+| `Pref` | A pair: `["sounds", false]`. The key is a `Pref` name in snake case (`crates/nexus-core/src/preferences.rs`). |
+| `SetThemeOption` | `{"key": option, "value": text}`. |
+| `SetConfig`, `SetConfigField`, `RunAction`, `SetPluginEnabled`, `SetFolders` | Plugin settings and plugin actions. See `app.rs`. |
+| `Download`, `PauseDownload`, `ResumeDownload`, `CancelDownload` | Emulator downloads. See `app.rs`. |
+| `InstallEmulator`, `UpdateEmulator`, `UninstallEmulator`, `UninstallGame` | Emulators and installed games. See `app.rs`. |
+| `CheckUpdates` | None. |
+| `ThemeSwitched` | The host sends it. A theme asks for a switch with `Host.switch-theme`. |
+
+The doc comments on `Command` in `app.rs` describe the args of each variant.
+
+### The other callbacks
+
+The other `Host` callbacks never reach the core. They go to the app shell
+(`UiRequest` in `host.rs`).
+
+| Callback | Does |
+|---|---|
+| `switch-theme(id)` | Switches theme. See [Switching and rollback](#switching-and-rollback). |
+| `play-sound(name)` | Plays a sound from `[theme.assets.sounds]`. |
+| `open-url(url)` | Opens an `https://` page in the browser. Other addresses are dropped. |
+| `open-game-folder(key)`, `open-game-log(key)` | Opens the game's folder or its emulator log. The theme names the game, never a path. |
+| `open-download-folder(id)` | Opens a download's folder. |
+| `play-trailer(url)`, `pause-trailer()`, `seek-trailer(seconds)`, `close-trailer()` | The trailer player. `play-trailer` takes `https://` only. |
+| `grid-window(grid, first, last)` | Tells the host which cards of a grid are on screen. |
+| `quit()`, `restart()`, `log-out()` | Closes the launcher, restarts it, or ends the Nexus session. |
+
+Only covers near the cards `grid-window` names are loaded. A theme with a grid calls it when the
+visible cards change. From `plugins/themes/default/theme/components/library-view.slint`:
+
+```slint
+Host.grid-window(Nav.catalog ? "catalog" : "library", grid.first-row * grid.columns,
+    (grid.first-row + grid.screen-rows) * grid.columns - 1);
+```
+
+## Torrent actions
+
+Each `Torrent` in `Vm.torrents` has an `actions` list of text names, in the order to show them.
+The core builds it (`torrent_vm` in `crates/nexus-core/src/view.rs`). The names are:
+`start`, `pause`, `cancel`, `remove`, `stop-seeding`, `install`, `play`, `remove-unpacked`,
+`cancel-install`, and `open-store` (for an install a store does).
+
+The theme turns an action into a command. The table shows where each goes.
+
+| Action | Command |
+|---|---|
+| `start`, `pause`, `cancel`, `remove`, `stop-seeding`, `open-store` | `Torrent`, `{"Act": {"id": id, "action": Name}}`. `Name` is the action in Pascal case: `StopSeeding`, `OpenStore`. |
+| `install` | `GameInstall`, `{"Download": {"id": id}}`. A `folder` is optional. |
+| `play` | `Session`, `{"Launch": game}`. `game` is the `Torrent`'s `game` field. |
+| `remove-unpacked` | `GameInstall`, `{"RemoveUnpacked": {"id": id}}`. |
+| `cancel-install` | `GameInstall`, `{"Cancel": {"id": id}}`. |
+
+`TorrentAction` also has `DeleteFiles`. The core never lists it in `actions`. A theme sends it
+when the player chooses to remove a download and its files.
+
+The default theme does this in `plugins/themes/default/theme/commands.slint`:
+
+```slint
+// A download's action as its command's name: stop-seeding is StopSeeding.
+pure function pascal(action: string) -> string {
+    action == "start" ? "Start" : action == "pause" ? "Pause" : action == "cancel" ? "Cancel"
+        : action == "remove" ? "Remove" : action == "delete-files" ? "DeleteFiles"
+        : action == "stop-seeding" ? "StopSeeding" : action == "open-store" ? "OpenStore" : action
+}
+```
+
+```slint
+public function torrent-action(id: string, action: string) {
+    if (action == "install") {
+        Host.command("GameInstall", "{\"Download\":{\"id\":" + Json.text(id) + "}}");
+    } else if (action == "remove-unpacked") {
+        Host.command("GameInstall", "{\"RemoveUnpacked\":{\"id\":" + Json.text(id) + "}}");
+    } else if (action == "cancel-install") {
+        Host.command("GameInstall", "{\"Cancel\":{\"id\":" + Json.text(id) + "}}");
+    } else {
+        Host.command("Torrent", "{\"Act\":{\"id\":" + Json.text(id) + ",\"action\":" + Json.text(Commands.pascal(action)) + "}}");
+    }
+}
+```
+
+## Slots
+
+A slot item is something a plugin adds to a screen. It reaches a theme as a `Slot` (see
+`types.slint`). A slot has a kind, and the theme draws it:
+
+| Where the theme gets it | Kind | Draw it as |
 |---|---|---|
-| `Navigate` | `"Home"`, `"Catalog"`, `"Downloads"`, `"Settings"`, `"Emulators"`, `"Themes"`; `{"GameDetail": key}`, `{"Plugin": id}`, `{"GameSettings": key}` | Opens a screen |
-| `Back` | none | Goes back |
-| `Select`, `OpenGame` | key | Selects a game; opens its Game Hub |
-| `LibrarySearch`, `LibrarySort` | text | The Library's search and sort (`title`, `played`, `size`, `smallest`, `rating`, `release`, `compat`, `added`) |
-| `LibrarySystem`, `LibraryGenre` | text? | A filter's id; `null` for All |
-| `LibraryMore` | none | The next page |
-| `CatalogSearch`, `CatalogSort`, `CatalogSystem`, `CatalogGenre`, `CatalogMore` | as the Library's | The Catalog's |
-| `GridColumns` | `{"grid": "Library" or "Catalog", "columns": n}` | How many columns a grid shows |
-| `Library` | `"Refresh"`; `{"Hide": {"game": key, "hidden": bool}}` | Reads the games again; hides a Catalog game or shows it again |
-| `Session` | `{"Launch": key}`, `{"Stop": session}`, `{"ShowGame": session}` | Plays, stops, and brings a game's window back |
-| `ConfirmInstall`, `CancelInstall` | none | Answers "Install the emulator first?" |
-| `AskResult` | key | Asks "How far did it get?" |
-| `ReportResult` | text? | `ingame`, `menus`, `boots` or `nothing`; `null` for Not now |
-| `UninstallGame` | key | Deletes an installed game |
-| `Torrent` | `{"Download": {"offer": key, "release": id, "folder": text?}}`; `{"Act": {"id": id, "action": action}}`; `{"SeedDownloads": bool}` | The catalogs' downloads. A blank folder is the one the sheet offers. See [Torrent actions](#torrent-actions). |
-| `GameInstall` | `{"Download": {"id": id, "folder": text?}}`, `{"RemoveUnpacked": {"id": id}}`, `{"Cancel": {"id": id}}` | Installs a finished download, deletes its unpacked archives, stops its install |
-| `PauseDownload`, `ResumeDownload`, `CancelDownload` | a job's `id` | Build downloads |
-| `InstallEmulator` | `{"plugin": id, "version": text?}` | `null` installs the newest |
-| `UpdateEmulator` | `{"plugin": id}` | |
-| `UninstallEmulator` | `{"plugin": id, "version": text}` | |
-| `RunAction` | `{"plugin": id, "action": text, "game": key?, "args": Slot.args or null}` | A slot's action button |
-| `SetConfigField` | `{"plugin": id, "scope": Slot.scope, "key": text, "value": text}` | A settings field |
-| `SetPluginEnabled` | `{"plugin": id, "enabled": bool}` | Turns a plugin on or off |
-| `SetThemeOption` | `{"key": text, "value": text}` | The current theme's option |
-| `SetFolders` | `{"name": text, "paths": text}` | A named folder: its folders as typed, separated by `;`; `""` for the default |
-| `Pref` | `[name, value]` | A preference: `sounds`, `fullscreen`, `return_on_exit`, `auto_update`, `start_at_login` (bool), `scale` (0.8 to 1.4), `monitor` (text, `""` for the one it is on), `welcomed` (true: the Welcome screen's Start) |
-| `Vpn` | `{"SetOnly": bool}`, `{"Choose": name}`, `{"Connect": name}`, `{"Disconnect": name}`, `{"Import": path}` | "Download only through a VPN", and the VPNs |
-| `Notice` | `"DismissAll"`, `{"Dismiss": id}`, `{"Open": id}` | Notices |
-| `LauncherUpdate` | `"Check"`, `"Download"` | The launcher's own update |
-| `System` | `"Refresh"`, `"ScanWifi"`, `{"JoinWifi": {"ssid": text, "password": text?}}`, `{"ForgetWifi": ssid}`, `{"SetBluetooth": bool}`, `"ScanBluetooth"`, `{"Pair": address}`, `{"ConnectDevice": address}`, `{"DisconnectDevice": address}`, `{"RemoveDevice": address}`, `{"SetOutput": name}`, `{"SetVolume": 0 to 100}`, `{"SetMuted": bool}`, `"Restart"`, `"ShutDown"`, `"CheckOsUpdate"`, `{"InstallOs": path}`, `"ChoosePartitions"`, `{"CancelJob": id}` | The machine (`Vm.system`) |
+| `GameCard.badges`, `GameDetail.badges` | `badge` | A small tag. `short` is the text for small places. |
+| `GameDetail.actions` | `action` | A button. |
+| `GameDetail.sections` | `section` | A block with `rows`. |
+| `SettingsPanel.slot` | `settings_panel` | A form from `fields`. |
 
-The app's own callbacks:
+`Slot.tone` is `neutral`, `info`, `success`, `warning` or `danger`. `Slot.style` is `primary` or
+`secondary`.
 
-| Callbacks | Use |
-|---|---|
-| `grid-window(grid, first, last)` | Which cards are on screen, for images; see [Images](#images) |
-| `switch-theme(id)` | Shows another theme |
-| `play-sound(name)` | A sound from `[theme.assets.sounds]` |
-| `open-url(url)`, `open-game-folder(key)`, `open-game-log(key)`, `open-download-folder(id)` | Opens a page, a folder or a log with the system's opener |
-| `play-trailer(url)`, `pause-trailer()`, `seek-trailer(seconds)`, `close-trailer()` | The trailer player |
-| `quit()`, `restart()`, `log-out()` | Closes the launcher; starts it again; ends the Nexus session |
+Set `accessible-role: text` and `accessible-label: <slot>.label` on each slot item you draw.
+Tests find an element by that label. The host does not check this rule. See
+[Limitations](#limitations).
 
-### Torrent actions
+To run an action, send `RunAction` with the slot's `plugin`, `action` and `args`, and the game
+key. `args` is JSON text that the theme passes back unchanged. From
+`plugins/themes/default/theme/commands.slint`:
 
-`Torrent.actions` lists, in order, what the player can do with a catalog download now. Most
-are a `TorrentAction`: send `Torrent` `{"Act": {"id": id, "action": name}}` with its variant
-name, `Start`, `Pause`, `Cancel`, `Remove`, `DeleteFiles`, `StopSeeding` or `OpenStore`. The
-others are game installs. The default theme's `Commands.torrent-action` does the mapping:
+```slint
+public function run-action(plugin: string, action: string, game: string, args: string) {
+    Host.command("RunAction", "{\"plugin\":" + Json.text(plugin) + ",\"action\":" + Json.text(action)
+        + ",\"game\":" + Json.text-or-null(game) + ",\"args\":" + (args == "" ? "null" : args) + "}");
+}
+```
 
-| Action | Effect |
-|---|---|
-| `start` | Download it (ready, paused, failed or cancelled) |
-| `pause` | Pause it |
-| `cancel` | Stop it; the files stay. While its archives unpack, stop the unpacking. |
-| `remove` | Forget a download that isn't running; the files stay |
-| `stop-seeding` | Stop sharing the finished files |
-| `install` | `GameInstall` `Download`: hand the finished download to its emulator's game installer, into the folder the player picks on a sheet, or the one it offers |
-| `play` | Not a torrent action: `Session` `Launch` of `torrent.game` |
-| `remove-unpacked` | `GameInstall` `RemoveUnpacked`: delete the unpacked archives; the downloaded files stay |
-| `open-store` | A store's install: open the store's own Downloads page |
-
-Two more actions are accepted but never listed:
-
-- `delete-files`: forget the download and delete its folder, the downloaded files and their
-  unpacked copies. An installed game is elsewhere and stays. Offer it beside `remove`: the
-  default theme's remove sheet asks "keep the files" (`remove`) or "delete them"
-  (`delete-files`).
-- `cancel-install`: `GameInstall` `Cancel`, stop the download's install; what it wrote goes.
-
-### Slots
-
-Plugins add badges, buttons, sections and settings panels as data (see
-[docs/plugins.md](plugins.md#slots)). They reach a theme as `Slot` structs in `GameCard.badges`,
-`GameDetail.badges`, `actions` and `sections`, `SettingsPanel.slot`, `PluginPage.sections` and
-`actions`, `Emulator.panels`, and `Vm.catalog-actions` and `catalog-status`.
-
-`Slot.kind` is `badge`, `action`, `section` or `settings_panel`; `tone` is `neutral`, `info`,
-`success`, `warning` or `danger`; `style` is `primary` or `secondary`. `label` is
-`<plugin-id>:<item-id>`. Render every slot item with that label:
+The default theme draws badges in `plugins/themes/default/theme/components/slot-badges.slint`:
 
 ```slint
 for item in root.items : Rectangle {
@@ -396,277 +562,325 @@ for item in root.items : Rectangle {
     accessible-label: item.label;
     accessible-value: item.text;
     // ...
+    Text {
+        text: root.short && item.short != "" ? item.short : item.text;
+        // ...
+    }
 }
 ```
 
-A button sends `RunAction` with `item.plugin`, `item.action`, the game's key and `item.args`. A
-settings panel draws its `fields` (`Field`: `kind` is `toggle`, `number`, `text` or `choice`,
-with `choices` and their `labels`) and saves each with `SetConfigField`, with `item.plugin`,
-`item.scope`, `field.key` and the value.
+The slot names a plugin can fill are in `SlotId` (`crates/nexus-api/src/slots.rs`). A theme
+does not name them. It reads the lists in `Vm`.
 
 ## Tokens and options
 
-`Tokens` has one property per design token (`TOKENS` in `crates/nexus-ui-api/src/tokens.rs`).
-Set them in `[theme.tokens]`:
+A token is a named design value. `Tokens.<name>` holds it in Slint. The list is `TOKENS` in
+`crates/nexus-ui-api/src/tokens.rs`. Every token must have a value somewhere in the chain.
+A token name that is not in the list fails with `no such token`.
 
-| Group | Tokens | TOML value |
+| Group | Tokens | Kind |
 |---|---|---|
-| color | `color-bg`, `color-surface`, `color-surface-raised`, `color-text`, `color-text-muted`, `color-accent`, `color-on-accent`, `color-focus`, `color-success`, `color-warning`, `color-danger`, `color-info`, `color-overlay` | `"#rrggbb"` or `"#rrggbbaa"` |
-| typography | `font-family` | text |
-| | `font-size-s`, `font-size-m`, `font-size-l`, `font-size-xl` | logical pixels |
-| | `font-weight-regular`, `font-weight-bold` | whole number |
-| spacing | `space-xs`, `space-s`, `space-m`, `space-l`, `space-xl` | logical pixels |
-| radii | `radius-s`, `radius-m`, `radius-l` | logical pixels |
-| elevation | `shadow-color` | color |
-| | `shadow-blur-1`, `shadow-blur-2` | logical pixels |
-| motion | `motion-fast`, `motion-normal`, `motion-slow` | milliseconds |
-| layout | `layout-direction` | `"ltr"` or `"rtl"` |
+| color | `color-bg`, `color-surface`, `color-surface-raised`, `color-text`, `color-text-muted`, `color-accent`, `color-on-accent`, `color-focus`, `color-success`, `color-warning`, `color-danger`, `color-info`, `color-overlay` | Color |
+| typography | `font-family` | Text |
+| typography | `font-size-s`, `font-size-m`, `font-size-l`, `font-size-xl` | Length |
+| typography | `font-weight-regular`, `font-weight-bold` | Int |
+| spacing | `space-xs`, `space-s`, `space-m`, `space-l`, `space-xl` | Length |
+| radii | `radius-s`, `radius-m`, `radius-l` | Length |
+| elevation | `shadow-color` | Color |
+| elevation | `shadow-blur-1`, `shadow-blur-2` | Length |
+| motion | `motion-fast`, `motion-normal`, `motion-slow` | Duration |
+| layout | `layout-direction` | Text, `"ltr"` or `"rtl"` |
 
-An unknown token name or a value of the wrong kind refuses the theme.
+In `theme.toml`, write each kind as follows (`TokenValue::parse`):
 
-Options are settings the player changes in the theme's page; they set tokens without a
-recompile. Two kinds (`OptionKind`):
+- Color: `"#rrggbb"` or `"#rrggbbaa"`.
+- Length: a number, in logical pixels.
+- Duration: a number, in milliseconds.
+- Int: a whole number.
+- Text: a string.
+
+An option is a setting the player changes on the theme's page. It sets tokens. `Vm.theme-options`
+lists them as fields, and `SetThemeOption` sets one (`{"key": name, "value": text}`). Option
+names use lowercase letters, digits and `-`, starting with a letter.
+
+A color option sets one color token. From
+`tests/fixtures/themes/fixture-grid/theme.toml`:
 
 ```toml
-# A color option sets one color token.
 [theme.options.accent]
 label = "Accent color"
 type = "color"
 token = "color-accent"
 default = "#0f9d8a"
+```
 
-# A choice sets a group of tokens per choice. From the default theme:
-[theme.options.motion]
-label = "Animations"
+A choice option sets a group of tokens for each choice. From
+`plugins/themes/default/theme/theme.toml`:
+
+```toml
+[theme.options.direction]
+label = "Layout direction"
 type = "choice"
-default = "on"
+default = "ltr"
 
-[theme.options.motion.choices.on]
-motion-fast = 160
-motion-normal = 260
-motion-slow = 420
+[theme.options.direction.choices.ltr]
+layout-direction = "ltr"
 
-[theme.options.motion.choices.off]
-motion-fast = 0
-motion-normal = 0
-motion-slow = 0
+[theme.options.direction.choices.rtl]
+layout-direction = "rtl"
 ```
 
-Option names are lowercase letters, digits and `-`, starting with a letter. The current value of
-each is on the `Options` global (`options.slint`): a choice as its name (`string`), a color as a
-`color`. An unset option, or an unknown choice, reads as its default. Use `Options` for markup
-that depends on a choice, not only on tokens:
+Until the player sets an option, the theme's own `[theme.tokens]` stay in force. The option's
+`default` only names the value `Options` shows. Once the player sets an option, `merge_chain`
+applies it on top of the tokens.
 
-```slint
-import { Options } from "../options.slint";
-Text { text: Options.motion; }
-```
+A change to an option does not recompile the theme. The host sets `Tokens` and `Options`
+again on the running instance and renders.
 
-`Vm.theme-options` lists the options as `Field`s for a settings form, and the command
-`SetThemeOption` changes one.
+A bad value falls back in two ways. A color option with a value that does not read as a color
+leaves the token as the chain set it (the host writes a warning to the log). The `Options`
+global shows the option's default for the same value. A choice option with an unknown choice
+shows the default in `Options` and sets no tokens.
 
 ## Responsive layout
 
-`Vm.viewport` is a `Viewport`: `width` and `height` (logical), `scale` (the screen's pixel
-density), `size` (the player's "Size of everything", 0.8 to 1.4, or `NEXUS_SCALE` for a run),
-`aspect` and `breakpoint`.
+A breakpoint is a named window class. `[[theme.breakpoints]]` lists them in order. The first
+one whose limits all hold is the current one (`Breakpoint::matches`). A breakpoint with no
+limits always holds, so put it last. If none holds, the name is `""`.
 
-`breakpoint` is the name of the first `[[theme.breakpoints]]` entry whose limits all hold. An
-entry has `name` and any of `min_width`, `max_width` (logical pixels), `min_aspect`,
-`max_aspect` (width over height) and `min_scale`. An entry with no limits matches everything, so
-put it last as the fallback. With no match, `breakpoint` is empty.
+| Key | Limit |
+|---|---|
+| `min_width`, `max_width` | The window width, in logical pixels. |
+| `min_aspect`, `max_aspect` | Width divided by height. |
+| `min_scale` | Physical pixels per logical pixel. |
 
-The host updates the viewport when the window changes size. The default theme lays everything out
-on a 1920 by 1080 canvas and scales it to the window.
+The host sets `Vm.viewport`:
+
+| Field | Holds |
+|---|---|
+| `width`, `height` | The window size, in logical pixels. |
+| `scale` | The screen's pixel density. |
+| `aspect` | Width over height. |
+| `size` | How big the player wants everything: from `MIN_SCALE` to `MAX_SCALE` (`crates/nexus-core/src/preferences.rs`), where 1 is the theme's own size. The `NEXUS_SCALE` environment variable sets it for one run. |
+| `breakpoint` | The current breakpoint's name. |
+
+The fixture's Home screen reads the breakpoint (see
+[A minimal theme](#a-minimal-theme)):
+
+```slint
+property <int> columns: Vm.viewport.breakpoint == "compact"
+    ? 2
+    : Math.max(3, Math.floor((self.width - 2 * Tokens.space-l + root.gap) / (root.cell + root.gap)));
+```
+
+A theme that does not multiply its sizes by `Vm.viewport.size` ignores the player's
+"Size of everything". The fixture does not use it.
 
 ## Input modes and pad keys
 
-`[theme] input` lists the devices the theme supports. `Vm.input-mode` starts as the first one
-and becomes `gamepad` when a controller button is pressed. Nothing in the host sets `touch`
-today, or sets `pointer` again after a pad press.
+`input` in the manifest lists the devices the theme supports, the main one first. The host
+puts the first entry in `Vm.input-mode` (`pointer`, `gamepad` or `touch`). When a gamepad button
+arrives, `Vm.input-mode` becomes `gamepad`.
 
-A theme needs no gamepad code. The app reads controllers with `gilrs`, and the UI host turns each
-button into a key press the theme already handles (`PadButton::action` in
-`crates/nexus-ui-host/src/input.rs`). A keyboard does the same as a pad:
+A theme needs no gamepad code. The host turns each button into a key press on the window
+(`PadButton::action` in `crates/nexus-ui-host/src/input.rs`):
 
-| Pad (PlayStation / Xbox) | `PadButton` | Key the theme gets |
-|---|---|---|
-| D-pad, left stick | `Up`, `Down`, `Left`, `Right` | `Key.UpArrow`, `Key.DownArrow`, `Key.LeftArrow`, `Key.RightArrow` |
-| Cross / A | `South` | `Key.Return` |
-| Circle / B | `East` | `Key.Escape` |
-| Triangle / Y | `North` | `"/"` |
-| Square / X | `West` | `Key.Insert` |
-| Options / Menu | `Start` | `Key.Menu` |
-| Create, Share / View | `Select` | `Key.Delete` |
-| R1 / RB | `RightShoulder` | `Key.Tab` |
-| L1 / LB | `LeftShoulder` | `Key.Backtab` |
-| L2 / LT | `LeftTrigger` | `Key.PageUp` |
-| R2 / RT | `RightTrigger` | `Key.PageDown` |
-| PS / Xbox (Logitech's too) | `Guide` | A tap, no key: the host opens Home; while a game runs, a tap does nothing |
-| PS / Xbox, held 600 ms | `GuideHeld` | No key: while a game runs, the host closes it at once. Else `Vm.power-menu` goes up by one, and the default theme opens its power menu |
+| Button | Key sent |
+|---|---|
+| Up, Down, Left, Right | The arrow keys |
+| South (A, Cross) | Return |
+| East (B, Circle) | Escape |
+| Start | Menu |
+| Select | Delete |
+| North (Triangle) | `/` |
+| West (Square) | Insert |
+| Left shoulder | Backtab |
+| Right shoulder | Tab |
+| Left trigger, right trigger | PageUp, PageDown |
 
-A held button or stick repeats after 380 ms, then every 85 ms, as a key press with
-`event.repeat` set, so a theme can ignore repeats where a second press would do harm. The default
-theme ignores a repeated Return. While a game's window is in front, or the launcher's window
-doesn't have the focus, only the PS button reaches the launcher. The PS button never repeats:
-the host waits for it to go up (a tap) or to be held 600 ms (close the game, or the power menu).
+Two buttons are not keys. The Guide button (the PS or Xbox button) sends `Navigate` to `Home`,
+and does nothing while a game runs. The Guide button held closes the running game, or, with
+no game, raises `Vm.power-menu` by one. A theme opens its power menu when that number changes.
 
-Handle the keys in a `FocusScope`:
+While a game's window is in front, or the launcher's window has no focus, the other buttons do
+nothing. The host still reads the Guide button, tapped or held.
+
+While a pad key is delivered, `Vm.pad-key` is `true`. It is `false` for a keyboard key. A
+theme uses it to tell the two apart. A held button repeats as a repeated key press
+(`event.repeat`), so a theme can ignore it. From
+`plugins/themes/default/theme/shell.slint`:
 
 ```slint
-keys := FocusScope {
-    key-pressed(event) => {
-        if (event.repeat && event.text == Key.Return) { return accept; }
-        if (event.text == Key.Escape) { Host.command("Back", ""); return accept; }
-        reject
-    }
+capture-key-pressed(event) => {
+    Osk.pad = Vm.pad-key;
+    // ...
 }
 ```
 
-## Images
-
-Markup never names an image file. Images reach a theme three ways:
-
-- **The theme's own images**: `[theme.assets.images]` maps a name to a file in the theme
-  folder, PNG or JPEG. Names are lowercase letters, digits and `-`. Each is an `image` property
-  on `Assets`: `Image { source: Assets.logo; }`. `Assets.loaded` is true once they are set.
-- **Art from the view models**: `GameCard.cover`, `GameDetail.cover`, `background`, `logo`,
-  `screenshots`, `Boot.covers`, `Notice.art`, slot icons. The host loads them in the background
-  and sets them when they are ready.
-- **Slot icons** that plugins give.
-
-Covers load only near the screen. A grid tells the host which cards it shows with
-`Host.grid-window(grid, first, last)`, where `grid` is `library` or `catalog` and `first` and
-`last` are card indices. Cards within one screen of that window load; cards further away ask for
-nothing and show empty. Before a grid reports, the host assumes cards 0 to 29.
-The command `GridColumns` tells the core how many columns the grid shows, so it fetches
-the art of the games above and below the selection. The default theme's
-`components/library-view.slint` reports both whenever it scrolls or resizes:
+`Vm.pad-name` is the controller's name, empty for none. A theme can show different hints from
+`Vm.input-mode`. From `plugins/themes/default/theme/components/boot.slint`:
 
 ```slint
-function report() {
-    if (root.active) {
-        Host.grid-window(Nav.catalog ? "catalog" : "library", grid.first-row * grid.columns,
-            (grid.first-row + grid.screen-rows) * grid.columns - 1);
-    }
-}
+property <bool> pad: Vm.input-mode == "gamepad";
 ```
 
-`GameCard.cover-state` is `loading` while a cover is on its way, `ready` once it shows, and
-`none` when the game has none or it failed: show a placeholder for `loading` and `none`.
+## Images, fonts and sounds
 
-Card art is made at most 512 by 768 pixels, and other art at most 1920 by 1080
-(`crates/nexus-ui-host/src/images.rs`).
-
-## Fonts and sounds
-
-**Fonts**: list TrueType or OpenType files in `[theme.assets] fonts = [...]`, and name the
-family with the `font-family` token. The host imports them through `tokens.slint`, so every
-file that imports `Tokens` has them. A theme may not import a font itself.
-
-**Sounds**: `[theme.assets.sounds]` maps a name to a sound file, WAV or Ogg Vorbis (what the
-app's `rodio` build decodes). `Host.play-sound(name)` plays one, unless the player turned
-sounds off. A missing file fails the load, so the old theme stays. The default theme has
-`move`, `select`, `back`, `error` and `start`; `move` plays at most once every 40 ms, so a held
-key doesn't stack clicks.
+Declare each file in `[theme.assets]`. Paths are relative to the theme folder, use `/`, and have
+no `.`, `..` or empty parts (`RelPath` in `crates/nexus-api/src/path.rs`).
 
 ```toml
+[theme.assets]
+fonts = ["fonts/Inter-Regular.ttf", "fonts/Inter-Bold.ttf"]
+
+[theme.assets.images]
+logo = "images/logo.png"
+
 [theme.assets.sounds]
 move = "sounds/move.wav"
-select = "sounds/select.wav"
 ```
+
+The second and third blocks are from `plugins/themes/default/theme/theme.toml`.
+
+**Images.** An image name becomes `Assets.<name>`. The host decodes PNG and JPEG
+(`crates/nexus-ui-host/src/images.rs`) and shrinks an image that is larger than `MAX_WIDTH` by
+`MAX_HEIGHT`. A missing or undecodable image fails the load with `ThemeError::Asset`. Images
+for games come from the `Vm` (`GameCard.cover` and the like), not from `Assets`.
+
+**Fonts.** The host registers each font file. It imports them in the generated `tokens.slint`.
+Set `font-family` to the family name inside the files, as the fixture does with `"Inter"`. A
+font path must resolve inside the theme folder (`ResolvedTheme::font_paths`). A built-in
+theme has no folder, so its fonts are written once to a `launcher-fonts` folder in the system's
+temp folder.
+
+**Sounds.** A sound name is what `Host.play-sound(name)` takes. The app plays WAV and Ogg Vorbis
+(`rodio` features in the workspace `Cargo.toml`). The host gives no sound when the player has
+turned sounds off or the name is not declared. The theme gets no error in either case.
 
 ## Rules the host checks
 
-Before compiling, the host refuses a theme (`contract::lint` and `ResolvedTheme::check`) that:
+`contract::lint` (`crates/nexus-ui-api/src/contract.rs`) checks each `.slint` file before
+compiling. A file that breaks a rule fails the load with `ThemeError::File`, which names the
+file.
 
-- ships `types.slint`, `tokens.slint`, `assets.slint` or `options.slint`;
-- uses `@image-url` anywhere;
-- imports anything but a `.slint` file (a font import, for example);
-- declares a screen or component in `theme.toml` and doesn't ship its file;
-- has a screen or component file that doesn't export the component named for it;
-- has no `shell.slint` anywhere in its chain;
-- imports a path outside the theme's virtual folder.
+- No `@image-url`. Show images from `Assets`, from the `Vm`, or from slot icons.
+- Every `import` and `export ... from` names a `.slint` file. A font import is refused: list fonts
+  in `theme.toml`.
+- A screen file exports its component under the name in the screen table, and a component file
+  under the name in the component table. The shell exports `Shell`.
 
-Each error names the theme and the file. Compile errors list each file, line and column. When a
-theme fails, the old theme stays on screen; at start, the app falls back to `default` and keeps
-the saved choice.
+Comments are ignored when the rules are checked. Strings are not.
+
+The compiler adds one rule (`crates/nexus-ui-host/src/compile.rs`): an import that leaves
+`VFS_ROOT` fails the compile with `outside the theme`.
+
+A compile error fails the load with `ThemeError::Compile`. Its text lists each error as
+`file:line:column: message`.
 
 ## Dev mode
 
-With `--dev`, the app shell's tick (`AppShell::on_tick` in `crates/nexus-ui-host/src/shell.rs`)
-checks the current theme's files four times a second and calls `ThemeHost::reload_if_changed`.
-When a file in a theme folder on disk has a newer modification time, the host loads the theme
-again: validate, compile, swap. A broken edit logs the error and keeps the last good version on
-screen, and isn't retried until the next change.
+`--dev` makes the app shell check the theme's files on every `TICK`
+(`crates/nexus-ui-host/src/shell.rs`). When the newest change time in the theme's folders
+differs from the last load (`ResolvedTheme::stamp`), the host loads the theme again
+(`ThemeHost::reload_if_changed`). It reads every folder in the chain that is on disk.
 
-Only themes loaded from a folder reload. The default theme is embedded in the binary, so an
-edit to `plugins/themes/default/theme/` needs a rebuild (`cargo run -p nexus-app`). To work on
-a look quickly, make a child theme in an extensions folder and run it with `--dev`.
+If the new files do not load, the last good version stays on screen. The error goes to the log,
+and the host does not try again until a file changes.
+
+Dev mode reloads the markup, images, fonts and sounds. It does not read `theme.toml` again.
+Restart the app after you edit the manifest. See [Limitations](#limitations).
+
+## Switching and rollback
+
+The player switches theme on the Themes screen. A theme can do the same with
+`Host.switch-theme(id)`, as the default theme does in
+`plugins/themes/default/theme/screens/plugin.slint`:
+
+```slint
+if (!Vm.plugin-page.current) { Host.switch-theme(Vm.plugin-page.plugin.id); }
+```
+
+The host queues the request and carries it out after the callback returns, because a switch drops
+the instance that runs the callback.
+
+`ThemeHost::switch` does these steps in order (`load` in `host.rs`):
+
+1. Resolve the theme and its chain, with the player's option values.
+2. Decode the images and read the sounds.
+3. Compile the markup.
+4. Create the new instance in the same window, set the tokens, the options and the images,
+   and bind the current view.
+5. Save the choice and announce `ThemeChanged` (`Core::theme_switched`).
+6. Show the new instance, then drop the old one.
+
+A failure in steps 1 to 5 leaves the old theme on screen. A failure to save the choice does the
+same. The core does not announce `ThemeChanged` in either case. The core keeps the navigation, selection, downloads and
+running games, because they are not in the theme.
+
+At start, the host loads `--theme`, else the saved theme, else `default`. If that theme fails, it
+logs the error and loads `default`. It does not overwrite the saved choice. In safe mode it
+loads `default` and refuses every other theme.
+
+A failed switch from `Host.switch-theme` is written to the log
+(`the theme's request failed`). I found no message to the player. See
+[Limitations](#limitations).
 
 ## Testing a theme
 
-The theme tests run the core and the theme host together on Slint's testing backend, with no
-window (`tests/tests/seams/common/mod.rs`):
+Tests drive a theme the way a player does. `ThemeDriver` in
+`crates/nexus-testkit/src/driver.rs` is the theme driver. It uses the accessible labels and
+values of elements, keys, clicks and Slint's test clock. It never reads the `Vm` globals or calls
+the theme's callbacks. That is why slot items need `accessible-label`.
 
-- `composed(|host| ...)` boots a `FakeHost` with the default theme and what the closure adds
-  (`FakeCatalog`, `FakeStore` or `FakeService` plugins, `discover(dir)` for theme folders), and
-  the app shell the app ships (`AppShell`) on it, over a `FakePlatform` and the core's
-  `FakeClock`. `host.ui` is the shell's `ThemeHost`.
-- `write_theme(parent, id, theme_section, files)` writes a data-only theme folder for a test.
-- `fixture_themes()` is `tests/fixtures/themes`, holding `fixture-grid`.
-- `host.ui.start()` shows the saved theme, `host.ui.switch(&id)` another one.
-- `host.dispatch(Command::...)` drives the core through the shell, which renders when the core
-  changed; `host.pump()` carries out what the theme asked through `Host`.
-- The core runs on a fake clock, so a test never sleeps: `host.advance(duration)` moves it,
-  `host.until(Area::X, pred)` runs the core until `pred` holds, and `host.run_until_idle()` runs
-  it until every task waits. None of them renders.
+The main steps:
 
-`Composed` is a `ThemeDriver` (`nexus-testkit`): a test drives the theme as a player does, through
-accessible labels, keys, clicks and the passing of time, and never through the `Vm` globals or
-the theme's callbacks.
-
-- `host.press(label, value)` invokes the element labelled `label` whose value is `value`;
-  `host.press_first(label)` the first one; `host.click(label)` clicks it with the mouse.
-- `host.navigate(key)` presses a key and carries out what the theme asked; `host.tap(key)`
-  presses it and only redraws; `host.down_to(label, most)` goes down until the label shows.
-- `host.type_text(text)` types on a physical keyboard; `host.pad(button)` presses a controller
-  button.
-- `host.values(label)`, `host.value(label)`, `host.focused(label)` (the selected ones),
-  `host.lit(label)`, `host.count(label)`, `host.first(label)` and `host.description(label)`
-  read what shows.
-- `host.settle()` lets the animations finish; `host.wait(duration)` moves Slint's clock.
-
-Accessible labels are the test seam. Give the elements a test needs to find an
-`accessible-label`, and an `accessible-value` for what it shows, and an
-`accessible-action-default` for what a click does. Slot items carry `<plugin-id>:<item-id>`. The
-default theme's tests in `tests/tests/seams/default_theme/` press, for example, the top bar's
-Library tab:
-
-```rust
-host.press("default-system", "Library");
-```
-
-What the view holds, a test reads from `host.core().view()`, the view models the theme gets.
-What only the theme host holds, it reads from `host.ui`: `breakpoint()`, `input_mode()`,
-`clock()` and `trailer()`. Only the switching tests read the `Vm` globals: they check that a new
-theme's tree is bound with the state the old one showed.
-
-The theme test files:
-
-| File | What it checks |
+| Step | Does |
 |---|---|
-| `tests/tests/seams/themes.rs` | The default theme compiles and renders every screen; inheritance; the rules above; options |
-| `tests/tests/seams/switching.rs` | Switching, rollback on a broken theme, dev-mode reload |
-| `tests/tests/seams/slots.rs` | Slot items in the default theme and in `fixture-grid` |
-| `tests/tests/seams/default_theme/` | The default theme, one module per screen: Home, the Library, the Catalog, the Game Hub and its releases, Downloads, installs, play, the trailer, notices, Settings, the emulator pages, the keyboards, and the theme's files |
-| `tests/tests/seams/gamepad.rs` | A gamepad drives the default theme through its keys |
-| `tests/tests/seams/sounds.rs` | Which sounds play |
-| `tests/tests/seams/system_theme.rs` | The default theme's machine settings, over a fake system plugin |
-| `tests/tests/seams/screenshots.rs` | The README's screenshots, rendered offscreen |
+| `count(label)`, `first(label)` | Count the elements with a label, or take the first. |
+| `value(label)`, `values(label)` | Read the accessible value. |
+| `focused(label)`, `lit(label)` | Which elements show as selected. |
+| `press(label, value)`, `press_first(label)` | Run an element's default action. |
+| `click(label)` | A mouse click in the middle of the element. |
+| `navigate(key)`, `tap(key)` | Send a key. `navigate` carries out what the theme asked for. |
+| `type_text(text)` | Type characters on a keyboard. |
+| `settle()`, `wait(duration)` | Move Slint's clock on. |
+
+The seam tests are in `tests/tests/seams/` (package `nexus-tests`, test binary `seams`). The
+tests that matter for a theme:
+
+- `themes.rs`: loading, inheritance and the rules. `write_theme` and `composed` in
+  `tests/tests/seams/common/mod.rs` write a theme into a temporary folder and boot the app on
+  it. `fixture_themes()` points at `tests/fixtures/themes`.
+- `switching.rs`: switching, rollback, safe mode, live options and dev reload.
+- `slots.rs`: slot items in the fixture and in the default theme, and the compact breakpoint.
+- `gamepad.rs` and `sounds.rs`: the pad keys and `play-sound`.
+- `system_theme.rs`: the default theme's machine settings over a fake system plugin.
+- `default_theme/`: the default theme, one module for each screen. `theme_files.rs` checks
+  that every font the theme names ships with it and that every animation time goes through
+  `Look.timed`.
+
+Run the theme tests:
 
 ```sh
 cargo test -p nexus-tests --test seams themes::
-cargo test -p nexus-tests --test seams default_theme::
-scripts/check.sh    # everything, as CI runs it
 ```
+
+`make check` runs formatting, clippy and every test, as CI does ([development.md](development.md)).
+
+## Limitations
+
+- `navigation` is read and merged into `MergedTheme`, but no host code reads it. Setting it to
+  `pointer` or `focus` changes nothing.
+- Only the first `input` entry is read. The host never sets `touch`. After the first pad button,
+  `Vm.input-mode` stays `gamepad` until the app restarts.
+- The host does not check that slot items set `accessible-label`. `contract.rs` lists it among
+  the rules, but `lint` does not test for it.
+- Dev mode does not read `theme.toml` again. The manifest, which includes tokens, breakpoints
+  and the asset list, is read once at boot. Restart to see a manifest edit.
+- Dev mode never reloads the default theme. It is built in and has no folder on disk.
+- A failed `Host.switch-theme` is logged and is not shown to the player.
+- A theme cannot add screens. The set of screens is `ScreenId`, and `screens` can only name
+  those.
+- A theme that extends a theme that is not installed never reaches `ThemeSet`. The core
+  rejects it at boot, so `ThemeError::MissingParent` does not appear through the normal path.
+- The `Options` global has no sample here, because no file allowed as a sample reads it.
