@@ -5,6 +5,7 @@
 //! reads headless view models and sends commands.
 
 mod app;
+mod archive_plan;
 mod archives;
 mod bus;
 mod config;
@@ -36,12 +37,14 @@ mod vpn;
 pub use app::{
     Command, Core, GRID_PAGE, Grid, HIDDEN_FILTER, INGAME_FILTER, INSTALLED_FILTER, MAX_SCALE, MIN_SCALE, Route,
 };
+pub use archive_plan::{ArchiveEntry, EntryKind, Plan, Planned, UNPACK_SPARE, plan_unpack, room};
 pub use archives::embedded_archive;
 pub use bus::EventBus;
 pub use config::ConfigService;
 pub use downloads::{Job, JobPhase};
 pub use error::{CoreError, CoreResult, LoadError};
 pub use kernel::{BootReport, HostConfig, Kernel, KernelBuilder, Loader, Origin, PluginInfo, PluginStatus, Rejection};
+pub use ports::{ArchiveError, Escape};
 pub use ports::{
     ArchiveKind, Archives, Body, Desktop, Front, Gpu, GroupTree, Hardware, HttpTransport, Network, NoArchives,
     NoDesktop, NoHardware, NoNetwork, NoTorrents, NoVpn, Opened, PackageError, PackageManager, ProcessExit,
