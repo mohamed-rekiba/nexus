@@ -375,7 +375,9 @@ impl Core {
                     }
                 })
             };
-            let unpacked = port.unpack(set.kind, &parts, &work, progress, cancel.clone()).await;
+            // The folder exists now, so the disk that holds it can say its free space.
+            let free = self.kernel().hardware().free_bytes(&work);
+            let unpacked = port.unpack(set.kind, &parts, &work, free, progress, cancel.clone()).await;
             let moved = match unpacked {
                 Ok(()) => tokio::fs::rename(&work, &dest).await.map_err(|e| format!("{}: {e}", set.name)),
                 Err(e) => Err(format!("{}: {e}", set.name)),
