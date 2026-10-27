@@ -61,13 +61,13 @@ then its meta file.
 **Current build**: the downloaded build games start. The build before it stays for a rollback.
 Both are saved in the plugin's `versions.json`.
 
-**Display text**: the words a theme shows for a fact of the view, such as "7.6 GB" for a size
-or "Mar 12, 2024" for a date. The core builds it when it builds the view (`display.rs`); the
-view model keeps the fact too, for the core's tests.
-
 **Disks** (`Disks`): each console's download folder and the free space on the disk that holds
 it, read ahead so the view doesn't ask the disk. The core reads them again when a Game Hub
 opens, the catalogs are read, a folder changes, and a download starts or ends.
+
+**Display text**: the words a theme shows for a fact of the view, such as "7.6 GB" for a size
+or "Mar 12, 2024" for a date. The core builds it when it builds the view (`display.rs`); the
+view model keeps the fact too, for the core's tests.
 
 **Fact** (`Fact`): one thing a catalog says about a release: a kind, a label, a value and an
 optional page. Its `FactKind` tells the host what it is about, such as the publisher, the
@@ -123,12 +123,12 @@ archives and the install from it. They change only through the torrents subsyste
 try again before the hold ends. Each hold is twice as long as the one before, at most the
 fresh time.
 
-**Host facades** (`Host`, emulator-kit): the narrow parts of a `PluginContext` the kit takes:
-storage, folders, programs, HTTP, settings and the log.
-
 **Host command**: a core `Command` a theme sends with `Host.command(name, args)`: the
 variant's name and its payload as JSON. The host reads it with `serde`; nothing else names the
 commands.
+
+**Host facades** (`Host`, emulator-kit): the narrow parts of a `PluginContext` the kit takes:
+storage, folders, programs, HTTP, settings and the log.
 
 **Install event** (`InstallEvent`): what the game installs subsystem asks of the core: refresh
 the library for a new game, tell the player of a failure, or start the install of a download
@@ -146,6 +146,11 @@ _Avoid_: type, category
 catalogs' copies and their offers, and the library's saved choices (hidden games, kept covers,
 the player's results). It asks no plugin; the core hands it the plugins' answers.
 
+**Listed folders** (`ListedFolders`): more folders for a host folder grant (`listed_in`), from a
+file in its default folder, while the player hasn't set the folder. The host reads the file
+(`folders.rs`): Steam's `steamapps/libraryfolders.vdf` names its libraries on other drives. A
+listed folder is read only, as the grant.
+
 **Listing** (`ArchiveEntry`): an archive's entries as a format reader gives them, unchecked: each
 name as the archive spells it, its size, its kind, and whether it needs a password.
 
@@ -157,8 +162,14 @@ Not a play session.
 contract form isn't its plain `serde` form: an image, a color, an optional part with its
 `has-` flag, or a long list of cards kept in place.
 
+**Mem storage** (`MemStorage`, nexus-testkit): a plugin's data folder in memory, for the tests
+of plugins and of the code they share.
+
 **Notice**: a short message for the player, such as "Download complete", until they close it.
 The notices subsystem keeps the newest three, each with its own id.
+
+**Notifier**: how a subsystem says its state changed: it sends a change with its area to the
+core's one change signal, and the app learns that something changed.
 
 **Offer**: one game a catalog offers, grouped from its releases by title id or by title
 without its edition words. An installed game can be an offer too: its record names the offer.
@@ -200,22 +211,26 @@ monitor, saved as `app.<key>`. Its spec says what values it takes and its defaul
 preferences subsystem checks each value the player sets, and the core reads them typed.
 _Avoid_: option (a theme's options are something else)
 
+**Purpose** (`Purpose`, nexus-core `folders.rs`): what a console's folder is for, `Download` or
+`Install`. It picks the grant the folder lies in (`packages` or `games`), the key of the last
+pick, and the words of an error. `HostFolders::place` takes it with a console.
+_Avoid_: place (`Place` in `system.rs` says where Nexus runs), kind (a plugin's kind is something else)
+
 **Refreshed copy**: a base copy brought up to date from its forums' feeds and forum lists. The
 Game Catalog keeps it in `refreshed/`.
 
 **Release metadata**: a release's `GameMetadata`: its game's words and art from a store, such as
 Steam's. The host fills in from it what the `metadata` plugins leave out.
 
+**Result**: how far a game got for the player, a `CompatLevel` (in-game, menus, boots or
+nothing). The core may ask after a game closes, and the library subsystem saves it under
+`app.results`.
+
 **Schedule**: the Game Catalog's rules for when a fetch or a refresh runs and how long a hold
 is (`schedule.rs`). They take the time as an input, so the tests need no clock.
 
 **Seed-only start**: a start of a finished download after a restart. The torrent starts paused,
 checks its files, and seeds only when every piece is there. It never downloads.
-**Purpose** (`Purpose`, nexus-core `folders.rs`): what a console's folder is for, `Download` or
-`Install`. It picks the grant the folder lies in (`packages` or `games`), the key of the last
-pick, and the words of an error. `HostFolders::place` takes it with a console.
-_Avoid_: place (`Place` in `system.rs` says where Nexus runs), kind (a plugin's kind is something else)
-
 
 **Session**: one run of a game, from its spawn to the end of its last process. It has a number
 (`SessionId`), and the game's log and play time come from it.
