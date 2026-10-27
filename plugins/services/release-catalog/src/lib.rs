@@ -61,7 +61,7 @@
 //! core gets no catalog for it, and it isn't fetched or refreshed. Its installed games are the
 //! emulator's, so they stay.
 //!
-//! The files are in the catalog collector's format: see [`format`].
+//! The files are in the catalog collector's format: see [`mod@format`].
 //!
 //! The catalog sources (see [`sources`]) name the forums each catalog comes from. Which copy
 //! is used follows the same rules, with the **Sources address** setting in place of the
@@ -72,7 +72,7 @@
 //! sources" section names the copy in use, each catalog's forums and each forum left out.
 //!
 //! The code: [`topic`] is the typed model of a catalog file, which [`refresh`] brings up to
-//! date and [`format`] turns into releases. `store.rs` keeps the copies and their meta files,
+//! date and [`mod@format`] turns into releases. `store.rs` keeps the copies and their meta files,
 //! and `schedule.rs` says when the fetch and the refresh run. `Catalogs` tracks what the core
 //! asked for, and builds the slot items over them.
 

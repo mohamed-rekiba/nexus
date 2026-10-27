@@ -433,7 +433,7 @@ impl ThemeHost {
     }
 
     /// A gamepad button was pressed: the theme gets it as a key press (see
-    /// [`PadButton::action`]) while `Vm.pad-key` is true, and `Vm.input-mode` becomes `gamepad`.
+    /// [`crate::PadButton::action`]) while `Vm.pad-key` is true, and `Vm.input-mode` becomes `gamepad`.
     ///
     /// While a game's window is in front, or the launcher's window doesn't have the focus, the
     /// pad is the other window's: only the PS button held reaches the launcher, to close the

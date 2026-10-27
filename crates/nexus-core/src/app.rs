@@ -155,7 +155,7 @@ pub enum Command {
     /// How the Library is sorted: `title`, `played`, `size` (largest first), `smallest`,
     /// `rating`, `release` (newest first), `compat` or `added`.
     LibrarySort(String),
-    /// The Library shows its next page of games ([`GRID_PAGE`] more).
+    /// The Library shows its next page of games ([`crate::GRID_PAGE`] more).
     LibraryMore,
     /// The Catalog's search text, system, genre and sort, as the Library's.
     CatalogSearch(String),
@@ -188,8 +188,6 @@ pub enum Command {
 
 pub use nexus_api::HOST_INSTALL_GAME;
 
-/// Where a game's folder is on disk, through its plugin's folder grants; `None` when the
-/// grants refuse it or it isn't a folder.
 /// The player's folders as `game`'s plugin may use them.
 pub(crate) fn game_folders(kernel: &Kernel, game: &GameKey) -> Option<crate::folders::HostFolders> {
     plugin_folders(kernel, &game.plugin)
@@ -206,6 +204,8 @@ pub(crate) fn plugin_folders(kernel: &Kernel, plugin: &PluginId) -> Option<crate
     })
 }
 
+/// Where a game's folder is on disk, through its plugin's folder grants; `None` when the
+/// grants refuse it or it isn't a folder.
 pub(crate) fn resolve_game_folder(
     kernel: &Kernel,
     game: &GameKey,
@@ -233,7 +233,7 @@ pub(crate) struct Inner {
     pub notices: crate::notices::NoticesSubsystem,
     pub launcher_update: crate::launcher_update::LauncherUpdateSubsystem,
     pub vpn: crate::vpn::VpnSubsystem,
-    /// Held while the catalogs are read: see [`Core::refresh_releases`].
+    /// Held while the catalogs are read: see [`crate::catalog_reads::refresh_releases`].
     pub reading_catalogs: tokio::sync::Mutex<()>,
 }
 
