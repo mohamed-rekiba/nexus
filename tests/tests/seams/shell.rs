@@ -100,6 +100,31 @@ fn the_window_shown_line_goes_out_once() {
 }
 
 #[test]
+fn the_window_is_claimed_after_the_announcement_and_on_each_tick_until_the_platform_is_done() {
+    let mut host = shown();
+    host.platform.refuse_claims(2);
+    for _ in 0..4 {
+        host.on_tick();
+    }
+    let session_calls: Vec<_> = host
+        .platform
+        .calls()
+        .into_iter()
+        .filter(|c| matches!(c, PlatformCall::Announce(_) | PlatformCall::ClaimWindow))
+        .collect();
+    assert_eq!(
+        session_calls,
+        [
+            PlatformCall::Announce("window shown".into()),
+            PlatformCall::ClaimWindow,
+            PlatformCall::ClaimWindow,
+            PlatformCall::ClaimWindow,
+        ],
+        "the line first; two refusals ask again on the next tick; the third claim is the last"
+    );
+}
+
+#[test]
 fn log_out_tells_the_session_then_quits() {
     let mut host = shown();
     host.on_request(UiRequest::LogOut).unwrap();

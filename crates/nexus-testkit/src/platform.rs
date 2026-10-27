@@ -24,6 +24,7 @@ pub enum PlatformCall {
     PauseTrailer,
     SeekTrailer(f64),
     CloseTrailer,
+    ClaimWindow,
 }
 
 #[derive(Default)]
@@ -36,6 +37,7 @@ struct State {
     local_time: String,
     trailer_refusal: Option<String>,
     trailer: Option<TrailerPoll>,
+    claim_refusals: usize,
 }
 
 /// A platform that records each call, and runs the shell's work only when the test says
@@ -92,6 +94,12 @@ impl FakePlatform {
     /// The local time the clock shows.
     pub fn set_local_time(&self, time: &str) {
         self.state.borrow_mut().local_time = time.to_owned();
+    }
+
+    /// The window system isn't done with the launcher's window: the next `refusals` claims
+    /// say so, and the one after says it shows.
+    pub fn refuse_claims(&self, refusals: usize) {
+        self.state.borrow_mut().claim_refusals = refusals;
     }
 
     /// Trailers don't play in the window, with `error`.
@@ -161,7 +169,11 @@ impl Platform for FakePlatform {
     }
 
     fn claim_window(&self) -> bool {
-        true
+        self.record(PlatformCall::ClaimWindow);
+        let mut state = self.state.borrow_mut();
+        let refused = state.claim_refusals > 0;
+        state.claim_refusals = state.claim_refusals.saturating_sub(1);
+        !refused
     }
 
     fn play_trailer(&self, url: &str) -> Result<(), String> {
