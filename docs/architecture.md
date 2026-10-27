@@ -40,7 +40,7 @@ nexus-app (the binary)         ──▶ nexus-ui-host, nexus-core, every built-
 | `crates/nexus-ui-api` | The theme contract. View models (`vm.rs`: `AppView` and the rest), the theme manifest (`ThemeManifest`), design tokens, and `contract/types.slint` with the `Vm` and `Host` globals. No toolkit code. |
 | `crates/nexus-ui-host` | `ThemeSet` (finds themes, resolves `extends`) and `ThemeHost`: compiles a theme with `slint-interpreter`, binds the view models, loads images, turns gamepad buttons into keys, and swaps themes. |
 | `crates/nexus-app` | The binary. The event loop, render scheduling, the image loader, and the system adapters: `desktop.rs`, `processes.rs` (a running game's processes), `torrents.rs` (librqbit), `archives.rs` and `libarchive.rs`, `hardware.rs` and `gpu_probe.rs` (Vulkan), `trailer.rs` (libmpv), `gamepad.rs` (gilrs), `audio.rs` (rodio), `http.rs` (reqwest), `disk.rs`, `clock.rs`. |
-| `crates/nexus-testkit` | `FakeHost` (a real core over a temporary data folder), `StubPlugin`, fakes for every port, `SpanRecorder`, and `contract::emulator`, the capability contract checks. |
+| `crates/nexus-testkit` | `FakeHost` (a real core over a temporary data folder), `FakeClock`, `StubPlugin`, fakes for every port, `SpanRecorder`, and `contract::emulator`, the capability contract checks. |
 | `plugins/emulators/*` | `emu-kyty` (KytyPS5, PS5), `emu-shadps4` (shadPS4, PS4), `emu-pc` (PC games), `emu-steam` (the games Steam installed, Linux). |
 | `plugins/services/*` | `playstation-store` (store art and details) and `release-catalog` (the Catalog's releases). |
 | `plugins/themes/default` | The built-in theme, id `default`. A crate only so its files are embedded in the binary. |
@@ -79,8 +79,11 @@ theme callback ─▶ UiRequest::Core(Command) ─▶ Core::dispatch ─▶ AppS
 2. `Core::dispatch` runs the command. All state lives in one `AppState` behind a mutex in
    `Core`: navigation (`nav`, a stack of `Route`s), selection, the library, details, store
    metadata, catalogs and offers, downloads, sessions, notices and more.
-3. A change calls `Core::changed`, which publishes `Event::StateChanged` on the `EventBus` (a
-   `tokio::sync::broadcast` channel of 1024; a reader that falls behind skips the oldest).
+3. A change calls `Core::changed(area)`. It sends a `Change { area }` (the torrents, the
+   catalogs, the installs, …) to `Core::changes()`, a broadcast for the core and its tests, and
+   publishes `Event::StateChanged` on the `EventBus` (a `tokio::sync::broadcast` channel of
+   1024; a reader that falls behind skips the oldest). Plugins see neither the change nor its
+   area.
 4. The app reads every event from `core.events()`. Any event asks for a render. An atomic flag
    keeps at most one such request waiting on the UI thread.
 5. `schedule_render` renders at most once per `RENDER_GAP` (8 ms, a frame at 120 Hz). A burst
@@ -231,7 +234,8 @@ Plugins never reach each other.
 ### The guard
 
 Every call into a plugin goes through `Kernel::guard` (`guard.rs`): a `plugin_call` tracing span
-with `plugin_id` and `method`, a timeout (`call_timeout`, 30 s), and `catch_unwind`. A panic
+with `plugin_id` and `method`, a timeout (`call_timeout`, 30 s, on the kernel's clock), and
+`catch_unwind`. A panic
 becomes `PluginError::Panicked`, a timeout `PluginError::Timeout`, and the caller gets a
 `CoreError::Plugin` (usually shown as a notice). Only a failed `init` marks a plugin failed; a
 later call that fails leaves it active. The timeout fires at the plugin's next `.await`: code
@@ -252,6 +256,7 @@ starts with a stand-in for each; the app plugs in the real ones; the test kit ha
 | `Torrents` | `NoTorrents` | `torrents::RqbitTorrents` | `FakeTorrents` |
 | `Network` (VPNs) | `NoVpn` | none: a system plugin's `vpn` replaces it once one provides it | `FakeNetwork` |
 | `Archives` | `NoArchives` | `archives::HostArchives` | `FakeArchives` |
+| `Clock` | `TokioClock` (real; the app keeps it) | `TokioClock` | `FakeClock` |
 
 - `TokioSpawner` starts each game as the leader of its own process group on Unix; on Windows
   the "group" is the process and its children. `terminate` asks it to close (SIGTERM, or
@@ -268,6 +273,11 @@ starts with a stand-in for each; the app plugs in the real ones; the test kit ha
 - `Hardware::specs` is slow (it runs system tools); the core calls it once a run, off the async
   threads. `free_bytes` gives a disk's free space.
 - Calls into `Desktop`, `ProcessTree` and `Network` run in `spawn_blocking`.
+- `Clock` is the core's time: `now`, `sleep` and `interval`, and on `dyn Clock`, `sleep_until`
+  and `timeout`. Every timer of the core runs on it: the pollers, the game watcher, the
+  plugin calls' timeouts (`Kernel::guard`), the select settle, the prefetch, the update checks.
+  No other code in `nexus-core` uses `tokio::time`. `TokioSpawner` runs real programs, so it
+  keeps real time (`TokioClock`) whatever clock the kernel has.
 
 ## State that persists
 
@@ -416,7 +426,8 @@ asks every `Releases` plugin, groups the releases into offers (`releases::offers
 title id, or per title without its edition words), reads the `catalog.action` slot, and posts a
 notice when releases were added. The core reads the catalogs once a run after the boot, when
 the Catalog first opens, and again whenever a catalog plugin publishes `RELEASES_CHANGED`
-(`watch_catalogs`).
+(`watch_catalogs`). One read runs at a time, so a read that began before a catalog changed
+can't put its old copies over a newer read's.
 
 The `release-catalog` service (`plugins/services/release-catalog`) answers at once with the
 best copy it has: one fetched from its catalog address (`fetched/`), one refreshed from the
@@ -580,7 +591,13 @@ Four seams, from the highest:
 
 1. **The core's API** through `FakeHost` (`nexus-testkit`): commands in, view models, events and
    errors out. Boot rules, lifecycle and isolation, spans, library, catalogs, downloads,
-   torrents, installs, launches, VPN, settings.
+   torrents, installs, launches, VPN, settings. The core runs on a `FakeClock`: tokio's time,
+   paused at boot (the `test-util` feature, in the test kit only). Its time moves when a test
+   calls `advance`, or when every task waits for a timer; a slow machine doesn't move it, and
+   work in `spawn_blocking` holds it. A test waits for work with `TestCore::until(area, done)`,
+   which checks `done` after each change in that area, or with `FakeClock::run_until_idle`,
+   and for a timer with `advance`. No seam test sleeps; the screenshot tests move Slint's
+   time themselves.
 2. **Capability contracts**: `nexus_testkit::contract::emulator`, run on KytyPS5, shadPS4 and
    PC.
 3. **The composed host**: the core and `ThemeHost` wired as the app wires them, on Slint's
