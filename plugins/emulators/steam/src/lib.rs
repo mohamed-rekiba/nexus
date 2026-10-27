@@ -78,7 +78,7 @@ impl Plugin for SteamPlugin {
 }
 
 #[async_trait]
-impl EmulatorPlugin for SteamPlugin {
+impl CodePlugin for SteamPlugin {
     async fn init(&self, ctx: PluginContext) -> PluginResult<Provided> {
         let steam = std::sync::Arc::new(Steam { ctx });
         Ok(Provided {
@@ -92,7 +92,7 @@ impl EmulatorPlugin for SteamPlugin {
     }
 }
 
-inventory::submit! { PluginFactory::emulator(|| Box::new(SteamPlugin)) }
+inventory::submit! { PluginFactory::code(|| Box::new(SteamPlugin)) }
 
 struct Steam {
     ctx: PluginContext,

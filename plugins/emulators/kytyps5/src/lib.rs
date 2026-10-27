@@ -464,7 +464,7 @@ impl Plugin for KytyPlugin {
 }
 
 #[async_trait]
-impl EmulatorPlugin for KytyPlugin {
+impl CodePlugin for KytyPlugin {
     async fn init(&self, ctx: PluginContext) -> PluginResult<Provided> {
         let host = Host::of(&ctx);
         let spec = ConsoleSpec {
@@ -493,7 +493,7 @@ impl EmulatorPlugin for KytyPlugin {
     }
 }
 
-inventory::submit! { PluginFactory::emulator(|| Box::new(KytyPlugin)) }
+inventory::submit! { PluginFactory::code(|| Box::new(KytyPlugin)) }
 
 struct Kyty {
     emu: Arc<ConsoleEmulator<KytyFlavor>>,

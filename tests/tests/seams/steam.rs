@@ -39,8 +39,7 @@ struct Steam {
 /// Steam with Dota 2 (art in its cache) and Proton in its own folder, Portal 2 in a library on
 /// another drive, and a game still downloading.
 async fn boot() -> Steam {
-    let test =
-        FakeHost::new().platform(Some(Platform::Linux)).built_in(PluginByKind::emulator(SteamPlugin)).boot_core().await;
+    let test = FakeHost::new().platform(Some(Platform::Linux)).built_in(PluginBox::code(SteamPlugin)).boot_core().await;
     let (root, library) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let apps = root.path().join("steamapps");
     write(apps.join("appmanifest_570.acf"), acf(570, "Dota 2", 4, "dota 2 beta").as_bytes());
@@ -196,8 +195,7 @@ async fn a_game_s_details_have_its_size_folder_and_steam_s_hero_art() {
 
 #[tokio::test]
 async fn a_flatpak_steam_s_game_starts_through_the_flatpak() {
-    let test =
-        FakeHost::new().platform(Some(Platform::Linux)).built_in(PluginByKind::emulator(SteamPlugin)).boot_core().await;
+    let test = FakeHost::new().platform(Some(Platform::Linux)).built_in(PluginBox::code(SteamPlugin)).boot_core().await;
     let home = tempfile::tempdir().unwrap();
     let root = home.path().join(".var/app/com.valvesoftware.Steam/.local/share/Steam");
     write(root.join("steamapps/appmanifest_570.acf"), acf(570, "Dota 2", 4, "dota 2 beta").as_bytes());
@@ -213,8 +211,7 @@ async fn a_flatpak_steam_s_game_starts_through_the_flatpak() {
 
 #[tokio::test]
 async fn a_flatpak_steam_s_library_on_another_drive_starts_through_the_flatpak_too() {
-    let test =
-        FakeHost::new().platform(Some(Platform::Linux)).built_in(PluginByKind::emulator(SteamPlugin)).boot_core().await;
+    let test = FakeHost::new().platform(Some(Platform::Linux)).built_in(PluginBox::code(SteamPlugin)).boot_core().await;
     let home = tempfile::tempdir().unwrap();
     let root = home.path().join(".var/app/com.valvesoftware.Steam/.local/share/Steam");
     std::fs::create_dir_all(root.join("steamapps")).unwrap();
@@ -259,7 +256,7 @@ async fn the_libraries_steam_lists_are_read_with_nothing_set() {
     let test = FakeHost::new()
         .platform(Some(Platform::Linux))
         .home(home.path())
-        .built_in(PluginByKind::emulator(SteamPlugin))
+        .built_in(PluginBox::code(SteamPlugin))
         .boot_core()
         .await;
     test.core.dispatch(Command::RefreshLibrary).await.unwrap();
@@ -281,7 +278,7 @@ async fn the_player_s_own_steam_libraries_setting_replaces_steam_s_list() {
     let test = FakeHost::new()
         .platform(Some(Platform::Linux))
         .home(home.path())
-        .built_in(PluginByKind::emulator(SteamPlugin))
+        .built_in(PluginBox::code(SteamPlugin))
         .boot_core()
         .await;
     test.core.dispatch(Command::SetFolders { name: "steam".into(), paths: vec![root] }).await.unwrap();

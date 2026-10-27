@@ -15,7 +15,7 @@ mod vpn;
 use std::sync::Arc;
 
 use nexus_api::{
-    Capability, Plugin, PluginContext, PluginFactory, PluginManifest, PluginResult, Provided, SystemPlugin, inventory,
+    Capability, CodePlugin, Plugin, PluginContext, PluginFactory, PluginManifest, PluginResult, Provided, inventory,
 };
 
 const MANIFEST: &str = include_str!("../plugin.toml");
@@ -33,7 +33,7 @@ impl Plugin for HostSystem {
 }
 
 #[nexus_api::async_trait]
-impl SystemPlugin for HostSystem {
+impl CodePlugin for HostSystem {
     async fn init(&self, ctx: PluginContext) -> PluginResult<Provided> {
         let vpn = Some(Arc::new(vpn::Vpns::new(ctx.programs().clone())) as Arc<dyn nexus_api::VpnSettings>);
         #[cfg(target_os = "linux")]
@@ -57,7 +57,7 @@ impl SystemPlugin for HostSystem {
     }
 }
 
-inventory::submit! { PluginFactory::system(|| Box::new(HostSystem)) }
+inventory::submit! { PluginFactory::code(|| Box::new(HostSystem)) }
 
 /// macOS and Windows: the battery, and no restart or shut down (the system's own menu does
 /// that, and Nexus isn't the whole screen there).

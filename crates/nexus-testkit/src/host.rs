@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use nexus_api::PluginByKind;
+use nexus_api::PluginBox;
 use nexus_core::{Area, BootReport, Core, HostConfig, Kernel, KernelBuilder, Loader};
 use tempfile::TempDir;
 use tokio::sync::broadcast::error::RecvError;
@@ -21,7 +21,7 @@ const UNTIL_LIMIT: Duration = Duration::from_secs(60);
 pub struct FakeHost {
     host: HostConfig,
     dir: TempDir,
-    plugins: Vec<(PluginByKind, bool)>,
+    plugins: Vec<(PluginBox, bool)>,
     discover: Vec<std::path::PathBuf>,
     loaders: Vec<Arc<dyn Loader>>,
     http: FakeHttp,
@@ -114,13 +114,13 @@ impl FakeHost {
         self
     }
 
-    /// Any built-in plugin, such as a real emulator: `PluginByKind::emulator(KytyPlugin)`.
-    pub fn built_in(mut self, plugin: PluginByKind) -> Self {
+    /// Any built-in plugin, such as a real emulator: `PluginBox::code(KytyPlugin)`.
+    pub fn built_in(mut self, plugin: PluginBox) -> Self {
         self.plugins.push((plugin, false));
         self
     }
 
-    pub fn third_party(mut self, plugin: PluginByKind) -> Self {
+    pub fn third_party(mut self, plugin: PluginBox) -> Self {
         self.plugins.push((plugin, true));
         self
     }

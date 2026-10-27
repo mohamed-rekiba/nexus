@@ -103,7 +103,7 @@ fn quiet_testing_backend() {
 /// Like [`composed`], for a test that set its own Slint platform.
 pub fn composed_on_current_platform(build: impl FnOnce(FakeHost) -> FakeHost) -> Composed {
     let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-    let host = build(FakeHost::new().built_in(nexus_api::PluginByKind::theme(theme_default::DefaultTheme)));
+    let host = build(FakeHost::new().built_in(nexus_api::PluginBox::theme(theme_default::DefaultTheme)));
     let test = rt.block_on(host.boot_core());
     let requests: Rc<RefCell<Vec<UiRequest>>> = Rc::default();
     let sink = requests.clone();

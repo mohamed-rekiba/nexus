@@ -151,7 +151,7 @@ impl Plugin for ReleaseCatalog {
 }
 
 #[async_trait]
-impl ServicePlugin for ReleaseCatalog {
+impl CodePlugin for ReleaseCatalog {
     async fn init(&self, ctx: PluginContext) -> PluginResult<Provided> {
         let wake = Arc::new(Notify::new());
         let timing = Timing { fresh: Duration::from_secs(self.fresh.as_secs()), retry: self.retry };
@@ -170,7 +170,7 @@ impl ServicePlugin for ReleaseCatalog {
     }
 }
 
-inventory::submit! { PluginFactory::service(|| Box::new(ReleaseCatalog::default())) }
+inventory::submit! { PluginFactory::code(|| Box::new(ReleaseCatalog::default())) }
 
 /// The fetch of the catalog address and the catalog refresh, in a task of their own: one for
 /// the plugin, so two never run at once, and no call of the core waits for one. It runs each

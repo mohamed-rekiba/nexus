@@ -70,7 +70,7 @@ async fn setup_on(build: impl FnOnce(FakeHost) -> FakeHost) -> Setup {
     let t = build(FakeHost::new())
         .home(home.path())
         .plugin(emulator())
-        .built_in(PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .boot_core()
         .await;
     t.http.serve("https://xyz.dev/c/ps5.json", catalog());

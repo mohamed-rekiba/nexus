@@ -77,7 +77,7 @@ fn with_the_game_catalog_turned_off_the_ways_to_the_catalog_go() {
     use slint::platform::Key;
     let mut host = composed(|h| {
         h.plugin(games("emu-kyty", vec!["Astro"]).console("PS5"))
-            .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+            .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
     host.dispatch(Command::RefreshLibrary);
@@ -323,9 +323,8 @@ fn leaving_the_library_closes_the_sorts_and_gives_the_keys_back() {
 fn enter_on_sort_opens_the_sorts_and_the_keys_pick_one() {
     use slint::platform::Key;
     // The Catalog's sorts too.
-    let mut host = default_theme_with(|h| {
-        h.built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
-    });
+    let mut host =
+        default_theme_with(|h| h.built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default())));
     press_tab(&mut host, "Library");
     // Up to the bar, right to Sort, Enter.
     key(&mut host, Key::UpArrow);
@@ -563,7 +562,7 @@ fn the_key_hints_name_the_trailer_and_options_and_hide_over_the_grids() {
     let mut host = composed(|h| {
         h.plugin(games("emu-a", vec!["Alpha"]))
             .plugin(store("store", vec![("CUSA00000", 4.5, "")], None, std::time::Duration::ZERO))
-            .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+            .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
     home_line(&mut host);
@@ -1881,7 +1880,7 @@ fn settings_hide_start_at_login_for_a_build_that_isn_t_installed() {
 
 /// The Emulators list, then KytyPS5's sheet.
 fn kyty_page() -> Composed {
-    let mut host = composed(|h| h.built_in(nexus_api::PluginByKind::emulator(emu_kyty::KytyPlugin)));
+    let mut host = composed(|h| h.built_in(nexus_api::PluginBox::code(emu_kyty::KytyPlugin)));
     host.ui.start().unwrap();
     host.dispatch(Command::Navigate(nexus_core::Route::Emulators));
     settle(&mut host);
@@ -1928,7 +1927,7 @@ fn a_plugin_turned_off_on_its_page_shows_only_the_switch() {
 
 #[test]
 fn settings_have_no_emulator_settings() {
-    let mut host = composed(|h| h.built_in(nexus_api::PluginByKind::emulator(emu_kyty::KytyPlugin)));
+    let mut host = composed(|h| h.built_in(nexus_api::PluginBox::code(emu_kyty::KytyPlugin)));
     host.ui.start().unwrap();
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
     settle(&mut host);
@@ -1956,7 +1955,7 @@ fn the_emulators_list_names_each_console_and_its_program_s_build() {
 
 #[test]
 fn an_emulator_with_no_builds_is_not_called_not_installed() {
-    let mut host = composed(|h| h.built_in(nexus_api::PluginByKind::emulator(emu_pc::PcPlugin)));
+    let mut host = composed(|h| h.built_in(nexus_api::PluginBox::code(emu_pc::PcPlugin)));
     host.ui.start().unwrap();
     host.dispatch(Command::Navigate(nexus_core::Route::Emulators));
     settle(&mut host);
@@ -1966,7 +1965,7 @@ fn an_emulator_with_no_builds_is_not_called_not_installed() {
 
 #[test]
 fn an_emulator_with_no_builds_has_no_build_row() {
-    let mut host = composed(|h| h.built_in(nexus_api::PluginByKind::emulator(emu_pc::PcPlugin)));
+    let mut host = composed(|h| h.built_in(nexus_api::PluginBox::code(emu_pc::PcPlugin)));
     host.ui.start().unwrap();
     host.dispatch(Command::Navigate(nexus_core::Route::Emulators));
     host.dispatch(Command::Navigate(nexus_core::Route::Plugin("emu-pc".parse().unwrap())));
@@ -1980,7 +1979,7 @@ fn an_emulator_with_no_builds_has_no_build_row() {
 fn the_game_catalog_page_shows_its_sources_its_refresh_and_refresh_now() {
     let mut host = composed(|h| {
         h.plugin(games("emu-kyty", vec!["Alpha"]).console("PS5"))
-            .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+            .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
     // Sources with one PS5 forum, so the test doesn't depend on the project's own file, and
@@ -2101,7 +2100,7 @@ fn a_section_card_grows_with_values_that_wrap() {
 
 #[test]
 fn a_plugin_s_page_leaves_the_shared_folders_to_settings() {
-    let mut host = composed(|h| h.built_in(nexus_api::PluginByKind::emulator(emu_kyty::KytyPlugin)));
+    let mut host = composed(|h| h.built_in(nexus_api::PluginBox::code(emu_kyty::KytyPlugin)));
     host.ui.start().unwrap();
     host.dispatch(Command::Navigate(nexus_core::Route::Emulators));
     host.dispatch(Command::Navigate(nexus_core::Route::Plugin("emu-kyty".parse().unwrap())));
@@ -2159,7 +2158,7 @@ fn the_catalog_is_the_library_s_view_and_loads_a_page_at_a_time() {
     use slint::platform::Key;
     let mut host = composed(|h| {
         h.plugin(games("emu-kyty", vec!["Alpha"]).console("PS5"))
-            .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+            .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
     // 130 games in the catalog.
@@ -2228,7 +2227,7 @@ fn covers_store() -> nexus_testkit::StubPlugin {
 fn three_on_the_catalog() -> Composed {
     let mut host = composed(|h| {
         h.plugin(games("emu-kyty", vec![]).console("PS5"))
-            .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+            .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
     let topics: Vec<serde_json::Value> = ["Astro", "Bolt", "Comet"]
@@ -2308,7 +2307,7 @@ fn the_bar_under_the_catalog_s_header_shows_how_far_down_all_its_games_the_grid_
     use slint::platform::Key;
     let mut host = composed(|h| {
         h.plugin(games("emu-kyty", vec![]).console("PS5"))
-            .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+            .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
     let topics: Vec<serde_json::Value> = (0..200u32)
@@ -2360,7 +2359,7 @@ fn back_from_a_game_s_details_the_catalog_is_where_it_was() {
     use slint::platform::Key;
     let mut host = composed(|h| {
         h.plugin(games("emu-kyty", vec![]).console("PS5"))
-            .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+            .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
     let topics: Vec<serde_json::Value> = (0..60u32)
@@ -2414,7 +2413,7 @@ fn the_catalog_loads_only_the_covers_near_the_screen() {
     let mut host = composed(|h| {
         h.plugin(games("emu-kyty", vec![]).console("PS5"))
             .plugin(covers_store())
-            .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+            .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
     let topics: Vec<serde_json::Value> = (0..60u32)
@@ -2465,9 +2464,7 @@ fn astro_on_its_game_hub(home: &std::path::Path) -> Composed {
 fn astro_with(home: &std::path::Path, emulator: nexus_testkit::StubPlugin) -> Composed {
     let hash = ASTRO_HASH;
     let mut host = composed(|h| {
-        h.home(home)
-            .plugin(emulator)
-            .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        h.home(home).plugin(emulator).built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
     let catalog = serde_json::json!({ "complete": true, "translation": { "language": "en" }, "topic_count": 1,
@@ -2752,7 +2749,7 @@ fn a_pc_release_says_its_system_and_when_this_computer_can_t_start_it() {
         h.home(home.path())
             .platform(Some(nexus_api::Platform::Windows))
             .plugin(installing_emulator())
-            .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+            .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
     let catalog = serde_json::json!({ "complete": true, "translation": { "language": "en" }, "topic_count": 1,
@@ -2795,7 +2792,7 @@ fn first_offer_on(
         build(h)
             .home(home)
             .plugin(emulator)
-            .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+            .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
     let count = topics.as_array().unwrap().len();
@@ -3221,8 +3218,8 @@ fn penguins_downloaded(home: &std::path::Path) -> Composed {
     let mut host = composed(|h| {
         h.home(home)
             .platform(Some(nexus_api::Platform::Linux))
-            .built_in(nexus_api::PluginByKind::emulator(emu_pc::PcPlugin))
-            .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+            .built_in(nexus_api::PluginBox::code(emu_pc::PcPlugin))
+            .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
     let catalog = serde_json::json!({ "complete": true, "translation": { "language": "en" }, "topic_count": 1,
@@ -3793,7 +3790,7 @@ fn the_catalog_says_loading_catalog_until_the_catalogs_are_read() {
 fn alpha_and_bolt_on_the_catalog() -> Composed {
     let mut host = composed(|h| {
         h.plugin(games_on("emu-kyty", "PS5", vec!["Alpha"]).console("PS5"))
-            .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+            .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
     let topic = |id: u32, name: &str, seeders: u64, hash: char| {
@@ -3893,7 +3890,7 @@ fn the_game_hub_shows_the_best_release_s_facts_and_each_release_s_place_and_avai
 fn catalog_with_refresh(refresh: bool) -> Composed {
     let mut host = composed(|h| {
         h.plugin(games_on("emu-kyty", "PS5", vec![]).console("PS5"))
-            .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+            .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
     let catalog = serde_json::json!({ "complete": true, "translation": { "language": "en" }, "topic_count": 1,
@@ -4290,7 +4287,7 @@ fn a_password_field_hides_its_text_and_the_show_key_shows_it() {
 #[test]
 fn a_settings_text_box_opened_with_the_controller_types_on_the_keyboard_too() {
     use nexus_ui_host::PadButton;
-    let mut host = composed(|h| h.built_in(nexus_api::PluginByKind::emulator(emu_kyty::KytyPlugin)));
+    let mut host = composed(|h| h.built_in(nexus_api::PluginBox::code(emu_kyty::KytyPlugin)));
     host.ui.start().unwrap();
     host.resize(1600.0, 900.0);
     settle(&mut host);

@@ -95,7 +95,7 @@ async fn boot() -> (TestCore, tempfile::TempDir) {
     let games = tempfile::tempdir().unwrap();
     ps4_game(games.path(), "CUSA04118", "gd", "CUSA04118", "Firewatch");
     ps4_game(games.path(), "CUSA04118-patch", "gp", "CUSA04118", "Firewatch");
-    let test = host.built_in(nexus_api::PluginByKind::emulator(ShadPlugin)).boot_core().await;
+    let test = host.built_in(nexus_api::PluginBox::code(ShadPlugin)).boot_core().await;
     extract_appimages(test.spawner.clone());
     test.spawner.prints(&app_run(&test, TAG), HELP);
     test.core.dispatch(Command::SetFolders { name: "games".into(), paths: vec![games.path().into()] }).await.unwrap();
@@ -375,8 +375,8 @@ async fn one_games_folder_holds_games_for_both_consoles_and_each_emulator_finds_
     std::fs::write(sce.join("param.json"), param.to_string()).unwrap();
     let test = FakeHost::new()
         .platform(Some(Platform::Linux))
-        .built_in(nexus_api::PluginByKind::emulator(ShadPlugin))
-        .built_in(nexus_api::PluginByKind::emulator(emu_kyty::KytyPlugin))
+        .built_in(nexus_api::PluginBox::code(ShadPlugin))
+        .built_in(nexus_api::PluginBox::code(emu_kyty::KytyPlugin))
         .boot_core()
         .await;
     test.core.dispatch(Command::SetFolders { name: "games".into(), paths: vec![games.path().into()] }).await.unwrap();
@@ -411,7 +411,7 @@ async fn on_macos_the_official_zip_installs_and_its_shadps4_starts_the_game() {
     host.http().serve(RELEASES, serde_json::to_vec(&releases).unwrap());
     let games = tempfile::tempdir().unwrap();
     ps4_game(games.path(), "CUSA04118", "gd", "CUSA04118", "Firewatch");
-    let test = host.built_in(nexus_api::PluginByKind::emulator(ShadPlugin)).boot_core().await;
+    let test = host.built_in(nexus_api::PluginBox::code(ShadPlugin)).boot_core().await;
     assert!(test.core.kernel().order().contains(&shad()), "loaded on macOS");
     test.core.dispatch(Command::SetFolders { name: "games".into(), paths: vec![games.path().into()] }).await.unwrap();
     let program = test.data_dir().join("plugins/emu-shadps4/builds/v.0.20.0/shadps4");

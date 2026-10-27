@@ -7,17 +7,22 @@ use serde::{Deserialize, Serialize};
 
 use crate::{PluginId, RelPath};
 
+/// What a plugin is. Every kind but `theme` has code ([`crate::CodePlugin`]) and may provide
+/// any data capability; the kind decides only the privileges. Only a `system` plugin may
+/// provide the system capabilities ([`Capability::SYSTEM`]), run programs long
+/// ([`Permissions::long_running`]) or through polkit ([`Permissions::polkit`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PluginKind {
     /// Runs games: catalog, builds, settings, launching.
     Emulator,
-    /// Code that adds to the games other plugins find, and runs none itself: a store's art
-    /// and details, for example.
+    /// Adds to the games other plugins find, and runs none itself: a store's art and details,
+    /// for example.
     Service,
+    /// Files only: no code and no init.
     Theme,
     /// The machine's own settings and devices: network, VPNs, Bluetooth, sound, power, and on
-    /// Nexus OS its updates and installer. See [`crate::SystemPlugin`].
+    /// Nexus OS its updates and installer.
     System,
 }
 

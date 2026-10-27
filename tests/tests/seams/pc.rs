@@ -42,7 +42,7 @@ struct Pc {
 }
 
 async fn boot(platform: Platform) -> Pc {
-    let test = FakeHost::new().platform(Some(platform)).built_in(PluginByKind::emulator(PcPlugin)).boot_core().await;
+    let test = FakeHost::new().platform(Some(platform)).built_in(PluginBox::code(PcPlugin)).boot_core().await;
     with_folders(test).await
 }
 
@@ -330,8 +330,8 @@ async fn a_game_a_catalog_download_installed_has_the_offer_s_art_and_the_repack_
     const ART: &str = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1";
     let test = FakeHost::new()
         .platform(Some(Platform::Linux))
-        .built_in(PluginByKind::emulator(PcPlugin))
-        .built_in(PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(PluginBox::code(PcPlugin))
+        .built_in(PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .boot_core()
         .await;
     let p = with_folders(test).await;
@@ -406,7 +406,7 @@ async fn play_runs_the_start_script_as_it_is_even_beside_a_wine_this_system_can_
     let test = FakeHost::new()
         .platform(Some(Platform::Linux))
         .runs_32bit(false)
-        .built_in(PluginByKind::emulator(PcPlugin))
+        .built_in(PluginBox::code(PcPlugin))
         .boot_core()
         .await;
     let p = with_folders(test).await;
@@ -602,7 +602,7 @@ async fn a_start_script_beside_thousands_of_files_is_still_found_and_can_run() {
     let test = FakeHost::new()
         .platform(Some(Platform::Linux))
         .call_timeout(Duration::from_secs(30))
-        .built_in(PluginByKind::emulator(PcPlugin))
+        .built_in(PluginBox::code(PcPlugin))
         .boot_core()
         .await;
     let p = with_folders(test).await;

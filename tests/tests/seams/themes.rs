@@ -26,7 +26,7 @@ fn the_default_theme_is_complete_and_compiles() {
 fn every_default_screen_renders() {
     let mut host = composed(|h| {
         h.plugin(games("emu-a", vec!["Alpha", "Beta"]))
-            .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+            .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
     host.dispatch(Command::RefreshLibrary);
@@ -67,7 +67,7 @@ export component Card inherits Rectangle {
     let mut host = composed(|h| {
         h.discover(dir.path())
             .plugin(games("emu-kyty", vec!["Alpha", "Beta", "Gamma"]).console("PS5"))
-            .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+            .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.switch(&id("child")).expect("the child theme loads");
     // A catalog with three games.

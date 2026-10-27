@@ -212,7 +212,7 @@ async fn the_kernel_loads_an_emulator_and_a_theme_each_through_its_own_trait() {
         "id = \"emu\"\nkind = \"emulator\"\nname = \"E\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"",
     );
     let host =
-        FakeHost::new().plugin(emu).built_in(nexus_api::PluginByKind::theme(theme_default::DefaultTheme)).boot().await;
+        FakeHost::new().plugin(emu).built_in(nexus_api::PluginBox::theme(theme_default::DefaultTheme)).boot().await;
     assert!(host.report().rejected.is_empty(), "{:?}", host.report().rejected);
     let order = host.kernel.order();
     assert!(order.contains(&id("emu")) && order.contains(&id("default")));
@@ -242,17 +242,19 @@ async fn code_of_one_kind_with_a_manifest_of_the_other_is_rejected() {
             <theme_default::DefaultTheme as nexus_api::ThemePlugin>::files(&theme_default::DefaultTheme)
         }
     }
-    let host = FakeHost::new().plugin(wrong).built_in(nexus_api::PluginByKind::theme(ThemeCode)).boot().await;
+    let host = FakeHost::new().plugin(wrong).built_in(nexus_api::PluginBox::theme(ThemeCode)).boot().await;
     let rejection = |name: &str| match host.report().rejection(&id(name)) {
         Some(LoadError::Invalid(m)) => m.clone(),
         other => panic!("{name}: {other:?}"),
     };
-    assert_eq!(rejection("wrong"), "the manifest says Theme, but the code is of kind Emulator");
-    assert_eq!(rejection("wrong-way"), "the manifest says Emulator, but the code is of kind Theme");
+    assert_eq!(rejection("wrong"), "the manifest says Theme, but the plugin is code with an init");
+    assert_eq!(rejection("wrong-way"), "the manifest says Emulator, but the plugin is a theme");
 }
 
+/// The kind governs privileges, not data (ADR 0001): a service may provide any data
+/// capability, even a launcher, and only a system plugin the machine's settings.
 #[tokio::test]
-async fn a_service_loads_through_its_own_trait_and_may_not_run_games() {
+async fn a_service_may_provide_any_data_capability_but_no_system_one() {
     let service = |id: &str, capabilities: &str| {
         StubPlugin::from_toml(&format!(
             "id = \"{id}\"\nkind = \"service\"\nname = \"S\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\ncapabilities = [{capabilities}]"
@@ -260,17 +262,46 @@ async fn a_service_loads_through_its_own_trait_and_may_not_run_games() {
     };
     let host = FakeHost::new()
         .plugin(service("store", "\"metadata\""))
-        .plugin(service("runner", "\"metadata\", \"launcher\""))
+        .plugin(service("runner", "\"metadata\", \"launcher\", \"catalog\""))
+        .plugin(service("wifi", "\"metadata\", \"network\""))
         .boot()
         .await;
     assert_eq!(host.report().rejection(&id("store")), None);
-    assert_eq!(host.kernel.of_kind(nexus_api::PluginKind::Service), [id("store")]);
+    assert_eq!(host.report().rejection(&id("runner")), None, "data capabilities follow the capability");
+    assert_eq!(host.kernel.of_kind(nexus_api::PluginKind::Service), [id("store"), id("runner")]);
     assert!(host.kernel.of_kind(nexus_api::PluginKind::Emulator).is_empty(), "a service isn't an emulator");
     assert!(
-        matches!(host.report().rejection(&id("runner")), Some(LoadError::Invalid(m)) if m.contains("runs no games")),
+        matches!(host.report().rejection(&id("wifi")), Some(LoadError::Invalid(m)) if m == "only a system plugin can provide Network"),
         "{:?}",
         host.report().rejected
     );
+}
+
+/// No plugin but a system one may declare a system capability, whatever else it is.
+#[tokio::test]
+async fn a_plugin_that_isn_t_system_can_t_declare_system_capabilities() {
+    let plugin = |id: &str, kind: &str, capability: &str| {
+        StubPlugin::from_toml(&format!(
+            "id = \"{id}\"\nkind = \"{kind}\"\nname = \"P\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\ncapabilities = [\"{capability}\"]"
+        ))
+    };
+    let mut fake = FakeHost::new();
+    let system = ["network", "vpn", "bluetooth", "audio", "power", "os_updates", "os_install"];
+    for (i, capability) in system.iter().enumerate() {
+        fake = fake.plugin(plugin(&format!("emu-{i}"), "emulator", capability));
+        fake = fake.plugin(plugin(&format!("svc-{i}"), "service", capability));
+    }
+    let host = fake.plugin(plugin("machine", "system", "network")).boot().await;
+    for i in 0..system.len() {
+        for name in [format!("emu-{i}"), format!("svc-{i}")] {
+            assert!(
+                matches!(host.report().rejection(&id(&name)), Some(LoadError::Invalid(m)) if m.starts_with("only a system plugin")),
+                "{name}: {:?}",
+                host.report().rejected
+            );
+        }
+    }
+    assert_eq!(host.report().rejection(&id("machine")), None);
 }
 
 /// The plugins and themes in plugins/ must accept the host's API and contract versions. Those are

@@ -200,7 +200,7 @@ impl Plugin for ShadPlugin {
 }
 
 #[async_trait]
-impl EmulatorPlugin for ShadPlugin {
+impl CodePlugin for ShadPlugin {
     async fn init(&self, ctx: PluginContext) -> PluginResult<Provided> {
         let host = Host::of(&ctx);
         let spec = ConsoleSpec {
@@ -229,7 +229,7 @@ impl EmulatorPlugin for ShadPlugin {
     }
 }
 
-inventory::submit! { PluginFactory::emulator(|| Box::new(ShadPlugin)) }
+inventory::submit! { PluginFactory::code(|| Box::new(ShadPlugin)) }
 
 struct Shad {
     emu: Arc<ConsoleEmulator<ShadFlavor>>,

@@ -114,7 +114,7 @@ async fn astro_offer(build: impl FnOnce(FakeHost) -> FakeHost) -> (TestCore, tem
     let t = build(FakeHost::new())
         .home(home.path())
         .plugin(offering_emulator(PS5))
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .boot_core()
         .await;
     let catalog = serde_json::json!({ "complete": true, "translation": { "language": "en" }, "topic_count": 1,
@@ -190,8 +190,8 @@ async fn pc_offer_on_a_mac(topics: serde_json::Value) -> (TestCore, tempfile::Te
         .home(home.path())
         .platform(Some(nexus_api::Platform::Macos))
         .hardware(strong())
-        .built_in(nexus_api::PluginByKind::emulator(emu_pc::PcPlugin))
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(nexus_api::PluginBox::code(emu_pc::PcPlugin))
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .boot_core()
         .await;
     let count = topics.as_array().unwrap().len();
@@ -278,7 +278,7 @@ async fn an_offer_says_not_enough_space_from_its_best_release_not_its_newest_upl
         .free_space(10_000_000_000)
         .home(home.path())
         .plugin(offering_emulator(PS5))
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .boot_core()
         .await;
     // The newest upload fits; the best release, the highest version, doesn't.

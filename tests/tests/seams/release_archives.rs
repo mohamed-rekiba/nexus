@@ -78,7 +78,7 @@ async fn setup_with(
 ) -> Setup {
     let home = tempfile::tempdir().unwrap();
     let t = add(FakeHost::new().home(home.path()))
-        .built_in(PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .boot_core()
         .await;
     let catalog = serde_json::json!({ "complete": true, "translation": { "language": "en" }, "topic_count": 1,
@@ -292,7 +292,7 @@ fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
 async fn installing_the_unpacked_game_moves_it_into_the_games_folder_and_the_archive_stays() {
     use std::os::unix::fs::MetadataExt;
     let s = setup_with(
-        |h| h.built_in(PluginByKind::emulator(emu_kyty::KytyPlugin)),
+        |h| h.built_in(PluginBox::code(emu_kyty::KytyPlugin)),
         &[("Astro/game.7z", b"seven")],
         Arc::default(),
     )

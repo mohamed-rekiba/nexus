@@ -493,7 +493,7 @@ fn shoot_this_pc(window: &MinimalSoftwareWindow, out: &Path) {
                 .hardware(this_pc(vulkan))
                 .free_space(10_000_000_000)
                 .plugin(offering_emulator("vulkan = \"1.3\""))
-                .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+                .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         });
         host.ui.start().unwrap();
         let catalog = serde_json::json!({ "complete": true, "translation": { "language": "en" }, "topic_count": 1,
@@ -530,7 +530,7 @@ fn shoot_releases(window: &MinimalSoftwareWindow, out: &Path) {
         let mut host = composed_on_current_platform(|h| {
             h.home(home.path())
                 .plugin(offering_emulator("vulkan = \"1.3\""))
-                .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+                .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         });
         host.ui.start().unwrap();
         host.dispatch(Command::SetThemeOption { key: "direction".into(), value: direction.into() });
@@ -945,12 +945,12 @@ fn library(home: &Path) -> Composed {
             .plugin(games_on("emu-a", "PS5", vec!["Astro Drift", "Deep Lantern", "Ember Peaks", "Neon Harbor"]))
             .plugin(games_on("emu-b", "PS4", vec!["Paper Knights", "Quiet Orbit"]))
             // The real KytyPS5 plugin, for its Settings section and Emulators block.
-            .built_in(nexus_api::PluginByKind::emulator(emu_kyty::KytyPlugin))
+            .built_in(nexus_api::PluginBox::code(emu_kyty::KytyPlugin))
             .plugin(games_needing_an_emulator("emu-x", vec!["Starfall"]))
             .plugin(playable_games("emu-p", vec!["Lumen Gate"]))
             .plugin(games_on("emu-pc", "PC", vec![]).console("PC"))
             // The game catalog, for the games it offers.
-            .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+            .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
     // The sample catalogs, fetched from the catalog address.

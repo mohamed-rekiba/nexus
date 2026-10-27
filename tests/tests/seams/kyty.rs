@@ -104,7 +104,7 @@ async fn boot_on(host: FakeHost, releases: &[&str]) -> Kyty {
     ps5_game(games.path(), "PS5/Astro", "PPSA01234", "Astro Bot");
     // Three folders down: the console folder, then a folder of the player's.
     ps5_game(games.path(), "PS5/Demon/PPSA05678-app0", "PPSA05678", "Demon's Souls");
-    let test = host.built_in(nexus_api::PluginByKind::emulator(KytyPlugin)).boot_core().await;
+    let test = host.built_in(nexus_api::PluginBox::code(KytyPlugin)).boot_core().await;
     for tag in [V1, V2] {
         runs(&test, tag);
     }
@@ -648,7 +648,7 @@ async fn builds_come_from_the_release_repo_you_set_with_its_prereleases() {
 async fn on_macos_builds_come_from_the_macos_test_builds_by_default() {
     let host = FakeHost::new().platform(Some(Platform::Macos));
     host.http().serve(FORK_RELEASES, b"[]".to_vec());
-    let test = host.built_in(nexus_api::PluginByKind::emulator(KytyPlugin)).boot_core().await;
+    let test = host.built_in(nexus_api::PluginBox::code(KytyPlugin)).boot_core().await;
     test.core.dispatch(Command::Navigate(Route::Emulators)).await.unwrap();
     let sent = test.http.sent();
     assert!(sent.iter().any(|u| u == FORK_RELEASES), "{sent:?}");
@@ -677,7 +677,7 @@ async fn on_macos_pre_releases_are_on_by_default_and_turning_them_off_hides_the_
         "assets": [{ "name": "KytyPS5-macOS-x86_64.zip", "browser_download_url": "https://github.com/x.zip", "size": 1 }],
     }]);
     host.http().serve(FORK_RELEASES, serde_json::to_vec(&test_build).unwrap());
-    let test = host.built_in(nexus_api::PluginByKind::emulator(KytyPlugin)).boot_core().await;
+    let test = host.built_in(nexus_api::PluginBox::code(KytyPlugin)).boot_core().await;
     let core = &test.core;
     let shown = |key: &str| {
         let view = core.view();
@@ -701,7 +701,7 @@ async fn a_stored_window_size_becomes_the_nearest_resolution_and_settings_still_
         "width": 2560, "height": 1440, "present_mode": "Fifo", "fullscreen": true,
     } } } });
     std::fs::write(host.data_dir().join("config.json"), old.to_string()).unwrap();
-    let test = host.built_in(nexus_api::PluginByKind::emulator(KytyPlugin)).boot_core().await;
+    let test = host.built_in(nexus_api::PluginBox::code(KytyPlugin)).boot_core().await;
     let core = &test.core;
     core.dispatch(Command::Navigate(Route::Settings)).await.unwrap();
     let shown = |key: &str| {
@@ -737,7 +737,7 @@ async fn a_turned_off_plugin_has_no_games_and_cannot_launch_until_turned_on_agai
 
 #[tokio::test]
 async fn a_theme_cannot_be_turned_off() {
-    let test = FakeHost::new().built_in(nexus_api::PluginByKind::theme(theme_default::DefaultTheme)).boot_core().await;
+    let test = FakeHost::new().built_in(nexus_api::PluginBox::theme(theme_default::DefaultTheme)).boot_core().await;
     let theme = PluginId::new("default").unwrap();
     let off = test.core.dispatch(Command::SetPluginEnabled { plugin: theme, enabled: false }).await;
     assert!(matches!(off, Err(nexus_core::CoreError::Invalid(_))), "{off:?}");

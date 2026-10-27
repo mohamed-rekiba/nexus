@@ -219,6 +219,7 @@ async fn the_view_says_whether_nexus_is_the_whole_screen() {
 
 #[tokio::test]
 async fn only_a_system_plugin_may_provide_the_machine_s_settings_or_run_programs_long() {
+    // The kind governs privileges only: a system plugin may provide data capabilities too.
     let service = StubPlugin::from_toml(
         "id = \"svc\"\nname = \"Svc\"\nversion = \"1.0.0\"\nkind = \"service\"\nhost_api = \"*\"\ncapabilities = [\"network\"]\n",
     );
@@ -235,9 +236,10 @@ async fn only_a_system_plugin_may_provide_the_machine_s_settings_or_run_programs
     );
     let t = FakeHost::new().plugin(service).plugin(system_with_games).plugin(long).plugin(unlisted).boot_core().await;
     let rejected: Vec<String> = t.report.rejected.iter().map(|r| r.source.clone()).collect();
-    for id in ["svc", "sys", "emu", "sys2"] {
+    for id in ["svc", "emu", "sys2"] {
         assert!(rejected.contains(&id.to_string()), "{id} is refused: {rejected:?}");
     }
+    assert!(!rejected.contains(&"sys".to_string()), "a system plugin may list games: {rejected:?}");
 }
 
 #[tokio::test]

@@ -28,10 +28,7 @@ fn catalog(collected_at: &str) -> String {
 }
 
 async fn boot() -> TestCore {
-    FakeHost::new()
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
-        .boot_core()
-        .await
+    FakeHost::new().built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default())).boot_core().await
 }
 
 async fn set_address(t: &TestCore, url: &str) -> nexus_core::CoreResult<()> {
@@ -141,7 +138,7 @@ async fn with_no_copy_kept_a_failed_fetch_falls_back_to_the_bundled_catalog() {
 #[tokio::test]
 async fn a_slow_catalog_address_still_gives_the_bundled_catalog_at_once_and_the_fetched_copy_after() {
     let t = FakeHost::new()
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .plugin(games("emu-kyty", vec![]).console("PS5"))
         .boot_core()
         .await;
@@ -208,7 +205,7 @@ fn offer_keys(t: &TestCore) -> Vec<String> {
 #[tokio::test]
 async fn an_emulator_gets_the_catalog_of_the_console_it_plays_and_keeps_its_own_id_in_the_keys() {
     let t = FakeHost::new()
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .plugin(games("emu-a", vec![]).console("PS5"))
         .plugin(games("emu-b", vec![]).console("PS4"))
         .boot_core()
@@ -228,7 +225,7 @@ async fn an_emulator_gets_the_catalog_of_the_console_it_plays_and_keeps_its_own_
 #[tokio::test]
 async fn a_console_turned_off_in_the_catalog_s_settings_offers_nothing_and_its_games_stay() {
     let t = FakeHost::new()
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .plugin(games_on("emu-a", "PS5", vec!["Alpha"]).console("PS5"))
         .plugin(games("emu-b", vec![]).console("PS4"))
         .boot_core()
@@ -286,8 +283,8 @@ async fn a_console_whose_emulator_lists_its_own_releases_has_no_other_catalog() 
     // console catalog is asked nothing for it.
     let t = FakeHost::new()
         .platform(Some(nexus_api::Platform::Linux))
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
-        .built_in(nexus_api::PluginByKind::emulator(emu_steam::SteamPlugin))
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
+        .built_in(nexus_api::PluginBox::code(emu_steam::SteamPlugin))
         .plugin(games("emu-a", vec![]).console("PS5"))
         .boot_core()
         .await;
@@ -303,7 +300,7 @@ async fn a_console_whose_emulator_lists_its_own_releases_has_no_other_catalog() 
 #[tokio::test]
 async fn the_catalog_s_console_toggles_follow_the_emulators_turned_on() {
     let t = FakeHost::new()
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .plugin(games("emu-a", vec![]).console("PS5"))
         .plugin(games("emu-b", vec![]).console("PS4"))
         .boot_core()
@@ -327,7 +324,7 @@ async fn the_catalog_s_console_toggles_follow_the_emulators_turned_on() {
 #[tokio::test]
 async fn of_two_emulators_for_one_console_the_first_loaded_gets_the_catalog() {
     let t = FakeHost::new()
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .plugin(games("emu-a", vec![]).console("PS5"))
         .plugin(games("emu-c", vec![]).console("PS5"))
         .boot_core()
@@ -347,7 +344,7 @@ async fn of_two_emulators_for_one_console_the_first_loaded_gets_the_catalog() {
 #[tokio::test]
 async fn an_emulator_with_no_console_gets_no_catalog() {
     let t = FakeHost::new()
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .plugin(games("emu-a", vec![]))
         .boot_core()
         .await;
@@ -385,7 +382,7 @@ fn topic(id: u32, title_id: &str, title: &str, version: &str, added: &str, hash:
 /// A catalog with two versions of one game, a game added long ago, and a game the emulator has.
 async fn with_offers() -> TestCore {
     let t = FakeHost::new()
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .plugin(games("emu-kyty", vec!["Alpha"]).console("PS5"))
         .boot_core()
         .await;
@@ -481,7 +478,7 @@ fn counting_store(asked: Arc<Mutex<Vec<String>>>) -> StubPlugin {
 async fn the_catalog_shows_a_page_at_a_time_and_describes_only_what_it_shows() {
     let asked = Arc::new(Mutex::new(Vec::new()));
     let t = FakeHost::new()
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .plugin(games("emu-kyty", vec![]).console("PS5"))
         .plugin(counting_store(asked.clone()))
         .boot_core()
@@ -538,7 +535,7 @@ fn steam_block() -> serde_json::Value {
 /// A catalog for `emulator` with these topics, served and read, on the Catalog.
 async fn offering(emulator: &str, console: &'static str, topics: serde_json::Value, store: bool) -> TestCore {
     let mut host = FakeHost::new()
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .plugin(games_on(emulator, console, vec![]).console(console));
     if store {
         host =
@@ -593,7 +590,7 @@ async fn a_pc_offer_shows_steam_s_words_and_art_and_its_protondb_tier() {
 #[tokio::test]
 async fn an_installed_game_with_no_art_of_its_own_has_its_offer_s_and_keeps_it_with_the_catalog_off() {
     let t = FakeHost::new()
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .plugin(games_on("emu-pc", "PC", vec!["Celeste"]).console("PC"))
         .boot_core()
         .await;
@@ -905,7 +902,7 @@ async fn releases_of_one_name_for_two_consoles_stay_two_games() {
 #[tokio::test]
 async fn an_installed_game_matches_its_offer_by_name_on_the_same_console_and_has_a_chip() {
     let t = FakeHost::new()
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .plugin(games_on("emu-kyty", "PS5", vec!["Alpha"]).console("PS5"))
         .boot_core()
         .await;
@@ -950,7 +947,7 @@ fn sized(id: u32, name: &str, version: &str, size: u64, seeders: u64, hash: char
 #[tokio::test]
 async fn a_card_shows_its_best_release_and_the_game_hub_orders_them_by_version() {
     let t = FakeHost::new()
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .plugin(games_on("emu-kyty", "PS5", vec!["Alpha"]).console("PS5"))
         .boot_core()
         .await;
@@ -1246,7 +1243,7 @@ async fn the_game_hub_s_facts_come_from_the_best_release() {
 #[tokio::test]
 async fn with_the_game_catalog_turned_off_there_is_no_catalog_to_open() {
     let t = FakeHost::new()
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .plugin(games("emu-kyty", vec![]).console("PS5"))
         .boot_core()
         .await;
@@ -1272,7 +1269,7 @@ async fn with_the_game_catalog_turned_off_there_is_no_catalog_to_open() {
 #[tokio::test]
 async fn a_hidden_game_leaves_the_catalog_and_the_hidden_filter_shows_it() {
     let t = FakeHost::new()
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .plugin(games("emu-kyty", vec![]).console("PS5"))
         .boot_core()
         .await;
