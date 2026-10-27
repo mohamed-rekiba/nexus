@@ -19,7 +19,7 @@ use crate::{CONSOLE_FOLDER, GAMES, GOG_INFO, Pc, WRAPPER_INFO, WRAPPER_NAME_LINE
 const PROBED: usize = 4000;
 
 /// `files`, nearest the game's folder first, at most [`PROBED`]: the ones to read.
-fn to_probe<'a>(files: impl IntoIterator<Item = &'a DownloadFile>) -> Vec<&'a DownloadFile> {
+pub(crate) fn to_probe<'a>(files: impl IntoIterator<Item = &'a DownloadFile>) -> Vec<&'a DownloadFile> {
     let mut files: Vec<&DownloadFile> = files.into_iter().collect();
     files.sort_by(|a, b| (a.rel.matches('/').count(), &a.rel).cmp(&(b.rel.matches('/').count(), &b.rel)));
     files.truncate(PROBED);
@@ -202,19 +202,7 @@ impl Pc {
         } else {
             "Game".into()
         };
-        let mut name = probe::clean_name(&title);
-        // A file's name in small letters ("cuphead_v1.3.4.run"): each word starts with a capital.
-        if !name.chars().any(char::is_uppercase) {
-            name = name
-                .split(' ')
-                .map(|word| {
-                    let mut letters = word.chars();
-                    letters.next().map(|first| first.to_uppercase().chain(letters).collect()).unwrap_or_default()
-                })
-                .collect::<Vec<String>>()
-                .join(" ");
-        }
-        Ok(Plan { name, files, whole })
+        Ok(Plan { name: probe::display_name(&title), files, whole })
     }
 }
 

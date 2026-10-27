@@ -4,8 +4,10 @@
 //! game's processes. Windows has no process groups: there a game is its process and the
 //! processes below it, from a process snapshot.
 //!
-//! - Unix: `pgrep -g` lists the group, `ps -A -o pid=,ppid=` the parents; `kill` ends them.
-//! - Windows: a ToolHelp snapshot lists the parents; `taskkill` ends them.
+//! - Unix: `pgrep -g` lists the group, `ps -A -o pid=,ppid=` the parents; `kill` ends them. A
+//!   game another program started is found by its command line, from `ps`.
+//! - Windows: a ToolHelp snapshot lists the parents; `taskkill` ends them. It has no command
+//!   lines, so a game another program started isn't found there.
 
 use nexus_core::ProcessTree;
 
@@ -29,6 +31,19 @@ impl ProcessTree for SystemProcesses {
                 return Vec::new();
             }
             and_below(vec![root], &parents)
+        }
+    }
+
+    fn find(&self, text: &str) -> Vec<u32> {
+        #[cfg(unix)]
+        {
+            let out = run("ps", &["-A", "-ww", "-o", "pid=,ppid=,args="]).unwrap_or_default();
+            topmost(&with_command_lines(&out), text)
+        }
+        #[cfg(windows)]
+        {
+            let _ = text;
+            Vec::new()
         }
     }
 
@@ -96,6 +111,31 @@ fn parents() -> Vec<(u32, u32)> {
         .unwrap_or_default()
 }
 
+/// Each process in `ps`'s `pid ppid args` lines, with its parent and command line.
+#[cfg(unix)]
+fn with_command_lines(ps: &str) -> Vec<(u32, u32, &str)> {
+    ps.lines()
+        .filter_map(|line| {
+            let (id, rest) = line.trim_start().split_once(char::is_whitespace)?;
+            let rest = rest.trim_start();
+            let (parent, args) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
+            Some((id.parse().ok()?, parent.parse().ok()?, args.trim_start()))
+        })
+        .collect()
+}
+
+/// Of the processes whose command line has `text`, those whose parent's hasn't: each game's
+/// first process, not one it started with the same words.
+#[cfg(any(unix, test))]
+fn topmost(processes: &[(u32, u32, &str)], text: &str) -> Vec<u32> {
+    let matches: Vec<_> = processes.iter().filter(|(_, _, args)| args.contains(text)).collect();
+    matches
+        .iter()
+        .filter(|(_, parent, _)| !matches.iter().any(|(id, _, _)| id == parent))
+        .map(|(id, _, _)| *id)
+        .collect()
+}
+
 /// `ids` and every process below them, from `parents` (each process with its parent).
 fn and_below(mut ids: Vec<u32>, parents: &[(u32, u32)]) -> Vec<u32> {
     let mut i = 0;
@@ -156,6 +196,52 @@ mod tests {
         let parents = [(10, 1), (11, 10), (20, 11), (30, 20), (40, 1), (50, 50)];
         assert_eq!(super::and_below(vec![10, 11], &parents), [10, 11, 20, 30]);
         assert_eq!(super::and_below(vec![50], &parents), [50], "not its own child");
+    }
+
+    /// Of a game's processes that share its words, the first: Steam's reaper, not what it
+    /// started with them.
+    #[test]
+    fn a_game_another_program_started_is_its_first_process_with_the_words() {
+        let processes = [
+            (5, 1, "steam steam://rungameid/570"),
+            (40, 1, "reaper SteamLaunch AppId=570 -- game"),
+            (41, 40, "game --from SteamLaunch AppId=570 -- game"),
+            (60, 1, "reaper SteamLaunch AppId=5700 -- other"),
+        ];
+        assert_eq!(super::topmost(&processes, "SteamLaunch AppId=570 "), [40]);
+        assert!(super::topmost(&processes, "SteamLaunch AppId=9 ").is_empty());
+    }
+
+    /// `ps` lines: the id, the parent and the command line, spaces in it kept.
+    #[cfg(unix)]
+    #[test]
+    fn ps_lines_give_each_process_its_parent_and_command_line() {
+        let ps = "    1     0 /sbin/init\n  4242  1  reaper SteamLaunch AppId=570 -- a b\n   77    1\n";
+        assert_eq!(
+            super::with_command_lines(ps),
+            [(1, 0, "/sbin/init"), (4242, 1, "reaper SteamLaunch AppId=570 -- a b"), (77, 1, "")]
+        );
+    }
+
+    /// The real process list finds a program by words in its command line.
+    #[cfg(unix)]
+    #[test]
+    fn a_running_program_is_found_by_its_command_line() {
+        // Words of this run only: a program an earlier run left can't match.
+        let words = format!("29.{}", std::process::id());
+        let mut program = std::process::Command::new("sleep").arg(&words).spawn().unwrap();
+        let id = program.id();
+        let found = || SystemProcesses.find(&format!("sleep {words}")) == [id];
+        // The program is killed whatever the check says, and the check is asserted after.
+        let start = Instant::now();
+        let mut seen = found();
+        while !seen && start.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(20));
+            seen = found();
+        }
+        program.kill().unwrap();
+        program.wait().unwrap();
+        assert!(seen, "sleep {words} ({id}) wasn't found");
     }
 
     fn until(what: &str, done: impl Fn() -> bool) {

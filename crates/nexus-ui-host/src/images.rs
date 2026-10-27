@@ -9,8 +9,8 @@ use slint_interpreter::{Image, Rgba8Pixel, SharedPixelBuffer};
 /// How big an image is made, by where it shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ImageSize {
-    /// Cards, tiles and badges: at most [`THUMB_WIDTH`] by [`THUMB_HEIGHT`], a 2:3 cover for a
-    /// card on a 2x screen.
+    /// Cards, tiles and badges: enough to cover [`THUMB_WIDTH`] by [`THUMB_HEIGHT`], a 2:3 cover
+    /// for a card on a 2x screen (see [`scale`]).
     Thumb,
     /// The Game Hub's cover, backgrounds, logos and screenshots: at most what a 1080p screen
     /// shows.
@@ -30,10 +30,11 @@ impl ImageSize {
         }
     }
 
-    /// For file names: `thumb` or `full`.
+    /// For file names: `card` or `full`. (Before thumbnails covered the card they were
+    /// `thumb`: those copies are too small, and the cache sweep deletes them.)
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Thumb => "thumb",
+            Self::Thumb => "card",
             Self::Full => "full",
         }
     }
@@ -66,14 +67,27 @@ pub struct Prepared {
     pub smaller: Option<Vec<u8>>,
 }
 
-/// Decodes PNG or JPEG, makes it no bigger than `size`'s limits and cuts `crop` off. Slow
+/// How much `size` scales an image of `width` × `height`, at most 1. A full image fits inside a
+/// 1080p screen. A thumbnail covers the card's 512 × 768: cards crop art of any shape to fill
+/// them, so a wide picture is made as tall as the card, else the card would stretch a short
+/// copy. Its long side stays at most a screen's width.
+fn scale(size: ImageSize, width: u32, height: u32) -> f64 {
+    let (w, h) = (f64::from(width), f64::from(height));
+    let (max_w, max_h) = size.limits();
+    let scale = match size {
+        ImageSize::Full => f64::min(f64::from(max_w) / w, f64::from(max_h) / h),
+        ImageSize::Thumb => f64::max(f64::from(max_w) / w, f64::from(max_h) / h).min(f64::from(MAX_WIDTH) / w.max(h)),
+    };
+    scale.min(1.0)
+}
+
+/// Decodes PNG or JPEG, makes it no bigger than `size` needs ([`scale`]) and cuts `crop` off. Slow
 /// for big art: call it on a worker thread, as the old launcher's image pool did. The copy
 /// to keep is already cut: load it again with [`Crop::None`].
 pub fn prepare(bytes: &[u8], size: ImageSize, crop: Crop) -> Result<Prepared, String> {
     let mut decoded = image::load_from_memory(bytes).map_err(|e| e.to_string())?;
     let (width, height) = (decoded.width(), decoded.height());
-    let (max_w, max_h) = size.limits();
-    let scale = f64::min(f64::from(max_w) / f64::from(width), f64::from(max_h) / f64::from(height));
+    let scale = scale(size, width, height);
     let mut changed = false;
     if scale < 1.0 {
         let (w, h) = ((f64::from(width) * scale).round() as u32, (f64::from(height) * scale).round() as u32);
@@ -367,6 +381,20 @@ mod tests {
         let started = std::time::Instant::now();
         prepare(&thumb.smaller.expect("a card-sized copy to keep"), ImageSize::Thumb, Crop::None).unwrap();
         eprintln!("1200x1800 PNG to a card: {cold:?}; the kept card-sized JPEG: {:?}", started.elapsed());
+    }
+
+    /// A wide picture as a card's cover: the card crops its sides, so it is made as tall as
+    /// the card, not as wide, and stays sharp.
+    #[test]
+    fn a_wide_cover_is_made_as_tall_as_the_card() {
+        let wide = prepare(&png(3840, 2160), ImageSize::Thumb, Crop::None).unwrap();
+        assert_eq!((wide.pixels.width(), wide.pixels.height()), (1365, 768));
+        let kept = prepare(&wide.smaller.expect("a card-sized copy to keep"), ImageSize::Thumb, Crop::None).unwrap();
+        assert_eq!((kept.pixels.width(), kept.pixels.height()), (1365, 768), "the kept copy loads as it is");
+        assert!(kept.smaller.is_none());
+        // A panorama stays at most a screen wide.
+        let panorama = prepare(&png(8000, 1000), ImageSize::Thumb, Crop::None).unwrap();
+        assert_eq!((panorama.pixels.width(), panorama.pixels.height()), (1920, 240));
     }
 
     /// 100 × 160 box art: 16 rows of PlayStation blue with a white "PS4", then red artwork.

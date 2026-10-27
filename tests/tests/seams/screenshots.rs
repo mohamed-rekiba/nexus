@@ -563,8 +563,8 @@ fn shoot_releases(window: &MinimalSoftwareWindow, out: &Path) {
 }
 
 /// The Library's header with a controller, as `default-pad-hints.png`, and its key hints cut
-/// out at four times the size as `default-pad-hints-zoom.png`: the d-pad's two pairs, ◀ ▶ and
-/// ▲ ▼, are the same size.
+/// out at four times the size as `default-pad-hints-zoom.png`: the d-pad's two pairs, ⮜  ⮞ and
+/// ⮝  ⮟, are the same size.
 fn shoot_pad_hints(window: &MinimalSoftwareWindow, out: &Path) {
     use nexus_ui_host::PadButton;
     let mut host = composed_on_current_platform(|h| h.plugin(games("emu-a", vec!["Alpha", "Beta"])));

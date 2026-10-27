@@ -154,8 +154,10 @@ pub fn system_name(platform: Platform) -> &'static str {
 
 /// Helpers that come with games but don't start them: listed last.
 fn helper(name: &str) -> bool {
-    const WORDS: [&str; 22] = [
+    const WORDS: [&str; 23] = [
         "setup",
+        // A game's own server, without its screen (`game-dedicated`).
+        "dedicated",
         "unins",
         "install",
         "redist",
@@ -324,6 +326,22 @@ pub fn clean_name(title: &str) -> String {
     if name.is_empty() { title.trim().to_owned() } else { name }
 }
 
+/// A game's name from a folder's or a file's: [`clean_name`], and a name in small letters
+/// ("cuphead_v1.3.4.run", "my_game") with a capital at each word.
+pub fn display_name(title: &str) -> String {
+    let name = clean_name(title);
+    if name.chars().any(char::is_uppercase) {
+        return name;
+    }
+    name.split(' ')
+        .map(|word| {
+            let mut letters = word.chars();
+            letters.next().map(|first| first.to_uppercase().chain(letters).collect()).unwrap_or_default()
+        })
+        .collect::<Vec<String>>()
+        .join(" ")
+}
+
 /// A folder name for a game: its name in safe characters.
 pub fn folder_name(name: &str) -> String {
     let s: String =
@@ -430,6 +448,18 @@ pub(crate) mod tests {
             "a deep start script first; 64-bit before 32-bit; a name with a helper's word last; not its Wine"
         );
         assert_eq!(Kind::Native.not_here(Platform::Windows), "This is a Linux game: it can't run on Windows");
+    }
+
+    /// A game's dedicated server sorts first by name, but isn't the game.
+    #[test]
+    fn a_dedicated_server_comes_after_the_game() {
+        let files = vec![
+            ("game-linux64-dedicated".to_owned(), Probe::Elf { x64: true }),
+            ("game-linux64-glx".to_owned(), Probe::Elf { x64: true }),
+            ("game-linux64-sdl".to_owned(), Probe::Elf { x64: true }),
+        ];
+        let paths: Vec<_> = rank(&files).into_iter().map(|(p, _)| p).collect();
+        assert_eq!(paths, ["game-linux64-glx", "game-linux64-sdl", "game-linux64-dedicated"]);
     }
 
     #[test]

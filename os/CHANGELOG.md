@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/mohamed-rekiba/nexus/compare/nexus-os-v0.2.0...nexus-os-v0.3.0) (2026-10-26)
+
+
+### Features
+
+* Steam games in the Library, PC games copied in by hand, and GameMode ([84a90ce](https://github.com/mohamed-rekiba/nexus/commit/84a90cec587027df4da1ff7921cf88cd9ded880c))
+
 ## [0.2.0](https://github.com/mohamed-rekiba/nexus/compare/nexus-os-v0.1.2...nexus-os-v0.2.0) (2026-10-26)
 
 

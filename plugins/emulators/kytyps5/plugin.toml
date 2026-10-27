@@ -105,3 +105,9 @@ default = [
     "~/Applications/KytyPS5", "~/Applications/kyty", "~/Applications/Kyty",
     "~/src/KytyPS5", "~/src/kyty", "~/src/Kyty",
 ]
+
+# The system its games show under: what the Library and a card call it, and its color.
+[system]
+id = "PS5"
+name = "PlayStation 5"
+# No color: PS5 is drawn in the theme's neutral look, black with a white edge.

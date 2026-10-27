@@ -31,6 +31,7 @@ tracing-subscriber.workspace = true
 emu-kyty.workspace = true
 emu-shadps4.workspace = true
 emu-pc.workspace = true
+emu-steam.workspace = true
 playstation-store.workspace = true
 release-catalog.workspace = true
 system-host.workspace = true

@@ -634,6 +634,7 @@ impl ThemeHost {
                     "remove-unpacked" => T::RemoveUnpacked,
                     "install" => T::Install,
                     "cancel-install" => T::CancelInstall,
+                    "open-store" => T::OpenStore,
                     _ => return None,
                 };
                 core(Command::Torrent { id: arg(a, 0), action })

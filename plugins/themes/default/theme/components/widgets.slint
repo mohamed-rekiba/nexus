@@ -296,7 +296,8 @@ export component Cover inherits Rectangle {
     // (the Game Hub): the name shows until the art is in.
     in property <string> state;
     in property <string> title;
-    in property <string> platform;
+    // The game's system color (`GameCard.system-color`): the art shown before the cover.
+    in property <color> system-color;
     in property <length> name-size: 20 * Look.px;
     // The corners' radius. The art is clipped to it, as in the old theme's tiles.
     in property <length> radius;
@@ -312,7 +313,7 @@ export component Cover inherits Rectangle {
         if !root.loaded : Rectangle {
             // Its own radius too: a renderer that clips square still draws it round.
             border-radius: root.radius;
-            background: Look.console-art(root.platform);
+            background: Look.console-art(root.system-color);
             Shimmer { active: root.loading; accessible-role: text; accessible-label: root.loading ? "cover-loading" : ""; }
             if !root.loading : Text {
                 accessible-role: text;

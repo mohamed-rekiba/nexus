@@ -114,12 +114,22 @@ pub struct RowVm {
     pub value: String,
 }
 
+/// A game's system, as the plugin of that system describes it (`[system]` in its manifest).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GameSystemVm {
+    /// Its full name, "PlayStation 5"; the system's code when no plugin names it.
+    pub name: String,
+    /// Its color, red, green and blue; `None` draws it in the theme's neutral look.
+    pub color: Option<[u8; 3]>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct GameCardVm {
     /// The game's [`nexus_api::GameKey`] as text.
     pub key: String,
     pub title: String,
     pub platform: String,
+    pub system: GameSystemVm,
     pub cover: Option<ImageRef>,
     pub selected: bool,
     pub badges: Vec<SlotVm>,
@@ -137,9 +147,36 @@ pub struct GameCardVm {
     pub availability: String,
     /// The player hid this Catalog game; it shows only under the Catalog's "Hidden" filter.
     pub hidden: bool,
-    /// The key of the installed game the card's Uninstall removes: the game itself, or for a
-    /// Catalog card, the installed game the offer is. Empty when there is none to uninstall.
+    /// What can be done with the game: the same for every game and on every screen.
+    pub can: GameActionsVm,
+}
+
+/// What can be done with a game, worked out once for any game, a Library one or a Catalog
+/// offer, of any plugin: every card and the Game Hub draw it the same way.
+///
+/// - Installed: the main action is Play.
+/// - Not installed: the main action is getting it, a download or the store's install.
+/// - Uninstall is never the main action: it's in the game's menu.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GameActionsVm {
+    /// The main action: `play`, `get`, or empty for none.
+    pub primary: String,
+    /// It is installed, and its plugin can start it (for a Catalog offer, the installed game it
+    /// is: Play starts that one).
+    pub play: bool,
+    /// How to get it when it isn't installed: "Download" (a torrent: pick a release on its
+    /// Game Hub) or "Install in Steam". Empty when there is nothing to get.
+    pub get: String,
+    /// For a store's install, the release whose download asks the store, and the store's
+    /// name; empty for a torrent.
+    pub get_release: String,
+    pub get_store: String,
+    /// The key of the installed game Uninstall removes (for a Catalog offer, the installed game
+    /// it is); empty when it can't be uninstalled.
     pub uninstall: String,
+    /// The store that uninstalls it ("Steam"), asking first in its own way; empty when Nexus
+    /// deletes its folder.
+    pub uninstall_store: String,
 }
 
 /// One Library filter: a system or a genre, with how many games it has.
@@ -211,6 +248,7 @@ pub struct GameDetailVm {
     pub key: String,
     pub title: String,
     pub platform: String,
+    pub system: GameSystemVm,
     pub description: String,
     /// `description` on one line, at most [`SUMMARY_CHARS`] characters, for Home.
     pub summary: String,
@@ -222,7 +260,8 @@ pub struct GameDetailVm {
     pub badges: Vec<SlotVm>,
     pub actions: Vec<SlotVm>,
     pub sections: Vec<SlotVm>,
-    pub can_launch: bool,
+    /// What can be done with the game: as on its card.
+    pub can: GameActionsVm,
     /// The game's own settings from its emulator: one panel, or none.
     pub settings: Vec<SettingsPanelVm>,
     /// What Play does first, for example "Play installs KytyPS5 first". Empty for nothing.
@@ -257,9 +296,6 @@ pub struct GameDetailVm {
     /// The game has a folder to open, and a log of its last run.
     pub has_folder: bool,
     pub has_log: bool,
-    /// The game's folder is one its emulator may delete, inside one of the player's folders:
-    /// the game's menu offers Uninstall.
-    pub can_uninstall: bool,
     /// The player hid this game from the Catalog: it shows only under the "Hidden" filter.
     pub hidden: bool,
     /// The community compatibility list's page; empty for none.
@@ -325,6 +361,9 @@ pub struct CatalogVm {
 pub struct ReleaseVm {
     /// The torrent's info hash.
     pub id: String,
+    /// The name of the store that installs it ("Steam"), for a release its store installs;
+    /// empty for a torrent. Its download asks the store, with no download sheet.
+    pub store: String,
     pub version: String,
     pub region: String,
     pub size_bytes: Option<u64>,
@@ -451,6 +490,10 @@ pub struct TorrentVm {
     pub install_folder: String,
     /// Why the last Install didn't start; empty when it did.
     pub install_error: String,
+    /// The store doing it, for an install a store does ("Steam"): its id is `store:<plugin>:
+    /// <release>`, its state `queued`, `downloading` or `paused` (or `install` `installing`), and
+    /// its one action `open-store`, the store's own Downloads page. Empty for a torrent.
+    pub store: String,
 }
 
 /// One settings field, flattened from the plugin's JSON Schema.

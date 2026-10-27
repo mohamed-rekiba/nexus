@@ -20,7 +20,8 @@ games. The tests also render every screen offscreen with made-up games
 
 ## What it does
 
-- **Library**: finds your PS5, PS4 and PC games in your game folders. Home is a row of games
+- **Library**: finds your PS5, PS4 and PC games in your game folders, and on Linux the games
+  Steam installed, which play through Steam. Home is a row of games
   over the selected game's art; Library is a grid with search, sort and filters by system,
   genre and compatibility.
 - **Game Hub**: one game's page, with official art, facts, the community's compatibility
@@ -120,12 +121,14 @@ make package        # a release build in dist/nexus-<os>-<arch>/
 | The "This PC" check | `vulkan-loader mesa-vulkan-drivers` (or your GPU vendor's driver) | `libvulkan1 mesa-vulkan-drivers` | The check lists the graphics cards without their Vulkan version |
 | Windows PC games | [umu-launcher](#umu-launcher-for-windows-games) (runs them with Proton), or `wine` | [umu-launcher](#umu-launcher-for-windows-games), or `wine` | The game's Game Hub says to install one |
 | An old game filling the screen at its own resolution (its Resolution setting) | `gamescope` | `gamescope` (Debian 12, backports for 13; Ubuntu where your release has it) | Play says to install it, or to set the game's Resolution back to Your screen |
+| [Steam games](#steam-for-steam-games). The Nexus packages recommend it | `steam` (RPM Fusion nonfree) | `steam-installer` (Debian non-free), `steam` (Ubuntu multiverse) | The Steam plugin finds no games, and Play says to install Steam |
+| GameMode: the computer tuned for the game while it runs (priority, processor speed). The Nexus packages recommend it | `gamemode` | `gamemode` | Games run without it |
 | Saved VPN connections in Settings | `NetworkManager` | `network-manager` | Only the VPNs already up show |
 | Old Linux games whose start script opens the game's own launcher (Trine 3 from GOG). The Nexus packages depend on these | `gtk2 libpng12` | `libgtk2.0-0t64` (no libpng 1.2 package) | The game closes right after it starts, with code 127 in its log |
 | A game that brings its own 32-bit Wine (a portable Wine wrapper's `start.sh`). The Nexus rpm depends on these | `glibc.i686 libgcc.i686 libX11.i686 libXext.i686 libXcomposite.i686 libXcursor.i686 libXfixes.i686 libXinerama.i686 libXi.i686 libXrandr.i686 libXrender.i686 libXxf86vm.i686 mesa-libGL.i686 mesa-dri-drivers.i686 mesa-vulkan-drivers.i686 vulkan-loader.i686 alsa-lib.i686 pulseaudio-libs.i686 freetype.i686 fontconfig.i686` | The same libraries for `i386`, after `sudo dpkg --add-architecture i386` | Its script says "There is a problem running Wine binary!", or Wine says no driver could be loaded |
 
-All of them on Fedora: `sudo dnf install xdotool xprop mpv-libs libarchive vulkan-loader mesa-vulkan-drivers wine gamescope NetworkManager gtk2 libpng12 unar`.
-On Debian and Ubuntu: `sudo apt-get install xdotool x11-utils libmpv2 libarchive13 libvulkan1 mesa-vulkan-drivers wine network-manager libgtk2.0-0t64 unar`.
+All of them on Fedora: `sudo dnf install xdotool xprop mpv-libs libarchive vulkan-loader mesa-vulkan-drivers wine gamescope gamemode NetworkManager gtk2 libpng12 unar`, and Steam from RPM Fusion.
+On Debian and Ubuntu: `sudo apt-get install xdotool x11-utils libmpv2 libarchive13 libvulkan1 mesa-vulkan-drivers wine gamemode network-manager libgtk2.0-0t64 unar`, and Steam as above.
 
 #### umu-launcher, for Windows games
 
@@ -184,6 +187,49 @@ Run the same commands again to update it.
 `umu-run --help` answering means Nexus will find it. Nexus looks for it each time a Windows game
 starts, so there is no need to restart Nexus.
 
+#### Steam, for Steam games
+
+The games Steam installed show in the Library with Steam's covers, and Play starts them through
+Steam (Linux only). Nexus follows the game Steam starts: the Running screen, the PS button and
+Stop work as for any game, and Steam itself keeps running.
+
+1. Install Steam:
+   - Fedora: turn on [RPM Fusion](https://rpmfusion.org/Configuration)'s nonfree repository, then
+     `sudo dnf install steam`
+   - Debian: add `non-free` to your sources and the i386 architecture
+     (`sudo dpkg --add-architecture i386`), then `sudo apt-get update && sudo apt-get install steam-installer`
+   - Ubuntu: `sudo apt-get install steam` (multiverse)
+   - Arch: turn on the multilib repository, then `sudo pacman -S steam`
+   - Or the Flatpak: `flatpak install flathub com.valvesoftware.Steam`. Nexus finds its folder too.
+2. Start Steam once, sign in, and install your games in it.
+3. Put yourself in GameMode's group, then log out and in again:
+   `sudo usermod -aG gamemode $USER`. GameMode then tunes the computer for each game without a
+   password. Nexus runs PC games through it by itself; for a Steam game, set its Launch Options
+   in Steam (the game's Properties) to `gamemoderun %command%`.
+4. Nothing to set for your Steam libraries: Nexus reads Steam's folder and every library Steam
+   lists (`steamapps/libraryfolders.vdf`), on any drive. A library you add in Steam shows at the
+   next rescan (Settings, GAMES, **Rescan game folders**). **Steam libraries** in Settings is
+   only for reading other folders: once set, it replaces Steam's list.
+
+A Steam game's Game Hub has Steam's store's words, genres, developer, release date,
+screenshots and trailer, kept a week; its cover and background are Steam's own files on this
+PC when Steam has them.
+
+Your Steam library is in the Catalog, under **Steam**: the games in your Steam collections
+(Favorites, and the ones you made), read from Steam's own files on this PC, with no key and
+no account to set. A game in Steam's Hidden collection shows only under the Catalog's
+**Hidden** filter; a favorite says **Favorite**, an installed one **Installed**. **Install in
+Steam** opens Steam's install dialog for the game, and Steam installs it: Downloads shows its
+progress ("Downloading in Steam", then "Installing in Steam"), with **Open in Steam** for
+Steam's own Downloads page, and the game shows in the Library once it's done. An install you
+start in Steam itself shows in Downloads too. **Uninstall**, in a Steam game's menu, asks Steam,
+which confirms in its own dialog. A game you never put in a collection isn't in those files, so it isn't
+listed.
+
+Steam may ask to sign in or update before the game starts. Nexus waits up to 2 minutes for the
+game, then says it didn't start. Steam Input may take the controller while Steam runs: turn it
+off for a game in Steam if both read the controller.
+
 #### gamescope, for old games
 
 An old game made for a small screen (800 × 600, say), Windows or Linux, can't change a Wayland screen's
@@ -229,40 +275,42 @@ boot menu. On a PC with an NVIDIA card it gets NVIDIA's driver by itself. It nee
 that starts with UEFI.
 
 <!-- x-release-please-start-version -->
-The current version is Nexus OS 0.2.0:
-[its release](https://github.com/mohamed-rekiba/nexus/releases/tag/nexus-os-v0.2.0).
+The current version is Nexus OS 0.3.0:
+[its release](https://github.com/mohamed-rekiba/nexus/releases/tag/nexus-os-v0.3.0).
 All Nexus OS releases are tagged `nexus-os-v…` on the
 [releases page](https://github.com/mohamed-rekiba/nexus/releases?q=nexus-os).
 
-The release has one ISO, named with its version (`nexus-os-x86_64-0.2.0.iso`), to write to a USB
+The release has one ISO, named with its version (`nexus-os-x86_64-0.3.0.iso`), to write to a USB
 stick of 8 GB or more. When the ISO is over 2 GiB it comes in parts
-(`nexus-os-x86_64-0.2.0.iso.part-aa`, `-ab`, …): download them all and join them into the ISO.
+(`nexus-os-x86_64-0.3.0.iso.part-aa`, `-ab`, …): download them all and join them into the ISO.
 
 - Linux and macOS:
 
   ```sh
-  cat nexus-os-x86_64-0.2.0.iso.part-* > nexus-os-x86_64-0.2.0.iso
+  v=0.3.0
+  cat nexus-os-x86_64-$v.iso.part-* > nexus-os-x86_64-$v.iso
   ```
 
 - Windows (Command Prompt), naming every part in order:
 
   ```bat
-  copy /b nexus-os-x86_64-0.2.0.iso.part-aa + nexus-os-x86_64-0.2.0.iso.part-ab nexus-os-x86_64-0.2.0.iso
+  set v=0.3.0
+  copy /b nexus-os-x86_64-%v%.iso.part-aa + nexus-os-x86_64-%v%.iso.part-ab nexus-os-x86_64-%v%.iso
   ```
 
-Then check the ISO against `nexus-os-x86_64-0.2.0.iso.sha256` (each part also has its own
+Then check the ISO against `nexus-os-x86_64-0.3.0.iso.sha256` (each part also has its own
 `.sha256`):
 
-- Linux: `sha256sum -c nexus-os-x86_64-0.2.0.iso.sha256`
-- macOS: `shasum -a 256 -c nexus-os-x86_64-0.2.0.iso.sha256`
-- Windows (PowerShell): `Get-FileHash nexus-os-x86_64-0.2.0.iso`, and compare it with the file's
+- Linux: `sha256sum -c nexus-os-x86_64-0.3.0.iso.sha256`
+- macOS: `shasum -a 256 -c nexus-os-x86_64-0.3.0.iso.sha256`
+- Windows (PowerShell): `Get-FileHash nexus-os-x86_64-0.3.0.iso`, and compare it with the file's
   first word.
 
 To try the ISO in a virtual machine first, on Fedora, from a clone of this repository:
 
 ```sh
 sudo dnf install qemu-kvm qemu-img edk2-ovmf
-os/run-vm.sh path/to/nexus-os-x86_64-0.2.0.iso
+os/run-vm.sh path/to/nexus-os-x86_64-0.3.0.iso
 ```
 
 <!-- x-release-please-end -->
@@ -380,6 +428,37 @@ Where installs go:
 | PS4 DLC | `addcont/` in shadPS4's data folder (`~/.local/share/shadPS4`, on macOS `~/Library/Application Support/shadPS4`) |
 | A PC game | `PC/` in the first game folder, from its folder, a GOG installer or an AppImage |
 
+#### Adding a PC game by hand
+
+A PC game you already have, Linux or Windows, unpacked and ready to run, needs no install:
+
+1. Copy the game's folder into `PC/` of a game folder (`~/Games/PC/` by default). One folder is
+   one game; keep the game's own files as they are inside it.
+2. Optional: put its cover in the game's folder, named `cover.jpg`, `cover.png` or `cover.webp`
+   (a portrait picture, as on a box).
+3. In Settings, GAMES, choose **Rescan game folders**, or restart Nexus. The game shows in the
+   Library, named after its folder.
+
+```text
+~/Games/PC/
+└── Hollow Knight/
+    ├── cover.jpg            ← its cover (optional)
+    ├── start.sh             ← what Play starts (found by itself)
+    └── game/…
+```
+
+Nexus looks through the folder once and writes `.nexus-game.json` in it: the game's name, and
+every file that can start it, best first: a start script (`start.sh`, `start`), an AppImage, a
+Linux program, then a Windows program. Play starts the first one that runs on this system;
+**Starts**, in the game's Game settings, picks another. A Windows game runs through umu-launcher (Proton) or Wine, as an installed one
+does. The name comes from the folder (`hollow_knight` shows as "Hollow Knight"), or from GOG's
+`gameinfo` file when the game has one; to rename the game, rename its folder before Nexus first
+sees it, or edit `name` in `.nexus-game.json`.
+
+A folder with nothing that starts a game (no program, script or AppImage) stays out of the
+Library until Nexus restarts. Folders whose name starts with `.` or ends with `.part` are never
+read.
+
 The install runs in Downloads. Installing checks that a package holds a game, and never runs
 what it installs. To delete an installed game, open its menu and choose Uninstall: it asks
 first, then deletes the game's folder. It refuses while the game runs.
@@ -495,7 +574,9 @@ transitions cuts). Third-party plugins are themes only: they are data, and run n
 - Nexus doesn't notice a game it didn't start.
 - KytyPS5 and shadPS4 don't provide the shader cache screen.
 - shadPS4's own build shows no version on its page.
-- The PC library shows only games Nexus installed: each has a `.nexus-game.json` in its folder.
+- The PC library shows the games in `PC/` of a game folder, not games installed elsewhere by
+  other launchers (Heroic, Lutris). Steam's games show through the Steam plugin.
+- Steam games play on Linux only, and Nexus OS doesn't include Steam.
 - "This PC" judges by the numbers in each emulator's manifest, not by how fast a game runs here.
 - "Download only through a VPN" isn't available on Windows: the torrent library (librqbit)
   can't bind a connection to an interface there. On macOS Nexus can't tell a VPN from the
@@ -546,6 +627,7 @@ what CI runs: the format check, clippy with warnings as errors, and every test.
 | `plugins/emulators/kytyps5` | PS5, with KytyPS5: its builds, PS5 games, installs, community compatibility. |
 | `plugins/emulators/shadps4` | PS4, with shadPS4: its builds, PS4 games, installs with updates and DLC, community compatibility. |
 | `plugins/emulators/pc` | PC games: installs a release, finds what starts it, and runs it. |
+| `plugins/emulators/steam` | Steam games on Linux: the games Steam installed, with Steam's art, played through Steam. |
 | `plugins/services/release-catalog` | The Game Catalog: each console's catalog, fetched or refreshed from its forums. |
 | `plugins/services/playstation-store` | Official art and details for PS4 and PS5 games. |
 | `plugins/shared/emulator-kit` | Code the emulator plugins share (not a plugin): GitHub releases, build folders, the game folder scan, compatibility lists, the PS5 package and exFAT readers. |

@@ -19,7 +19,6 @@
 //! `~/Library/LaunchAgents` on macOS, and a value in the `Run` key of the registry on Windows,
 //! through `reg.exe`.
 
-#[cfg(unix)]
 use std::process::{Command, Stdio};
 
 use nexus_core::{Desktop, Front};
@@ -497,6 +496,27 @@ impl Desktop for SystemDesktop {
                 Err(PackageError::Failed(why.unwrap_or_else(|| format!("the package manager ended with {code:?}"))))
             }
         }
+    }
+
+    fn open_link(&self, link: &str) -> Result<(), String> {
+        let (program, args): (&str, Vec<&str>) = if cfg!(target_os = "macos") {
+            ("open", vec![link])
+        } else if cfg!(windows) {
+            ("cmd", vec!["/C", "start", "", link])
+        } else {
+            ("xdg-open", vec![link])
+        };
+        // Not waited for: without a desktop's own opener, xdg-open runs the handler itself, and
+        // `steam` may become Steam's client and keep running. Reaped in the background.
+        let mut opener = Command::new(program)
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|e| format!("couldn't open the link ({program}): {e}"))?;
+        std::thread::spawn(move || opener.wait());
+        Ok(())
     }
 }
 

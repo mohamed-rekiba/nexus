@@ -83,34 +83,37 @@ export global Look {
             : tone == "info" ? Tokens.color-info
             : Tokens.color-text-muted
     }
-    // The art a game without a cover shows: its console's colors.
-    public pure function console-art(platform: string) -> brush {
-        platform == "PC" ? @linear-gradient(160deg, #1d3a2f 0%, #0d1714 100%)
-            : platform == "PS4" ? @linear-gradient(160deg, #1b2d52 0%, #0b1224 100%)
-            : @linear-gradient(160deg, #26304f 0%, #0e1222 100%)
+    // A system's look comes from the one color its plugin gives (`system-color`), so any
+    // plugin's games have their own without a change here. Transparent: the neutral look.
+    // The system's color made dark at `value` (0 to 1), its hue kept and richer: a pale color
+    // mixed with black only greys.
+    pure function deep(system: color, value: float) -> color {
+        hsv(system.to-hsv().hue, Math.min(1, system.to-hsv().saturation + 0.3), value)
     }
-    // A card's console badge, big enough to tell a game on PS5, PS4 and PC apart at a glance:
-    // each console has its own fill, edge and text color.
-    public pure function console-fill(platform: string) -> color {
-        platform == "PS4" ? #12306be8 : platform == "PC" ? #12452fe8 : #000000d9
+    // The art a game without a cover shows: its system's color, deep.
+    public pure function console-art(system: color) -> brush {
+        system.alpha == 0 ? @linear-gradient(160deg, #26304f 0%, #0e1222 100%)
+            : @linear-gradient(160deg, deep(system, 0.3) 0%, deep(system, 0.12) 100%)
     }
-    public pure function console-edge(platform: string) -> color {
-        platform == "PS4" ? #8fc2ff80 : platform == "PC" ? #7ee2b080 : #ffffff59
+    // A card's system badge, big enough to tell systems apart at a glance: a dark fill, an edge
+    // and text in the system's color.
+    public pure function console-fill(system: color) -> color {
+        system.alpha == 0 ? #000000d9 : deep(system, 0.36).with-alpha(0.91)
     }
-    public pure function console-ink(platform: string) -> color {
-        platform == "PS4" ? #b8d8ff : platform == "PC" ? #a8f0cc : #ffffff
+    public pure function console-edge(system: color) -> color {
+        system.alpha == 0 ? #ffffff59 : system.with-alpha(0.5)
+    }
+    public pure function console-ink(system: color) -> color {
+        system.alpha == 0 ? #ffffff : system.mix(#ffffff, 0.75)
     }
     // How easy a release is to download, as a color: good green, low amber, none or unknown
     // grey.
     public pure function availability-color(level: string) -> color {
         level == "good" ? Tokens.color-success : level == "low" ? Tokens.color-warning : root.text3
     }
-    // A platform's full name. "" is every platform.
-    public pure function system-name(platform: string) -> string {
-        platform == "" ? "All Games"
-            : platform == "PS5" ? "PlayStation 5"
-            : platform == "PS4" ? "PlayStation 4"
-            : platform
+    // A system's full name, as its plugin gives it (`system-name`); "" is every system.
+    public pure function system-name(name: string) -> string {
+        name == "" ? "All Games" : name
     }
     // The player's own result after playing, as words and as a color.
     public pure function result-label(level: string) -> string {

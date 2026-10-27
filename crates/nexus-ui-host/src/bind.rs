@@ -248,6 +248,19 @@ fn slots(images: &dyn ImageSource, items: &[SlotVm]) -> Value {
     model(items.iter().map(|s| slot(images, s)).collect())
 }
 
+/// What can be done with a game, as the theme contract's `GameActions`.
+fn game_actions(can: &nexus_ui_api::GameActionsVm) -> Value {
+    record([
+        ("primary", text(&can.primary)),
+        ("play", Value::Bool(can.play)),
+        ("get", text(&can.get)),
+        ("get-release", text(&can.get_release)),
+        ("get-store", text(&can.get_store)),
+        ("uninstall", text(&can.uninstall)),
+        ("uninstall-store", text(&can.uninstall_store)),
+    ])
+}
+
 /// A game's card; its cover is loaded when `want`.
 fn card(images: &dyn ImageSource, g: &GameCardVm, want: bool) -> Value {
     let shown = cover(images, &g.cover, &g.platform, crate::ImageSize::Thumb, want);
@@ -261,6 +274,8 @@ fn card_with(images: &dyn ImageSource, g: &GameCardVm, shown: Value, state: Valu
         ("key", text(&g.key)),
         ("title", text(&g.title)),
         ("platform", text(&g.platform)),
+        ("system-name", text(&g.system.name)),
+        ("system-color", system_color(&g.system)),
         ("cover-state", state),
         ("cover", shown),
         ("selected", Value::Bool(g.selected)),
@@ -273,7 +288,7 @@ fn card_with(images: &dyn ImageSource, g: &GameCardVm, shown: Value, state: Valu
         ("availability", text(&g.availability)),
         ("availability-text", text(availability_text(&g.availability))),
         ("hidden", Value::Bool(g.hidden)),
-        ("uninstall", text(&g.uninstall)),
+        ("can", game_actions(&g.can)),
     ])
 }
 
@@ -374,6 +389,8 @@ fn detail(images: &dyn ImageSource, d: Option<&GameDetailVm>) -> Value {
         ("key", text(&d.key)),
         ("title", text(&d.title)),
         ("platform", text(&d.platform)),
+        ("system-name", text(&d.system.name)),
+        ("system-color", system_color(&d.system)),
         ("description", text(&d.description)),
         ("summary", text(&d.summary)),
         ("developer", text(&d.developer)),
@@ -393,7 +410,7 @@ fn detail(images: &dyn ImageSource, d: Option<&GameDetailVm>) -> Value {
         ("badges", slots(images, &d.badges)),
         ("actions", slots(images, &d.actions)),
         ("sections", slots(images, &d.sections)),
-        ("can-launch", Value::Bool(d.can_launch)),
+        ("can", game_actions(&d.can)),
         ("settings", model(d.settings.iter().map(|p| panel(images, p)).collect())),
         ("launch-hint", text(&d.launch_hint)),
         ("running", Value::Bool(d.running)),
@@ -416,7 +433,6 @@ fn detail(images: &dyn ImageSource, d: Option<&GameDetailVm>) -> Value {
         ("your-result", text(&d.your_result)),
         ("has-folder", Value::Bool(d.has_folder)),
         ("has-log", Value::Bool(d.has_log)),
-        ("can-uninstall", Value::Bool(d.can_uninstall)),
         ("hidden", Value::Bool(d.hidden)),
         ("compat-page", text(&d.compat_page)),
         ("trailer-url", text(&d.trailer_url)),
@@ -458,6 +474,7 @@ fn detail(images: &dyn ImageSource, d: Option<&GameDetailVm>) -> Value {
                             ("warning", text(&r.warning)),
                             ("no-room", text(&r.no_room)),
                             ("download", text(&r.download)),
+                            ("store", text(&r.store)),
                             ("download-progress", number(r.download_progress)),
                             ("version-label", text(&r.version_label)),
                             ("best", Value::Bool(r.best)),
@@ -643,6 +660,7 @@ fn torrent(t: &nexus_ui_api::TorrentVm) -> Value {
         ("install-note", text(&t.install_note)),
         ("install-folder", text(&t.install_folder)),
         ("install-error", text(&t.install_error)),
+        ("store", text(&t.store)),
     ])
 }
 
@@ -1036,6 +1054,14 @@ pub struct Viewport {
     pub size: f32,
     pub breakpoint: String,
     pub input_mode: String,
+}
+
+/// A system's color for the theme: transparent when its plugin gives none, which the theme
+/// draws in its neutral look.
+fn system_color(system: &nexus_ui_api::GameSystemVm) -> Value {
+    let [r, g, b] = system.color.unwrap_or_default();
+    let alpha = if system.color.is_some() { 255 } else { 0 };
+    Value::Brush(Brush::SolidColor(Color::from_argb_u8(alpha, r, g, b)))
 }
 
 pub fn token_value(value: &TokenValue) -> Value {

@@ -13,6 +13,7 @@ The real plugins are the best examples, and this guide quotes them:
 | `plugins/emulators/kytyps5` (`emu-kyty`) | emulator | Every capability: builds from GitHub, settings, slots, a game installer |
 | `plugins/emulators/shadps4` (`emu-shadps4`) | emulator | The same, with an AppImage build and DLC into another program's folder |
 | `plugins/emulators/pc` (`emu-pc`) | emulator | The smallest emulator: no builds, games in host folders, programs on `PATH` |
+| `plugins/emulators/steam` (`emu-steam`) | emulator | No console: another program's library, read-only folders with a search default, and a launch that hands the game over (`game_process`) |
 | `plugins/services/playstation-store` | service | The smallest plugin: one `Metadata` capability and a cache in storage |
 | `plugins/services/release-catalog` | service | `Releases`, settings, slots, a background task, events, `shutdown` |
 | `plugins/shared/emulator-kit` | not a plugin | Shared code the emulators use |
@@ -207,9 +208,10 @@ network = ["m.np.playstation.com", "image.api.playstation.com"]
 | `requires` | `[requires]` with `vulkan` (`"1.3"`), `avx2`, and `[requires.recommended]` `cpu_threads`, `memory_gb`, `gpu_memory_gb`, `discrete_gpu`. The "This PC" check compares them with the computer. |
 | `keymap` | `[[keymap]]` entries of `button` and `keys`, in order. The launch splash and the emulator's page show them. |
 | `install_note` | One or two sentences the install sheet shows for an emulator with a game installer. |
+| `system` | `[system]`: the system the plugin's games show under. `id` is the code in their `platform` (`PS5`, `PC`, `Steam`), `name` its full name ("PlayStation 5"), and optional `color` as `#rrggbb` (another form doesn't load). Themes draw a game's system from these, not from its code: a plugin without one gets the theme's neutral look and its code as its name. |
 
 Sections for one kind only, such as `[theme]`, land in `extra` and are parsed by the crate that
-owns them. Unknown fields inside `permissions`, `requires` and `keymap` are errors.
+owns them. Unknown fields inside `permissions`, `requires`, `keymap` and `system` are errors.
 
 ### Permissions
 
@@ -229,6 +231,7 @@ checked too, so list the CDN a download redirects to. shadPS4 lists
 | `default` | Where it is until the player maps it: one path (`"~/Games"`), or a list to search, each one that exists in order (`["~/KytyPS5", "~/src/KytyPS5"]`). `~/` is the home folder. |
 | `default_on` | A per-system default: `default_on = { macos = "~/Library/Application Support/shadPS4" }`. |
 | `title`, `help` | What Settings and the plugin's page call the folder, and a line under it. |
+| `listed_in` | More folders that a file in a default folder lists, while the player hasn't mapped the folder: `{ file = "steamapps/libraryfolders.vdf", key = "path", holds = "steamapps" }` (Steam's libraries). The host reads the file (Valve's text: `"key" "value"`), and keeps each value that is an absolute path to a folder holding `holds`, once. Read-only: a grant with it and `write = true` doesn't load. |
 
 Plugins that ask for the same name share the player's mapping. Two names are the host's own,
 in `SHARED_FOLDERS`: `games` (`GAMES_FOLDER`, default `~/Games`) and `packages`
@@ -247,6 +250,10 @@ install into a folder named for the console inside the first `games` folder (`PS
 | `system:<name>` | A program on the system's `PATH`, by file name, never a path. |
 
 An empty list means the plugin may not start anything.
+
+**`links`**: links the host may open for the plugin with the system's handler, by how they
+start: `["steam://install/"]`. A release's `store` link opens only when one of them starts it,
+and only when it is one line of plain characters.
 
 **`long_running`** and **`polkit`**, system plugins only: entries of `process` (`system:<name>`)
 that may run with no time limit, their output read line by line (`Programs::stream`), and that
@@ -411,6 +418,7 @@ The files are in `crates/nexus-api/src/`. What the built-in plugins provide:
 |---|---|
 | `emu-kyty`, `emu-shadps4` | catalog, downloader, installer, configurator, launcher, compatibility, slots, controllers, game_installer |
 | `emu-pc` | catalog, launcher, slots, game_installer |
+| `emu-steam` | catalog, launcher, slots |
 | `release-catalog` | releases, configurator, slots |
 | `playstation-store` | metadata |
 
@@ -455,6 +463,12 @@ then the game's on top.
 turns into a real path. A system program needs a `cwd`. The host spawns only what
 `permissions.process` allows.
 
+A program that hands the game to another one, as a store's client does, sets `game_process`:
+words of the game's own command line. The game is then that process and the ones below it, and
+the program started here is neither waited for nor stopped. The Steam plugin sets
+`SteamLaunch AppId=<id> `. See "A game another program starts" in
+[the desktop reference](reference/desktop.md).
+
 Fail with `PluginError::Precondition` and a sentence for the player when something must happen
 first ("install KytyPS5 first"); the Game Hub shows it.
 
@@ -484,12 +498,35 @@ For the Catalog's downloads to install, the emulator names its `console`, asks f
 says whether the list was `Fetched`, `Cached` or `Bundled`, and `problem` why a fetch didn't
 give it. Publish `RELEASES_CHANGED` when the lists change on their own.
 
+A catalog whose store installs its releases lists the installs the store is doing in
+`store_installs()`: each a `StoreInstall` with its release, title, phase (`Queued`,
+`Downloading`, `Paused`, `Installing`), bytes done of the total, and `open`, a link to the
+store's own Downloads page (allowed in `permissions.links`). The host reads them every
+`store_poll` (2 s) while one runs or for a minute after an Install, ten times as long
+otherwise; it shows each in Downloads, and when one ends it reads the Library and the catalogs
+again. The Steam plugin reads them from its app files: every app not fully installed.
+
+An emulator may describe its own games with `metadata`: the Steam plugin gives a Steam game
+(`platform` `Steam`, its app id as the title id) Steam's store's details, from
+`store.steampowered.com/api/appdetails`, kept a week in its storage.
+
+A game its store removes (Steam's) gives `GameDetails.uninstall_link`, `steam://uninstall/440`:
+Uninstall opens it, when `permissions.links` allows it, instead of deleting the game's folder.
+
+A release a store installs has an empty `torrent` and a `store` link instead
+(`steam://install/440`): the Game Hub's Install opens that link, which the plugin's
+`permissions.links` must allow, and downloads nothing. `hidden` puts the game under the
+Catalog's "Hidden" filter, as if the player hid it in Nexus (Steam's Hidden collection);
+`favorite` gives its card a "Favorite" badge. An emulator may provide `releases` for its own
+console: the Steam plugin's console is `Steam`, and its list is the player's Steam library.
+
 `Vm.catalog-available` in the theme contract is true only while a plugin with `releases` is
 turned on. A `releases` plugin may have a boolean setting `show_hidden_filter`: when one sets it
 to `false`, the Catalog has no "Hidden" filter.
 
-The Game Catalog gives no list for a console whose `show_<console>` setting (`show_ps5`) is
-`false`. Its settings schema names one such toggle for each console an emulator turned on
+An emulator that provides `releases` itself is its console's only catalog: the core asks no
+other plugin for that console (the Steam plugin's console, `Steam`). The Game Catalog gives no
+list for a console whose `show_<console>` setting (`show_ps5`) is `false`. Its settings schema names one such toggle for each console an emulator turned on
 plays. The library is the emulator's, so that console's installed games stay.
 
 ### Metadata (services)

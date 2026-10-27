@@ -15,7 +15,7 @@ use serde_json::Value;
 use crate::app::{Route, Session};
 use crate::error::require;
 use crate::order::sort_by_order;
-use crate::{Core, CoreError, CoreResult, DirStorage, Kernel, SpawnCommand, folders, running};
+use crate::{Core, CoreError, CoreResult, DirStorage, Kernel, ProcessExit, SpawnCommand, folders, running};
 
 /// Wraps one plugin's middleware so its calls get the plugin's guard and span.
 struct Guarded {
@@ -132,7 +132,7 @@ fn spawn_command(
     };
     let args = spec.args.iter().map(value).collect::<CoreResult<Vec<_>>>()?;
     let env = spec.env.iter().map(|(k, v)| Ok((k.clone(), value(v)?))).collect::<CoreResult<_>>()?;
-    Ok(SpawnCommand { program, args, env, cwd, log: None })
+    Ok(SpawnCommand { program, args, env, cwd, log: None, keep_running: false })
 }
 
 /// Where a game's output goes: `logs/<plugin>/<game>.log` in the data folder.
@@ -253,6 +253,11 @@ pub(crate) async fn launch(core: &Core, game: GameKey) -> CoreResult<()> {
         return Err(CoreError::PermissionDenied { plugin, action: format!("run {}", spec.program) });
     }
     let mut command = spawn_command(kernel, &plugin, &manifest.permissions, &spec)?;
+    command.keep_running = spec.game_process.is_some();
+    let hand_over = match spec.game_process.clone() {
+        Some(game_process) => Some(running::hand_over(core, game_process).await),
+        None => None,
+    };
     let log = log_path(kernel, &game);
     keep_previous_log(&log);
     command.log = Some(log.clone());
@@ -292,13 +297,9 @@ pub(crate) async fn launch(core: &Core, game: GameKey) -> CoreResult<()> {
 
     let core = core.clone();
     tokio::spawn(async move {
-        let exit = running::run(core.clone(), session, process, stop_rx).await;
-        let exit = ExitInfo {
-            code: exit.code,
-            success: exit.success,
-            duration_ms: started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
-        };
-        finish(&core, session, &game, exit, &launcher).await;
+        let ended = running::run(core.clone(), session, process, stop_rx, hand_over).await;
+        let duration_ms = started.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+        finish(&core, session, &game, ended, duration_ms, &launcher).await;
     });
     Ok(())
 }
@@ -307,10 +308,15 @@ async fn finish(
     core: &Core,
     session: SessionId,
     game: &GameKey,
-    exit: ExitInfo,
+    // `None`: nothing was played, as the game another program starts never showed.
+    ended: Option<ProcessExit>,
+    duration_ms: u64,
     launcher: &Arc<dyn nexus_api::Launcher>,
 ) {
-    tracing::info!(plugin_id = %game.plugin, %session, ?exit, "game exited");
+    let played_any = ended.is_some();
+    let ended = ended.unwrap_or(ProcessExit { code: None, success: false });
+    let exit = ExitInfo { code: ended.code, success: ended.success, duration_ms };
+    tracing::info!(plugin_id = %game.plugin, %session, ?exit, played_any, "game exited");
     core.inner.stops.lock().unwrap_or_else(|p| p.into_inner()).remove(&session);
     let ended = {
         let mut state = core.state();
@@ -319,7 +325,20 @@ async fn finish(
         state.sessions.remove(&session)
     };
     let played = Duration::from_millis(exit.duration_ms);
-    add_play_time(core, game, played);
+    if let Some(ended) = &ended
+        && !played_any
+        && !ended.stopping
+    {
+        let waited = core.kernel().host().hand_over_timeout.as_secs();
+        core.game_problem(
+            game,
+            format!("{} didn't start: its game didn't show up within {waited} seconds", ended.title),
+        );
+    }
+    let ended = ended.filter(|_| played_any);
+    if played_any {
+        add_play_time(core, game, played);
+    }
     if let Some(ended) = &ended
         && !exit.success
         && !ended.stopping

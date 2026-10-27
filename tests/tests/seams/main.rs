@@ -28,6 +28,7 @@ mod screenshots;
 mod shadps4;
 mod slots;
 mod sounds;
+mod steam;
 mod switching;
 mod system;
 mod system_theme;

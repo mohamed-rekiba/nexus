@@ -104,3 +104,9 @@ write = true
 [[permissions.filesystem]]
 folder = "shadps4-build"
 title = "Your own shadPS4 build"
+
+# The system its games show under: what the Library and a card call it, and its color.
+[system]
+id = "PS4"
+name = "PlayStation 4"
+color = "#8fc2ff"

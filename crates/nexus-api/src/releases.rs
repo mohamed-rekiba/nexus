@@ -73,6 +73,15 @@ pub struct Release {
     pub format: String,
     /// The release topic's pictures, `https://` addresses. The first one is the cover.
     pub image_urls: Vec<String>,
+    /// A release a store installs, not a torrent: the link that asks the store to, for
+    /// example `steam://install/440`. Its Install opens the link (the plugin's manifest must
+    /// allow it in `permissions.links`) instead of downloading. Empty for a torrent.
+    pub store: String,
+    /// The player hid the game in its store (Steam's Hidden collection): the Catalog shows it
+    /// only under its "Hidden" filter, as a game the player hid in Nexus.
+    pub hidden: bool,
+    /// The player marked the game a favorite in its store: its card says so.
+    pub favorite: bool,
 }
 
 /// What Steam says about a release's game. Text is empty, and an address is empty, when
@@ -144,4 +153,40 @@ pub trait Releases: Send + Sync {
     /// The catalog for `console`, the console an emulator's manifest names (`PS5`, `PS4`,
     /// `PC`). `None` when this plugin has no catalog for it.
     async fn releases(&self, console: &Console) -> PluginResult<Option<ReleaseList>>;
+
+    /// For a catalog whose store installs its releases: the installs the store is doing now,
+    /// started from Nexus or in the store itself. The host shows them in Downloads while they
+    /// last. None by default.
+    async fn store_installs(&self) -> PluginResult<Vec<StoreInstall>> {
+        Ok(Vec::new())
+    }
+}
+
+/// A game its store is installing, as the store says (Steam's app files).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct StoreInstall {
+    /// The release it installs: its id in this plugin's catalog.
+    pub release: String,
+    pub title: String,
+    pub phase: StorePhase,
+    /// Bytes done of `total` in this phase.
+    pub done: u64,
+    pub total: u64,
+    /// The link that opens the store's own page of its downloads (`steam://open/downloads`);
+    /// the plugin's `permissions.links` must allow it.
+    pub open: String,
+}
+
+/// Where a store's install is.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StorePhase {
+    /// Waiting for its turn, or for the store to start.
+    #[default]
+    Queued,
+    Downloading,
+    Paused,
+    /// Downloaded: the store writes it into place.
+    Installing,
 }

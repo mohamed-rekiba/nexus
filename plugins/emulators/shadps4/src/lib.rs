@@ -693,13 +693,19 @@ impl Launcher for Shad {
                     Location::Data(path("own")?)
                 }
             };
-            return Ok(LaunchSpec { program, args, env: Default::default(), cwd: Some(cwd) });
+            return Ok(LaunchSpec { program, args, env: Default::default(), cwd: Some(cwd), game_process: None });
         }
         let tag = versions::state(&self.ctx)
             .await
             .current
             .ok_or_else(|| PluginError::Precondition("install shadPS4 first".into()))?;
-        Ok(LaunchSpec { program: program(&tag, self.platform)?.into(), args, env: Default::default(), cwd: None })
+        Ok(LaunchSpec {
+            program: program(&tag, self.platform)?.into(),
+            args,
+            env: Default::default(),
+            cwd: None,
+            game_process: None,
+        })
     }
 }
 

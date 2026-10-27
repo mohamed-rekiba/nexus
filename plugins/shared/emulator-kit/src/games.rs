@@ -269,6 +269,7 @@ impl FoundGame {
         nexus_api::GameDetails {
             folder: Some(self.dir.clone()),
             also: Vec::new(),
+            uninstall_link: None,
             summary: self.summary(platform),
             // A game's files have no description.
             description: String::new(),

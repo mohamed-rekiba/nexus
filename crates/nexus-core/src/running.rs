@@ -4,6 +4,11 @@
 //! is left, so a start script that starts the game in the background and exits keeps its
 //! session. On the way the module shows the game's window, keeps `game_in_front` up to date,
 //! and carries out Stop.
+//!
+//! A launch can hand the game to another program (`LaunchSpec::game_process`), as
+//! `steam steam://rungameid/…` asks Steam's client to start it. The game is then the process
+//! with those words in its command line, once it shows, and the processes below it; the program
+//! started here is left to itself.
 
 use std::time::{Duration, Instant};
 
@@ -22,6 +27,17 @@ const STOP_EVERY: Duration = Duration::from_millis(50);
 
 /// The exit of a game that a kill ended.
 const KILLED: ProcessExit = ProcessExit { code: None, success: false };
+/// The exit of a game another program started, which ended by itself: its code is that
+/// program's to know.
+const ENDED: ProcessExit = ProcessExit { code: None, success: true };
+
+/// The process a session follows as the game's first.
+enum Followed {
+    /// The one the launcher started.
+    Started(Box<dyn ProcessHandle>),
+    /// One another program started, found by its command line.
+    Found(u32),
+}
 
 /// Runs a desktop or process-list call, which may run a helper program, off the async threads.
 pub(crate) async fn blocking<T: Send + 'static>(
@@ -54,16 +70,79 @@ pub(crate) async fn show(core: &Core, root: Option<u32>) -> bool {
     .await
 }
 
-/// The session `session` of the game `process`, until it ends: its first process's exit (or a
-/// kill's). `stop` is Stop.
+/// A launch that hands the game to another program: the text of the game's command line, and
+/// the processes that had it before the launch (the same game started from Steam itself),
+/// which aren't the one this launch starts.
+pub(crate) struct HandOver {
+    game_process: String,
+    before: Vec<u32>,
+}
+
+/// The hand-over of a launch whose game has `game_process` in its command line: looked up
+/// before the launch starts anything.
+pub(crate) async fn hand_over(core: &Core, game_process: String) -> HandOver {
+    let looking = game_process.clone();
+    let before = blocking(core, move |_, processes| processes.find(&looking)).await;
+    HandOver { game_process, before }
+}
+
+/// The session `session` of the game `process` started, until it ends: its first process's
+/// exit (or a kill's). `stop` is Stop. With `hand_over`, `process` hands the game over to the
+/// process with that text in its command line. `None` when nothing was played: that process
+/// never showed within the host's `hand_over_timeout`, or Stop came first.
 pub(crate) async fn run(
     core: Core,
     session: SessionId,
-    mut process: Box<dyn ProcessHandle>,
+    process: Box<dyn ProcessHandle>,
+    mut stop: oneshot::Receiver<()>,
+    hand_over: Option<HandOver>,
+) -> Option<ProcessExit> {
+    let Some(HandOver { game_process, before }) = hand_over else {
+        return Some(follow(core, session, Followed::Started(process), stop).await);
+    };
+    // Steam's client, when the launch started it, keeps running after the game: it is reaped
+    // here, never stopped.
+    tokio::spawn(async move {
+        let mut process = process;
+        if let Err(e) = process.wait().await {
+            tracing::debug!(error = %e, "the program that handed the game over wasn't waited for");
+        }
+    });
+    let host = core.kernel().host().clone();
+    let deadline = Instant::now() + host.hand_over_timeout;
+    loop {
+        tokio::select! {
+            // Nothing of the game runs yet: nothing to close, and nothing was played.
+            _ = &mut stop => return None,
+            _ = tokio::time::sleep(SHOW_EVERY.min(host.watch_every)) => {}
+        }
+        let looking = game_process.clone();
+        let found = blocking(&core, move |_, processes| processes.find(&looking)).await;
+        if let Some(id) = found.into_iter().find(|id| !before.contains(id)) {
+            tracing::info!(%session, id, "the game another program started is running");
+            if let Some(s) = core.state().sessions.get_mut(&session) {
+                s.pid = Some(id);
+            }
+            return Some(follow(core, session, Followed::Found(id), stop).await);
+        }
+        if Instant::now() >= deadline {
+            return None;
+        }
+    }
+}
+
+/// The game whose first process is `followed`, until none of its processes is left.
+async fn follow(
+    core: Core,
+    session: SessionId,
+    mut followed: Followed,
     mut stop: oneshot::Receiver<()>,
 ) -> ProcessExit {
     let host = core.kernel().host().clone();
-    let root = process.id();
+    let root = match &followed {
+        Followed::Started(process) => process.id(),
+        Followed::Found(id) => Some(*id),
+    };
     let deadline = Instant::now() + host.show_timeout;
     let mut first: Option<ProcessExit> = None;
     let mut shown = false;
@@ -74,10 +153,10 @@ pub(crate) async fn run(
     let exit = loop {
         let every = if shown { host.watch_every } else { SHOW_EVERY.min(host.watch_every) };
         tokio::select! {
-            exit = process.wait(), if first.is_none() => {
-                first = Some(exit.unwrap_or(KILLED));
+            exit = wait(&mut followed), if first.is_none() => {
+                first = Some(exit);
             }
-            _ = &mut stop => break close(&core, process.as_mut(), root, first).await,
+            _ = &mut stop => break close(&core, &mut followed, root, first).await,
             _ = tokio::time::sleep(every) => {}
         }
         let root_exited = first.is_some();
@@ -92,6 +171,7 @@ pub(crate) async fn run(
                 (ids, showing, front)
             })
             .await;
+            ended_by_itself(&followed, &ids, &mut first);
             if let Some(exit) = first
                 && ids.is_empty()
             {
@@ -121,6 +201,7 @@ pub(crate) async fn run(
             Look { ends_with_window: desktop.window_close_ends_game(), front, window, ids }
         })
         .await;
+        ended_by_itself(&followed, &look.ids, &mut first);
         if let Some(exit) = first
             && look.ids.is_empty()
         {
@@ -152,10 +233,31 @@ pub(crate) async fn run(
         }
     };
     // What the first process left in its group goes with it (on Windows, what it started).
-    if let Err(e) = process.kill().await {
+    if let Followed::Started(process) = &mut followed
+        && let Err(e) = process.kill().await
+    {
         tracing::warn!(error = %e, "could not stop what the game left running");
     }
     exit
+}
+
+/// The first process's exit: the launcher's own, waited for. A found one has no handle to wait
+/// on: the process list says when it ended ([`ended_by_itself`]).
+async fn wait(followed: &mut Followed) -> ProcessExit {
+    match followed {
+        Followed::Started(process) => process.wait().await.unwrap_or(KILLED),
+        Followed::Found(_) => std::future::pending().await,
+    }
+}
+
+/// A found first process ended when the process list no longer has it.
+fn ended_by_itself(followed: &Followed, ids: &[u32], first: &mut Option<ProcessExit>) {
+    if let Followed::Found(id) = followed
+        && first.is_none()
+        && !ids.contains(id)
+    {
+        *first = Some(ENDED);
+    }
 }
 
 /// One look at the game: its processes, which window is in front, whether it has a window.
@@ -168,29 +270,35 @@ struct Look {
 
 /// Stop: asks the game to close, so the emulator saves its caches, and kills what is left
 /// after the host's `stop_grace`.
-async fn close(
-    core: &Core,
-    process: &mut dyn ProcessHandle,
-    root: Option<u32>,
-    mut first: Option<ProcessExit>,
-) -> ProcessExit {
+async fn close(core: &Core, followed: &mut Followed, root: Option<u32>, mut first: Option<ProcessExit>) -> ProcessExit {
+    // A launcher's process is waited for, so its id leaves the list once it exited; a found
+    // one stays in it while it runs.
+    let drop_root = matches!(followed, Followed::Started(_));
     let root_exited = first.is_some();
     let ids = blocking(core, move |_, processes| members(processes, root, root_exited)).await;
-    if let Err(e) = process.terminate().await {
+    if let Followed::Started(process) = followed
+        && let Err(e) = process.terminate().await
+    {
         tracing::warn!(error = %e, "could not ask the game to close");
     }
     let asked = ids.clone();
     blocking(core, move |_, processes| processes.end(&asked, false)).await;
     let deadline = Instant::now() + core.kernel().host().stop_grace;
     while Instant::now() < deadline {
-        let waited = if first.is_none() { tokio::time::timeout(STOP_EVERY, process.wait()).await.ok() } else { None };
+        let waited = match followed {
+            Followed::Started(process) if first.is_none() => {
+                tokio::time::timeout(STOP_EVERY, process.wait()).await.ok()
+            }
+            _ => None,
+        };
         match waited {
             Some(Ok(exit)) => first = Some(exit),
             // Timed out: the wait was the pause. Otherwise pause here, or this loop spins.
-            None if first.is_none() => {}
+            None if first.is_none() && drop_root => {}
             _ => tokio::time::sleep(STOP_EVERY).await,
         }
-        let left = blocking(core, move |_, processes| members(processes, root, true)).await;
+        let left = blocking(core, move |_, processes| members(processes, root, drop_root)).await;
+        ended_by_itself(followed, &left, &mut first);
         if let Some(exit) = first
             && left.is_empty()
         {
@@ -198,14 +306,17 @@ async fn close(
         }
     }
     tracing::info!("the game didn't close: killing it");
-    if let Err(e) = process.kill().await {
+    if let Followed::Started(process) = followed
+        && let Err(e) = process.kill().await
+    {
         tracing::warn!(error = %e, "could not stop the game");
     }
-    let left = blocking(core, move |_, processes| members(processes, root, true)).await;
+    let left = blocking(core, move |_, processes| members(processes, root, drop_root)).await;
     blocking(core, move |_, processes| processes.end(&left, true)).await;
-    match first {
-        Some(exit) => exit,
-        None => process.wait().await.unwrap_or(KILLED),
+    match (first, followed) {
+        (Some(exit), _) => exit,
+        (None, Followed::Started(process)) => process.wait().await.unwrap_or(KILLED),
+        (None, Followed::Found(_)) => KILLED,
     }
 }
 

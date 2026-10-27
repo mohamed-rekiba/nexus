@@ -613,7 +613,15 @@ async fn a_script_installer_s_archive_installs_as_the_game_named_by_its_folder()
 
 #[tokio::test]
 async fn a_start_script_beside_thousands_of_files_is_still_found_and_can_run() {
-    let p = boot(Platform::Linux).await;
+    // The app's own call limit: copying thousands of real files takes over the tests' 500 ms on a
+    // busy CI runner.
+    let test = FakeHost::new()
+        .platform(Some(Platform::Linux))
+        .call_timeout(Duration::from_secs(30))
+        .built_in(PluginByKind::emulator(PcPlugin))
+        .boot_core()
+        .await;
+    let p = with_folders(test).await;
     // A repack with its own Proton: its start script sorts after thousands of files.
     let names: Vec<String> = (0..4100).map(|n| format!("Game/game/wine/files/lib/{n}.so")).collect();
     let mut files: Vec<(&str, &[u8])> = names.iter().map(|n| (n.as_str(), &b"lib"[..])).collect();
@@ -686,4 +694,64 @@ async fn a_download_with_nothing_that_starts_a_game_is_refused() {
     p.download(&[("Docs/readme.txt", b"hi")]);
     let refused = p.install().await;
     assert!(refused.starts_with("failed") && refused.contains("Nothing in this download starts a game"), "{refused}");
+}
+
+impl Pc {
+    /// Writes `files` into the game folder's `PC/`, as a player copies a game in by hand.
+    fn copy_in(&self, files: &[(&str, &[u8])]) {
+        for (name, bytes) in files {
+            let path = self.games.path().join("PC").join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, bytes).unwrap();
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_game_copied_into_pc_by_hand_shows_and_plays_as_an_installed_one() {
+    let p = boot(Platform::Linux).await;
+    p.copy_in(&[("my_game/start.sh", b"#!/bin/sh\n"), ("my_game/bin/game.x86_64", &elf())]);
+    p.test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+
+    assert_eq!(p.titles(), [("My Game".to_owned(), "PC".to_owned())], "named after its folder");
+    assert_eq!(p.starts("my_game"), ["start.sh", "bin/game.x86_64"], "found as an install finds them");
+    p.test.core.dispatch(Command::Launch("emu-pc:my_game".parse().unwrap())).await.unwrap();
+    let run = p.test.spawner.wait_for(1).await.command;
+    assert_eq!(run.program, p.games.path().join(native("PC/my_game/start.sh")));
+    assert!(!run.keep_running, "a game Nexus started stops with Nexus");
+}
+
+#[tokio::test]
+async fn a_folder_with_nothing_to_start_or_still_installing_isn_t_a_game() {
+    let p = boot(Platform::Linux).await;
+    p.copy_in(&[("Notes/readme.txt", b"hello"), ("Game.part/start.sh", b"#!/bin/sh\n")]);
+    p.test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+
+    assert_eq!(p.titles(), []);
+    for folder in ["Notes", "Game.part"] {
+        assert!(!p.games.path().join("PC").join(folder).join(GAME_FILE).exists(), "{folder} is left as it is");
+    }
+}
+
+#[tokio::test]
+async fn a_cover_image_in_a_game_s_folder_is_its_cover() {
+    let p = boot(Platform::Linux).await;
+    p.copy_in(&[("Game/start.sh", b"#!/bin/sh\n"), ("Game/cover.png", b"png")]);
+    p.test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+
+    let card = p.test.core.view().home.games.first().cloned().expect("the game");
+    let cover = HostPath::new("games", 0, RelPath::new("PC/Game/cover.png").unwrap());
+    assert_eq!(card.cover, Some(nexus_ui_api::ImageRef::Folder { plugin: pc(), path: cover }));
+}
+
+#[tokio::test]
+async fn with_gamemode_installed_a_linux_game_runs_through_it() {
+    let p = boot(Platform::Linux).await;
+    p.copy_in(&[("Game/start.sh", b"#!/bin/sh\n")]);
+    p.test.spawner.on_path("gamemoderun", Path::new("/usr/bin/gamemoderun"));
+
+    p.test.core.dispatch(Command::Launch("emu-pc:Game".parse().unwrap())).await.unwrap();
+    let run = p.test.spawner.wait_for(1).await.command;
+    assert_eq!(run.program, Path::new("gamemoderun"));
+    assert_eq!(run.args, [p.games.path().join(native("PC/Game/start.sh")).to_string_lossy()]);
 }

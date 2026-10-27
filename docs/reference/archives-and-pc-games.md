@@ -326,8 +326,11 @@ Cancel never deletes files. It stops the download, which reads "Cancelled · the
 
 ## Uninstalling a game
 
-The game's menu has "Uninstall", last and in red, when the Game Hub's details say
-`can_uninstall`:
+The game's menu has "Uninstall", last and in red, when the game's actions (`can.uninstall`,
+see "A game's actions" in [themes.md](../themes.md)) name a game to remove. Its store removes
+it when the game's details give an `uninstall_link` its plugin may open (Steam's
+`steam://uninstall/<id>`, which asks in Steam's own dialog). Else Nexus deletes its folder,
+when:
 
 - the game's details name its folder;
 - that folder is not one of the player's folders itself;
@@ -355,15 +358,27 @@ Permissions:
 
 - the games folder, with write; the packages folder, read only;
 - processes: `folder:games` (any file in a game folder), the umu-launcher it installs,
-  `system:umu-run`, `system:wine`, `system:wine64`, `system:sh` and `system:gamescope`.
+  `system:umu-run`, `system:wine`, `system:wine64`, `system:sh`, `system:gamescope` and
+  `system:gamemoderun`.
 
 ### Library
 
 Games install to `PC/` in the player's first game folder, or the folder picked on the install
 sheet. A game is a folder in `PC/` with a `.nexus-game.json` manifest (version 2): its `name`,
-and `starts`, every file in it that can start the game, best first, each a `path` inside the
-folder and its `kind`. The manifest holds what the install found and doesn't change after. The
+and `starts`, every file in it that can start the game, best first, each its `kind` and its
+`path` inside the folder. The manifest holds what the install found and doesn't change after. The
 folder's name is the game's id. Search matches the name.
+
+A folder the player copied into `PC/` by hand, with no manifest, gets one the first time the
+library or Play sees it: its files are probed as an install probes them (the nearest 4000 first),
+and the folder's files that should be programs get the flag. Its name is GOG's `gameinfo` (first
+line, at the folder's top), else a portable Wine wrapper's, else the folder's name, with a
+capital at each word when it has none (`my_game` is "My Game"). A folder with nothing that
+starts a game stays as it is and isn't probed again until Nexus restarts. Hidden folders and
+`<name>.part` (an install still writing) are skipped.
+
+A `cover.jpg`, `cover.png` or `cover.webp` in a game's folder, in that order, is its cover. It
+comes before the cover of a catalog release the game matches.
 
 The first manifest (version 1: `launch`, `kind` and up to 8 `alternatives`) reads as the same
 list, `launch` first. A game with one is named by GOG's `data/noarch/gameinfo` (first line) or a
@@ -414,7 +429,8 @@ it, or run the installer by hand". Nothing installs then.
 The plugin then lists every file that can start the game. The order compares, one after the
 other:
 
-1. helpers last: a name with `setup`, `install`, `update`, `config`, `crashhandler` and the like;
+1. helpers last: a name with `setup`, `install`, `update`, `config`, `crashhandler`, `dedicated`
+   (a game's own server) and the like;
 2. what the file is: a start script by its name (`start`, `start.sh`, `play.sh`, `run.sh`, …),
    an AppImage, a Mac program inside a `.app`, a Linux program, another Mac program, another
    script, a Windows `.exe`;
@@ -462,6 +478,9 @@ the player picks another file in Starts. `prepare` builds the launch:
   by itself. On a system without 32-bit libraries it also gets `PROTON_USE_WOW64=1`.
 - With a Resolution, all of it runs inside gamescope: `gamescope -f -w <width> -h <height> --`
   and then the program and its arguments.
+- On Linux with GameMode installed (`gamemoderun` on the `PATH`), all of that runs through
+  `gamemoderun`. GameMode raises the game's priority and the processor's speed while it runs;
+  without a password only for a player in the `gamemode` group.
 
 A game this system can't start installs anyway. Play then fails with the reason, for example
 "Can't start Celeste: This is a Linux game: it can't run on Windows". Without a runner it is

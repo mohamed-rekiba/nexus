@@ -109,6 +109,7 @@ async fn kytyps5_from(repo: Option<&str>, name: &str) {
         env: Default::default(),
         cwd: binary.parent().unwrap().into(),
         log: None,
+        keep_running: false,
     };
     let out = TokioSpawner.output(command, Duration::from_secs(10), 64 * 1024).await.unwrap();
     let banner = String::from_utf8_lossy(out.as_deref().unwrap_or_default()).into_owned();

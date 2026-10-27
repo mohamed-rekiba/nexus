@@ -33,7 +33,8 @@ export global Dl {
     }
     // A torrent's folder is on disk from its start: Open folder comes after its actions.
     public pure function has-folder(i: int) -> bool {
-        return Vm.torrents[i].state != "resolving" && Vm.torrents[i].state != "ready";
+        // A store's install is in the store's own folders.
+        return Vm.torrents[i].store == "" && Vm.torrents[i].state != "resolving" && Vm.torrents[i].state != "ready";
     }
     public pure function buttons(row: int) -> int {
         return root.torrent(row) >= 0 ? Vm.torrents[root.torrent(row)].actions.length + (root.has-folder(root.torrent(row)) ? 1 : 0)
@@ -534,8 +535,10 @@ export component DownloadsScreen inherits Rectangle {
                             horizontal-alignment: root.align;
                         }
                         Text {
-                            text: t.install == "installing" ? "Installing"
+                            // A store's install says the store does it: "Downloading in Steam".
+                            text: (t.install == "installing" ? "Installing"
                                 : t.install == "done" ? "Installed"
+                                : t.state == "queued" ? "Queued"
                                 : t.unpack == "unpacking" ? "Unpacking"
                                 : t.unpack == "failed" ? "Unpacking failed"
                                 : t.state == "resolving" ? "Reading its files"
@@ -545,7 +548,7 @@ export component DownloadsScreen inherits Rectangle {
                                 : t.state == "paused" ? (t.waiting-vpn ? "Paused · waiting for your VPN" : "Paused")
                                 : t.state == "complete" ? (t.seeding ? "Complete · sharing" : t.verifying ? "Complete · checking" : "Complete")
                                 : t.state == "failed" ? "Failed"
-                                : "Cancelled · the files stay";
+                                : "Cancelled · the files stay") + (t.store != "" ? " in " + t.store : "");
                             font-size: 17 * Look.px;
                             color: card.failed ? Tokens.color-danger : card.done ? Tokens.color-success : #8dbaff;
                             accessible-role: text;
@@ -627,6 +630,7 @@ export component DownloadsScreen inherits Rectangle {
                                 : action == "install" ? (t.install == "failed" ? "Retry install" : t.unpack == "failed" || t.unpack == "cancelled" ? "Unpack and install" : "Install")
                                 : action == "remove-unpacked" ? "Remove unpacked files"
                                 : action == "cancel-install" ? "Cancel install"
+                                : action == "open-store" ? "Open in " + t.store
                                 : "Play";
                             accessible-role: button;
                             accessible-label: "torrent-action:" + action;

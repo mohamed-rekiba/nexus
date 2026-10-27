@@ -165,6 +165,13 @@ pub struct LaunchSpec {
     /// `None` means the program's folder. A system program needs one.
     #[serde(default)]
     pub cwd: Option<Location>,
+    /// For a program that hands the game to another one and may exit at once (a store's
+    /// client, as `steam steam://rungameid/…`): text in the command line of the game's own
+    /// process. The game is then that process and every process below it, from when it shows
+    /// until it ends; the program started here is neither waited for nor stopped. `None`: the
+    /// game is the program started here.
+    #[serde(default)]
+    pub game_process: Option<String>,
 }
 
 /// Where a program or folder is. As JSON, a bare string is a path in the data folder, and
@@ -315,6 +322,7 @@ mod location_tests {
             args: vec![LaunchArg::path(game.clone()), "--fullscreen".into()],
             env: BTreeMap::new(),
             cwd: Some(Location::Folder(game.clone())),
+            game_process: None,
         };
         let json = serde_json::to_value(&spec).unwrap();
         assert_eq!(json["program"], serde_json::json!({"system": "wine"}));

@@ -50,6 +50,9 @@ pub struct HostConfig {
     pub stop_grace: Duration,
     /// How long a started game has to show a window before the launcher stops waiting for it.
     pub show_timeout: Duration,
+    /// How long a game another program starts (a store's client) has to show its process: the
+    /// client may first have to start, sign in and update itself.
+    pub hand_over_timeout: Duration,
     /// How often a running game's processes and windows are read once it shows.
     pub watch_every: Duration,
     /// How many downloads run at once. The rest wait in a queue.
@@ -58,6 +61,10 @@ pub struct HostConfig {
     pub home: Option<PathBuf>,
     /// How often a running torrent's state is read.
     pub torrent_poll: Duration,
+    /// How often a store's installs (Steam's) are read while one runs, or for a minute after
+    /// Nexus asked the store to install; ten times as long otherwise, to see installs started in
+    /// the store itself.
+    pub store_poll: Duration,
     /// How often the VPN is checked while downloads go only through it.
     pub vpn_poll: Duration,
 }
@@ -76,10 +83,12 @@ impl HostConfig {
             shutdown_timeout: Duration::from_secs(5),
             stop_grace: Duration::from_secs(4),
             show_timeout: Duration::from_secs(20),
+            hand_over_timeout: Duration::from_secs(120),
             watch_every: Duration::from_secs(1),
             max_downloads: 2,
             home: None,
             torrent_poll: Duration::from_secs(1),
+            store_poll: Duration::from_secs(2),
             vpn_poll: Duration::from_secs(2),
         }
     }
@@ -885,10 +894,26 @@ fn validate(host: &HostConfig, manifest: &PluginManifest, origin: Origin) -> Res
     {
         return Err(LoadError::Platform { supported: manifest.platforms.clone() });
     }
+    if let Some(system) = &manifest.system
+        && system.color.is_some()
+        && system.rgb().is_none()
+    {
+        return Err(LoadError::Invalid(format!(
+            "[system] color {:?}: write it as #rrggbb",
+            system.color.as_deref().unwrap_or_default()
+        )));
+    }
     for grant in &manifest.permissions.filesystem {
         if !nexus_api::PathGrant::valid_name(&grant.folder) {
             return Err(LoadError::Invalid(format!(
                 "folder name {:?}: use lowercase letters, digits and -",
+                grant.folder
+            )));
+        }
+        // The folders a file lists are read only: the file's writer, not the player, named them.
+        if grant.write && grant.listed_in.is_some() {
+            return Err(LoadError::Invalid(format!(
+                "folder {:?}: a folder with listed_in can't be written",
                 grant.folder
             )));
         }
