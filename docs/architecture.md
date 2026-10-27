@@ -36,7 +36,7 @@ nexus-app (the binary)         ──▶ nexus-ui-host, nexus-core, every built-
 | Crate | Owns |
 | --- | --- |
 | `crates/nexus-api` | The plugin API. The plugin traits, `PluginManifest`, `Capability`, `Provided`, `PluginContext` and its facades (`ConfigStore`, `Storage`, `Folders`, `Programs`, `HttpClient`, `Logger`, `EventSink`, `ServiceRegistry`), `RelPath` and `HostPath`, plans (`DownloadPlan`, `LaunchSpec`), slots, `Event`, `VpnGate`. Semver-versioned: a manifest's `host_api` must match `API_VERSION`, which is set by hand with the API, not from Nexus's version. |
-| `crates/nexus-core` | The kernel and the app. Plugin lifecycle and registry (`Kernel`), the event bus (`EventBus`), settings (`ConfigService`), the app state and commands (`Core`, `AppState`, `Command`), the subsystems (`torrents/`), view building (`view.rs`), HTTP downloads, unpacking, game installs, launches, VPN rules, catalogs, "This PC", the launcher update, and the port traits. |
+| `crates/nexus-core` | The kernel and the app. Plugin lifecycle and registry (`Kernel`), the event bus (`EventBus`), settings (`ConfigService`), the app state and commands (`Core`, `AppState`, `Command`), the subsystems (`torrents/`, `sessions/`), view building (`view.rs`), HTTP downloads, unpacking, game installs, launches, VPN rules, catalogs, "This PC", the launcher update, and the port traits. |
 | `crates/nexus-ui-api` | The theme contract. View models (`vm.rs`: `AppView` and the rest), the theme manifest (`ThemeManifest`), design tokens, and `contract/types.slint` with the `Vm` and `Host` globals. No toolkit code. |
 | `crates/nexus-ui-host` | `ThemeSet` (finds themes, resolves `extends`) and `ThemeHost`: compiles a theme with `slint-interpreter`, binds the view models, loads images, turns gamepad buttons into keys, and swaps themes. |
 | `crates/nexus-app` | The binary. The event loop, render scheduling, the image loader, and the system adapters: `desktop.rs`, `processes.rs` (a running game's processes), `torrents.rs` (librqbit), `archives.rs` and `libarchive.rs`, `hardware.rs` and `gpu_probe.rs` (Vulkan), `trailer.rs` (libmpv), `gamepad.rs` (gilrs), `audio.rs` (rodio), `http.rs` (reqwest), `disk.rs`, `clock.rs`. |
@@ -78,9 +78,9 @@ theme callback ─▶ UiRequest::Core(Command) ─▶ Core::dispatch ─▶ AppS
    `OpenPath`, `Quit`, `Restart`, `Trailer`, `Render`).
 2. `Core::dispatch` runs the command. Most state lives in one `AppState` behind a mutex in
    `Core`: navigation (`nav`, a stack of `Route`s), selection, the library, details, store
-   metadata, catalogs and offers, downloads, sessions, notices and more. An area that became a
-   subsystem keeps its own state behind its own lock: the torrents so far (see
-   [Subsystems](#subsystems)). `view::build` reads each subsystem's snapshot before it locks
+   metadata, catalogs and offers, downloads, notices and more. An area that became a
+   subsystem keeps its own state behind its own lock: the torrents and the running games so
+   far (see [Subsystems](#subsystems)). `view::build` reads each subsystem's snapshot before it locks
    `AppState`.
 3. A change calls `Core::changed(area)`, or a subsystem's `Notifier`. It sends a `Change { area }` (the torrents, the
    catalogs, the installs, …) to `Core::changes()`, a broadcast for the core and its tests, and
@@ -407,23 +407,29 @@ action `host:install-game` (`HOST_INSTALL_GAME`) installs a package the plugin l
 
 ## Launches and the game watcher
 
-`launch::launch` (`crates/nexus-core/src/launch.rs`):
+The sessions subsystem (`crates/nexus-core/src/sessions/`) owns the running games: their
+sessions, `game_in_front`, the one-game-at-a-time claim, Stop, the window focus calls and the
+play time (`app.playtime`). It takes the `ProcessSpawner`, `ProcessTree`, `Desktop` and `Clock`
+ports. `Command::Session(SessionCmd)` carries `Launch`, `Stop`, `ShowGame` and `ToggleFocus`.
 
-1. `Launching::claim`: one game at a time; a second press of Play is refused. No game starts
-   while its emulator installs or updates.
+A launch needs the plugin first, so the core resolves it (`crates/nexus-core/src/launch.rs`):
+
+1. `SessionsSubsystem::claim`: one game at a time; a second press of Play is refused. No game
+   starts while its emulator installs or updates.
 2. A first play whose emulator isn't installed asks the player first (`ask_to_install`).
 3. `Launcher::prepare` returns a `LaunchSpec`; launch middleware (Tower-style, ordered by
    `before`/`after`, priority and id) may change or stop it. No built-in plugin adds any yet.
-4. The program must pass `permissions.process`. Its output goes to the game's log.
-5. The process is spawned, a `Session` is added, `Event::ProcessStarted` is published, and the
-   Running screen opens.
+4. The program must pass `permissions.process`. The core resolves its paths and hands the
+   subsystem a `NewSession`.
+5. The subsystem spawns the process with its output in the game's log, adds a `Session` and
+   publishes `Event::ProcessStarted`. The core opens the Running screen.
 
-The running-game module (`crates/nexus-core/src/running.rs`) then owns the session until it
+The subsystem's watch (`sessions/watch.rs`) then follows the session until it
 ends. A game is its processes, as `ProcessTree::members` lists them, and it ends when none is
 left: a start script that starts the game in the background and exits keeps its session. On
-the way the module tries `show_game` every 250 ms until the game has a window or `show_timeout`
+the way the watch tries `show_game` every 250 ms until the game has a window or `show_timeout`
 (20 s) passes, then reads `front` and `has_window` every `watch_every` (1 s). It keeps
-`AppState.game_in_front` up to date; a window of any of the game's processes counts. When the
+`game_in_front` up to date; a window of any of the game's processes counts. When the
 desktop can't say what is in front (`Front::Unknown`), the last window the launcher showed
 counts. Only where `window_close_ends_game` (macOS) does a window that was seen and is gone for
 three reads in a row stop the game: elsewhere a launcher's own menu closes before the game's
@@ -432,21 +438,21 @@ window opens.
 A launch can hand the game to another program: `LaunchSpec.game_process` holds words of the
 game's own command line, as Steam's `SteamLaunch AppId=<id> ` (the Steam plugin). The program
 started here (`steam steam://rungameid/<id>`) is then left alone: reaped when it exits, never
-stopped. The module looks for the game with `ProcessTree::find` until `hand_over_timeout`
+stopped. The watch looks for the game with `ProcessTree::find` until `hand_over_timeout`
 (2 min: the client may first start and update itself); the first process found that wasn't
 there before the launch is the game's first, and the rest works as above. A game that never
 shows ends the session with a notice, and no play time; Stop before it shows ends it with
 nothing played.
 
 Stop asks the game's processes to close, waits up to `stop_grace` (4 s) for them, and kills what
-is left. When the game exits,
-`finish` saves play time under `app.playtime` (sessions of 3 s or more), posts a notice with the
-log for a crash the player didn't cause, may ask how far the game got, brings the launcher back
+is left. When the game exits, the core's
+`finish` ends the session (`SessionsSubsystem::end`, which saves play time under `app.playtime`
+for sessions of 3 s or more), posts a notice with the log for a crash the player didn't cause, may ask how far the game got, brings the launcher back
 when "Back to the launcher" is on, calls `Launcher::on_exit`, publishes `Event::ProcessExited`,
 and runs an emulator update that waited for the game.
 
 While the game's window is in front, or the launcher's window doesn't have focus, `ThemeHost`
-drops every pad button but a hold of the PS (Guide) button, which sends `Command::Stop` for
+drops every pad button but a hold of the PS (Guide) button, which sends `SessionCmd::Stop` for
 each running game, at once; a tap does nothing while a game runs. With no game running, a tap
 opens Home and a hold opens the power menu. Per-system details: [reference/desktop.md](reference/desktop.md).
 

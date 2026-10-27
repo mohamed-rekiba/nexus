@@ -30,8 +30,8 @@ a sandbox such as Proton's pressure-vessel starts its programs in a session of t
 the group. Windows has no process groups: there they are the game's process and every process
 below it, from a process snapshot (`CreateToolhelp32Snapshot`).
 
-The adapters only answer. The rules live once, in the core's running-game module
-(`crates/nexus-core/src/running.rs`).
+The adapters only answer. The rules live once, in the sessions subsystem's watch
+(`crates/nexus-core/src/sessions/watch.rs`).
 
 ## How each system answers
 
@@ -198,7 +198,7 @@ The Guide button (PS or Xbox) is not sent to the theme as a key. In
 
 - A tap while a game runs does nothing: the game keeps the screen.
 - A tap with no game running opens Home.
-- A hold (600 ms) while a game runs sends `Command::Stop` for each running game, at once,
+- A hold (600 ms) while a game runs sends `SessionCmd::Stop` for each running game, at once,
   with no question.
 - A hold with no game running opens the power menu (`Vm.power-menu`).
 

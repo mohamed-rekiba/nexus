@@ -104,6 +104,14 @@ is (`schedule.rs`). They take the time as an input, so the tests need no clock.
 **Seed-only start**: a start of a finished download after a restart. The torrent starts paused,
 checks its files, and seeds only when every piece is there. It never downloads.
 
+**Session**: one run of a game, from its spawn to the end of its last process. It has a number
+(`SessionId`), and the game's log and play time come from it.
+_Avoid_: process, run
+
+**Sessions subsystem** (`SessionsSubsystem`): the subsystem of the running games. It starts the
+game the core resolved, watches it, carries out Stop and the window focus calls, and saves play
+time.
+
 **Snapshot**: a subsystem's state read whole, in one lock. Reading it changes nothing.
 
 **Subsystem**: one area of the core's state with its own lock, saved records and ports. The core
