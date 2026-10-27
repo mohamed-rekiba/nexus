@@ -38,6 +38,7 @@ impl FakeClock {
             tokio::time::pause();
         }
         drop(paused);
+        // Set by the first use; every later use finds it set.
         let _ = self.runtime.set(runtime);
     }
 

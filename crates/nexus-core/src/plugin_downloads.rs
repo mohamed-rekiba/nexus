@@ -50,14 +50,18 @@ pub(crate) fn resume_downloads(core: &Core) {
     let Some(pending) = pending.as_object() else { return };
     for (key, saved) in pending.clone() {
         let Ok(record) = serde_json::from_value::<DownloadRecord>(saved) else {
-            let _ = core.kernel().config().remove(&["app", "downloads", &key]);
+            if let Err(e) = core.kernel().config().remove(&["app", "downloads", &key]) {
+                tracing::warn!(error = %e, "could not forget an unreadable download");
+            }
             continue;
         };
         tracing::info!(plugin_id = %record.plugin, request = ?record.request, "resuming an interrupted download");
         let core = core.clone();
         tokio::spawn(async move {
             // Saved again under its own key, then removed when it ends.
-            let _ = core.kernel().config().remove(&["app", "downloads", &key]);
+            if let Err(e) = core.kernel().config().remove(&["app", "downloads", &key]) {
+                tracing::warn!(error = %e, "could not save download state");
+            }
             if let Err(e) = download(&core, &record.plugin, record.request).await {
                 core.notices().opening(
                     NoticeKind::Error,

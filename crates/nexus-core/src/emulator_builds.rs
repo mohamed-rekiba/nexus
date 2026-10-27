@@ -167,7 +167,9 @@ pub(crate) async fn resume_installs(core: &Core) {
         tracing::info!(plugin_id = %plugin, version = %record.version, "resuming an interrupted install");
         let core = core.clone();
         tokio::spawn(async move {
-            let _ = install(&core, &plugin, Some(record.version), record.from).await;
+            if let Err(e) = install(&core, &plugin, Some(record.version), record.from).await {
+                tracing::warn!(error = %e, plugin_id = %plugin, "could not resume an interrupted install");
+            }
         });
     }
 }

@@ -34,6 +34,7 @@ impl Platform for SystemPlatform {
             if let Err(error) = work.await {
                 tracing::warn!(%error, "command failed");
             }
+            // Refused only once the app closes: nothing is left to poll then.
             let _ = slint_interpreter::invoke_from_event_loop(poll_shell);
         });
     }
@@ -66,6 +67,7 @@ impl Platform for SystemPlatform {
     fn announce(&self, line: &str) {
         use std::io::Write;
         let mut out = std::io::stdout();
+        // A closed stdout has no reader left to tell.
         let _ = writeln!(out, "{line}").and_then(|()| out.flush());
     }
 

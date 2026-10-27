@@ -491,7 +491,9 @@ pub(crate) async fn check_launcher_update(core: &Core) -> CoreResult<()> {
     if matches!(found, crate::launcher_update::UpdateState::WithSystem { .. }) {
         let core = core.clone();
         tokio::spawn(async move {
-            let _ = run(&core, SystemCommand::CheckOsUpdate).await;
+            if let Err(e) = run(&core, SystemCommand::CheckOsUpdate).await {
+                tracing::warn!(error = %e, "could not look for the Nexus OS update");
+            }
         });
     }
     Ok(())

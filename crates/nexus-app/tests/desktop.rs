@@ -169,8 +169,8 @@ fn start_at_login_writes_the_system_s_entry_and_takes_it_out(desktop: &SystemDes
         // Off again: an entry that is gone already is fine.
         desktop.session.start_at_login(false).map_err(|e| format!("off again: {e}"))
     })();
-    if before {
-        let _ = desktop.session.start_at_login(true);
+    if before && let Err(e) = desktop.session.start_at_login(true) {
+        eprintln!("could not turn starting at login back on: {e}");
     }
     match outcome {
         Ok(()) => Outcome::Pass,

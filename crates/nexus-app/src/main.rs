@@ -150,7 +150,8 @@ fn run(args: args::Args) -> Result<(), String> {
     handle.spawn_blocking(move || nexus_ui_host::sweep_thumbs(&thumbs));
     APP.with(|app| *app.borrow_mut() = Some(App { shell }));
 
-    // Controllers: each press, and the controller's name for the launch splash.
+    // Controllers: each press, and the controller's name for the launch splash. The event loop
+    // refuses work only once the app closes, so a refusal drops the press.
     gamepad::spawn(
         |button, repeated| {
             let _ =
@@ -168,6 +169,7 @@ fn run(args: args::Args) -> Result<(), String> {
         while let Some(event) = events.next().await {
             if !pending.swap(true, Ordering::SeqCst) {
                 let pending = pending.clone();
+                // Refused only once the app closes: no render is due then.
                 let _ = slint_interpreter::invoke_from_event_loop(move || {
                     pending.store(false, Ordering::SeqCst);
                     with_app(|app| app.shell.on_core_event(&event));
@@ -181,7 +183,9 @@ fn run(args: args::Args) -> Result<(), String> {
 
     let starting = core.clone();
     handle.spawn(async move {
-        let _ = starting.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await;
+        if let Err(error) = starting.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await {
+            tracing::warn!(%error, "the first Library refresh failed");
+        }
     });
     with_app(|app| {
         if let Err(error) = app.shell.render() {

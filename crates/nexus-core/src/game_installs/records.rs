@@ -48,7 +48,9 @@ impl Records {
                 Some((plugin, work))
             })
             .collect();
-        let _ = self.config.set(&RECORDS, serde_json::json!({}));
+        if let Err(e) = self.config.set(&RECORDS, serde_json::json!({})) {
+            tracing::warn!(error = %e, "could not clear the install records");
+        }
         left
     }
 }

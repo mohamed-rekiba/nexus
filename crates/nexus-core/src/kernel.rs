@@ -725,7 +725,9 @@ impl Kernel {
         if declared == got {
             return Ok(provided);
         }
-        let _ = guarded(clock, plugin, "shutdown", host.shutdown_timeout, code.shutdown()).await;
+        if let Err(error) = guarded(clock, plugin, "shutdown", host.shutdown_timeout, code.shutdown()).await {
+            tracing::warn!(plugin_id = %plugin, %error, "shutdown failed");
+        }
         Err(LoadError::CapabilityMismatch {
             declared: declared.into_iter().collect(),
             provided: got.into_iter().collect(),

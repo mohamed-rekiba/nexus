@@ -630,7 +630,9 @@ impl TorrentsSubsystem {
                         }
                     }
                     Action::Stop => {
-                        let _ = self.port().stop(&id).await;
+                        if let Err(e) = self.port().stop(&id).await {
+                            tracing::warn!(error = %e, "a torrent didn't stop seeding");
+                        }
                         self.update(&id, |job| job.seeding = false);
                     }
                     Action::Finished => self.emit(TorrentEvent::Finished { id: id.clone(), title: title.clone() }),
@@ -726,7 +728,9 @@ impl TorrentsSubsystem {
         let seeding: Vec<String> =
             self.state().jobs.values().filter(|j| j.seeding || j.verifying).map(|j| j.id.clone()).collect();
         for id in seeding {
-            let _ = self.act(&id, TorrentAction::StopSeeding).await;
+            if let Err(e) = self.act(&id, TorrentAction::StopSeeding).await {
+                tracing::warn!(error = %e, torrent = %id, "a download didn't stop seeding");
+            }
         }
     }
 }
