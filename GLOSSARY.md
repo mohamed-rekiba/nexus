@@ -83,12 +83,12 @@ storage, folders, programs, HTTP, settings and the log.
 a plugin's privileges.
 _Avoid_: type, category
 
+**Listing** (`ArchiveEntry`): an archive's entries as a format reader gives them, unchecked: each
+name as the archive spells it, its size, its kind, and whether it needs a password.
+
 **Login session** (`LoginSession`): the port for the player's login session: starting the
 launcher at login, and installing the launcher's own package with the administrator prompt.
 Not a play session.
-
-**Listing** (`ArchiveEntry`): an archive's entries as a format reader gives them, unchecked: each
-name as the archive spells it, its size, its kind, and whether it needs a password.
 
 **Opener** (`Opener`): the port that opens a link or a file with the system's opener, as a click
 on it would. The core opens plugins' store links with it; the app shell's platform opens pages
