@@ -425,6 +425,17 @@ forums (`refreshed/`), else the copy bundled into the binary from `assets/catalo
 `RELEASES_CHANGED` when it has something new. The catalog sources come from
 `assets/catalog-sources.json` the same way.
 
+Inside the plugin, each part has its own module:
+
+- `topic.rs` is one typed model of a catalog file. The refresh (`refresh.rs`) changes it, and
+  `format.rs` turns it into releases in one function, `format::release`.
+- `store.rs` (`CopyStore`) keeps the fetched and refreshed copies and their meta files.
+- `schedule.rs` holds the due-time and back-off rules. It takes the time as an input.
+- `sources.rs` reads the catalog sources. Only the bundled sources say what a forum's topics
+  are for, so a catalog file reads the same whichever sources are in use.
+- `lib.rs` (`Catalogs`) tracks what the core asked for, runs the task and builds the slot
+  items over these modules.
+
 ## The machine's settings
 
 `crates/nexus-core/src/system.rs`. For each system capability the core uses the first active
