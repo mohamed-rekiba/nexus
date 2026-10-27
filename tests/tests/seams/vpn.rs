@@ -108,11 +108,14 @@ async fn until(t: &TestCore, hash: &str, what: &str, check: impl Fn(&nexus_ui_ap
 
 async fn download(t: &TestCore, hash: &str) {
     let release = hash.to_owned();
-    t.core.dispatch(Command::DownloadRelease { offer: offer(hash), release, folder: None }).await.unwrap();
+    t.core
+        .dispatch(Command::Torrent(nexus_core::TorrentCmd::Download { offer: offer(hash), release, folder: None }))
+        .await
+        .unwrap();
 }
 
 async fn act(t: &TestCore, hash: &str, action: TorrentAction) {
-    t.core.dispatch(Command::Torrent { id: hash.into(), action }).await.unwrap();
+    t.core.dispatch(Command::Torrent(nexus_core::TorrentCmd::Act { id: hash.into(), action })).await.unwrap();
 }
 
 /// `hash` read, started and downloading.

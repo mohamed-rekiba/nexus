@@ -35,8 +35,9 @@ impl Core {
         let rested = clock.now() + SCREENSHOTS_AFTER;
         clock.sleep(NEIGHBOURS_AFTER).await;
         let art: Vec<ImageRef> = {
+            let torrents = self.torrents().snapshot();
             let state = self.state();
-            crate::view::neighbours(&self.inner.kernel, &state, &game, &state.grid_columns, MOST_NEIGHBOURS)
+            crate::view::neighbours(&self.inner.kernel, &state, &torrents, &game, &state.grid_columns, MOST_NEIGHBOURS)
                 .iter()
                 .flat_map(|key| {
                     let art = crate::view::hub_art(&state, key);

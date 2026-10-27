@@ -674,7 +674,7 @@ fn run(args: Args) -> Result<(), String> {
             .processes(Arc::new(processes::SystemProcesses))
             .desktop(Arc::new(desktop::SystemDesktop { raise: Box::new(raise_launcher), login: login_program() }))
             .hardware(Arc::new(hardware::SystemHardware { data_dir: args.data_dir.clone() }))
-            .torrents(Arc::new(torrents::RqbitTorrents::new(args.data_dir.join("torrents"), runtime.handle().clone())))
+            .torrents(Arc::new(torrents::RqbitTorrents::new(args.data_dir.join("torrents"))))
             .archives(Arc::new(archives::HostArchives))
             .clock(Arc::new(TokioClock))
             .built_in_plugins()

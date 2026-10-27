@@ -164,10 +164,12 @@ impl InstallJob for HostJob {
             left = dir.parent().map(std::path::Path::to_path_buf);
         }
         if top.is_some_and(|t| !t.exists()) {
-            let mut state = core.state();
-            for job in state.torrents.values_mut().filter(|j| j.source == self.source) {
-                job.unpack.phase = crate::archives::UnpackPhase::Waiting;
-                job.unpack.progress = 0.0;
+            let torrents = core.torrents();
+            for id in torrents.snapshot().jobs.values().filter(|j| j.source == self.source).map(|j| j.id.clone()) {
+                torrents.hand_off(&id, |_, h| {
+                    h.unpack.phase = crate::archives::UnpackPhase::Waiting;
+                    h.unpack.progress = 0.0;
+                });
             }
         }
         true
@@ -220,10 +222,11 @@ impl Core {
         );
         // A download's own unpacked copy may move into the games folder rather than be copied.
         let disposable = self
-            .state()
-            .torrents
+            .torrents()
+            .snapshot()
+            .jobs
             .values()
-            .any(|t| t.source == source && t.unpack.phase == crate::archives::UnpackPhase::Unpacked)
+            .any(|t| t.source == source && t.hand_off.unpack.phase == crate::archives::UnpackPhase::Unpacked)
             .then(|| source.join(crate::archives::UNPACKED).ok())
             .flatten();
         let job = Arc::new(HostJob {

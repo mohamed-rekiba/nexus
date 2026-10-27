@@ -252,7 +252,8 @@ fn shoot_install_sheet(host: &mut Composed, window: &MinimalSoftwareWindow, out:
     install.invoke_accessible_default_action();
     host.pump();
     shoot(window, &out.join(format!("{prefix}-install-sheet.png")));
-    let outside = Command::InstallDownload { id: t.id.clone(), folder: Some("/elsewhere".into()) };
+    let outside =
+        Command::Torrent(nexus_core::TorrentCmd::Install { id: t.id.clone(), folder: Some("/elsewhere".into()) });
     assert!(host.rt.block_on(host.test.core.dispatch(outside)).is_err(), "a folder outside the game folders");
     host.ui.render().unwrap();
     shoot(window, &out.join(format!("{prefix}-install-sheet-error.png")));
@@ -269,11 +270,11 @@ fn shoot_resolving(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Pa
     let Some(release) = host.core().view().detail.and_then(|d| d.releases.first().cloned()) else { return };
     host.test.torrents.has(&release.id, "Sample", &[("Sample/game.pkg", b"package")]);
     let held = host.test.torrents.hold();
-    host.dispatch(Command::DownloadRelease {
+    host.dispatch(Command::Torrent(nexus_core::TorrentCmd::Download {
         offer: offer.key.parse().unwrap(),
         release: release.id.clone(),
         folder: None,
-    });
+    }));
     host.dispatch(Command::Navigate(Route::Downloads));
     host.load_images();
     shoot(window, &out.join(format!("{prefix}-downloads-resolving.png")));
@@ -281,7 +282,10 @@ fn shoot_resolving(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Pa
     run_until(host, 1000, |core| {
         core.view().downloads.torrents.iter().any(|t| t.id == release.id && t.state == "ready")
     });
-    host.dispatch(Command::Torrent { id: release.id, action: nexus_core::TorrentAction::Remove });
+    host.dispatch(Command::Torrent(nexus_core::TorrentCmd::Act {
+        id: release.id,
+        action: nexus_core::TorrentAction::Remove,
+    }));
 }
 
 /// Three notices on Home, one of each kind, as `<prefix>-notices.png`. The core makes a
@@ -381,7 +385,10 @@ fn shoot_vpn(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path, pr
         core.view().downloads.torrents.iter().any(|t| t.id == release.id && t.state == "ready")
     });
     if host.core().view().downloads.torrents.iter().any(|t| t.id == release.id) {
-        host.dispatch(Command::Torrent { id: release.id, action: nexus_core::TorrentAction::Remove });
+        host.dispatch(Command::Torrent(nexus_core::TorrentCmd::Act {
+            id: release.id,
+            action: nexus_core::TorrentAction::Remove,
+        }));
     }
     key(host, Key::Escape);
     key(host, Key::Escape);

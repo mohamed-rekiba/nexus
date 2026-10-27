@@ -3239,9 +3239,16 @@ fn penguins_downloaded(home: &std::path::Path) -> Composed {
     host.resize(1600.0, 900.0);
     host.dispatch(Command::Navigate(nexus_core::Route::Catalog));
     let offer = host.core().view().catalog.games.games[0].key.clone();
-    host.dispatch(Command::DownloadRelease { offer: offer.parse().unwrap(), release: ASTRO_HASH.into(), folder: None });
+    host.dispatch(Command::Torrent(nexus_core::TorrentCmd::Download {
+        offer: offer.parse().unwrap(),
+        release: ASTRO_HASH.into(),
+        folder: None,
+    }));
     until_torrent(&mut host, "ready");
-    host.dispatch(Command::Torrent { id: ASTRO_HASH.into(), action: nexus_core::TorrentAction::Start });
+    host.dispatch(Command::Torrent(nexus_core::TorrentCmd::Act {
+        id: ASTRO_HASH.into(),
+        action: nexus_core::TorrentAction::Start,
+    }));
     host.test.torrents.complete(ASTRO_HASH);
     until_torrent(&mut host, "complete");
     host.dispatch(Command::Navigate(nexus_core::Route::Downloads));
@@ -3321,9 +3328,15 @@ fn delete_files_removes_a_download_and_its_folder() {
     let mut host = penguins_downloaded(home.path());
     let folder = home.path().join(format!("Downloads/PC/torrent-{ASTRO_HASH}"));
     assert!(folder.is_dir(), "the downloaded files");
-    host.dispatch(Command::Torrent { id: ASTRO_HASH.into(), action: nexus_core::TorrentAction::StopSeeding });
+    host.dispatch(Command::Torrent(nexus_core::TorrentCmd::Act {
+        id: ASTRO_HASH.into(),
+        action: nexus_core::TorrentAction::StopSeeding,
+    }));
 
-    host.dispatch(Command::Torrent { id: ASTRO_HASH.into(), action: nexus_core::TorrentAction::DeleteFiles });
+    host.dispatch(Command::Torrent(nexus_core::TorrentCmd::Act {
+        id: ASTRO_HASH.into(),
+        action: nexus_core::TorrentAction::DeleteFiles,
+    }));
     assert!(host.core().view().downloads.torrents.is_empty());
     assert!(!folder.exists(), "its folder is deleted");
     assert!(home.path().join("Downloads/PC").is_dir(), "the downloads folder stays");
@@ -3571,7 +3584,11 @@ fn downloads_sums_up_its_transfers_and_says_how_they_behave() {
     host.test.network.up("wg0");
     host.dispatch(Command::SetVpnOnly(true));
     let offer = "release-catalog:emu-kyty/PPSA01234".parse().unwrap();
-    host.dispatch(Command::DownloadRelease { offer, release: ASTRO_HASH.into(), folder: None });
+    host.dispatch(Command::Torrent(nexus_core::TorrentCmd::Download {
+        offer,
+        release: ASTRO_HASH.into(),
+        folder: None,
+    }));
     until_torrent(&mut host, "ready");
     assert_eq!(
         values(&host, "downloads-summary"),
@@ -3589,7 +3606,10 @@ fn downloads_sums_up_its_transfers_and_says_how_they_behave() {
           unpacked files deletes only the copies Nexus unpacked."]
     );
 
-    host.dispatch(Command::Torrent { id: ASTRO_HASH.into(), action: nexus_core::TorrentAction::Start });
+    host.dispatch(Command::Torrent(nexus_core::TorrentCmd::Act {
+        id: ASTRO_HASH.into(),
+        action: nexus_core::TorrentAction::Start,
+    }));
     host.test.torrents.progress(ASTRO_HASH, 4);
     until_torrent(&mut host, "downloading");
     assert_eq!(
@@ -3606,7 +3626,11 @@ fn a_ready_download_lists_up_to_100_files_in_a_scroll_area() {
     let files: Vec<(&str, &[u8])> = names.iter().map(|n| (n.as_str(), &b"x"[..])).collect();
     host.test.torrents.has(ASTRO_HASH, "Astro", &files);
     let offer = "release-catalog:emu-kyty/PPSA01234".parse().unwrap();
-    host.dispatch(Command::DownloadRelease { offer, release: ASTRO_HASH.into(), folder: None });
+    host.dispatch(Command::Torrent(nexus_core::TorrentCmd::Download {
+        offer,
+        release: ASTRO_HASH.into(),
+        folder: None,
+    }));
     until_torrent(&mut host, "ready");
     host.dispatch(Command::Navigate(nexus_core::Route::Downloads));
     settle(&mut host);
@@ -3622,7 +3646,11 @@ fn while_it_looks_up_or_installs_a_card_shows_a_button_that_does_nothing_and_can
     let mut host = astro_with(home.path(), slow_installer());
     let held = host.test.torrents.hold();
     let offer: nexus_api::GameKey = "release-catalog:emu-kyty/PPSA01234".parse().unwrap();
-    host.dispatch(Command::DownloadRelease { offer, release: ASTRO_HASH.into(), folder: None });
+    host.dispatch(Command::Torrent(nexus_core::TorrentCmd::Download {
+        offer,
+        release: ASTRO_HASH.into(),
+        folder: None,
+    }));
     host.dispatch(Command::Navigate(nexus_core::Route::Downloads));
     settle(&mut host);
     assert_eq!(values(&host, "torrent-placeholder"), ["Resolving…"]);
@@ -3632,10 +3660,13 @@ fn while_it_looks_up_or_installs_a_card_shows_a_button_that_does_nothing_and_can
     held.release();
     until_torrent(&mut host, "ready");
     assert_eq!(host.count("torrent-placeholder"), 0);
-    host.dispatch(Command::Torrent { id: ASTRO_HASH.into(), action: nexus_core::TorrentAction::Start });
+    host.dispatch(Command::Torrent(nexus_core::TorrentCmd::Act {
+        id: ASTRO_HASH.into(),
+        action: nexus_core::TorrentAction::Start,
+    }));
     host.test.torrents.complete(ASTRO_HASH);
     until_torrent(&mut host, "complete");
-    host.dispatch(Command::InstallDownload { id: ASTRO_HASH.into(), folder: None });
+    host.dispatch(Command::Torrent(nexus_core::TorrentCmd::Install { id: ASTRO_HASH.into(), folder: None }));
     settle(&mut host);
     assert_eq!(values(&host, "torrent-placeholder"), ["Installing…"]);
     press(&mut host, "torrent-action:cancel-install", ASTRO_HASH);
@@ -3671,7 +3702,10 @@ fn right_to_left_the_install_sheet_has_install_on_the_right_and_the_keys_follow(
     // Right stays on Install, on the right; Left goes to Not now.
     key(&mut host, Key::RightArrow);
     let asked = key_asks(&mut host, Key::Return);
-    assert!(asked.iter().any(|c| matches!(c, Command::InstallDownload { .. })), "Enter installs: {asked:?}");
+    assert!(
+        asked.iter().any(|c| matches!(c, Command::Torrent(nexus_core::TorrentCmd::Install { .. }))),
+        "Enter installs: {asked:?}"
+    );
 
     let home = tempfile::tempdir().unwrap();
     let mut host = penguins_downloaded(home.path());
@@ -3680,7 +3714,10 @@ fn right_to_left_the_install_sheet_has_install_on_the_right_and_the_keys_follow(
     press(&mut host, "torrent-action:install", ASTRO_HASH);
     key(&mut host, Key::LeftArrow);
     let asked = key_asks(&mut host, Key::Return);
-    assert!(!asked.iter().any(|c| matches!(c, Command::InstallDownload { .. })), "Not now: {asked:?}");
+    assert!(
+        !asked.iter().any(|c| matches!(c, Command::Torrent(nexus_core::TorrentCmd::Install { .. }))),
+        "Not now: {asked:?}"
+    );
     host.pump();
     settle(&mut host);
     assert_eq!(host.count("install-agree"), 0, "Not now closed the sheet");
@@ -3696,7 +3733,10 @@ fn right_to_left_the_download_sheet_has_look_up_on_the_right_and_the_keys_follow
     // Left to right, Right goes to Not now.
     key(&mut host, Key::RightArrow);
     let asked = key_asks(&mut host, Key::Return);
-    assert!(!asked.iter().any(|c| matches!(c, Command::DownloadRelease { .. })), "Not now: {asked:?}");
+    assert!(
+        !asked.iter().any(|c| matches!(c, Command::Torrent(nexus_core::TorrentCmd::Download { .. }))),
+        "Not now: {asked:?}"
+    );
     settle(&mut host);
     assert_eq!(host.count("download-agree"), 0, "Not now closed the sheet");
 
@@ -3707,7 +3747,10 @@ fn right_to_left_the_download_sheet_has_look_up_on_the_right_and_the_keys_follow
     key(&mut host, Key::LeftArrow);
     key(&mut host, Key::RightArrow);
     let asked = key_asks(&mut host, Key::Return);
-    assert!(asked.iter().any(|c| matches!(c, Command::DownloadRelease { .. })), "Enter looks it up: {asked:?}");
+    assert!(
+        asked.iter().any(|c| matches!(c, Command::Torrent(nexus_core::TorrentCmd::Download { .. }))),
+        "Enter looks it up: {asked:?}"
+    );
 }
 
 #[test]

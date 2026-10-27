@@ -24,6 +24,7 @@ mod order;
 mod ports;
 mod prefetch;
 mod programs;
+mod release_downloads;
 mod releases;
 mod resolve;
 mod running;
@@ -51,10 +52,10 @@ pub use ports::{
     ArchiveKind, Archives, Body, Clock, Desktop, Front, Gpu, GroupTree, Hardware, HttpTransport, Network, NoArchives,
     NoDesktop, NoHardware, NoNetwork, NoTorrents, NoVpn, Opened, PackageError, PackageManager, ProcessExit,
     ProcessHandle, ProcessSpawner, ProcessTree, SEED_UPLOAD_LIMIT, SpawnCommand, Specs, TokioClock, TokioSpawner,
-    TorrentFile, TorrentInfo, TorrentPhase, TorrentStart, TorrentStatus, Torrents, UnpackProgress, Vpn,
+    TorrentFile, TorrentInfo, TorrentStats, Torrents, TransferState, UnpackProgress, Vpn,
 };
 pub use storage::DirStorage;
 pub use themes::{DataTheme, DirFiles};
-pub use torrents::TorrentAction;
+pub use torrents::{TorrentAction, TorrentCmd};
 /// The path checks every unpacker runs before it writes.
 pub use unpack::{inside, link_stays_inside, stays_inside};

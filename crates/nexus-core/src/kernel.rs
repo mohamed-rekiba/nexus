@@ -571,10 +571,6 @@ impl Kernel {
         &self.inner.hardware
     }
 
-    pub(crate) fn torrents(&self) -> &Arc<dyn Torrents> {
-        &self.inner.torrents
-    }
-
     /// The VPNs, from the system plugin that provides them, or else from the app's port.
     pub(crate) fn network(&self) -> Arc<dyn Network> {
         self.inner.network.get()
@@ -585,8 +581,18 @@ impl Kernel {
         self.inner.network.set(network);
     }
 
+    /// The ports the torrents subsystem takes.
+    pub(crate) fn torrent_ports(&self) -> crate::torrents::TorrentPorts {
+        crate::torrents::TorrentPorts {
+            torrents: self.inner.torrents.clone(),
+            network: self.inner.network.clone(),
+            hardware: self.inner.hardware.clone(),
+            clock: self.inner.clock.clone(),
+        }
+    }
+
     /// Set while a plugin waits for the VPN: see [`crate::vpn::HostVpnGate`].
-    pub(crate) fn vpn_waited(&self) -> &AtomicBool {
+    pub(crate) fn vpn_waited(&self) -> &Arc<AtomicBool> {
         &self.inner.vpn_waited
     }
 

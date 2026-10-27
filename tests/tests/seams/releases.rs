@@ -271,7 +271,7 @@ async fn a_console_turned_off_in_the_catalog_s_settings_offers_nothing_and_its_g
     t.core.dispatch(Command::Navigate(nexus_core::Route::Catalog)).await.unwrap();
     assert_eq!(offer_keys(&t), ["release-catalog:emu-b/CUSA00001"], "no PS5 game to download");
     let offer = "release-catalog:emu-a/PPSA01234".parse().unwrap();
-    let download = Command::DownloadRelease { offer, release: HASH.into(), folder: None };
+    let download = Command::Torrent(nexus_core::TorrentCmd::Download { offer, release: HASH.into(), folder: None });
     assert!(t.core.dispatch(download).await.is_err(), "nor a PS5 release");
     let library: Vec<String> = t.core.view().home.games.iter().map(|g| g.title.clone()).collect();
     assert_eq!(library, ["Alpha"], "the installed PS5 game stays in the library");

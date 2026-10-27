@@ -107,7 +107,11 @@ impl Setup {
     /// Downloads the release to the end.
     async fn finish(&self) {
         let offer: GameKey = "release-catalog:emu-kyty/PPSA01234".parse().unwrap();
-        self.t.core.dispatch(Command::DownloadRelease { offer, release: HASH.into(), folder: None }).await.unwrap();
+        self.t
+            .core
+            .dispatch(Command::Torrent(nexus_core::TorrentCmd::Download { offer, release: HASH.into(), folder: None }))
+            .await
+            .unwrap();
         until(&self.t.core, Area::Torrents, |r| r.state == "ready").await;
         act(&self.t.core, TorrentAction::Start).await;
         self.t.torrents.complete(HASH);
@@ -130,7 +134,7 @@ async fn until(
 }
 
 async fn act(core: &nexus_core::Core, action: TorrentAction) {
-    core.dispatch(Command::Torrent { id: HASH.into(), action }).await.unwrap();
+    core.dispatch(Command::Torrent(nexus_core::TorrentCmd::Act { id: HASH.into(), action })).await.unwrap();
 }
 
 #[tokio::test]

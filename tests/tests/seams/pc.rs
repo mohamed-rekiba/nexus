@@ -370,17 +370,29 @@ async fn a_game_a_catalog_download_installed_has_the_offer_s_art_and_the_repack_
     })
     .await;
     let offer: GameKey = t.core.view().catalog.games.games[0].key.parse().unwrap();
-    t.core.dispatch(Command::DownloadRelease { offer, release: HASH.into(), folder: None }).await.unwrap();
+    t.core
+        .dispatch(Command::Torrent(nexus_core::TorrentCmd::Download { offer, release: HASH.into(), folder: None }))
+        .await
+        .unwrap();
     let row = |t: &TestCore| t.core.view().downloads.torrents.into_iter().next();
     for (step, state) in [("ready", "ready"), ("complete", "complete")] {
         t.until(Area::Torrents, |_| row(t).is_some_and(|r| r.state == state)).await;
         if step == "ready" {
-            let start = Command::Torrent { id: HASH.into(), action: nexus_core::TorrentAction::Start };
+            let start = Command::Torrent(nexus_core::TorrentCmd::Act {
+                id: HASH.into(),
+                action: nexus_core::TorrentAction::Start,
+            });
             t.core.dispatch(start).await.unwrap();
             t.torrents.complete(HASH);
         }
     }
-    t.core.dispatch(Command::Torrent { id: HASH.into(), action: nexus_core::TorrentAction::Install }).await.unwrap();
+    t.core
+        .dispatch(Command::Torrent(nexus_core::TorrentCmd::Act {
+            id: HASH.into(),
+            action: nexus_core::TorrentAction::Install,
+        }))
+        .await
+        .unwrap();
     t.until(Area::Installs, |_| row(t).is_some_and(|r| r.install == "done")).await;
     assert_eq!(p.titles(), [("Pocket Tanks Deluxe".to_owned(), "PC".to_owned())], "the repack's name for it");
     let portrait = nexus_ui_api::ImageRef::Url {

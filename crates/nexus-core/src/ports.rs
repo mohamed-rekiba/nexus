@@ -735,23 +735,26 @@ pub struct TorrentInfo {
     pub files: Vec<TorrentFile>,
 }
 
+/// What the BitTorrent engine is doing with a torrent now.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TorrentPhase {
+pub enum TransferState {
     /// Checking the pieces already in the folder.
     Checking,
-    Downloading,
-    /// Every piece is in, and it uploads to others.
-    Seeding,
-    /// Every piece is in, and it doesn't upload.
-    Finished,
+    /// Connected to the swarm: it downloads what is missing, and uploads what it has.
+    Live,
+    /// Talks to no peer. A torrent started paused stays so once its check is done.
+    Paused,
     /// It stopped with an error.
-    Failed,
+    Error,
 }
 
-/// A torrent's state, as the transport sees it now.
+/// A torrent as the engine sees it now: raw numbers, no decision. The core's phase rules
+/// read them (`torrents::phase`).
 #[derive(Clone, Debug, PartialEq)]
-pub struct TorrentStatus {
-    pub phase: TorrentPhase,
+pub struct TorrentStats {
+    pub state: TransferState,
+    /// Every piece is in the folder and checked.
+    pub finished: bool,
     /// Bytes checked or downloaded of `total`.
     pub done: u64,
     pub total: u64,
@@ -759,18 +762,8 @@ pub struct TorrentStatus {
     pub download_rate: u64,
     pub upload_rate: u64,
     pub peers: u32,
-    /// For [`TorrentPhase::Failed`].
+    /// For [`TransferState::Error`].
     pub error: String,
-}
-
-/// How a torrent starts.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TorrentStart {
-    /// Downloads what is missing, then seeds if `seed` is on, else finishes.
-    Download { seed: bool },
-    /// Checks the pieces in the folder and seeds them. A missing piece fails it: nothing
-    /// downloads.
-    SeedOnly,
 }
 
 /// The upload limit while seeding, in bytes a second.
@@ -781,12 +774,17 @@ pub const SEED_UPLOAD_LIMIT: u64 = 128 * 1024;
 pub trait Torrents: Send + Sync {
     /// Reads the torrent's name and files from the swarm. Downloads no file.
     async fn resolve(&self, magnet: &str) -> PluginResult<TorrentInfo>;
-    /// Starts the torrent into `folder`, checking the pieces already there first.
-    async fn start(&self, id: &str, magnet: &str, folder: &Path, how: TorrentStart) -> PluginResult<()>;
+    /// Starts the torrent into `folder`, checking the pieces already there first. A torrent
+    /// started `paused` stays paused after its check: it downloads nothing until
+    /// [`Torrents::unpause`]. One the engine already has, paused, goes on unless `paused`.
+    async fn start(&self, id: &str, magnet: &str, folder: &Path, paused: bool) -> PluginResult<()>;
+    /// Connects a paused torrent to the swarm. No error when it already is.
+    async fn unpause(&self, id: &str) -> PluginResult<()>;
     /// Stops the torrent. Its files stay. No error when it isn't running.
     async fn stop(&self, id: &str) -> PluginResult<()>;
-    /// `None` when it isn't running.
-    fn status(&self, id: &str) -> Option<TorrentStatus>;
+    /// What the engine reports for the torrent now; `None` when it isn't running. Reading it
+    /// changes nothing.
+    fn stats(&self, id: &str) -> Option<TorrentStats>;
     /// The network interface that every connection uses from the next start; `None` for any.
     /// A change closes the connections the torrents shared, so the core stops them first.
     async fn route(&self, interface: Option<String>) -> PluginResult<()>;
@@ -802,13 +800,16 @@ impl Torrents for NoTorrents {
     async fn resolve(&self, _magnet: &str) -> PluginResult<TorrentInfo> {
         Err(nexus_api::PluginError::Unsupported("this build of Nexus can't download torrents".into()))
     }
-    async fn start(&self, _id: &str, _magnet: &str, _folder: &Path, _how: TorrentStart) -> PluginResult<()> {
+    async fn start(&self, _id: &str, _magnet: &str, _folder: &Path, _paused: bool) -> PluginResult<()> {
         Err(nexus_api::PluginError::Unsupported("this build of Nexus can't download torrents".into()))
+    }
+    async fn unpause(&self, _id: &str) -> PluginResult<()> {
+        Ok(())
     }
     async fn stop(&self, _id: &str) -> PluginResult<()> {
         Ok(())
     }
-    fn status(&self, _id: &str) -> Option<TorrentStatus> {
+    fn stats(&self, _id: &str) -> Option<TorrentStats> {
         None
     }
     async fn route(&self, _interface: Option<String>) -> PluginResult<()> {

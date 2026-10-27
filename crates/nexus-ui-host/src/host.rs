@@ -6,7 +6,7 @@ use std::time::SystemTime;
 
 use nexus_api::{GameKey, JobId, PluginId, SessionId};
 use nexus_core::system::SystemCommand;
-use nexus_core::{Command, Core, Grid, Route};
+use nexus_core::{Command, Core, Grid, Route, TorrentCmd};
 use nexus_ui_api::{ScreenId, ThemeError};
 use slint_interpreter::{ComponentDefinition, ComponentHandle, ComponentInstance, Image, SharedString, Value};
 
@@ -609,7 +609,7 @@ impl ThemeHost {
             Box::new(move |a| {
                 game(a, 0).and_then(|offer| {
                     let folder = Some(arg(a, 2)).filter(|f| !f.trim().is_empty()).map(|f| f.trim().into());
-                    core(Command::DownloadRelease { offer, release: arg(a, 1), folder })
+                    core(Command::Torrent(TorrentCmd::Download { offer, release: arg(a, 1), folder }))
                 })
             }),
         )?;
@@ -617,7 +617,7 @@ impl ThemeHost {
             "install-download",
             Box::new(move |a| {
                 let folder = Some(arg(a, 1)).filter(|f| !f.trim().is_empty()).map(|f| f.trim().into());
-                core(Command::InstallDownload { id: arg(a, 0), folder })
+                core(Command::Torrent(TorrentCmd::Install { id: arg(a, 0), folder }))
             }),
         )?;
         callback(
@@ -637,12 +637,14 @@ impl ThemeHost {
                     "open-store" => T::OpenStore,
                     _ => return None,
                 };
-                core(Command::Torrent { id: arg(a, 0), action })
+                core(Command::Torrent(TorrentCmd::Act { id: arg(a, 0), action }))
             }),
         )?;
         callback(
             "set-seed-downloads",
-            Box::new(move |a| core(Command::SetSeedDownloads(matches!(a.first(), Some(Value::Bool(true)))))),
+            Box::new(move |a| {
+                core(Command::Torrent(TorrentCmd::SeedDownloads(matches!(a.first(), Some(Value::Bool(true))))))
+            }),
         )?;
         callback(
             "set-vpn-only",

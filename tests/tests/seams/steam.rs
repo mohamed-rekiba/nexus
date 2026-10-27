@@ -387,7 +387,11 @@ async fn install_asks_steam_to_install_the_game_and_downloads_nothing() {
     let release = s.test.core.view().detail.unwrap().releases.remove(0);
     assert_eq!(release.store, "Steam", "its Game Hub says Steam installs it");
 
-    s.test.core.dispatch(Command::DownloadRelease { offer: key, release: release.id, folder: None }).await.unwrap();
+    s.test
+        .core
+        .dispatch(Command::Torrent(nexus_core::TorrentCmd::Download { offer: key, release: release.id, folder: None }))
+        .await
+        .unwrap();
     assert_eq!(s.test.desktop.links(), ["steam://install/440"]);
     assert!(s.test.core.view().downloads.jobs.is_empty(), "nothing downloads");
     let notices = s.test.core.view().notices;
@@ -530,7 +534,10 @@ async fn steam_s_install_shows_in_downloads_until_the_game_is_installed() {
     assert_eq!(card.actions, ["open-store"], "Steam pauses and cancels its own");
     s.test
         .core
-        .dispatch(Command::Torrent { id: card.id.clone(), action: nexus_core::TorrentAction::OpenStore })
+        .dispatch(Command::Torrent(nexus_core::TorrentCmd::Act {
+            id: card.id.clone(),
+            action: nexus_core::TorrentAction::OpenStore,
+        }))
         .await
         .unwrap();
     assert_eq!(s.test.desktop.links(), ["steam://open/downloads"]);

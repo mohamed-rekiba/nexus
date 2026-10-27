@@ -28,8 +28,7 @@ use nexus_api::{VpnBlock, VpnCheck, VpnPass};
 use crate::app::Core;
 use crate::changes::Area;
 use crate::config::ConfigService;
-use crate::torrents::TorrentState;
-use crate::{Network, TorrentStart, Vpn};
+use crate::{Network, Vpn};
 
 /// The interface of the VPN downloads use: the picked one when it is connected, or else the
 /// first connected one when the system `finds` VPNs.
@@ -46,12 +45,12 @@ pub(crate) fn pick(vpns: &[Vpn], chosen: &str, finds: bool) -> Option<String> {
 }
 
 /// Downloads go only through the VPN. Never where the system can't bind them to one.
-fn vpn_only(config: &ConfigService, network: &dyn Network) -> bool {
+pub(crate) fn vpn_only(config: &ConfigService, network: &dyn Network) -> bool {
     config.get(&["app", "vpn_only"]).as_bool().unwrap_or(false) && network.problem().is_none()
 }
 
 /// The VPN the player picked; empty for none.
-fn vpn_chosen(config: &ConfigService) -> String {
+pub(crate) fn vpn_chosen(config: &ConfigService) -> String {
     config.get(&["app", "vpn"]).as_str().unwrap_or_default().to_owned()
 }
 
@@ -129,152 +128,20 @@ impl Core {
     pub(crate) async fn refresh_vpns(&self) -> Vec<Vpn> {
         let network = self.kernel().network();
         let vpns = tokio::task::spawn_blocking(move || network.vpns()).await.unwrap_or_default();
+        self.keep_vpns(vpns.clone());
+        vpns
+    }
+
+    /// Keeps the VPNs as just read, for the view.
+    pub(crate) fn keep_vpns(&self, vpns: Vec<Vpn>) {
         let changed = {
             let mut state = self.state();
             let changed = state.vpns != vpns;
-            state.vpns = vpns.clone();
+            state.vpns = vpns;
             changed
         };
         if changed {
             self.changed(Area::Vpn);
-        }
-        vpns
-    }
-
-    /// The interface downloads may use now: `Ok(None)` for any, while the setting is off.
-    /// `Err` while they wait for the VPN.
-    async fn wanted_route(&self) -> Result<Option<String>, ()> {
-        if !self.vpn_only() {
-            return Ok(None);
-        }
-        let vpns = self.refresh_vpns().await;
-        let finds = self.kernel().network().finds_vpns();
-        pick(&vpns, &self.vpn_chosen(), finds).map(Some).ok_or(())
-    }
-
-    /// Some download waits for the VPN.
-    pub(crate) fn any_waiting_vpn(&self) -> bool {
-        self.state().torrents.values().any(|j| j.waiting_vpn)
-    }
-
-    /// Some plugin waits for the VPN, with the setting on.
-    pub(crate) fn plugin_waiting_vpn(&self) -> bool {
-        self.vpn_only() && self.kernel().vpn_waited().load(Ordering::SeqCst)
-    }
-
-    /// Marks download `id` waiting for the VPN: paused, unless it is finished.
-    fn wait_for_vpn(&self, id: &str) {
-        self.update_torrent(id, |job| {
-            if job.state != TorrentState::Complete {
-                job.state = TorrentState::Paused;
-            }
-            job.waiting_vpn = true;
-            job.seeding = false;
-            job.verifying = false;
-            job.download_rate = 0;
-            job.upload_rate = 0;
-            job.peers = 0;
-        });
-    }
-
-    /// Pauses every running download for the VPN, and closes the torrent port's connections.
-    async fn stop_for_vpn(&self) {
-        let running: Vec<String> = self
-            .state()
-            .torrents
-            .values()
-            .filter(|j| j.state.active() || j.seeding || j.verifying)
-            .map(|j| j.id.clone())
-            .collect();
-        if running.is_empty() {
-            return;
-        }
-        for id in &running {
-            self.wait_for_vpn(id);
-        }
-        if let Err(e) = self.kernel().torrents().stop_all().await {
-            tracing::warn!(error = %e, "could not stop the downloads for the VPN");
-        }
-        tracing::info!("downloads paused: the VPN they use isn't connected");
-    }
-
-    /// Binds the torrent port to `route`. What runs on the old route stops and waits.
-    async fn reroute(&self, route: Option<String>) {
-        self.stop_for_vpn().await;
-        match self.kernel().torrents().route(route.clone()).await {
-            Ok(()) => self.state().vpn_bound = route,
-            Err(e) => tracing::warn!(error = %e, "could not bind the downloads to the VPN"),
-        }
-    }
-
-    /// Before a download talks to the swarm: binds the torrent port to the VPN. Without the
-    /// VPN it marks download `id` waiting and returns `false`.
-    pub(crate) async fn vpn_gate(&self, id: &str) -> bool {
-        let bound = self.state().vpn_bound.clone();
-        if !self.vpn_only() && bound.is_none() {
-            return true;
-        }
-        match self.wanted_route().await {
-            Ok(route) if route == bound => true,
-            Ok(route) => {
-                self.reroute(route).await;
-                // What the new route stopped starts at the next check.
-                self.watch_torrents();
-                true
-            }
-            Err(()) => {
-                self.wait_for_vpn(id);
-                self.watch_torrents();
-                false
-            }
-        }
-    }
-
-    /// The kill switch, once a `vpn_poll` while a download runs or waits, and after each
-    /// change to the setting or the VPNs.
-    pub(crate) async fn check_vpn(&self) {
-        if std::mem::replace(&mut self.state().vpn_checking, true) {
-            return;
-        }
-        let mut back = false;
-        match self.wanted_route().await {
-            Err(()) => self.stop_for_vpn().await,
-            Ok(route) => {
-                if route != self.state().vpn_bound {
-                    self.reroute(route).await;
-                }
-                self.resume_waiting().await;
-                back = self.vpn_only() && self.kernel().vpn_waited().swap(false, Ordering::SeqCst);
-            }
-        }
-        self.state().vpn_checking = false;
-        // Not in this check: the catalogs' fetches would hold up the kill switch.
-        if back {
-            let core = self.clone();
-            tokio::spawn(async move { core.refresh_releases().await });
-        }
-    }
-
-    /// Starts again what the VPN stopped, and only that.
-    async fn resume_waiting(&self) {
-        let waiting: Vec<(String, TorrentState, usize)> = self
-            .state()
-            .torrents
-            .values()
-            .filter(|j| j.waiting_vpn)
-            .map(|j| (j.id.clone(), j.state, j.file_count))
-            .collect();
-        for (id, state, files) in waiting {
-            self.update_torrent(&id, |job| job.waiting_vpn = false);
-            if files == 0 {
-                self.read_torrent(&id).await;
-            } else if state == TorrentState::Complete {
-                if self.seed_on() {
-                    self.start_torrent(&id, TorrentStart::SeedOnly).await;
-                }
-            } else {
-                self.start_torrent(&id, TorrentStart::Download { seed: self.seed_on() }).await;
-            }
         }
     }
 
@@ -297,10 +164,7 @@ impl Core {
     /// The setting or the VPNs changed: the kill switch looks at once. A plugin that waits
     /// for the VPN gets it this way too, for example when the player picks the VPN.
     pub(crate) async fn vpn_changed(&self) {
-        if self.vpn_only() || self.any_waiting_vpn() || self.state().vpn_bound.is_some() {
-            self.check_vpn().await;
-            self.watch_torrents();
-        }
+        self.torrents().vpn_changed().await;
         self.changed(Area::Vpn);
     }
 }

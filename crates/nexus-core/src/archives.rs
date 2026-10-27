@@ -301,14 +301,14 @@ impl Core {
     pub(crate) fn unpack_download(&self, id: &str, install: bool) {
         let cancel = Arc::new(AtomicBool::new(false));
         let mut started = false;
-        self.update_torrent(id, |job| {
-            if job.state != TorrentState::Complete || job.unpack.phase == UnpackPhase::Unpacking {
+        self.torrents().hand_off(id, |state, h| {
+            if *state != TorrentState::Complete || h.unpack.phase == UnpackPhase::Unpacking {
                 return;
             }
-            job.unpack.phase = UnpackPhase::Unpacking;
-            job.unpack.error.clear();
-            job.unpack.progress = 0.0;
-            job.unpack.cancel = Some(cancel.clone());
+            h.unpack.phase = UnpackPhase::Unpacking;
+            h.unpack.error.clear();
+            h.unpack.progress = 0.0;
+            h.unpack.cancel = Some(cancel.clone());
             started = true;
         });
         if !started {
@@ -322,17 +322,18 @@ impl Core {
                 Err(_) if cancel.load(Ordering::Acquire) => (UnpackPhase::Cancelled, String::new()),
                 Err(e) => (UnpackPhase::Failed, e),
             };
-            core.update_torrent(&id, |job| {
-                job.unpack.phase = phase;
-                job.unpack.error = error;
-                job.unpack.cancel = None;
+            core.torrents().hand_off(&id, |_, h| {
+                h.unpack.phase = phase;
+                h.unpack.error = error;
+                h.unpack.cancel = None;
                 if phase == UnpackPhase::Unpacked {
-                    job.unpack.progress = 1.0;
+                    h.unpack.progress = 1.0;
                 }
             });
-            let job = core.state().torrents.get(&id).cloned();
+            let job = core.torrents().job(&id);
             if let Some(job) = job.filter(|_| install && phase == UnpackPhase::Unpacked)
-                && let Err(e) = core.install_game(&job.emulator, job.source.clone(), job.install_into.clone()).await
+                && let Err(e) =
+                    core.install_game(&job.emulator, job.source.clone(), job.hand_off.install_into.clone()).await
             {
                 core.notice_opening(
                     nexus_ui_api::NoticeKind::Error,
@@ -344,8 +345,8 @@ impl Core {
     }
 
     async fn run_unpack(&self, id: &str, cancel: Arc<AtomicBool>) -> Result<(), String> {
-        let Some(job) = self.state().torrents.get(id).cloned() else { return Err("no such download".into()) };
-        let sets = job.unpack.sets.clone();
+        let Some(job) = self.torrents().job(id) else { return Err("no such download".into()) };
+        let sets = job.hand_off.unpack.sets.clone();
         if let Some(problem) = sets.iter().find_map(|s| s.problem.clone()) {
             return Err(problem);
         }
@@ -371,7 +372,7 @@ impl Core {
                     let part = if total > 0 { done as f32 / total as f32 } else { 0.0 };
                     let percent = (((i as f32 + part.min(1.0)) / count) * 100.0) as u32;
                     if shown.swap(percent, Ordering::AcqRel) != percent {
-                        core.update_torrent(&id, |job| job.unpack.progress = percent as f32 / 100.0);
+                        core.torrents().hand_off(&id, |_, h| h.unpack.progress = percent as f32 / 100.0);
                     }
                 })
             };
@@ -396,15 +397,15 @@ impl Core {
 
     /// Deletes the download's unpacked files. The torrent's own files stay.
     pub(crate) async fn remove_unpacked(&self, id: &str) {
-        let Some(job) = self.state().torrents.get(id).cloned() else { return };
-        if job.unpack.phase == UnpackPhase::Unpacking {
+        let Some(job) = self.torrents().job(id) else { return };
+        if job.hand_off.unpack.phase == UnpackPhase::Unpacking {
             return;
         }
         let _ = tokio::fs::remove_dir_all(job.folder.join(UNPACKED)).await;
-        self.update_torrent(id, |job| {
-            job.unpack.phase = UnpackPhase::Waiting;
-            job.unpack.progress = 0.0;
-            job.unpack.error.clear();
+        self.torrents().hand_off(id, |_, h| {
+            h.unpack.phase = UnpackPhase::Waiting;
+            h.unpack.progress = 0.0;
+            h.unpack.error.clear();
         });
     }
 }

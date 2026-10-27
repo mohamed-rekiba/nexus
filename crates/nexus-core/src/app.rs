@@ -15,7 +15,7 @@ use nexus_api::{
 use nexus_ui_api::{AppView, CompatVm, NoticeKind, SettingsPanelVm, SlotVm};
 use serde_json::Value;
 
-use crate::changes::{Area, Change, Changes};
+use crate::changes::{Area, Change, Changes, Notifier};
 use crate::downloads::Downloads;
 use crate::error::require;
 use crate::view::{self, slot_vms};
@@ -196,31 +196,9 @@ pub enum Command {
         grid: Grid,
         columns: usize,
     },
-    /// Downloads a release of a game the catalogs offer: the player agreed. It reads the
-    /// torrent's files first and waits for the player to start it.
-    DownloadRelease {
-        offer: GameKey,
-        /// The release's id, its torrent's info hash.
-        release: String,
-        /// The folder the player picked, inside a packages folder (`~/` for the home folder).
-        /// `None`: the last one picked for the console, or else the console's folder in the
-        /// first packages folder.
-        folder: Option<std::path::PathBuf>,
-    },
-    /// Installs a finished download into the game folder the player picked on the install
-    /// sheet (`~/` for the home folder). `None`: the last one picked for the console, or else
-    /// the console's folder in the first game folder. The folder must be inside a game folder.
-    InstallDownload {
-        id: String,
-        folder: Option<std::path::PathBuf>,
-    },
-    /// The player's action on a download, by its id.
-    Torrent {
-        id: String,
-        action: crate::TorrentAction,
-    },
-    /// "Keep sharing finished downloads": on seeds them; off stops every one.
-    SetSeedDownloads(bool),
+    /// The catalogs' downloads: download a release, act on a download, install it, and
+    /// "Keep sharing finished downloads".
+    Torrent(crate::TorrentCmd),
     /// "Download only through a VPN". On is refused where the system can't bind downloads to
     /// a VPN, and says why.
     SetVpnOnly(bool),
@@ -487,19 +465,8 @@ pub(crate) struct AppState {
     pub offer_art: HashMap<GameKey, (PluginId, nexus_api::ImageSource)>,
     /// The offer each installed game is, by the game: its Game Hub has the offer's Steam data.
     pub installed_offers: HashMap<GameKey, GameKey>,
-    /// The catalogs' downloads, by info hash.
-    pub torrents: BTreeMap<String, crate::torrents::TorrentJob>,
-    /// The running downloads are being read.
-    pub torrent_watch: bool,
-    /// Why the last download the player asked for on a game's Game Hub didn't start, for its
-    /// download sheet; gone at the next try or when a Game Hub opens.
-    pub download_error: Option<(GameKey, String)>,
     /// The VPNs, as last read.
     pub vpns: Vec<crate::Vpn>,
-    /// The interface the torrent port is bound to; `None` for any.
-    pub vpn_bound: Option<String>,
-    /// The kill switch is looking at the VPN.
-    pub vpn_checking: bool,
     /// Why the last connect, disconnect or import of a VPN failed.
     pub vpn_error: Option<String>,
     /// The game selected in the Catalog. Home's selection stays a library game.
@@ -526,6 +493,8 @@ pub(crate) struct Inner {
     /// The desktop was asked what it is missing, at the first game of this run.
     pub desktop_checked: std::sync::atomic::AtomicBool,
     pub changes: Changes,
+    /// The catalogs' downloads.
+    pub torrents: crate::torrents::TorrentsSubsystem,
     /// Held while the catalogs are read: see [`Core::refresh_releases`].
     pub reading_catalogs: tokio::sync::Mutex<()>,
 }
@@ -618,33 +587,46 @@ impl Core {
             asked: HashSet::new(),
             catalog_selected: None,
             catalog_grid: None,
-            torrents: BTreeMap::new(),
-            torrent_watch: false,
-            download_error: None,
             vpns: Vec::new(),
-            vpn_bound: None,
-            vpn_checking: false,
             vpn_error: None,
             grid_columns: HashMap::new(),
             prefetch: None,
             prefetched: HashSet::new(),
         };
         let downloads = Downloads::spawn(kernel.clone());
-        let core = Core {
-            inner: Arc::new(Inner {
+        let changes = Changes::new();
+        let inner = Arc::new_cyclic(|weak: &std::sync::Weak<Inner>| {
+            let weak = weak.clone();
+            // The subsystem's events reach the core while it lives.
+            let events: crate::torrents::EventSink = Arc::new(move |event| {
+                if let Some(inner) = weak.upgrade() {
+                    Core { inner }.torrent_event(event);
+                }
+            });
+            let torrents = crate::torrents::TorrentsSubsystem::new(
+                kernel.torrent_ports(),
+                crate::torrents::Polls { torrents: kernel.host().torrent_poll, vpn: kernel.host().vpn_poll },
+                crate::torrents::Records::new(kernel.config().clone()),
+                kernel.vpn_waited().clone(),
+                Notifier::new(changes.clone(), kernel.events().clone()),
+                events,
+            );
+            Inner {
                 kernel,
                 state: Mutex::new(state),
                 downloads,
                 next_session: AtomicU64::new(0),
                 stops: Mutex::new(HashMap::new()),
                 desktop_checked: Default::default(),
-                changes: Changes::new(),
+                changes,
+                torrents,
                 reading_catalogs: tokio::sync::Mutex::new(()),
-            }),
-        };
+            }
+        });
+        let core = Core { inner };
         core.clean_up_game_installs();
         crate::system::adopt_vpn(&core).await;
-        core.restore_torrents();
+        core.torrents().restore();
         core.resume_installs().await;
         core.resume_downloads();
         core.schedule_update_checks();
@@ -698,6 +680,11 @@ impl Core {
 
     pub fn events(&self) -> BoxStream<'static, Event> {
         self.inner.kernel.events().stream()
+    }
+
+    /// The catalogs' downloads.
+    pub(crate) fn torrents(&self) -> &crate::torrents::TorrentsSubsystem {
+        &self.inner.torrents
     }
 
     pub(crate) fn state(&self) -> MutexGuard<'_, AppState> {
@@ -778,9 +765,7 @@ impl Core {
     /// pieces it has, then every plugin is deactivated. The downloads stay as they were, so
     /// the next launch starts them again. Call it while the async runtime still runs.
     pub async fn shutdown(&self) {
-        if let Err(error) = self.inner.kernel.torrents().stop_all().await {
-            tracing::warn!(%error, "the torrents didn't stop");
-        }
+        self.torrents().shutdown().await;
         self.inner.kernel.shutdown().await;
     }
 
@@ -830,7 +815,7 @@ impl Core {
                 Ok(())
             }
             Command::OpenGame(game) => {
-                self.state().download_error = None;
+                self.torrents().set_download_error(None);
                 self.open_game(game).await
             }
             Command::RefreshLibrary => self.refresh_library().await,
@@ -846,7 +831,8 @@ impl Core {
             Command::UninstallEmulator { plugin, version } => self.uninstall(&plugin, &version).await,
             Command::Launch(game) => {
                 // A Catalog offer's Play starts the installed game it is.
-                let game = crate::view::played_game(&self.state(), &game);
+                let torrents = self.torrents().snapshot();
+                let game = crate::view::played_game(&self.state(), &torrents, &game);
                 let result = crate::launch::launch(self, game.clone()).await;
                 // The player pressed Play: say why nothing started.
                 if let Err(error) = &result {
@@ -930,31 +916,7 @@ impl Core {
                 self.set_grid(true, |v| v.sort = sort)
             }
             Command::CatalogMore => self.more(true),
-            Command::DownloadRelease { offer, release, folder } => {
-                self.state().download_error = None;
-                let started = self.download_release(&offer, &release, folder.as_deref()).await;
-                // The sheet that asked says why nothing downloads, and so does a notice, for
-                // when the player closed the sheet.
-                if let Err(e) = &started {
-                    self.state().download_error = Some((offer, e.to_string()));
-                    self.problem(e.to_string());
-                }
-                started
-            }
-            Command::Torrent { id, action } => self.torrent_action(&id, action).await,
-            Command::InstallDownload { id, folder } => self.install_download(&id, folder.as_deref()).await,
-            Command::SetSeedDownloads(on) => {
-                self.inner
-                    .kernel
-                    .config()
-                    .set(&["app", "seed_downloads"], Value::Bool(on))
-                    .map_err(|e| CoreError::Io(e.to_string()))?;
-                if !on {
-                    self.stop_all_seeding().await;
-                }
-                self.changed(Area::Torrents);
-                Ok(())
-            }
+            Command::Torrent(command) => self.torrent(command).await,
             Command::SetVpnOnly(on) => {
                 if on && let Some(why) = self.inner.kernel.network().problem() {
                     return Err(CoreError::Invalid(why));
@@ -1185,8 +1147,9 @@ impl Core {
     /// its cover (see [`AppState::offer_art`]), and keeps the covers that changed.
     pub(crate) fn remember_offer_art(&self) {
         let changed = {
+            let torrents = self.torrents().snapshot();
             let mut state = self.state();
-            let found = view::installed_offers(&state);
+            let found = view::installed_offers(&state, &torrents);
             state.installed_offers = found.iter().map(|(game, offer, _)| (game.clone(), offer.clone())).collect();
             let art: Vec<_> = found.into_iter().filter_map(|(game, _, art)| Some((game, art?))).collect();
             let changed = art.iter().any(|(game, art)| state.offer_art.get(game) != Some(art));
@@ -2223,16 +2186,15 @@ impl Core {
     /// The folder of the download `id`, for its Open folder: once it installed, the installed
     /// game's folder. `None` before the folder is on disk.
     pub fn download_folder(&self, id: &str) -> Option<std::path::PathBuf> {
-        let (job, game) = {
+        let job = self.torrents().job(id)?;
+        let game = {
             let state = self.state();
-            let job = state.torrents.get(id)?.clone();
-            let game = state
+            state
                 .game_installs
                 .values()
                 .rev()
                 .find(|g| g.plugin == job.emulator && g.source == job.source)
-                .and_then(|g| g.installed.clone());
-            (job, game)
+                .and_then(|g| g.installed.clone())
         };
         let kernel = &self.inner.kernel;
         let installed = game.and_then(|g| {

@@ -2,7 +2,10 @@
 //! tests. The app renders on [`nexus_api::Event::StateChanged`], which the same change
 //! publishes, and plugins never see it.
 
+use nexus_api::Event;
 use tokio::sync::broadcast;
+
+use crate::EventBus;
 
 /// A part of the core's state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -61,5 +64,25 @@ impl Changes {
 
     pub(crate) fn subscribe(&self) -> broadcast::Receiver<Change> {
         self.tx.subscribe()
+    }
+}
+
+/// How a subsystem says its state changed: the core's readers learn the area, and the app
+/// learns that something changed ([`Event::StateChanged`]). Every subsystem publishes to the
+/// core's one signal, so [`crate::Core::changes`] is the merge of theirs.
+#[derive(Clone)]
+pub(crate) struct Notifier {
+    changes: Changes,
+    bus: EventBus,
+}
+
+impl Notifier {
+    pub(crate) fn new(changes: Changes, bus: EventBus) -> Self {
+        Self { changes, bus }
+    }
+
+    pub(crate) fn changed(&self, area: Area) {
+        self.changes.publish(area);
+        self.bus.publish(Event::StateChanged);
     }
 }
