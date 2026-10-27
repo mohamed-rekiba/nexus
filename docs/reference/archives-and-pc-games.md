@@ -1,588 +1,459 @@
-# Downloads, archives, installs and PC games
+# Archives and PC games
 
-This page describes how a release goes from the Catalog to the Library today: the torrent
-download, unpacking its archives, the install, removing and uninstalling, and the PC games
-plugin. The host and its ports are in [architecture.md](../architecture.md). Plugins are in
-[plugins.md](../plugins.md). The Downloads screen and its sheets are in
-[default-theme.md](default-theme.md#downloads).
+When a download finishes, Nexus unpacks the archives in it. The PC plugin then installs the
+game, finds the file that starts it, and runs it on Play. Nexus never runs anything in a
+download while it unpacks.
 
-## The flow
+This page is for contributors and for players who want to know what Nexus does with a
+download. The core and its ports are in [architecture.md](../architecture.md). Plugins are in
+[plugins.md](../plugins.md).
 
-1. **Download.** The Game Hub's Download button opens the download sheet. "Look up metadata"
-   reads the torrent's file list (`resolving`), then the download waits for the player
-   (`ready`). Download checks the free space and the pieces already on disk (`checking`), then
-   downloads the rest (`downloading`).
-2. **Unpack.** When the download is `complete`, the core looks for archive sets in it. When
-   there are any, it unpacks them in the background, each into its own folder.
-3. **Install.** Install on the download's card opens the install sheet. Install hands the
-   download's folder to the emulator's game installer, which copies (or moves) the game into a
-   game folder. Install unpacks first when the archives aren't unpacked yet.
-4. **Play.** The game is in the Library. The download's card offers Play.
+## Where the work happens
 
-Each step is separate. Nothing in a download runs on the computer during these steps.
+| Part | Where | Job |
+| --- | --- | --- |
+| Archive sets | `crates/nexus-core/src/archives.rs` | Finds the sets in a download by name or by bytes. |
+| Archive plan | `crates/nexus-core/src/archive_plan.rs` | Decides what an unpack may write. |
+| Unpack flow | `crates/nexus-core/src/game_installs/unpacking.rs` | Runs the sets one by one and keeps the state. |
+| `Archives` port | `crates/nexus-core/src/ports.rs` | The one call, `unpack`, that an adapter implements. |
+| Real adapter | `crates/nexus-app/src/archives.rs`, `libarchive.rs` | `HostArchives`: the format readers. |
+| Fake adapter | `crates/nexus-testkit/src/archives.rs` | `FakeArchives`: the same plan, no files. |
+| PC plugin | `plugins/emulators/pc/` | Installs, lists and runs PC games. |
+| Shared code | `plugins/shared/emulator-kit/` | Reads a download's folder; finds archive set names. |
 
-## Torrents
+## Archive sets
 
-The core's side is the torrents subsystem, `crates/nexus-core/src/torrents/`. The app plugs in
-the `Torrents` port on librqbit 9.0.1 (`crates/nexus-app/src/torrents.rs`). The port only
-reports the engine's raw stats; the core's phase rules (`torrents/phase.rs`) decide what they
-mean, and the core unpauses or stops the torrent.
+An archive set is one archive, or one archive cut into parts. `part_of` in
+`crates/nexus-core/src/archives.rs` reads a file name and says which set and which part it is.
 
-### Where files go
+| Name | Kind | Part |
+| --- | --- | --- |
+| `game.rar` | `Rar` | 1 |
+| `game.part1.rar`, `game.part2.rar` | `Rar` | 1, 2 |
+| `game.rar` with `game.r00`, `game.r01` | `Rar` | 1, then 2, 3 |
+| `game.7z`, `game.7z.001`, `game.7z.002` | `SevenZ` | 1, then 1, 2 |
+| `game.zip`, `game.tar` | `Zip`, `Tar` | 1 |
+| `.tar.gz`, `.tgz` | `TarGz` | 1 |
+| `.tar.xz`, `.txz` | `TarXz` | 1 |
+| `.tar.bz2`, `.tbz2`, `.tbz` | `TarBz2` | 1 |
+| `.tar.zst`, `.tzst` | `TarZst` | 1 |
+| `.iso`, `.cab` | `Iso`, `Cab` | 1 |
 
-A download goes to `<folder>/torrent-<info hash>`. `<folder>` is, in order:
+Names are matched in lower case. Only RAR and 7z can be cut into parts.
 
-- the folder the player typed on the download sheet, which must be inside one of the
-  emulator's packages folders;
-- the folder last picked for that console (`app.download_folder.<console>`);
-- `<console>` in the emulator's first packages folder. When the release doesn't name its
-  console, it is the one the emulator's manifest names, else the emulator's id.
+Two more kinds are found by their bytes, not their names. A file that ends in `.sh` or `.run`
+is a script installer when:
 
-A typed folder is saved for the next download of the same console. At most 32 downloads are
-kept. A start checks the free space first: "Not enough free space in the download folder:
-<needed> needed, <free> free".
+- It is a `Gog` installer: it starts with `#!`, is at least 1024 bytes long, and has a zip end
+  record (`PK\x05\x06`) in its last 64 KiB. Only a `.sh` file can be a `Gog` installer.
+- It is a `Script` installer: it starts with `#!` and states its archive's size on an
+  `arcsz=` line within the first 128 KiB (`SCRIPT_HEAD`). The archive is the last bytes of the
+  file. `embedded_archive` finds where it starts. Kron4ek's YAD installers do this.
 
-### States
+Nexus never runs these scripts. It reads the archive inside.
 
-| State | Meaning |
-|---|---|
-| `resolving` | Reading the torrent's file list from the swarm, at most 3 minutes |
-| `ready` | The file list is in. The player looks at the files, then presses Download |
-| `checking` | Checking the pieces already on disk |
-| `downloading` | Downloading |
-| `paused` | Paused by the player, by a restart, or by the VPN rule |
-| `complete` | Every piece is there |
-| `failed` | It stopped. The error says why |
-| `cancelled` | Stopped by Cancel. The files stay |
+`scan` looks at the top of the download and one folder down. A set deeper than that is left
+alone. The folder `unpacked` is skipped. Two files that are the same part of a set, or a
+missing part, make the set carry a `problem`. Nothing is written for such a set, and the
+download fails with the problem as its text. The test `a_set_with_a_missing_part_fails_before_anything_is_unpacked`
+in `tests/tests/seams/release_archives.rs` checks this. A set can have at most 999 parts
+(`MAX_PARTS`).
 
-Each download is saved in the config under `app.torrents.<info hash>`. After a restart:
+## When Nexus unpacks
 
-- a download that was `resolving` comes back `failed`: "The app stopped before the torrent's
-  files were read: try again.";
-- one that was checking or downloading comes back `paused`;
-- a finished one seeds again after a check of its files, while seeding is on.
-
-A finished download posts a success notice: "Download complete: <title>. Install it from
-Downloads." A download that fails posts an error notice: "Download stopped: <title>. Open
-Downloads to see why". Both open Downloads.
-
-### The session and fastresume
-
-There is one librqbit session, made at the first use:
-
-- no local peer discovery, at most 50 peers, two torrents starting at once;
-- uploads capped at `SEED_UPLOAD_LIMIT`, 128 KiB/s;
-- each torrent's metadata kept as `torrents/<info hash>.torrent` in the data folder, so a start
-  after a restart doesn't ask the swarm for it again.
-
-librqbit keeps which pieces each torrent was checked to have, in `torrents/resume/` (fastresume).
-A launch then reads one piece of each file instead of every byte. The core decides which
-downloads start, so librqbit's own list of torrents, `torrents/resume/session.json`, is deleted
-each time a session is made. Stopping a torrent forgets its pieces, and its next start checks it
-all.
-
-### Seeding
-
-"Keep sharing finished downloads" (`app.seed_downloads`) is on by default. While it is on, a
-finished download seeds at most 128 KiB/s. After a restart it is added paused, which checks the
-pieces on disk without downloading. It seeds when every piece is there. When one is missing it
-says: "The downloaded files were moved, changed or deleted, so this download can't seed.
-Remove it, or download it again."
-
-Stop sharing stops one download until the next start. Turning the setting off stops every
-download from seeding. A download that finishes with the setting off stops at once.
-
-### Quitting
-
-At quit the core stops every torrent first (`Torrents::stop_all`), then deactivates the
-plugins. The session stops within 5 s, then gets 200 ms to write down each torrent's pieces.
-The downloads stay as they were, and the next launch starts them again. The rest of quitting is
-in [desktop.md](desktop.md#quitting).
-
-### Downloads through a VPN
-
-"Download only through a VPN" (`app.vpn_only`) is off by default. The rules are in the VPN
-subsystem (`crates/nexus-core/src/vpn.rs`) and the torrents subsystem's gate
-(`crates/nexus-core/src/torrents/vpn.rs`). What each system can do is in
-[desktop.md](desktop.md#downloads-through-a-vpn).
-
-- The VPN in use is the one the player picked (`app.vpn`). With none picked, it is the first
-  connected VPN, where the system can tell VPNs from other networks.
-- The torrent port binds every socket of the session to the VPN's interface: peers, the
-  listener, DHT, trackers and UPnP. A new interface stops the session, and the next start makes
-  a new one.
-- Without the VPN, a download doesn't start, not even to read its file list. It is paused and
-  marked waiting ("Paused · waiting for your VPN").
-- The kill switch: while a download runs or waits, the core checks the VPN every 2 s. When the
-  VPN drops or another one takes its place, every running download is paused and marked
-  waiting, and the connections close. When a VPN is back, only the waiting downloads start
-  again.
-- A restart forgets the waiting: those downloads come back paused.
-- Plugins ask the same gate before they fetch in bulk, so the catalog refresh waits too.
-
-## Archives
-
-### Sets
-
-An archive set is one archive, or one archive cut into parts. The core finds sets by their
-names (`crates/nexus-core/src/archives.rs`), at the top of the download or one folder down.
-Archives deeper than that are a game's own data, and are left as they are.
-
-| Names | Kind |
-|---|---|
-| `name.part1.rar`, `name.part2.rar`, … | RAR, in parts |
-| `name.rar` with `name.r00`, `name.r01`, … | RAR, in parts (`.r00` is part 2) |
-| `name.rar` | RAR |
-| `name.7z.001`, `name.7z.002`, … | 7z, in parts |
-| `name.7z` | 7z |
-| `name.zip` | zip |
-| `name.tar` | tar |
-| `name.tar.gz`, `name.tgz` | tar.gz |
-| `name.tar.xz`, `name.txz` | tar.xz |
-| `name.tar.bz2`, `name.tbz2`, `name.tbz` | tar.bz2 |
-| `name.tar.zst`, `name.tzst` | tar.zst |
-| `name.iso` | ISO |
-| `name.cab` | cab |
-| `name.sh` that starts with `#!` and has a zip's end record in its last 64 KiB | GOG installer |
-| `name.sh` or `name.run` that starts with `#!` and has an `arcsz=<bytes>` line in its first 128 KiB | script installer (Kron4ek's YAD installers): the archive is the file's last `<bytes>` |
-
-Names match in any case. A set can have at most 999 parts. A set with a missing part ("part 2
-of game is missing") or a doubled one ("<a> and <b> are the same part of one archive") is
-refused before anything is written.
-
-The emulator kit's `archive_sets::set_name` (`plugins/shared/emulator-kit/src/archive_sets.rs`)
-names a file's set by the same rules, so a plugin finds each set's unpacked folder.
-
-### Readers
-
-The app plugs in the `Archives` port (`crates/nexus-app/src/archives.rs`). It has one call:
-`unpack(kind, parts, into, free, progress, cancel)`, on real paths in the download's folder.
-The core reads `free` from the `Hardware` port, on the disk that holds `into`. The call fails
-with a typed `ArchiveError` (`crates/nexus-core/src/ports.rs`): `Password`, `Escapes`,
-`NoRoom`, `Unsupported`, `Missing`, `Corrupt`, `Io` or `Cancelled`. The core shows its text.
-
-| Kind | Reader |
-|---|---|
-| zip, GOG installer | the `zip` crate, which finds the zip from its end, past the script |
-| tar, tar.gz | the `tar` crate, with `flate2` for gzip |
-| 7z | `sevenz-rust2` 0.24.1, with a split 7z read as one stream |
-| RAR (3, 4 and 5), tar.xz, tar.bz2, tar.zst, ISO, cab | libarchive, loaded at run time |
-| script installer | libarchive, reading the file from the archive's start as a stream |
-| a RAR or script installer libarchive can't read (`Unsupported`) | `unar` (The Unarchiver), when it is installed: `lsar -j` lists it for the checks, then `unar` unpacks it; a script installer's archive is copied out beside the unpack folder first and removed after |
-| 7z with BZip2, Zstandard, Brotli, LZ4, LZS, Lizard or Deflate64 | libarchive |
-
-`sevenz-rust2` is built without those codecs, or AES, so a 7z that uses one goes to
-libarchive. A 7z whose listing is encrypted goes there too, and libarchive reports the
-password.
-
-The fallback to `unar` is chosen by the error's kind: libarchive's read errors are
-`Unsupported`. A password, a path, the room or a cancel never fall back. Without `unar`, the
-error says to install it (`Missing`), and for a script installer, "or run the installer by
-hand".
-
-libarchive (`crates/nexus-app/src/libarchive.rs`) is loaded with `libloading`, and must have
-RAR 5 support. The app looks for it in this order:
-
-- the package's copy: `lib/` beside the binary, `../lib/` in the AppImage, `../Frameworks/` in
-  `Nexus.app`, the binary's own folder on Windows;
-- the system's: `libarchive.so.13` on Linux; Homebrew's keg and then the system's on macOS.
-
-`scripts/bundle-libarchive.sh` ships libarchive 3.8.9, built from its release with only its
-compression codecs, on Linux and macOS, and MSYS2's build on Windows. Without libarchive, such
-an archive fails with the fix (`Missing`), for example "RAR archives need libarchive, which
-isn't here: install libarchive13 on Debian and Ubuntu, libarchive on Fedora".
-
-libarchive reports a password by the encryption it saw (`archive_entry_is_encrypted`, and
-`archive_read_has_encrypted_entries` after a failed read), not by its error text.
-
-RAR goes through libarchive, which reads RAR with its own BSD-licensed code, and not through
-UnRAR. UnRAR's licence adds terms the GPL doesn't allow, and Nexus is GPL-2.0-or-later. See
-[third-party-notices.md](../third-party-notices.md).
-
-### Checks
-
-Each archive is read twice. The first pass lists it with a format reader. The core's archive
-plan (`plan_unpack` in `crates/nexus-core/src/archive_plan.rs`) checks the listing and refuses
-before anything is written:
-
-| Problem | Error |
-|---|---|
-| An entry needs a password | `Password`: "This archive needs a password, which Nexus can't ask for" |
-| A path is absolute or has `..` | `Escapes`: "<name> leaves the folder" |
-| A link points out of the folder, or a hard link names a path outside it | `Escapes`: "<name> links out of the folder" |
-| Not enough room | `NoRoom`: "This archive needs <size> free, and the disk has <free>" |
-
-The plan leaves out the archive's own top (`./`), devices and pipes. The room check adds
-64 MiB of spare (`UNPACK_SPARE`) to the files' bytes. A disk that doesn't report its free
-space counts as having room. For `unar`, a script installer's copied-out archive counts
-against the free space too.
-
-Every adapter runs the same plan: the app's `HostArchives`, for every reader and for `unar`,
-and the test kit's `FakeArchives`. So the rules exist once.
-
-The second pass writes only the plan's entries: by index for zip, in order for tar and
-libarchive, by name for 7z (its reader gives entries block by block). An entry the second pass
-doesn't find as the first one listed it fails: "the archive changed while it was unpacked".
-Before each entry it checks again on the disk: nothing is written through a link ("<name>
-would write through a link"), and the path stays inside the folder once links are followed
-("<name> leaves the folder through a link"). Files keep their Unix mode, so a program stays a
-program. Links are made only on Unix. Progress is reported every MiB, and a cancel stops the
-work at the next MiB: "The unpacking was cancelled".
-
-### Where sets go, and the phases
-
-Each set unpacks into `unpacked/<folder>/<name>/` in the download's folder, for example
-`unpacked/game/` for `game.part1.rar`, or `unpacked/Extras/dlc/` for `Extras/dlc.rar`. The
-folder is named as the set's first part spells it. A set is written into
-`unpacked/<name>.part/`, which moves into place when the set is done. A set whose folder is
-already there is skipped.
-
-A download's unpacking is saved with it, in these phases:
+`Unpack::of` scans a download when the torrent finishes (`torrents/mod.rs`). The download
+then has one of these unpack phases (`UnpackPhase`):
 
 | Phase | Meaning |
-|---|---|
-| (none) | The download holds no archive. It installs as it is |
-| `waiting` | Its archives aren't unpacked yet |
-| `unpacking` | Unpacking. Progress goes from 0 to 1 over every set, saved at each whole percent |
-| `unpacked` | Every set is unpacked |
-| `failed` | A set failed. The error says which and why |
-| `cancelled` | The player stopped it |
+| --- | --- |
+| `none` | No archive set. The download installs as it is. |
+| `waiting` | Sets found, not unpacked yet. |
+| `unpacking` | An unpack is running. |
+| `unpacked` | Every set is unpacked. |
+| `failed` | An unpack failed. The error says why. |
+| `cancelled` | The player cancelled. |
 
-When a set fails, its `.part` folder goes, and so do the sets this run already unpacked. A
-download that was `unpacking` when the app closed comes back `failed`: "The unpacking stopped
-when Nexus closed: Install unpacks again." Its `.part` folders are removed.
+Unpacking starts in two ways:
 
-Unpacking starts by itself when the download finishes. On the card, Cancel reads "Stop
-unpacking" while it runs. After a failed or stopped unpacking, Install reads "Unpack and
-install": it unpacks, then installs.
+- When a download finishes with phase `waiting`, the core starts the unpack at once
+  (`torrent_event` in `release_downloads.rs`).
+- When the player presses Install on a download in phase `waiting`, `failed` or `cancelled`,
+  the unpack runs first and the install starts after it (`install_download` in
+  `game_installs/mod.rs`). In phase `unpacking`, Install does nothing.
 
-"Remove unpacked files" deletes the download's `unpacked/` folder only. The downloaded files
-stay, and the download can still seed. The phase goes back to `waiting`.
+Each set goes to `unpacked/<folder>/<name>/` inside the download, where `<folder>` is the
+set's folder if it has one. For example `a/game.rar` unpacks to `unpacked/a/game/`.
 
-An archived download takes about twice the game's size until "Remove unpacked files", unless
-the install moved the unpacked game (see below).
+`run_unpack` in `game_installs/unpacking.rs` works set by set:
 
-## Installing
+1. It skips a set whose destination folder exists already.
+2. It makes a work folder, `unpacked/<name>.part`, and empties it.
+3. It reads the free space of the disk that holds the work folder.
+4. It calls `Archives::unpack` into the work folder.
+5. On success it renames the work folder to the destination.
+6. On failure it removes the work folder and every set this run already unpacked, then
+   reports the error.
 
-### The install sheet
+Progress is the share of the bytes of all sets, saved at each whole percent.
 
-Install on a finished download opens the install sheet, with its "Game folder" row. The game
-folder is, in order: the folder the player typed (which must be inside one of the emulator's
-game folders), the one last picked for the console (`app.install_folder.<console>`), or
-`<console>` in the first game folder. A typed folder is saved for the next install.
+Cancel sets a flag. The adapter stops soon after and returns `ArchiveError::Cancelled`. The
+phase becomes `cancelled`. The download stays.
 
-Before it starts, Install checks that the game folder's disk has room for the download's size:
-"Not enough free space in the game folder: <needed> needed, <free> free". The reason it doesn't
-start stays on the sheet.
+If Nexus closes during an unpack, `Unpack::restored` runs at the next start. It sets the phase
+to `failed`, with the text "The unpacking stopped when Nexus closed: Install unpacks again.",
+and removes the work folders.
 
-The sheet's note comes from the emulator's manifest (`install_note`), then the host's: "Nexus
-first unpacks the RAR, ZIP, 7z and TAR archives in the download, but not one with a password."
+Remove unpacked files (`remove_unpacked`) deletes the folder `unpacked` and sets the phase
+back to `waiting`. The torrent's own files stay, and so does the seeding. It does nothing
+while an unpack runs.
 
-### The install job
+When the install moves the unpacked folder into the games folder instead of copying it, the
+phase also goes back to `waiting`, because the unpacked copy is gone.
 
-The game installs subsystem owns the job (`crates/nexus-core/src/game_installs/`). The
-plugin's `GameInstaller` gets the download's folder as a `HostPath` and an `InstallJob`.
-Plugins never see real paths.
+## The archive plan
 
-- The plugin writes into a work folder, `<dest>.part`, and moves it into place at the end. On
-  an error the work folder goes.
-- Progress reaches the screen at most every 200 ms.
-- Cancel install stops the job at the plugin's next check.
-- A running install's work folder is saved under `app.game_installs`. The next start removes
-  the work folders of installs that were running when the app stopped.
-- One install of the same source at a time: "<source> is already installing".
-- A failed install posts "The install failed: <error>", which opens Downloads.
-- When the install ends, the Library refreshes, and the card offers Play.
+Every `Archives` adapter reads an archive twice. The first pass lists it. `plan_unpack`
+checks the listing. The second pass writes only what the plan holds.
 
-### Moving instead of copying
+`plan_unpack` refuses the whole archive at the first entry that breaks a rule:
 
-`InstallJob::take(from, to)` lets a plugin move a folder instead of copying it. The host agrees
-only when:
+| Rule | Error |
+| --- | --- |
+| An entry needs a password. | `Password` |
+| A path is absolute, has `..` that climbs out, or is empty. | `Escapes` with `Leaves` |
+| A link points to an absolute path, or climbs out with `..`. | `Escapes` with `LinksOut` |
+| A hard link names a target that is not a plain path inside the folder. | `Escapes` with `LinksOut` |
+| The files' bytes plus the spare do not fit in the free space. | `NoRoom` |
 
-- `from` is inside the download's `unpacked/` folder (`disposable`): a copy the host made itself,
-  set only while the download's phase is `unpacked`;
-- `to` is not there yet;
-- both are on one disk. A rename across disks fails with "crosses devices", and the plugin
-  copies.
+The spare is `UNPACK_SPARE`, 64 MiB. A disk that does not report its free space counts as
+having room.
 
-After a move, the empty folders it left go, up to `unpacked/`. When `unpacked/` is gone, the
-download's phase goes back to `waiting`.
+The plan leaves out the archive's own top, an entry such as `./` that some tars list first.
+It also leaves out devices and pipes (`EntryKind::Other`).
 
-KytyPS5 uses it: an unpacked PS5 game folder from an archive moves into the game folder in one
-step. shadPS4 and the PC plugin copy.
+The adapter checks the disk again during the second pass. `Work::place` in
+`crates/nexus-app/src/archives.rs` refuses to write where a link is already on the disk
+(`Escape::ThroughLink`), and where the path ends up outside the folder once links are
+followed (`Escape::LeavesThroughLink`). If the second pass finds an entry the first pass did
+not list, it fails with "the archive changed while it was unpacked".
 
-### PS5 (KytyPS5) and PS4 (shadPS4)
+A file written by the adapter keeps its Unix mode, so a program stays a program. Windows has
+no modes. Symbolic links are made on Unix only.
 
-Both read a download up to 8 folders deep, and the archives' unpacked folders are part of it.
+## Format readers
 
-| | KytyPS5 (PS5) | shadPS4 (PS4) |
-|---|---|---|
-| Unpacked game folder | `sce_sys/param.json` with a non-empty `eboot.bin` beside `sce_sys` | `sce_sys/param.sfo` of category `gd` with a title id, and a non-empty `eboot.bin` |
-| Which folder | The one nearest the top. Two at the same depth: "Several folders hold a game (…); choose a single release folder" | The first game folder found |
-| Packages | The PS5 package or exFAT image that holds the game, nearest the top. Two at the same depth are refused | Every PS4 package, as one job: the game, then its update, then its DLC |
-| Goes to | `<game folder>/<title id>-app0` | The game: `<game folder>/<root>`. Its update: `<game>-patch` beside it. DLC: `addcont/<root>` in shadPS4's data folder |
+`HostArchives` picks a reader by the set's kind.
 
-shadPS4's checks, before anything is written:
+| Kind | Reader |
+| --- | --- |
+| `Zip`, `Gog` | `zip` crate. It finds a zip's start from its end, past the script. |
+| `Tar`, `TarGz` | `tar` and `flate2` crates. |
+| `SevenZ` | `sevenz-rust2` crate. A split 7z is read as one stream. |
+| `Rar`, `TarXz`, `TarBz2`, `TarZst`, `Iso`, `Cab`, `Script` | libarchive. |
+| `SevenZ` with a codec `sevenz-rust2` lacks | libarchive. |
 
-- "This download has 2 games; install one game at a time"
-- "This download has 2 updates for one game; it can install only one"
-- an update in the same download as its game must be for that game
-- an update alone needs its game installed: "this is an update for <title id>: install the game
-  first"
-- a game or update that is there already: "<path> is already installed"
-- an add-on that is installed already stays as it is; when every add-on is there: "every add-on
-  in this download is already installed"
+`SEVEN_ELSEWHERE` lists the codecs that send a 7z to libarchive: BZip2, Zstd, Brotli, LZ4,
+LZS, Lizard and Deflate64. A 7z listing that cannot be read for lack of a codec goes there
+too.
 
-The job reports one progress for all its packages.
+A format reader decides nothing about safety. The plan does.
 
-## Removing a download
+### libarchive
 
-Remove on a card opens a sheet with three answers:
+libarchive is loaded at run time (`libarchive.rs`), not linked. `candidates` lists where it
+looks, package copy first, then the system:
 
-| Answer | Action | Effect |
-|---|---|---|
-| "Remove from Downloads" | `remove` | Forgets the download. Its folder stays |
-| "Delete files too" | `delete-files` | Forgets the download and deletes its folder |
-| "Not now" | | Closes the sheet |
+| System | Package copy | System copy |
+| --- | --- | --- |
+| Linux | `lib/libarchive.so.13`, `../lib/libarchive.so.13` | `libarchive.so.13`, `libarchive.so` |
+| macOS | `lib/libarchive.13.dylib`, `../Frameworks/libarchive.13.dylib` | Homebrew paths, `libarchive.13.dylib`, `/usr/lib/libarchive.2.dylib` |
+| Windows | `libarchive-13.dll`, `archive.dll` | the same names |
 
-Remove is offered only when the download isn't running or seeding. "Delete files too" also
-waits while its archives unpack or its install runs. It deletes the folder only when its name
-is `torrent-<info hash>`, the folder Nexus made for that download. The downloaded files and
-their unpacked copies go with it. An installed game is elsewhere, and stays.
+The package paths are relative to the folder of the Nexus program. The library must also
+support RAR 5, or Nexus treats it as missing and tries the next place.
 
-Cancel never deletes files. It stops the download, which reads "Cancelled · the files stay".
+If no libarchive loads, the unpack fails with `ArchiveError::Missing` and a hint from
+`install_hint`: `brew install libarchive` on macOS, "a Nexus package, which ships it" on
+Windows, and `libarchive13` on Debian and Ubuntu or `libarchive` on Fedora on Linux. The
+packages ship a copy. See [third-party-notices.md](../third-party-notices.md).
 
-## Uninstalling a game
+### unar
 
-The game's menu has "Uninstall", last and in red, when the game's actions (`can.uninstall`,
-see "A game's actions" in [themes.md](../themes.md)) name a game to remove. Its store removes
-it when the game's details give an `uninstall_link` its plugin may open (Steam's
-`steam://uninstall/<id>`, which asks in Steam's own dialog). Else Nexus deletes its folder,
-when:
+A `Rar` set or a `Script` archive that libarchive cannot read comes back as
+`ArchiveError::Unsupported`. `unpack` in `crates/nexus-app/src/archives.rs` then tries `unar`
+(The Unarchiver), for example for a RAR 5 with a dictionary bigger than libarchive takes. It
+only does this for those two kinds. It does not do it for a password, a path or a lack of
+room.
 
-- the game's details name its folder;
-- that folder is not one of the player's folders itself;
-- the emulator's manifest grants it write access to that folder;
-- the folder resolves on the disk.
+Nexus needs both `lsar` and `unar` on the PATH. If either is missing, the error says
+"Install unar to unpack it".
 
-It asks first, "Uninstall <title>?", with the keys on "Not now". Uninstall deletes the game's
-folder through the plugin's folder grants, refreshes the Library, closes the Game Hub and posts
-"Uninstalled <title>". The core refuses while the game runs ("Stop the game before you
-uninstall it") or while its emulator installs a game ("Wait until the install ends"). A
-download it came from stays in Downloads.
+The flow is the same: `lsar -j -jss -nr` lists, `plan_unpack` checks, then `unar` writes.
+These are the arguments for `unar`, from `Unar::unpack`:
+
+```
+-f -D -nr -o <folder> <archive>
+```
+
+`unar` reads only a whole file. For a `Script` archive, Nexus copies the archive out of the
+script to a file beside the work folder, and removes the copy at the end. The copy needs
+room on the same disk, and the plan counts it.
+
+Nexus reads the progress from the lines `unar` prints. After `unar` ends, Nexus sets the Unix
+mode that a RAR 5 made on Unix keeps, because `unar` leaves the program flag off.
+
+### Errors
+
+`ArchiveError` says why an unpack failed. The core shows its text. An adapter picks a fallback
+by the kind, never by the text.
+
+| Kind | Meaning |
+| --- | --- |
+| `Password` | An entry needs a password. Nexus cannot ask for one. |
+| `Escapes` | A path or link gets out of the folder. |
+| `NoRoom` | The disk is too small. The text gives both sizes in GB. |
+| `Unsupported` | The reader cannot read this. Another reader may. |
+| `Missing` | A library or program is not installed. The text says which. |
+| `Corrupt` | The archive is damaged, cut short, or changed during the unpack. |
+| `Io` | Reading the parts or writing the folder failed. |
+| `Cancelled` | The player cancelled. |
+
+## Unpacking a plugin's build
+
+A second unpack exists for emulator builds, in `crates/nexus-core/src/unpack.rs`. It does not
+use the `Archives` port. A file in a plugin's download plan can carry an `Unpack` with an `ArchiveFormat` (`TarGz`, `Zip`
+or `AppImageInZip`) and a folder to unpack into. The core unpacks after the file passes its
+checks. It unpacks into a sibling folder named `<folder>.unpacking` first and replaces the old
+folder at the end, so a failure leaves the old contents.
+
+It applies the same path rules (`inside`, `link_stays_inside`, `stays_inside`).
+
+For `AppImageInZip`, the core takes the one AppImage out of the zip and runs it with
+`--appimage-extract`. This is allowed on Linux only, and only when the plugin's
+`permissions.process` allows that file. The run is killed after `EXTRACT_TIMEOUT`, 600
+seconds. The result must be a `squashfs-root` folder.
+
+## Testing an adapter
+
+`contract::archives` in `crates/nexus-testkit/src/contract.rs` checks the refusals every
+`Archives` adapter must make. An adapter gives a fixture that builds archives. The contract
+checks that:
+
+- A plain archive unpacks, and progress ends at the files' bytes.
+- A `..` path is refused, and nothing is written.
+- An absolute path is refused.
+- A link to `../../../etc/passwd` or `/etc/passwd` is refused.
+- An archive that needs a password is refused. If the fixture cannot make one, the check is
+  skipped and says so.
+- An archive bigger than the free space is refused.
+
+The app runs this contract on `HostArchives`, with real zip files. The test kit runs it on
+`FakeArchives`, which calls the same `plan_unpack`. The other seam tests are
+`tests/tests/seams/release_archives.rs` for the whole flow and `tests/tests/seams/unpack.rs`
+for plugin builds.
 
 ## PC games
 
-The PC plugin is `emu-pc` (`plugins/emulators/pc`). It plays the console `PC` on Linux, macOS
-and Windows, with the capabilities catalog, launcher, slots, game installer and configurator.
-It has no settings of its own; each game has Starts, and on Linux a Resolution (see Game Hub).
+The PC plugin is `emu-pc` (`plugins/emulators/pc/plugin.toml`). It runs on Linux, macOS and
+Windows. It gives the capabilities `catalog`, `launcher`, `slots`, `game_installer` and
+`configurator`.
 
-Its modules: `install.rs` (the install), `probe.rs` (what a file is, and the order of a game's
-files), `manifest.rs` (the manifest file and the default start), `library.rs` (the installed
-games, their details and Game Hub section), `launch.rs` (Play), `settings.rs` (a game's
-settings) and `runner.rs` (umu-launcher and Wine). `lib.rs` joins them.
-
-Permissions:
-
-- the games folder, with write; the packages folder, read only;
-- processes: `folder:games` (any file in a game folder), the umu-launcher it installs,
-  `system:umu-run`, `system:wine`, `system:wine64`, `system:sh`, `system:gamescope` and
-  `system:gamemoderun`.
-
-### Library
-
-Games install to `PC/` in the player's first game folder, or the folder picked on the install
-sheet. A game is a folder in `PC/` with a `.nexus-game.json` manifest (version 2): its `name`,
-and `starts`, every file in it that can start the game, best first, each its `kind` and its
-`path` inside the folder. The manifest holds what the install found and doesn't change after. The
-folder's name is the game's id. Search matches the name.
-
-A folder the player copied into `PC/` by hand, with no manifest, gets one the first time the
-library or Play sees it: its files are probed as an install probes them (the nearest 4000 first),
-and the folder's files that should be programs get the flag. Its name is GOG's `gameinfo` (first
-line, at the folder's top), else a portable Wine wrapper's, else the folder's name, with a
-capital at each word when it has none (`my_game` is "My Game"). A folder with nothing that
-starts a game stays as it is and isn't probed again until Nexus restarts. Hidden folders and
-`<name>.part` (an install still writing) are skipped.
-
-A `cover.jpg`, `cover.png` or `cover.webp` in a game's folder, in that order, is its cover. It
-comes before the cover of a catalog release the game matches.
-
-The first manifest (version 1: `launch`, `kind` and up to 8 `alternatives`) reads as the same
-list, `launch` first. A game with one is named by GOG's `data/noarch/gameinfo` (first line) or a
-portable Wine wrapper's `game_info/game_info.txt` beside its first file (sixth line) when it
-has one: it was installed before its name came from them.
-
-### What a file is
-
-Files are known by their first 4096 bytes, not their names, since downloads lose the program
-flag:
-
-| First bytes | Probe | Kind |
-|---|---|---|
-| `#!` | Script | `script` |
-| ELF with `AI\x02` at byte 8 | AppImage | `appimage` |
-| ELF program, or a PIE with an interpreter, x86 or x86-64 | Elf | `native` |
-| Mach-O, 32 or 64 bit, or a universal binary | MachO | `macapp` |
-| `MZ` with a `PE\0\0` header | Exe | `windows` |
-
-At most 4000 files of a release are probed: the nearest the game's folder first, so a start
-script beside a bundled runtime's thousands of files is still found.
+PC games install from downloads only. The plugin's `candidates` returns nothing, so no game is
+offered from a folder the player picks. The manifest's install note says so for the install
+sheet: "Nothing in it runs until you press Play."
 
 ### Install
 
-The installer reads the download after the host unpacked it. For each archive set, it decides
-whether the set is the release's packaging, by what its folder holds beside the set:
+`begin` in `plugins/emulators/pc/src/install.rs` installs from a download folder. The core
+has unpacked the archives by then. The plugin works in these steps:
 
-| Beside the set | Its unpacked folder is used |
-|---|---|
-| Nothing that starts a game | Yes |
-| Only a start script | Only when the unpacked files hold a program |
-| A program | No: the archive is the game's own data, and is copied as it is |
-| (a GOG or script installer) | Always |
+1. It scans the download (`Download::scan` in the emulator kit). A download deeper than
+   `SCAN_DEPTH` (64 folders), or with more than `SCAN_FILES` (1,000,000) files, is refused.
+2. It decides which archive sets are the release's packaging. It replaces those with the
+   files the core unpacked from them. The rules:
+   - A script installer is always packaging.
+   - A set with nothing beside it is packaging.
+   - A set beside a start script is packaging only when what is inside holds a program.
+   - A set beside a program is not packaging. It is the game's own data, and it is copied
+     as it is.
+3. It picks the game's name. GOG's `data/noarch/gameinfo` gives it first (`GOG_INFO`). Else
+   the installer's own folder. Else the torrent's top folder. Else the name of the set. Else
+   "Game". `display_name` cleans tags and versions off the name.
+4. It reads the first 4096 bytes (`probe::HEAD`) of up to 4000 files (`PROBED`), nearest
+   the game's folder first, and ranks them. A portable Wine wrapper (Kron4ek's) names its
+   game on the sixth line of `game_info/game_info.txt` beside its start script.
+5. It refuses a download with nothing that starts a game: "Nothing in this download starts a
+   game".
+6. It writes into `PC/<game>.part` and renames it to `PC/<game>` at the end. If
+   `PC/<game>` exists, the install fails with "is already installed".
+7. When one unpacked folder alone is the game, and the unpacked copy is the host's own, the
+   plugin asks the host to move the whole folder instead of copying. The host copies when it
+   cannot move. A bundled Proton needs the links and empty folders that a move keeps.
+8. Off Windows it sets the program flag on every file that should have it, because downloads
+   drop the flag.
+9. It writes the manifest file.
 
-Everything else is copied as it is. The files of a used set go where the archive was. The
-torrent's own top folder is the game's folder, and the game's name comes from it, cleaned of
-release tags: "[GOG] Celeste (v1.4.0.0) [amd64] [Multi]" is "Celeste".
+The game goes to the folder the player picked for the install. Else it goes to `PC/` in the
+first games folder. If there is no games folder, the install fails with "add a game folder in
+Settings first".
 
-A script installer's archive usually holds the game's folder ("Human Fall Flat/"): its files go
-at the game's top, and the folder names the game. Without one, the installer's file name does,
-without its version, each word with a capital: "cuphead_v1.3.4.run" is "Cuphead".
+### What a file is
 
-libarchive can't read every RAR: Cuphead's installer holds a RAR 5 with a 1 GB dictionary
-("Declared dictionary size is not supported"). Nexus then unpacks it with `unar`, which needs
-room for a copy of the archive too. Without `unar` the unpacking fails: "… Install unar to unpack
-it, or run the installer by hand". Nothing installs then.
+Nexus reads a file's first bytes, not its name. `probe` in `probe.rs` tells:
 
-The plugin then lists every file that can start the game. The order compares, one after the
-other:
+| First bytes | Probe |
+| --- | --- |
+| `#!` | A script |
+| ELF, x86 or x86-64, executable or position-independent with an interpreter | A Linux program |
+| ELF with the AppImage marker | An AppImage |
+| `MZ` with a `PE` header | A Windows program |
+| Mach-O, or a universal binary | A Mac program |
 
-1. helpers last: a name with `setup`, `install`, `update`, `config`, `crashhandler`, `dedicated`
-   (a game's own server) and the like;
-2. what the file is: a start script by its name (`start`, `start.sh`, `play.sh`, `run.sh`, …),
-   an AppImage, a Mac program inside a `.app`, a Linux program, another Mac program, another
-   script, a Windows `.exe`;
-3. how deep it is: nearer the game's folder first;
-4. a 64-bit program before a 32-bit one;
-5. its path.
+An ELF for ARM or a big-endian ELF is `Other`. So is a library.
 
-The game's name plays no part. Libraries (`.so`, `.dll`) and the programs in bundled runtimes'
-folders (`lib/`, `wine/`, `runtime/`, `jre/`, …) aren't listed. The order doesn't depend on the
-system; what Play starts by default does (see Game Hub). A GOG installer's `gameinfo` or a
-portable Wine wrapper's `game_info.txt` beside the first file names the game; neither decides
-what starts.
+Each file that can start the game has a kind (`Kind`): `script`, `appimage`, `native`,
+`macapp` or `windows`.
 
-When one unpacked folder alone is the game, the host moves it into the games folder whole, on
-the same disk: links and empty folders stay, as a bundled Proton's libraries and Wine prefix need
-(Proton makes its drive links in the prefix's empty `dosdevices`). Otherwise the files are copied
-one by one, and a link arrives as a copy of what it points to.
+### What starts the game
 
-On Linux and macOS the program flag is set again on scripts, AppImages and programs. A game
-whose folder exists already is refused: "<name> is already installed". A download with nothing
-that starts a game is refused: "Nothing in this download starts a game".
+`rank` puts the files in order. Helpers come last. These names mark a helper: `setup`,
+`install`, `uninstall`, `redist`, `crashhandler`, `update`, `easyanticheat` and others in
+`helper`. Then the order is:
 
-### What runs where
+1. A start script by its name. The names are in `START_NAMES`: `start`, `start.sh`,
+   `start-game.sh`, `start_game.sh`, `play.sh`, `run.sh`, `launch.sh`, `game.sh`.
+2. An AppImage.
+3. A Mac program inside a `.app`.
+4. A Linux program.
+5. Another Mac program.
+6. Another script.
+7. A Windows program.
 
-| Kind | Linux | Windows | macOS |
-|---|---|---|---|
-| `script` | runs | can't | can't |
-| `appimage`, `native` | runs | can't | can't |
-| `macapp` | can't | can't | runs |
-| `windows` | `umu-run`, else `wine`, else `wine64` | runs | `wine`, else `wine64` |
+Within one group, a file nearer the game's folder comes first, a 64-bit program comes before
+a 32-bit one, and then the path decides.
 
-So on a Mac, a release with a start script and a `.exe` starts the `.exe` through Wine.
+`rank` leaves out libraries (`.so`, `.dll`) and programs in the folders of bundled runtimes
+(`RUNTIMES`: `lib/`, `wine/bin`, `runtime/`, `jre/` and others), except start scripts.
 
-Play runs the file Starts chose, as it is: its kind decides how, and nothing else. Nexus never
-starts another file in its place. When the file fails (a wrapper's 32-bit Wine on a system
-without 32-bit libraries, say), the notice "closed right after it started" names its log, and
-the player picks another file in Starts. `prepare` builds the launch:
+### The manifest file
 
-- The file starts from its own folder, which is the working folder.
-- A script without `#!` runs through `sh`.
-- An AppImage gets `APPIMAGE_EXTRACT_AND_RUN=1`, so it runs without FUSE.
-- A Windows program off Windows runs through the runner, with the `.exe` as its argument and
-  its own Wine prefix, `prefixes/<game id>` in the plugin's data folder (`WINEPREFIX`). With
-  `umu-run`, `GAMEID=umu-default` and `PROTONPATH=GE-Proton`: umu downloads and updates Proton
-  by itself. On a system without 32-bit libraries it also gets `PROTON_USE_WOW64=1`.
-- With a Resolution, all of it runs inside gamescope: `gamescope -f -w <width> -h <height> --`
-  and then the program and its arguments.
-- On Linux with GameMode installed (`gamemoderun` on the `PATH`), all of that runs through
-  `gamemoderun`. GameMode raises the game's priority and the processor's speed while it runs;
-  without a password only for a player in the `gamemode` group.
+The install writes `.nexus-game.json` in the game's folder (`GAME_FILE` in `manifest.rs`). It
+holds the game's name and every file that can start it, best first. It is at most 64 KiB
+(`MAX_GAME_FILE`). Its `version` is 2 (`GameManifest::VERSION`). The plugin still reads
+version 1 and drops any path that is not a safe path inside the folder.
 
-A game this system can't start installs anyway. Play then fails with the reason, for example
-"Can't start Celeste: This is a Linux game: it can't run on Windows". Without a runner it is
-"This is a Windows game: install umu-launcher (it runs the game with Proton) or Wine to play
-it" on Linux, and "… install Wine to play it" on a Mac.
+The default start on a system is the first start script that runs there. Else it is the first
+file that runs there. Else it is the first file.
 
-### Game Hub
+| Kind | Runs on |
+| --- | --- |
+| `script`, `appimage`, `native` | Linux |
+| `macapp` | macOS |
+| `windows` | Every system. Off Windows it needs Proton or Wine. |
 
-- A "Starts" fact names the file Play starts.
-- A "PC" section has the rows "Starts" and "Runs". "Runs" is "As it is", "With Proton, through
-  umu-launcher", "With Wine", the runner hint, or why it can't run here.
-- Every PC game has Game settings (the Game Hub's ⋯ menu). "Starts" lists each file it can
-  start, in the manifest's order. Each is named by its file name, with the nearest folder that
-  tells it apart when another file has the same name ("ENG/start.sh", "ENG/…/Ra2.exe"). The
-  line under the row gives the whole path of the file Play starts.
-- The default is the first start script by its name (`start.sh`, `run.sh`, …) that runs on
-  this system, else the first file that runs here, else the first file.
-- Picking another file is kept as the game's `starts` setting, and Play and the "Starts" fact
-  and row then use it. Only a file in the manifest can be picked. The manifest file doesn't
-  change. A `starts` setting that names a file the manifest no longer has is ignored.
-- On Linux, every game has a "Resolution" setting there too: "Your screen" (the default) or a
-  size, which runs it inside gamescope.
-- The game comes to the front, takes the pad and gives the launcher back as any game does (see
-  [desktop.md](desktop.md#the-running-game)).
+### The library
 
-### Catalog
+The plugin lists the folders in `PC/` of each games folder. A folder is a game when it has a
+manifest file. A folder named with a leading `.` or an ending `.part` is never a game.
 
-The release catalog plugin reads the PC catalog for the console the PC plugin names. Each
-release gets the system it is for, from its game info's platform first, then from its title's
-tags:
+A player can copy a game into `PC/` by hand. The first time the library sees the folder, the
+plugin probes its files as an install does and writes its manifest. It also sets the program
+flag off Windows. A folder with nothing that starts a game is left alone and is not probed
+again until the next run.
 
-| Word | System |
-|---|---|
-| `linux`, `native`, `wine`, `amd64`, `x86_64`, `x64` | Linux |
-| `windows`, `win`, `win64`, `win32` | Windows |
-| `macos`, `mac`, `osx`, `mac os` | macOS |
+A `cover.jpg`, `cover.png` or `cover.webp` in the game's folder is its cover, in that order.
 
-A release with neither has no system mark. A Windows release counts as runnable everywhere. A
-Linux or macOS release on another system says "This is a Linux release: it can't run on
-Windows" on its row and on the download sheet. It still downloads and installs. A Catalog card
-whose every release can't run here gets the badge "Can't run here".
+### Settings
 
-## Emulator builds
+A game has these settings in its Game Hub (`settings.rs`):
 
-Separate from downloads, an emulator plugin's own build is unpacked by the core
-(`crates/nexus-core/src/unpack.rs`) into the plugin's data folder: tar.gz, zip, or an AppImage
-inside a zip. The AppImage runs `--appimage-extract` (Linux only, at most 10 minutes), and only
-when the plugin's process permission allows that file. The same path checks apply: no absolute
-paths, no `..`, no links out of the folder, nothing written through a link. It unpacks into a
-sibling `.unpacking` folder first, so a failure leaves the old build.
+- **Starts.** The file Play starts. It must be one of the manifest's files.
+- **Resolution.** On Linux only. The choices (`resolution::CHOICES`) are `screen` and sizes from
+  640 × 480 to 1920 × 1080. Anything but `screen` runs the game inside gamescope.
 
-## Tests
+### Play
 
-- `tests/tests/seams/torrents.rs`, `unpack.rs`, `release_archives.rs`, `game_installs.rs`,
-  `kyty.rs`, `shadps4.rs`, `pc.rs` and `vpn.rs` drive the core with fakes, as a player or a
-  plugin does.
-- The torrents subsystem's phase rules have table tests in `torrents/phase.rs`, and the game
-  installs subsystem has its own tests on fake ports (`game_installs/tests.rs`).
-- The tests in `crates/nexus-app/src/archives.rs` unpack real zip, tar.gz, GOG, script
-  installer and RAR files, and check the refusals and cancel. The RAR files in
-  `crates/nexus-app/testdata/` come from the `unrar` crate's test data.
-- `contract::archives` in the test kit checks the refusals every `Archives` adapter makes: `..`,
-  an absolute path, a link out, a password and no room, plus a plain archive that unpacks. It
-  runs against `HostArchives` (with real zip files) in `crates/nexus-app/src/archives.rs`, and
-  against `FakeArchives` in `crates/nexus-testkit/src/archives.rs`.
-- The archive plan's tests in `crates/nexus-core/src/archive_plan.rs` run a table of hostile
-  paths and 5000 generated listings, and check that no planned path leaves the folder.
-- `tests/tests/seams/real_archives.rs` installs the real KytyPS5 and shadPS4 release
-  archives, with `NEXUS_REAL_ARCHIVES` set to a folder of them.
-- A real transfer between two local librqbit sessions runs with `NEXUS_TORRENT_TESTS=1`.
+`spec` in `launch.rs` builds the launch. The file's kind decides how it runs:
 
-## Limits
+| Kind | How it runs |
+| --- | --- |
+| `script` | As it is. If it does not start with `#!`, through `sh`. |
+| `appimage` | With `APPIMAGE_EXTRACT_AND_RUN=1`, so it needs no FUSE. |
+| `native`, `macapp` | As it is. |
+| `windows` on Windows | As it is. |
+| `windows` elsewhere | Through umu-launcher (Proton) or Wine. |
 
-- Archives with a password are refused.
-- Nothing in a download runs during install, GOG and script installers included.
-- Nexus doesn't download Wine, Proton or umu-launcher.
-- Downloads only through a VPN is not available on Windows.
+The game's folder is the working folder, which is the folder of the file that starts it. A
+file that this system cannot run fails with a message such as "This is a Linux game: it can't
+run on Windows".
+
+On Linux, two more wrappers can apply:
+
+- With a Resolution other than `screen`, the game runs inside `gamescope -f -w <width> -h
+  <height> --`. If gamescope is not installed, Play fails and says to install it or reset the
+  Resolution.
+- If `gamemoderun` is installed, the game runs through it.
+
+### Windows games off Windows
+
+`runner` in `runner.rs` picks what runs a Windows game:
+
+1. On Linux, the umu-launcher this plugin installed.
+2. On Linux, `umu-run` on the system.
+3. `wine`, then `wine64`.
+
+On macOS only Wine is tried. If nothing is found, Play fails and says what to install.
+
+Each game gets its own Wine prefix in the plugin's data folder, `prefixes/<game id>`. With
+umu-launcher the plugin sets `GAMEID=umu-default` and `PROTONPATH=GE-Proton`. umu-launcher
+downloads and updates Proton by itself. If the host does not run 32-bit programs, the plugin
+also sets `PROTON_USE_WOW64=1`.
+
+The plugin page has a "Windows games" section. On Linux it has a button, Install umu-launcher
+or Update umu-launcher. The button does this (`install_umu`):
+
+1. It asks GitHub's API for the latest release of `Open-Wine-Components/umu-launcher`.
+2. It picks the asset named `umu-launcher-*-zipapp.tar` and the SHA-256 that GitHub lists for
+   it. If GitHub lists none, the install stops.
+3. It downloads the tar and checks the SHA-256. A mismatch stops the install.
+4. It takes `umu/umu-run` from the tar, writes it beside the old one as `umu/umu-run.part`,
+   sets the program flag, and renames it into place. A failed install leaves the old one.
+5. It saves the release tag in `umu/version`.
+
+The zipapp needs only Python 3.
+
+### Permissions
+
+The plugin declares these in `plugins/emulators/pc/plugin.toml`:
+
+```toml
+process = ["folder:games", "umu/umu-run", "system:umu-run", "system:wine", "system:wine64", "system:sh", "system:gamescope", "system:gamemoderun"]
+network = ["api.github.com", "github.com", "*.githubusercontent.com"]
+```
+
+A PC game runs with the player's access to their files. Install only releases you trust.
+
+## Limitations
+
+- **Archives with a password do not unpack.** Nexus cannot ask for one. The unpack fails with
+  `Password`.
+- **Only RAR and 7z can be cut into parts.** A split zip or tar is not recognized as one set.
+- **Sets deeper than one folder are ignored.** `scan` reads the top of the download and one
+  folder down.
+- **RAR 5 with a big dictionary needs `unar`.** libarchive cannot read it, and no other
+  reader tries. Without `unar` and `lsar` the unpack fails with `Missing`.
+- **Archives need libarchive for most formats.** RAR, tar.xz, tar.bz2, tar.zst, ISO and cab
+  all go through it. The packages ship a copy. A source build uses the system's, and it must
+  support RAR 5.
+- **Links are not made on Windows.** The adapter writes symbolic links on Unix only.
+- **Script installers only unpack.** Nexus does not run them. A script installer that does not
+  state its archive's size, and is not a GOG installer, is not recognized.
+- **PC games do not install from a folder the player picks.** They install from downloads.
+  A folder copied by hand into `PC/` works as an installed game.
+- **The PC plugin gives no description, developer or art.** It reports a cover only from
+  `cover.jpg`, `cover.png` or `cover.webp` in the game's folder. Other art comes from the
+  catalog.
+- **Resolution needs gamescope and works on Linux only.**
+- **No test here runs a real game.** The seam tests in `tests/tests/seams/pc.rs` run the plugin
+  against a fake host for each system. The Windows and macOS paths are not tried on those
+  systems by these tests.

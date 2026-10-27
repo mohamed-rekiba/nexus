@@ -1,127 +1,89 @@
 # Writing a plugin
 
-This guide covers emulator and service plugins: Rust crates that the launcher links in and calls
-through the plugin contract in `crates/nexus-api`. Themes are plugins too, but they hold no code;
-see [docs/themes.md](themes.md). The design behind all of this is in
-[docs/architecture.md](architecture.md), and the build setup is in
-[docs/development.md](development.md).
+A plugin is a Rust crate that Nexus compiles into its binary. It tells the host what it can do
+in a manifest (`plugin.toml`), and it returns the code for each thing from one function
+(`init`). The host calls that code. The plugin never calls the host except through a
+`PluginContext`.
 
-The real plugins are the best examples, and this guide quotes them:
+This guide is for Rust developers who write or maintain plugins: emulators, services and system
+plugins. Themes are files, not code: see [themes.md](themes.md). The shape of the whole app is in
+[architecture.md](architecture.md). How to build, run and test the repo is in
+[development.md](development.md). Terms (capability, kind, flavor, and so on) are in
+[the glossary](../GLOSSARY.md).
 
-| Plugin | Kind | What to read it for |
-|---|---|---|
-| `plugins/emulators/kytyps5` (`emu-kyty`) | emulator | Every capability: builds from GitHub, settings, slots, a game installer |
-| `plugins/emulators/shadps4` (`emu-shadps4`) | emulator | The same, with an AppImage build and DLC into another program's folder |
-| `plugins/emulators/pc` (`emu-pc`) | emulator | The smallest emulator: no builds, games in host folders, programs on `PATH` |
-| `plugins/emulators/steam` (`emu-steam`) | emulator | No console: another program's library, read-only folders with a search default, and a launch that hands the game over (`game_process`) |
-| `plugins/services/playstation-store` | service | The smallest plugin: one `Metadata` capability and a cache in storage |
-| `plugins/services/release-catalog` | service | `Releases`, settings, slots, a background task, events, `shutdown` |
-| `plugins/shared/emulator-kit` | not a plugin | Shared code the emulators use |
+Every Rust and TOML sample below comes from a real file in the repo. The line under each sample
+names the file. Doc samples are not compiled, so read the file when you need the full code.
 
-## Contents
+## What a plugin is
 
-- [Kinds of plugin](#kinds-of-plugin)
-- [Built in, or from an extensions folder](#built-in-or-from-an-extensions-folder)
-- [The crate](#the-crate)
-- [The manifest](#the-manifest)
-- [Lifecycle](#lifecycle)
-- [PluginContext](#plugincontext)
-- [Capabilities](#capabilities)
-- [Settings](#settings)
-- [Slots](#slots)
-- [Errors](#errors)
-- [Shared code: emulator-kit](#shared-code-emulator-kit)
-- [Testing](#testing)
-- [Checklist for a new plugin](#checklist-for-a-new-plugin)
+A plugin has three parts:
 
-## Kinds of plugin
+- A manifest, `plugin.toml`, read with `PluginManifest::from_toml` (`crates/nexus-api/src/manifest.rs`).
+- A type that implements `Plugin` (its manifest and its `shutdown`) and `CodePlugin` (its `init`).
+- One or more capabilities: traits that the plugin implements and `init` returns in a `Provided`.
 
-`nexus_api::PluginKind` has four values. A theme implements `ThemePlugin` and has no code
-beyond its files. The other three kinds implement one trait, `CodePlugin`, and differ only in
-their privileges (ADR 0001, `docs/adr/0001-capabilities-follow-the-capability-not-the-kind.md`).
+A plugin depends on `nexus-api` only. That crate holds every type that crosses between the host and
+a plugin, and it re-exports `serde`, `serde_json`, `schemars`, `semver`, `async_trait` and
+`inventory`, so a plugin needs no other dependency for them (`crates/nexus-api/src/lib.rs`).
 
-| `kind` | Trait | What it does |
-|---|---|---|
-| `emulator` | `CodePlugin` | Runs games: lists them, installs builds, launches them |
-| `service` | `CodePlugin` | Adds to the games other plugins find, and runs none |
-| `theme` | `ThemePlugin` | Files only: `theme.toml`, Slint markup and assets |
-| `system` | `CodePlugin` | The machine's own settings: network and Wi-Fi, VPNs, Bluetooth, sound, power and battery, Nexus OS's updates and installer |
+## Kinds
 
-All four implement `Plugin`, which has `manifest()` and an optional `shutdown()`. A
-`CodePlugin` also implements `init(ctx: PluginContext) -> PluginResult<Provided>`. The host
-holds a plugin as a `PluginBox`: `PluginBox::code(..)` or `PluginBox::theme(..)`. A theme
-manifest with code, or a code manifest with a theme, doesn't load.
+The manifest `kind` is `emulator`, `service`, `theme` or `system` (`PluginKind`).
 
-Any plugin with code may provide the data capabilities: `catalog`, `releases`, `metadata`,
-`slots`, `configurator`, `launcher` and the rest. Steam's emulator plugin, for example, lists
-releases and describes games. The kind governs privileges only, in `validate` in
-`crates/nexus-core/src/kernel.rs`:
+| Kind | Code | What it is for |
+| --- | --- | --- |
+| `emulator` | yes | Runs games: catalog, builds, settings, launching. |
+| `service` | yes | Adds to the games other plugins find, and runs none: a store's art and details. |
+| `system` | yes | The machine's own settings and devices: network, VPNs, Bluetooth, sound, power. |
+| `theme` | no | Files only. See [themes.md](themes.md). |
 
-- Only a system plugin may provide the system capabilities (`Capability::SYSTEM`: `network`,
-  `vpn`, `bluetooth`, `audio`, `power`, `os_updates`, `os_install`).
-- Only a system plugin may run programs long (`permissions.long_running`, `Programs::stream`)
-  or through polkit (`permissions.polkit`).
-- A theme declares only `theme`, and no other kind may declare it.
+The kind governs privileges. It does not govern which data capabilities a plugin may provide
+([ADR 0001](adr/0001-capabilities-follow-the-capability-not-the-kind.md)). Any plugin with code
+may provide `catalog`, `releases`, `metadata`, `slots`, `configurator` and the rest. The Steam
+emulator, for example, provides `releases` and `metadata` (`plugins/emulators/steam/plugin.toml`).
 
-For each system capability the core uses the first active system plugin that provides it; one
-nobody provides shows as unavailable. The built-in one is `plugins/system/host` (`id =
-"system"`).
+Only a `system` plugin may do these three things:
 
-## Built in, or from an extensions folder
+- provide a system capability (`Capability::SYSTEM`),
+- run a program long (`permissions.long_running`, `Programs::stream`),
+- run a program through polkit (`permissions.polkit`).
 
-There are two ways a plugin reaches the host, and they differ in what they may hold.
+The kernel checks this at boot in `validate` (`crates/nexus-core/src/kernel.rs`). Beyond
+privileges, `validate` uses the kind only to tell a theme from a plugin with code.
 
-**Built in.** The crate is linked into the `nexus` binary and registers itself at compile time
-with `inventory`:
+## Built-in and data-only plugins
 
-```rust
-inventory::submit! { PluginFactory::code(|| Box::new(PcPlugin)) }
-inventory::submit! { PluginFactory::code(|| Box::new(PlayStationStore)) }
-```
+Nexus has two kinds of origin (`Origin` in `kernel.rs`):
 
-`KernelBuilder::built_in_plugins()` creates every registered factory. A factory only registers
-if its crate is linked, so `crates/nexus-app` lists each plugin crate in its `Cargo.toml` and
-keeps a `use emu_pc as _;` line for it in `src/main.rs`. Built-in plugins have
-`Origin::BuiltIn` and run in-process with `runtime` left at its default, `native`.
+- **Built-in.** The crate sits in this workspace, `crates/nexus-app` links it, and it registers
+  itself with `inventory::submit!`. It runs in the host process.
+- **Third-party.** A folder with a `plugin.toml` or `theme.toml`, found by
+  `KernelBuilder::discover`. It must declare `[runtime] type = "data"`.
 
-**From an extensions folder.** `KernelBuilder::discover(dir)` treats each subfolder of `dir`
-that holds a `plugin.toml` or `theme.toml` as a third-party plugin (`Origin::ThirdParty`). The
-app discovers two folders: the one given with `--extensions <folder>` (by default
-`<data-dir>/extensions`), and `extensions/` next to the binary (`Contents/Resources/extensions`
-in the macOS app).
+Today a third-party plugin can only be a theme. No runtime for third-party code exists. The
+evidence in the code:
 
-A third-party plugin must be data-only: `validate` in `crates/nexus-core/src/kernel.rs` refuses
-`runtime = native` from a folder with "third-party plugins must be data-only", and refuses an
-emulator or service with `runtime = data` ("needs code"). The only loader is
-`DataThemeLoader`, so today a folder in `extensions/` can hold a theme and nothing else. An
-emulator or service plugin is always a built-in crate. In `--safe-mode`, third-party plugins
-don't load at all.
+- `validate` rejects a third-party manifest whose runtime is `native`: "third-party plugins must
+  be data-only".
+- `validate` also rejects a non-theme plugin whose runtime is `data`: "needs code".
+- The only loader the kernel registers is `DataThemeLoader` (`crates/nexus-core/src/themes.rs`),
+  and it accepts a theme with `Runtime::Data` only. `crates/nexus-app` adds no other loader.
 
-In tests, `FakeHost::third_party(plugin)` registers in-process code as third-party, to check
-those rules.
+`--safe-mode` loads built-in plugins only. A third-party plugin is then rejected with
+`LoadError::SafeMode`.
+
+Writing a new emulator, service or system plugin therefore means adding a crate to this repo. See
+[the checklist](#checklist-for-a-new-plugin).
 
 ## The crate
 
-A plugin crate depends on `nexus-api` only (plus `emulator-kit` for emulators, if it helps).
-`nexus-api` re-exports what plugins need: `async_trait`, `inventory`, `serde`, `serde_json`,
-`schemars` and `semver`. Point derives at the re-exports:
-
-```rust
-use nexus_api::serde::{Deserialize, Serialize};
-use nexus_api::schemars::{self, JsonSchema};
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-#[serde(crate = "nexus_api::serde")]
-#[schemars(crate = "nexus_api::schemars")]
-pub struct Settings { /* ... */ }
-```
-
-The `Cargo.toml` of `plugins/services/playstation-store` is the whole shape:
+A plugin crate sits under `plugins/emulators/`, `plugins/services/` or `plugins/system/`. It
+depends on `nexus-api`, and an emulator may also depend on `emulator-kit`.
 
 ```toml
 [package]
 name = "playstation-store"
-description = "The PlayStation Store's descriptions of PS4 and PS5 games ..."
+description = "The PlayStation Store's descriptions of PS4 and PS5 games: art, logo, rating, genres, release date and screenshots, by title id."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -135,10 +97,39 @@ nexus-api.workspace = true
 workspace = true
 ```
 
-Every plugin embeds its own manifest and parses it in `manifest()`:
+Source: `plugins/services/playstation-store/Cargo.toml`.
+
+The crate has three jobs in `src/lib.rs`: embed the manifest, implement the traits, and register
+the plugin. This is the whole entry point of the PlayStation Store service:
+
+```rust
+#[async_trait]
+impl CodePlugin for PlayStationStore {
+    async fn init(&self, ctx: PluginContext) -> PluginResult<Provided> {
+        let cache = match ctx.storage().read(&RelPath::new(CACHE)?).await {
+            Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
+            Err(_) => HashMap::new(),
+        };
+        Ok(Provided { metadata: Some(Arc::new(Store { ctx, cache: Mutex::new(cache) })), ..Provided::default() })
+    }
+}
+
+inventory::submit! { PluginFactory::code(|| Box::new(PlayStationStore)) }
+```
+
+Source: `plugins/services/playstation-store/src/lib.rs`.
+
+The `inventory::submit!` line registers the plugin at compile time. It works only if the host
+binary links the crate, so `crates/nexus-app/src/main.rs` has one `use <crate> as _;` line for each
+built-in plugin. `KernelBuilder::built_in_plugins` then creates every registered factory. A
+theme registers with `PluginFactory::theme`.
+
+The `Plugin` impl returns the manifest from the embedded file:
 
 ```rust
 const MANIFEST: &str = include_str!("../plugin.toml");
+
+pub struct PcPlugin;
 
 #[async_trait]
 impl Plugin for PcPlugin {
@@ -148,764 +139,849 @@ impl Plugin for PcPlugin {
 }
 ```
 
-Files the plugin ships with go into the binary too. `release-catalog/build.rs` embeds the
-catalog files from `assets/catalog/`, and the default theme's `build.rs` embeds every file
-under `theme/`.
+Source: `plugins/emulators/pc/src/lib.rs`.
+
+`Plugin::shutdown` has a default that does nothing. Override it to stop work you started in
+`init`: the Game Catalog service aborts its refresh task there
+(`plugins/services/release-catalog/src/lib.rs`).
+
+The host holds a plugin as a `PluginBox`: `PluginBox::code(..)` for a plugin with code and
+`PluginBox::theme(..)` for a theme (`crates/nexus-api/src/plugin.rs`).
 
 ## The manifest
 
-`plugin.toml` parses into `nexus_api::PluginManifest` (`crates/nexus-api/src/manifest.rs`).
-This is the manifest of `plugins/emulators/pc`, with its comments trimmed:
+The manifest is TOML, parsed into `PluginManifest`. The sub-tables (`[permissions]`, a filesystem
+grant, `[[keymap]]`, `[requires]`, `[system]`) reject keys they do not name. Top-level keys the
+struct does not name go to `extra`, which the crate that owns them reads (a theme's `[theme]`
+table, for example).
+
+This is the head of the KytyPS5 manifest, trimmed:
 
 ```toml
-id = "emu-pc"
+id = "emu-kyty"
 kind = "emulator"
-name = "PC"
+# The plugin is shown by the console it plays.
+name = "PS5"
+# The program the plugin installs and runs. Sentences about the program name it.
+emulator = "KytyPS5"
 version = "0.1.0"
 host_api = "^0.2"
+# KytyPS5 ships Linux and Windows builds, and macOS x86-64 builds that run under Rosetta 2.
 platforms = ["linux", "macos", "windows"]
-console = "PC"
-capabilities = ["catalog", "launcher", "slots", "game_installer", "configurator"]
-install_note = "Installs a PC game from its folder, a GOG installer or an AppImage, ..."
+# The console it plays: it gets that console's catalog.
+console = "PS5"
+capabilities = ["catalog", "downloader", "installer", "configurator", "launcher", "compatibility", "slots", "game_installer"]
 
-[permissions]
-process = ["folder:games", "umu/umu-run", "system:umu-run", "system:wine", "system:wine64", "system:sh", "system:gamescope", "system:gamemoderun"]
-network = ["api.github.com", "github.com", "*.githubusercontent.com"]
+[[keymap]]
+button = "Cross"
+keys = "J"
 
+[requires]
+vulkan = "1.3"
+
+[requires.recommended]
+cpu_threads = 12
+memory_gb = 14.5
+gpu_memory_gb = 7.5
+discrete_gpu = true
+
+# The system its games show under: what the Library and a card call it, and its color.
+[system]
+id = "PS5"
+name = "PlayStation 5"
+```
+
+Source: `plugins/emulators/kytyps5/plugin.toml`.
+
+Fields of `PluginManifest`:
+
+| Field | Meaning |
+| --- | --- |
+| `id` | `PluginId`: 1 to 64 lowercase letters, digits or `-`, starting with a letter. |
+| `kind` | `emulator`, `service`, `theme` or `system`. |
+| `name` | What the player sees. An emulator names its console: `PS5`. |
+| `emulator` | The program an emulator installs and runs (`KytyPS5`). Empty when it has no name of its own. `PluginManifest::emulator_name` returns it, or `name` when empty. |
+| `version` | The plugin's version (semver). |
+| `host_api` | The `nexus-api` versions the plugin works with. The host refuses it unless the range matches `API_VERSION`. |
+| `platforms` | Systems the plugin runs on: `linux`, `macos`, `windows`. Empty means every system. |
+| `console` | The console an emulator plays (`PS5`, `PS4`, `PC`). Kept in uppercase. The core gives the emulator that console's catalog. |
+| `capabilities` | The set of capabilities `init` provides. |
+| `permissions` | What the plugin may do outside its data folder. See below. |
+| `dependencies` | Plugins that load first. |
+| `activation` | `lazy` (default) or `eager`. |
+| `runtime` | `native` (default) or `data`. |
+| `assets` | A folder of images that slot data and catalog entries name. |
+| `config_schema` | A JSON Schema field. No host code reads it today: see [Limitations](#limitations). |
+| `requires` | What the plugin's games need from the computer: `vulkan`, `avx2`, and `[requires.recommended]`. |
+| `keymap` | An emulator's keyboard keys for the console's buttons, in the order the launch splash lists them. |
+| `install_note` | One or two sentences the install sheet shows. |
+| `system` | `[system]`: the id, name and `#rrggbb` color that the Library's chips and a card's badge use for the plugin's games. |
+
+`API_VERSION` is a constant in `crates/nexus-api/src/lib.rs`. A change to the plugin API raises it
+by hand, together with every built-in plugin's `host_api`.
+
+A dependency names another plugin:
+
+```toml
+[[dependencies]]
+id = "firmware"
+version = ">=1.0"
+optional = true
+```
+
+Source: `crates/nexus-api/src/manifest.rs`, the `KYTY` constant in its tests.
+
+An optional dependency loads first when it is present, and the host ignores it when it is missing
+or has the wrong version. A required dependency that is missing, has the wrong version, or failed
+to load rejects the plugin. A dependency cycle rejects its members (`LoadError`).
+
+### What the kernel checks
+
+`validate` rejects a manifest at boot when any of these holds:
+
+- safe mode is on and the origin is third-party,
+- `host_api` does not match the host's API version,
+- a theme does not support this platform (other plugins load turned off instead: see
+  [Lifecycle](#lifecycle)),
+- `[system] color` is not `#rrggbb`,
+- a filesystem folder name has characters other than lowercase letters, digits and `-`,
+- a filesystem grant has both `write = true` and `listed_in`,
+- a third-party plugin has the `native` runtime,
+- a plugin that is not `system` declares a system capability, or `long_running` or `polkit`,
+- an entry of `long_running` or `polkit` is not also in `process`,
+- a theme declares anything but `theme`, or an emulator, service or system plugin declares `theme`,
+- an emulator, service or system plugin has the `data` runtime.
+
+### Permissions
+
+`[permissions]` lists what the plugin may do outside its own data folder. The host enforces each
+entry (`Permissions` in `manifest.rs`):
+
+| Key | Rule |
+| --- | --- |
+| `network` | Hosts the plugin may reach over HTTP: an exact name (`github.com`) or a suffix pattern (`*.github.com`, which also matches `github.com`). |
+| `filesystem` | Named host folders the plugin may read, and write with `write = true`. |
+| `process` | Programs the plugin may start. See below. |
+| `long_running` | System plugins only: entries of `process` that may run with no time limit. |
+| `polkit` | System plugins only: entries of `process` that may run as the administrator through `pkexec`. |
+| `links` | Link prefixes the host may open for the plugin, such as `steam://install/`. |
+
+A `process` entry has one of three forms (`Permissions::allows_program`):
+
+- A path pattern in the plugin's data folder, such as `builds/*/kyty_emulator`. A `*` part
+  matches any name. `*.AppImage` matches any name with that ending.
+- `folder:<name>`: any file in a granted host folder. The manifest must also grant that folder.
+- `system:<name>`: a program on the system `PATH`, by file name only, such as `system:wine`.
+
+A filesystem grant (`PathGrant`) has a `folder` name and these options:
+
+- `write`: allow writes. Default is read only.
+- `default`: where the folder is until the player maps it. A string is one folder. A list is a set of
+  places to look, and each one that exists counts (`default = ["~/KytyPS5", "~/src/KytyPS5"]`).
+  `~/` means the home folder.
+- `default_on`: another default for one platform.
+- `title` and `help`: the words Settings shows.
+- `listed_in`: more folders, read from a file inside the default folder, while the player has not
+  set the folder. The Steam plugin uses it to find libraries on other drives.
+
+Two folder names are shared by every plugin that asks for them, and the host owns their default,
+title and help (`SHARED_FOLDERS`): `games` (`GAMES_FOLDER`) and `packages` (`PACKAGES_FOLDER`). A
+plugin leaves out its own default for them.
+
+This is how KytyPS5 asks for them, and for the player's own build:
+
+```toml
 [[permissions.filesystem]]
 folder = "games"
 write = true
 
+# PS5 packages (.pkg) and exFAT disc images to install. Read only.
 [[permissions.filesystem]]
 folder = "packages"
 
-[system]
-id = "PC"
-name = "PC"
-color = "#7ee2b0"
+[[permissions.filesystem]]
+folder = "kyty-build"
+title = "Your own KytyPS5 build"
+default = [
+    "~/KytyPS5", "~/kyty", "~/Kyty",
+]
 ```
 
-And a service, `plugins/services/playstation-store/plugin.toml`:
+Source: `plugins/emulators/kytyps5/plugin.toml`, trimmed (the real `default` list is longer).
+
+This is the permission block of the one plugin that may run programs long. A rule in `long_running`
+or `polkit` must also appear in `process`:
 
 ```toml
-id = "playstation-store"
-kind = "service"
-name = "PlayStation Store"
-version = "0.1.0"
-host_api = "^0.2"
-platforms = ["linux", "macos", "windows"]
-capabilities = ["metadata"]
-
 [permissions]
-network = ["m.np.playstation.com", "image.api.playstation.com"]
+process = [
+    "system:nmcli",
+    "system:bluetoothctl",
+    "system:pactl",
+    "system:systemctl",
+    "system:rpm-ostree",
+    "system:nexus-os-install",
+    "system:pmset",
+]
+long_running = [
+    "system:nmcli",
+    "system:bluetoothctl",
+    "system:pactl",
+    "system:systemctl",
+    "system:nexus-os-install",
+]
+polkit = ["system:nexus-os-install"]
 ```
 
-### Fields
-
-| Field | Meaning |
-|---|---|
-| `id` | `PluginId`: 1 to 64 lowercase letters, digits or `-`, starting with a letter. Two plugins with one id: the second is rejected (`LoadError::Duplicate`). |
-| `kind` | `emulator`, `service`, `theme` or `system`. The kind sets the privileges, not the data capabilities: see "Kinds of plugin". |
-| `name` | What the player sees. An emulator names its console: `"PS5"`. |
-| `emulator` | The program the emulator runs, such as `"KytyPS5"`. Sentences about the program use it. Empty for PC. `emulator_name()` falls back to `name`. |
-| `version` | The plugin's semver version. |
-| `host_api` | The `nexus-api` versions it works with, as a semver range. The host refuses a plugin whose range doesn't include `API_VERSION` (`LoadError::HostApi`). `API_VERSION` changes by hand with the API, not with Nexus's releases. |
-| `platforms` | `linux`, `macos`, `windows`. Empty means all. An emulator made for other systems still loads, turned off, so the player can use their own build; a theme for another system is refused. |
-| `console` | `Console`: the console an emulator plays (`PS5`, `PS4`, `PC`), stored in uppercase. A `releases` service gives the emulator that console's catalog. |
-| `capabilities` | The set of `Capability` values the plugin provides (snake case: `game_installer`, `os_updates`). `init` must provide exactly this set. |
-| `permissions` | `network`, `filesystem` and `process`; see below. |
-| `dependencies` | `[[dependencies]]` with `id`, `version` (a range, default any) and `optional`. Dependencies activate first; a cycle or a missing required one rejects the plugin. |
-| `activation` | `lazy` (default): `init` runs the first time the host needs a capability. `eager`: at boot. |
-| `runtime` | `[runtime] type = "native"` (default, built-in only) or `"data"` (themes only). |
-| `assets` | A folder of images that slot data may name as `ImageSource::Asset`. A built-in plugin gives `Provided::assets` instead. |
-| `config_schema` | JSON Schema of the plugin-wide settings. The built-in plugins return theirs from `Configurator::schema` instead. |
-| `requires` | `[requires]` with `vulkan` (`"1.3"`), `avx2`, and `[requires.recommended]` `cpu_threads`, `memory_gb`, `gpu_memory_gb`, `discrete_gpu`. The "This PC" check compares them with the computer. |
-| `keymap` | `[[keymap]]` entries of `button` and `keys`, in order. The launch splash and the emulator's page show them. |
-| `install_note` | One or two sentences the install sheet shows for an emulator with a game installer. |
-| `system` | `[system]`: the system the plugin's games show under. `id` is the code in their `platform` (`PS5`, `PC`, `Steam`), `name` its full name ("PlayStation 5"), and optional `color` as `#rrggbb` (another form doesn't load). Themes draw a game's system from these, not from its code: a plugin without one gets the theme's neutral look and its code as its name. |
-
-Sections for one kind only, such as `[theme]`, land in `extra` and are parsed by the crate that
-owns them. Unknown fields inside `permissions`, `requires`, `keymap` and `system` are errors.
-
-### Permissions
-
-The host enforces every entry. Nothing outside them works.
-
-**`network`**: hosts the plugin's `HttpClient` may reach. An exact name (`github.com`) or a
-suffix pattern (`*.githubusercontent.com`, which also matches the bare domain). Redirects are
-checked too, so list the CDN a download redirects to. shadPS4 lists
-`["api.github.com", "github.com", "*.githubusercontent.com"]`.
-
-**`filesystem`**: named host folders, each a `[[permissions.filesystem]]` `PathGrant`:
-
-| Key | Meaning |
-|---|---|
-| `folder` | The name: lowercase letters, digits and `-`. |
-| `write` | `true` to write, rename, remove or mark programs. Default read-only. |
-| `default` | Where it is until the player maps it: one path (`"~/Games"`), or a list to search, each one that exists in order (`["~/KytyPS5", "~/src/KytyPS5"]`). `~/` is the home folder. |
-| `default_on` | A per-system default: `default_on = { macos = "~/Library/Application Support/shadPS4" }`. |
-| `title`, `help` | What Settings and the plugin's page call the folder, and a line under it. |
-| `listed_in` | More folders that a file in a default folder lists, while the player hasn't mapped the folder: `{ file = "steamapps/libraryfolders.vdf", key = "path", holds = "steamapps" }` (Steam's libraries). The host reads the file (Valve's text: `"key" "value"`), and keeps each value that is an absolute path to a folder holding `holds`, once. Read-only: a grant with it and `write = true` doesn't load. |
-
-Plugins that ask for the same name share the player's mapping. Two names are the host's own,
-in `SHARED_FOLDERS`: `games` (`GAMES_FOLDER`, default `~/Games`) and `packages`
-(`PACKAGES_FOLDER`, default `~/Downloads`). Settings shows each once, with the host's title and
-help; a plugin's own `default`, `title` and `help` for them are ignored. Each console's games
-install into a folder named for the console inside the first `games` folder (`PS5/`, `PS4/`,
-`PC/`), and its packages are found in that console's folder inside each `packages` folder.
-
-**`process`**: programs the host may start for the plugin, through `Programs` or a
-`LaunchSpec`. Three forms, matched by `Permissions::allows_program`:
-
-| Rule | Matches |
-|---|---|
-| `builds/*/emu`, `builds/*/*.AppImage` | A path in the plugin's data folder. `*` as a whole part matches any name; `*.ext` any name with that ending. The parts must line up one to one. |
-| `folder:<name>` | Any file in a host folder the manifest asks for. |
-| `system:<name>` | A program on the system's `PATH`, by file name, never a path. |
-
-An empty list means the plugin may not start anything.
-
-**`links`**: links the host may open for the plugin with the system's handler, by how they
-start: `["steam://install/"]`. A release's `store` link opens only when one of them starts it,
-and only when it is one line of plain characters.
-
-**`long_running`** and **`polkit`**, system plugins only: entries of `process` (`system:<name>`)
-that may run with no time limit, their output read line by line (`Programs::stream`), and that
-may run as the administrator through `pkexec`. Each must also be in `process`; the host refuses
-them from any other kind.
+Source: `plugins/system/host/plugin.toml`, with its comments removed.
 
 ## Lifecycle
 
-`crates/nexus-core/src/kernel.rs` drives it:
+`Kernel` (`crates/nexus-core/src/kernel.rs`) runs every plugin through these steps:
 
-1. **Discover.** Built-in factories and extension folders become candidates.
-2. **Validate.** Bad manifests, a wrong `host_api`, bad folder names, safe mode, kind and runtime
-   rules. Each rejection lands in `BootReport::rejected` with a `LoadError`.
-3. **Resolve.** Dependencies are ordered; cycles and missing ones are rejected.
-4. **Load.** `manifest()` is read. No work happens yet.
-5. **Init.** For `activation = "eager"` at boot, otherwise the first time the host needs a
-   capability. The host checks that `Provided::capabilities()` equals the manifest's
-   `capabilities`; if not, it calls `shutdown` and fails the plugin with
-   `LoadError::CapabilityMismatch`.
-6. **Shutdown.** At most once per activation, under a timeout (5 s by default), dependents first.
-   It runs through `Kernel::deactivate`, and for every plugin when the app quits
-   (`Kernel::shutdown`). Turning a plugin off in the app makes the core stop using it; it
-   doesn't call `shutdown`.
+1. **Discover.** Built-in plugins come from `built_in_plugins`. Third-party folders come from
+   `discover`: each subfolder with a `plugin.toml` or `theme.toml`.
+2. **Validate.** `validate` checks each manifest. A bad one goes into `BootReport::rejected` with a
+   `LoadError`. Two plugins with one id: the second gets `LoadError::Duplicate`.
+3. **Resolve.** `resolve` orders the plugins from their dependencies (a theme's `extends` counts as a
+   dependency). `BootReport::order` lists the loaded plugins, dependencies first.
+4. **Load.** The kernel builds each plugin. A plugin whose code does not match its `kind` (a theme
+   that has an `init`, or the reverse) is rejected. A plugin made for other systems still loads,
+   but turned off. The player may turn it on to use their own build.
+5. **Init (activate).** `CodePlugin::init` runs once. A plugin with `activation = "eager"` runs at
+   boot. A `lazy` plugin runs the first time the host asks for its capabilities
+   (`Kernel::provided`). A theme has no `init`.
+6. **Deactivate.** `Kernel::deactivate` first deactivates the plugins that depend on this one, then
+   calls `shutdown`. `Kernel::shutdown` deactivates every plugin, dependents first. The state then
+   returns to loaded, so a later call runs `init` again.
 
-Every call into a plugin runs under a timeout (`HostConfig::call_timeout`, 30 s) and a panic
-guard. A panic or a timeout becomes `PluginError::Panicked` or `PluginError::Timeout` for that
-call; the app goes on.
+The host checks that `init` provides exactly the capabilities the manifest declares
+(`Provided::capabilities`). A mismatch fails the plugin with `LoadError::CapabilityMismatch`, and
+the host calls `shutdown` first.
 
-A plugin that starts its own task must stop it in `shutdown`. `release-catalog` keeps the
-`JoinHandle` of its refresh task and aborts it there, and also aborts a task left from an
-activation before.
+A plugin whose `init` fails stays failed for the rest of the run. Later calls return the same reason
+as `CoreError::PluginUnavailable`. The kernel publishes `Event::PluginActivated`,
+`Event::PluginFailed` and `Event::PluginDeactivated` on the event bus.
+
+The player can turn a plugin off. The host then refuses to activate it: `Kernel::provided` returns
+`PluginUnavailable` ("it is turned off"). The host saves the choice under `app.disabled_plugins`,
+and under `app.enabled_plugins` for a plugin made for other systems.
+
+### Timeouts and panics
+
+Every call into a plugin goes through `guarded` (`crates/nexus-core/src/guard.rs`), which `init`
+and `shutdown` use too. It adds:
+
+- a tracing span, `plugin_call`, tagged with `plugin_id` and the method name,
+- a timeout: `HostConfig::call_timeout` for a call and for `init`, `HostConfig::shutdown_timeout`
+  for `shutdown`. A timeout returns `PluginError::Timeout`,
+- a panic guard. A panic returns `PluginError::Panicked`, and the other plugins keep working.
+
+The timeout fires at the plugin's next `.await`. A plugin that blocks its thread without awaiting
+holds that worker thread until it returns. Do not block in a plugin: use async calls, or
+`tokio::task::spawn_blocking`.
 
 ## PluginContext
 
-`init` gets a `PluginContext` (`crates/nexus-api/src/context.rs`). It is the only way a plugin
-reaches the host, and it is `Clone`, so capability objects keep their own copy:
+`init` gets a `PluginContext`. It is the only way a plugin reaches the host. Each plugin gets its
+own, scoped to its id and its manifest (`Kernel::context_for`).
+
+```rust
+pub struct PluginContext {
+    plugin: PluginId,
+    config: Arc<dyn ConfigStore>,
+    storage: Arc<dyn Storage>,
+    folders: Arc<dyn Folders>,
+    programs: Arc<dyn Programs>,
+    http: Arc<dyn HttpClient>,
+    log: Logger,
+    events: Arc<dyn EventSink>,
+    services: ServiceRegistry,
+}
+```
+
+Source: `crates/nexus-api/src/context.rs`.
+
+Each field has a method of the same name: `ctx.storage()`, `ctx.folders()`, and so on. The
+context is `Clone`. A plugin keeps it, or keeps the parts it needs.
+
+| Facade | What it gives | Host side |
+| --- | --- | --- |
+| `config()` | `ConfigStore`: the plugin's settings, by `ConfigScope`. | `ScopedConfig` in `config.rs`, saved under `plugins.<id>`. |
+| `storage()` | `Storage`: files in the plugin's own data folder. | `DirStorage` over `HostConfig::plugin_dir`. |
+| `folders()` | `Folders`: host folders the manifest asks for. | `HostFolders` in `folders.rs`. |
+| `programs()` | `Programs`: find and run programs the manifest allows. | `HostPrograms` in `programs.rs`. |
+| `http()` | `HttpClient`: HTTP to the hosts in `permissions.network`. | `AllowlistHttp` in `facades.rs`. |
+| `log()` | `Logger`: `debug`, `info`, `warn`, `error`. | `TracingLog`, tagged with the plugin id. |
+| `events()` | `EventSink`: publish `Event::Custom`, and subscribe to all events. | `PluginEvents` in `facades.rs`. |
+| `services()` | `ServiceRegistry`: host facts, looked up by type. | Built in `Kernel::context_for`. |
+
+### Paths
+
+Two path types keep a plugin inside its folders:
+
+- `RelPath`: a relative path with `/` and no `.`, `..`, empty, `\` or `:` parts. Joining it to a base
+  folder never leaves that folder. The empty path is the base folder.
+- `HostPath`: a `folder` name from the manifest, a `root` (which of the player's folders for that
+  name), and a `RelPath` inside it.
+
+### Storage and folders
+
+`Storage` works on the plugin's data folder with `RelPath`: `read`, `write` (creates parent
+folders), `write_at`, `exists`, `list`, `remove`, `rename` and `set_executable`.
+
+`Folders` works on host folders with `HostPath`. The host refuses:
+
+- a name the manifest does not ask for (`PermissionDenied`),
+- a write, rename or `set_executable` without `write = true`,
+- a symlink that leaves the folder.
+
+`Folders::roots(name)` lists the player's folders for a name. It is empty until the player maps the
+name and the grant has no default. `Folders::read_range` returns at most `MAX_FOLDER_READ` bytes
+per call. `Folders::size` counts at most `MAX_SIZE_FILES` entries.
+
+### Programs
+
+`Programs` finds and runs programs that `permissions.process` allows. The host refuses any other.
+
+- `find` returns a program's real path, or `None` when it is not there.
+- `output` runs a program with no input and returns its standard output. The output is at most
+  `MAX_PROGRAM_OUTPUT` bytes, and the run is at most `MAX_PROGRAM_TIME`. A longer run fails with
+  `PluginError::Timeout`.
+- `stream` runs a program that `long_running` allows, and hands each line to a callback. With
+  `elevated = true` it runs through `pkexec`, and `polkit` must allow it. The default
+  implementation returns `PermissionDenied`.
+
+`Programs` is for short checks, such as reading a build's `--help`. Games start through
+`Launcher::prepare`, which returns a `LaunchSpec`. The host starts that process.
+
+### HTTP
+
+`HttpClient::send` takes an `HttpRequest` (`HttpRequest::get(url)` builds a GET) and returns an
+`HttpResponse`. `HttpResponse::json` reads a 2xx body as JSON. The host checks every request
+against `permissions.network`. It follows redirects, up to `MAX_REDIRECTS`, and checks each hop. A
+URL with user info, or with a scheme other than `http` or `https`, is refused.
+
+### Events
+
+`EventSink::publish(topic, payload)` sends an `Event::Custom` tagged with the plugin id. A plugin
+can publish custom events only. `subscribe` returns a stream of every `Event`. The Game Catalog
+publishes `RELEASES_CHANGED` when its catalogs change between the core's asks, and the core then
+asks again.
+
+### Services
+
+`ServiceRegistry::get::<T>()` returns a host service by type. Two are always present
+(`Kernel::context_for`):
+
+- `HostInfo`: `api_version`, `platform`, `safe_mode`, `runs_32bit`.
+- `VpnGate`: `check()` tells whether the plugin may fetch now under "Download only through a VPN".
+  A plugin asks it before bulk fetches. It reports on the VPN only: the plugin's own HTTP does not
+  go through the VPN's interface.
+
+The PC plugin reads `HostInfo` in `init`:
+
+```rust
+let host = ctx.services().get::<HostInfo>();
+let platform = host.as_ref().and_then(|h| h.platform).or_else(Platform::current).unwrap_or(Platform::Linux);
+let runs_32bit = host.is_some_and(|h| h.runs_32bit);
+```
+
+Source: `plugins/emulators/pc/src/lib.rs`.
+
+Plugins do not reach each other through the registry.
+
+## Capabilities
+
+A capability is one thing a plugin does for the host. The manifest names it in `capabilities`.
+`init` returns it in a field of `Provided` with the matching name. The two must agree.
+
+| Manifest name | Trait | `Provided` field |
+| --- | --- | --- |
+| `catalog` | `Catalog` | `catalog` |
+| `downloader` | `Downloader` | `downloader` |
+| `installer` | `Installer` | `installer` |
+| `configurator` | `Configurator` | `configurator` |
+| `launcher` | `Launcher` | `launcher` |
+| `compatibility` | `Compatibility` | `compatibility` |
+| `slots` | `Slots` | `slots` |
+| `game_installer` | `GameInstaller` | `game_installer` |
+| `metadata` | `Metadata` | `metadata` |
+| `releases` | `Releases` | `releases` |
+| `theme` | none (themes only) | none |
+| `network`, `vpn`, `bluetooth`, `audio`, `power`, `os_updates`, `os_install` | `NetworkSettings`, `VpnSettings`, `BluetoothSettings`, `AudioSettings`, `PowerSettings`, `OsUpdates`, `OsInstall` | `network`, `vpn`, `bluetooth`, `audio`, `power`, `os_updates`, `os_install` |
+
+`Provided` also has an `assets` field: a `Files` object that serves the images slot data and
+catalog entries name as `ImageSource::Asset`. The manifest's `assets` folder is the alternative.
+
+The traits are in `crates/nexus-api/src/`. All except `VpnSettings` are `async_trait` traits.
+
+### Catalog
+
+`Catalog` (`catalog.rs`) lists, searches and describes the games one emulator can run.
+
+- `list(PageRequest)` returns a `Page<GameSummary>`. `PageRequest::ALL` asks for everything.
+- `search(&SearchQuery)` returns `GameSummary` values, at most `limit`.
+- `details(game)` returns `GameDetails`, or `PluginError::NotFound`.
+- `artwork(game, ArtworkKind)` returns an `ImageSource` or `None`.
+
+A `GameSummary.id` is the plugin's own game id. The host makes it global with a `GameKey`
+(`plugin:local`).
+
+### Downloader and Installer
+
+These two traits describe work as data (`plans.rs`). The host does the side effects.
+
+- `Downloader::plan(&DownloadRequest)` returns a `DownloadPlan`: a label and a list of `Artifact`
+  values. An artifact has a `url`, a lowercase hex `sha256`, an optional `Signature`, a `dest` in
+  the plugin's data folder, and an optional `Unpack`. The host fetches, resumes and checks each
+  file, and refuses one whose SHA-256 does not match. It unpacks an archive into `Unpack.into`
+  (`ArchiveFormat`: `TarGz`, `Zip` or `AppImageInZip`) and deletes the archive.
+- `Installer` installs, updates and removes emulator versions with the files the host downloaded:
+  `available`, `installed`, `install`, `uninstall`, and `update`. The default `update` installs the
+  new version and then uninstalls the old, so a failed install leaves the old one.
+
+### Launcher
+
+`Launcher::prepare(game, config)` returns a `LaunchSpec`. `config` is the game's merged settings:
+the emulator's settings with the game's on top. The host starts, watches and stops the process, and
+starts it only if `permissions.process` allows `program`. `on_exit` has a default that does nothing.
 
 ```rust
 #[async_trait]
-impl CodePlugin for PcPlugin {
+impl Launcher for Kyty {
+    async fn prepare(&self, game: &str, config: &Value) -> PluginResult<LaunchSpec> {
+        let found = self.emu.games().find(self.emu.host().folders.as_ref(), game).await?;
+        let builds = self.emu.builds();
+        // `config` is the emulator settings with the game's settings on top; the game's
+        // fields are optional, so null ones fall back to the emulator's.
+        let settings = builds.settings().for_launch(config).await;
+        let run = builds.run().await?;
+        let args = self.args_for(&run.program, run.tag.as_deref(), &settings, LaunchArg::path(found.dir)).await;
+        Ok(LaunchSpec { program: run.program, args, env: Default::default(), cwd: run.cwd, game_process: None })
+    }
+}
+```
+
+Source: `plugins/emulators/kytyps5/src/lib.rs`.
+
+A `Location` says where a program or folder is: `Data(RelPath)` in the data folder,
+`Folder(HostPath)` in a host folder, or `System(String)` on the `PATH`. A `LaunchArg` is text or a
+path (`LaunchArg::path(..)`) that the host turns into a real path. Set `game_process` for a program
+that hands the game to another one and may exit at once, such as a store's client.
+
+### Configurator
+
+`Configurator` describes and checks settings. See [Settings](#settings).
+
+### Compatibility
+
+`Compatibility::status(game)` returns a `CompatInfo`: a `CompatLevel` (`Unknown`, `Nothing`,
+`Boots`, `Menus`, `Ingame`, `Playable`) and optional notes, source system, page and test date
+(`extras.rs`).
+
+### GameInstaller
+
+`GameInstaller` installs games from packages and disc images the player has (`games.rs`). The plugin
+reads and decodes. The host owns the job: progress, cancel, and clean-up after a crash.
+
+- `candidates()` lists the `Installable` packages in folders the plugin may read.
+- `begin(source, job)` checks `source`, starts the install in the background, and returns the work
+  folder at once. The work moves into place when done, and reports through the `InstallJob`:
+  `progress`, `cancelled`, `finished` (exactly once), and the optional `games_folder` and `take`.
+
+A slot action named `HOST_INSTALL_GAME` asks the host to run an install.
+
+### Releases
+
+`Releases::releases(&Console)` returns the catalog of games to download for one console, as a
+`ReleaseList`, or `None` when the plugin has no catalog for that console (`releases.rs`). A service
+reads the lists. The core gives each list to the emulator that plays its console.
+
+A `Release` holds the fields the host sorts, groups, searches and downloads by: `id` (the torrent's
+info hash), `title_id`, `platform`, `title`, `region`, `size_bytes`, `torrent` (a magnet link),
+`facts`, and more. Set `store` for a release a store installs, such as `steam://install/440`. The
+manifest must allow that link in `permissions.links`. `Releases::store_installs` reports the
+installs a store is doing. It returns none by default.
+
+A `Fact` has a `FactKind` (`Publisher`, `ReleaseDate`, `Firmware`, `Compatibility`, and others), a
+label, a value and an optional page.
+
+### Metadata
+
+`Metadata::describe(&GameRef)` returns a game's words and art as `GameMetadata`, or `None` when the
+catalog has no such game. The host fills in what the `metadata` plugins leave out. The PlayStation
+Store service is the example in this repo.
+
+### System capabilities
+
+A system plugin provides the machine's settings (`system.rs`). The core uses the first active
+system plugin that provides each capability, and shows a capability nobody provides as
+unavailable.
+
+Quick calls answer within the call timeout. Long work (joining a network, a scan, pairing,
+installing the OS) starts in the background and returns at once. It reports through the
+`SystemJob` the host passes in: `progress`, `done`, `failed`, `cancelled`.
+
+`VpnSettings` is not async. The host runs its blocking calls off its async threads.
+
+The built-in system plugin (`plugins/system/host`) builds its manifest from `plugin.toml`, and on
+macOS and Windows it keeps only `Vpn` and `Power`:
+
+```rust
+impl Plugin for HostSystem {
+    fn manifest(&self) -> PluginManifest {
+        let mut manifest = PluginManifest::from_toml(MANIFEST).expect("the bundled manifest is valid");
+        if !cfg!(target_os = "linux") {
+            manifest.capabilities.retain(|c| matches!(c, Capability::Vpn | Capability::Power));
+        }
+        manifest
+    }
+}
+```
+
+Source: `plugins/system/host/src/lib.rs`.
+
+## Settings
+
+A plugin with settings provides `Configurator`: `schema(scope)`, `defaults(scope)` and
+`validate(scope, value)`. A `ConfigScope` is `Emulator` (the plugin's own settings) or
+`Game(id)` (one game's). The host stores the values through `ConfigStore`, and a theme draws the form
+from the schema.
+
+Write the settings as Rust types and let `schemars` make the schema. Point the derives at the
+re-exports in `nexus_api`:
+
+```rust
+/// Per-game settings: anything set here wins over the KytyPS5 settings.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(crate = "nexus_api::serde", deny_unknown_fields)]
+#[schemars(crate = "nexus_api::schemars")]
+pub struct GameSettings {
+    #[serde(default)]
+    #[schemars(title = "Video out")]
+    pub video_out: Option<VideoOut>,
+    #[serde(default)]
+    #[schemars(title = "Extra arguments")]
+    pub extra_args: Option<String>,
+}
+```
+
+Source: `plugins/emulators/kytyps5/src/lib.rs`.
+
+The host reads these parts of the schema (`crates/nexus-core/src/settings_schema.rs`):
+
+- `properties` of type boolean (a toggle), integer or number (a number), and string (text). Other
+  properties are left out of the form.
+- `enum`, `oneOf` and `anyOf` give a choice. A `$ref` into `$defs` is followed. A doc comment on a
+  variant is its label.
+- `Option<T>` becomes a field that may be unset. An optional choice gets an "As the emulator"
+  entry.
+- `title` is the label, `description` is the help line, and `default` is the value shown until the
+  player sets one.
+- `x-order` is a list of keys that sets the order of fields. The rest follow, by name.
+
+An emulator sets `x-order` in its derive, for example `#[schemars(crate = "nexus_api::schemars",
+extend("x-order" = ["own_build", "release_repo", ...]))]` (`plugins/emulators/kytyps5/src/lib.rs`).
+
+A console emulator built on the kit does not implement `Configurator` by hand. It implements the
+kit's `Settings` trait on its settings type, and `SettingsStore<S>` provides `Configurator` for
+it: see [Shared code](#shared-code-emulator-kit). A game scope uses the `Game` type of that trait.
+
+To show a settings form in Settings, return a `SlotContent::SettingsPanel` in the
+`settings.panel` slot.
+
+## Slots
+
+A slot is a named place in the UI that plugins fill with data. A theme decides where and how it
+draws the data. A plugin provides `Slots`:
+
+```rust
+#[async_trait]
+pub trait Slots: Send + Sync {
+    async fn items(&self, request: &SlotRequest) -> PluginResult<Vec<SlotItem>>;
+
+    async fn run_action(&self, action: &str, game: Option<&str>, args: &serde_json::Value) -> PluginResult<()>;
+}
+```
+
+Source: `crates/nexus-api/src/slots.rs`.
+
+The `SlotId` values (`SlotId::ALL`):
+
+| Slot | Where it shows |
+| --- | --- |
+| `game.badge` | Small labels on a game's card and detail page. |
+| `game.action` | Buttons on a game's detail page. |
+| `game.detail-section` | Blocks of extra information on a game's detail page. |
+| `settings.panel` | A settings form in the Settings screen. |
+| `emulator.panel` | Blocks on a plugin's page, and in the Emulator Management screen. |
+| `catalog.action` | Buttons on the Catalog screen, and badges that say what they did, from a service with `releases`. |
+
+The first three are per game (`SlotId::is_per_game`): the host asks only the plugin that owns the
+game, and `SlotRequest.game` carries the plugin's own game id.
+
+An item is a `SlotItem` with an `id` (unique within the plugin), an `Order` and a `SlotContent`:
+`Badge`, `Action`, `Section` or `SettingsPanel`. `Order` has a `priority`, and `before` and `after`
+lists of peer ids. `before` and `after` win over `priority`, and load order never matters.
+
+When the player picks an `Action` button, the host calls `Slots::run_action` with the item's
+`action` and `args`. Two action names belong to the host: `HOST_OPEN_SETTINGS` and
+`HOST_INSTALL_GAME`.
+
+The console emulator in the kit builds its slots like this (trimmed):
+
+```rust
+#[async_trait]
+impl<F: Flavor> Slots for ConsoleEmulator<F> {
+    async fn items(&self, request: &SlotRequest) -> PluginResult<Vec<SlotItem>> {
+        let item = |id: &str, content| SlotItem { id: id.into(), order: Order::default(), content };
+        Ok(match (request.slot, request.game.as_deref()) {
+            (SlotId::SettingsPanel, None) => vec![item(
+                "settings",
+                SlotContent::SettingsPanel { title: F::NAME.into(), scope: ConfigScope::Emulator },
+            )],
+            _ => Vec::new(),
+        })
+    }
+```
+
+Source: `plugins/shared/emulator-kit/src/console.rs`, with the other match arms removed.
+
+## Errors
+
+Plugin calls return `PluginResult<T>`, which is `Result<T, PluginError>` (`error.rs`).
+
+| Variant | Use |
+| --- | --- |
+| `NotFound` | The thing does not exist. `Catalog::details` returns it for an unknown game. |
+| `InvalidInput` | Bad input. `Configurator::validate` returns it with a message the player can read. |
+| `PermissionDenied` | The manifest does not allow it. The host returns it for a facade call. |
+| `Network`, `Storage` | A network or storage failure. |
+| `Unsupported` | The plugin cannot do it here. |
+| `Precondition` | Something must happen first, such as installing a build. |
+| `OwnBuildMissing` | The player's own build is on but missing. The host words it for the player. |
+| `Timeout`, `Panicked` | The host reports these about a plugin call. |
+| `Other` | Anything else. |
+
+Most variants carry text. A typed precondition (`OwnBuildMissing`) carries data, and the host words
+it, so a plugin does not name the host's screens. `PluginError` converts from `InvalidPath`,
+`InvalidId` and `serde_json::Error`, all as `InvalidInput`, so `?` works on them.
+
+## Shared code: emulator-kit
+
+`emulator-kit` (`plugins/shared/emulator-kit`) is a crate, not a plugin. Two emulators use it
+as a whole (KytyPS5 and shadPS4), and the PC plugin uses parts of it. It depends on `nexus-api` like
+a plugin, plus `tokio` and the Kraken decoder for PS5 packages.
+
+A console emulator describes itself, and the kit runs the rest:
+
+- A `Flavor` (`builds.rs`) describes the emulator's builds. The `BuildManager` plans downloads,
+  installs, updates, rolls back and removes builds, and picks the program a game starts. A new
+  build runs once with `--help` before it becomes current (`Flavor::runs`). The kit keeps the
+  current build and the one before it, in the plugin's `versions.json`.
+- A `ConsoleSpec` (`console.rs`) describes the console: its games, package formats, compatibility
+  list, keyboard keys and game page section. `ConsoleEmulator` implements `Catalog`,
+  `Compatibility`, `Configurator` and `Slots` from it.
+- The plugin keeps its settings type (`Settings`), its launch arguments, and its game installs.
+
+The kit reaches the host only through `Host` (`host.rs`): storage, folders, programs, HTTP, config,
+the log and the platform. `Host::of(&ctx)` builds it from a `PluginContext`. It never takes the
+whole context, so its tests run on small in-memory doubles.
+
+A `Flavor` implementation, trimmed to its required items:
+
+```rust
+#[async_trait]
+impl Flavor for KytyFlavor {
+    type Settings = Settings;
+    const NAME: &'static str = "KytyPS5";
+    const CONSOLE: &'static str = CONSOLE;
+    const OWN_VERSION: bool = true;
+    const OFFICIAL_STYLE: ActionStyle = ActionStyle::Primary;
+
+    fn release_source(&self, settings: &Settings) -> PluginResult<ReleaseSource> {
+        let (repo, prereleases) = release_source(settings, self.platform)?;
+        Ok(ReleaseSource { url: releases_url(&repo), cache: releases_cache(&repo)?, prereleases })
+    }
+
+    fn asset_matches(&self, name: &str) -> bool {
+        asset_matches(name, self.platform)
+    }
+
+    fn archive_format(&self, asset: &str) -> ArchiveFormat {
+        if asset.ends_with(".zip") { ArchiveFormat::Zip } else { ArchiveFormat::TarGz }
+    }
+
+    async fn program(&self, storage: &dyn Storage, tag: &str) -> PluginResult<RelPath> {
+        data::binary(storage, tag, self.platform).await
+    }
+
+    /// The test run's `--help` must print KytyPS5's banner.
+    fn runs(&self, help: &str) -> bool {
+        banner_version(help).is_some()
+    }
+
+    fn own_build(&self) -> OwnBuild {
+        let name = data::binary_name(self.platform);
+        let files = OWN_PATHS.map(|dir| if dir.is_empty() { name.to_owned() } else { format!("{dir}/{name}") });
+        OwnBuild { folder: OWN_BUILD, itself: true, files: files.to_vec(), system: "kyty_emulator" }
+    }
+}
+```
+
+Source: `plugins/emulators/kytyps5/src/lib.rs`, with the optional methods removed (`pretty`,
+`version`, `work_dir`, `on_switch`, `on_leave_own`).
+
+The optional methods have defaults. `on_switch` and `on_leave_own` run when the current build
+changes, so an emulator that keeps its data next to its program can move it.
+
+The whole `init` of the KytyPS5 plugin wires the kit to `Provided`:
+
+```rust
+#[async_trait]
+impl CodePlugin for KytyPlugin {
     async fn init(&self, ctx: PluginContext) -> PluginResult<Provided> {
-        let host = ctx.services().get::<HostInfo>();
-        let platform = host.as_ref().and_then(|h| h.platform).or_else(Platform::current).unwrap_or(Platform::Linux);
-        let runs_32bit = host.is_some_and(|h| h.runs_32bit);
-        let pc = Arc::new(Pc { ctx, platform, runs_32bit, not_games: Mutex::default() });
+        let host = Host::of(&ctx);
+        let spec = ConsoleSpec {
+            console: Console::Ps5,
+            packages: &[Format::Ps5Package, Format::Exfat],
+            compat: CompatList { url: COMPATIBILITY, page: LIST_PAGE, parse: compat::kyty },
+            keys: KEYS,
+            section: "kyty",
+            version_row: false,
+            own_row: true,
+        };
+        let emu = Arc::new(ConsoleEmulator::start(KytyFlavor { platform: host.platform }, spec, host).await?);
+        let kyty = Arc::new(Kyty { emu: emu.clone(), options: Default::default() });
         Ok(Provided {
-            catalog: Some(pc.clone()),
-            launcher: Some(pc.clone()),
-            configurator: Some(pc.clone()),
-            game_installer: Some(pc.clone()),
-            slots: Some(pc),
+            catalog: Some(emu.clone()),
+            downloader: Some(emu.builds().clone()),
+            installer: Some(emu.builds().clone()),
+            configurator: Some(emu.clone()),
+            launcher: Some(kyty.clone()),
+            compatibility: Some(emu.clone()),
+            game_installer: Some(kyty),
+            slots: Some(emu),
             ..Provided::default()
         })
     }
 }
 ```
 
-| Method | Type | What it gives |
-|---|---|---|
-| `plugin()` | `&PluginId` | The plugin's own id. |
-| `config()` | `ConfigStore` | `get(&scope)` and `set(&scope, value)`: the plugin's settings per `ConfigScope`, stored by the host in `config.json` under `plugins.<id>`. `get` returns `Null` when nothing is stored. |
-| `storage()` | `Storage` | Files in the plugin's data folder, `<data-dir>/plugins/<id>`: `read`, `write`, `write_at`, `exists`, `list`, `remove`, `rename`, `set_executable`. Paths are `RelPath`s. |
-| `folders()` | `Folders` | The named host folders from `permissions.filesystem`, through `HostPath`s. |
-| `programs()` | `Programs` | `find(&Location)` and `output(&Location, args, timeout)` for the programs `permissions.process` allows. |
-| `http()` | `HttpClient` | `send(HttpRequest)` to the hosts in `permissions.network`. `HttpResponse::json()` fails on a non-2xx status. |
-| `log()` | `Logger` | `debug`, `info`, `warn`, `error` into the host log, tagged with the plugin id. |
-| `events()` | `EventSink` | `publish(topic, payload)` sends an `Event::Custom`; `subscribe()` is a stream of every `Event`. |
-| `services()` | `ServiceRegistry` | Host services by type: `get::<HostInfo>()` and `get::<VpnGate>()` are always there. |
+Source: `plugins/emulators/kytyps5/src/lib.rs`.
 
-### Paths: RelPath and HostPath
-
-`RelPath` is a path inside a folder the host owns. It is relative, uses `/`, and has no `.`,
-`..`, empty part, `\` or `:`, so joining it to its base can never leave the base.
-`RelPath::new` checks that; `RelPath::root()` is the base itself; `join(name)` checks the
-part it adds.
-
-`HostPath` is a path in a host folder: `folder` (the grant's name), `root` (which of the
-player's folders for that name, an index into `Folders::roots`) and `path` (a `RelPath`
-inside it). A plugin finds its games by walking the roots, as `Pc::pc_folders` and `Pc::games`
-do:
-
-```rust
-for root in folders.roots(GAMES).await? {
-    let dir = HostPath::new(GAMES, root.root, RelPath::new(CONSOLE_FOLDER)?);
-    for entry in folders.list(&dir).await.unwrap_or_default() {
-        // ...
-    }
-}
-```
-
-`Folders` refuses a name the manifest doesn't ask for, a write without `write = true`, and a
-symlink that leads out of the folder. `read_range` reads at most `MAX_FOLDER_READ` (16 MiB) per
-call; `write_at` writes big files in pieces of that size; `size` counts at most
-`MAX_SIZE_FILES` entries. `rename` moves within one folder and root only, and fails if the
-target exists.
-
-### Programs
-
-`Programs::output` runs an allowed program in its own folder with no input, for at most
-`MAX_PROGRAM_TIME` (10 s), and returns at most `MAX_PROGRAM_OUTPUT` (64 KiB) of its standard
-output. Use it to check a build: KytyPS5 runs each new build with `--help` and reads which
-options it knows. `find` returns the real path, or `None`; for `Location::System` it looks on
-`PATH`, which is how the PC plugin picks `umu-run` or `wine`.
-
-`Programs::stream` (system plugins, `long_running`) runs a program until it ends, hands each
-line of its output and errors to a callback, stops it when a cancel check says so, and returns
-its exit code. With `elevated` it runs through `pkexec` (`polkit`); pkexec's 126 or 127 means the
-player dismissed the password prompt. An action that must report a failure (forgetting a network,
-switching the sound output) runs this way, for its exit code.
-
-A plugin never starts a game itself. It returns a `LaunchSpec`, and the host starts, watches and
-stops the process.
-
-### Host services
-
-`HostInfo` has `api_version`, `platform` (an `Option<Platform>`), `safe_mode` and `runs_32bit`
-(the host runs 32-bit Linux programs). Prefer its `platform` over `Platform::current()`: tests
-set it with `FakeHost::platform`.
-
-`VpnGate::check()` tells whether the player's "Download only through a VPN" lets the plugin
-fetch now: `Ok(VpnPass::Open)`, `Ok(VpnPass::Unbound { reason })` where the system can't bind
-traffic to a VPN, or `Err(VpnBlock::Waiting | NoVpn)`. Ask it before fetching what the player
-downloads in bulk; `release-catalog` asks it before a forum refresh. The plugin's own HTTP does
-not go through the VPN.
-
-### Events
-
-The bus carries `Event` (`crates/nexus-api/src/event.rs`): plugin activation, downloads,
-installs, processes, `LibraryChanged`, `StateChanged`, `ThemeChanged`, and `Custom`. A plugin
-publishes only `Custom`, with its id attached by the host. `release-catalog` publishes
-`RELEASES_CHANGED` (`"releases.changed"`) when its catalogs change between the core's asks, and
-the core asks for them again.
-
-## Capabilities
-
-`Provided` (`crates/nexus-api/src/plugin.rs`) holds one optional `Arc` per capability. Its
-`capabilities()` set must equal the manifest's. The traits are all `async_trait`, `Send + Sync`,
-and return `PluginResult`.
-
-| `Capability` | `Provided` field | Trait and methods | File |
-|---|---|---|---|
-| `catalog` | `catalog` | `Catalog`: `list(PageRequest)`, `search(&SearchQuery)`, `details(game)`, `artwork(game, ArtworkKind)` | `catalog.rs` |
-| `downloader` | `downloader` | `Downloader`: `plan(&DownloadRequest) -> DownloadPlan` | `plans.rs` |
-| `installer` | `installer` | `Installer`: `available`, `installed`, `install(version, files)`, `uninstall(version)`, `update(from, to, files)` | `plans.rs` |
-| `configurator` | `configurator` | `Configurator`: `schema(&scope)`, `defaults(&scope)`, `validate(&scope, value)` | `config.rs` |
-| `launcher` | `launcher` | `Launcher`: `prepare(game, config) -> LaunchSpec`, `on_exit(game, &ExitInfo)` | `plans.rs` |
-| `compatibility` | `compatibility` | `Compatibility`: `status(game) -> CompatInfo` | `extras.rs` |
-| `slots` | `slots` | `Slots`: `items(&SlotRequest)`, `run_action(action, game, args)` | `slots.rs` |
-| `game_installer` | `game_installer` | `GameInstaller`: `candidates()`, `begin(&HostPath, Arc<dyn InstallJob>) -> HostPath` | `games.rs` |
-| `metadata` | `metadata` | `Metadata`: `describe(&GameRef) -> Option<GameMetadata>` | `catalog.rs` |
-| `releases` | `releases` | `Releases`: `releases(&Console) -> Option<ReleaseList>` | `releases.rs` |
-
-`theme` is a capability too, but only a theme's manifest declares it, and no `init` provides it.
-The system capabilities are in "The machine (system plugins)" below.
-
-The files are in `crates/nexus-api/src/`. What the built-in plugins provide:
-
-| Plugin | Capabilities |
-|---|---|
-| `emu-kyty`, `emu-shadps4` | catalog, downloader, installer, configurator, launcher, compatibility, slots, game_installer |
-| `emu-pc` | catalog, launcher, slots, game_installer, configurator |
-| `emu-steam` | catalog, launcher, slots, releases, metadata |
-| `release-catalog` | releases, configurator, slots |
-| `playstation-store` | metadata |
-
-The API has no seam that no plugin uses: saves, shader caches, launch middleware, and firmware
-or game-file downloads came out in API 0.2.0, and come back when a plugin needs one. An
-emulator's controllers come from its manifest's `[[keymap]]`: with keys listed, its page says
-it plays with a controller or the keyboard.
-
-### Catalog
-
-The games an emulator can run, by the plugin's own id for each game. The host makes the id
-global as a `GameKey` (`<plugin-id>:<game-id>`). `details` fails with `NotFound` for an
-unknown game. Ids must be unique; the contract suite checks it.
-
-`GameSummary` carries `title_id` and `content_id` when the plugin knows them: a `Metadata`
-service describes games by those. `GameDetails::facts` are `GameFact`s; themes know the ids
-`region`, `age`, `version`, `title-id`, `content-id` and `folder`, and show others by label.
-`GameDetails::folder` is the game's `HostPath`: it gives the Game Hub "Open game folder", and
-"Uninstall" when the folder is not a root of a folder grant with `write = true`.
-
-Images are `ImageSource`: `Url`, `Asset` (a `RelPath` in the plugin's assets) or `Folder` (a
-`HostPath`, such as a game's own icon).
-
-### Downloader and Installer: plans, not side effects
-
-A plugin never fetches files itself. `Downloader::plan` returns a `DownloadPlan`: a `label` and
-`Artifact`s, each with a `url`, an optional `size`, a lowercase hex `sha256`, an optional
-Ed25519 `signature`, a `dest` in the data folder and an optional `Unpack` (`TarGz`, `Zip` or
-`AppImageInZip`, into a folder that is replaced). The host downloads, resumes, checks the hash
-and unpacks, then calls `Installer::install` (or `update`) with the `DownloadedArtifact`s.
-KytyPS5's `plan` is a good example: it refuses a build GitHub gives no checksum for.
-
-`InstalledVersion::own` marks a build the player brought; the host never updates it by itself.
-`newest_first` sorts version strings, semver first.
-
-### Launcher
-
-`prepare(game, config)` returns a `LaunchSpec`: a `program` (`Location`), `args` and `env` of
-`LaunchArg`s, and an optional `cwd`. `config` is the game's merged settings: the emulator's,
-then the game's on top.
-
-`Location` is `Data(RelPath)` in the data folder, `Folder(HostPath)` in a host folder, or
-`System(name)` on `PATH`. A `LaunchArg` is text or `LaunchArg::path(location)`, which the host
-turns into a real path. A system program needs a `cwd`. The host spawns only what
-`permissions.process` allows.
-
-A program that hands the game to another one, as a store's client does, sets `game_process`:
-words of the game's own command line. The game is then that process and the ones below it, and
-the program started here is neither waited for nor stopped. The Steam plugin sets
-`SteamLaunch AppId=<id> `. See "A game another program starts" in
-[the desktop reference](reference/desktop.md).
-
-Fail with `PluginError::Precondition` and a sentence for the player when something must happen
-first ("install KytyPS5 first"); the Game Hub shows it. A precondition the host knows has a
-type of its own, and the host words it: `OwnBuildMissing { has_downloaded, folder, program }`
-says the player's own build is on but isn't there, and the host names the emulator's page.
-
-### GameInstaller
-
-Installs games from packages, disc images or finished catalog downloads into the `games`
-folders. `candidates()` lists what the plugin can install from the folders it may read. `begin`
-checks the source, starts the work in the background, and returns at once with the work folder.
-The work reports through `InstallJob`: `progress`, `cancelled`, and `finished` exactly once. On
-an error the work folder must be gone; the host removes it if the app stops first.
-`InstallJob::games_folder` is the folder the player picked, and `take` lets the host move a
-folder it made itself (such as unpacked archives) in place of a copy.
-
-A slot action named `HOST_INSTALL_GAME` (`"host:install-game"`) with a `HostPath` as `args`
-asks the host to run the install as a job in Downloads. KytyPS5 offers one such button per
-candidate on its page. `plugins/shared/emulator-kit/src/installs.rs` holds the shared work:
-read a tree through `Folders`, write a `.part` folder, move it into place.
-
-For the Catalog's downloads to install, the emulator names its `console`, asks for `packages`
-(where downloads go) and `games` with `write = true`, and provides `game_installer`.
-
-### Releases
-
-`releases(&Console)` returns one console's `ReleaseList`, or `None`. The core asks each
-`releases` plugin for the console of each emulator, and gives the list to that emulator. A
-`Release` is one torrent: its `id` is the info hash, `torrent` a magnet link. `ReleaseSource`
-says whether the list was `Fetched`, `Cached` or `Bundled`, and `problem` why a fetch didn't
-give it. Publish `RELEASES_CHANGED` when the lists change on their own.
-
-A `Release` has no one catalog's schema. Its fields are what the host sorts, groups, searches
-and downloads by: title ids, platform and system, version, region, size, the day the catalog
-added it, the torrent and its counts, a store link, and the pictures. The rest is data the
-plugin makes:
-
-- `facts`: `Fact { kind, label, value, url }`, in the order the Game Hub lists them. The
-  `FactKind` says what a fact is about: `publisher`, `developer`, `release-date` (a date or a
-  year, which the host writes in words and sorts by), `players`, `update`, `format`,
-  `firmware`, `interface-languages`, `audio-languages`, `genre` (the genre chips' words, not
-  listed) and `compatibility` (a community tier with its page, shown on its own: the release
-  catalog gives ProtonDB's tier of a Windows game packed with Wine). An unknown kind reads as
-  `other` and is listed by its label.
-- `metadata`: a `GameMetadata` about the release's game, such as Steam's words and art. The
-  host fills in from it what the `metadata` plugins leave out.
-- `install_warning`: why the release may not install, shown beside it. The release catalog
-  sets it for a PS5 package.
-
-A catalog whose store installs its releases lists the installs the store is doing in
-`store_installs()`: each a `StoreInstall` with its release, title, phase (`Queued`,
-`Downloading`, `Paused`, `Installing`), bytes done of the total, and `open`, a link to the
-store's own Downloads page (allowed in `permissions.links`). The host reads them every
-`store_poll` (2 s) while one runs or for a minute after an Install, ten times as long
-otherwise; it shows each in Downloads, and when one ends it reads the Library and the catalogs
-again. The Steam plugin reads them from its app files: every app not fully installed.
-
-An emulator may describe its own games with `metadata`: the Steam plugin gives a Steam game
-(`platform` `Steam`, its app id as the title id) Steam's store's details, from
-`store.steampowered.com/api/appdetails`, kept a week in its storage.
-
-A game its store removes (Steam's) gives `GameDetails.uninstall_link`, `steam://uninstall/440`:
-Uninstall opens it, when `permissions.links` allows it, instead of deleting the game's folder.
-
-A release a store installs has an empty `torrent` and a `store` link instead
-(`steam://install/440`): the Game Hub's Install opens that link, which the plugin's
-`permissions.links` must allow, and downloads nothing. `hidden` puts the game under the
-Catalog's "Hidden" filter, as if the player hid it in Nexus (Steam's Hidden collection);
-`favorite` gives its card a "Favorite" badge. An emulator may provide `releases` for its own
-console: the Steam plugin's console is `Steam`, and its list is the player's Steam library.
-
-`Vm.catalog-available` in the theme contract is true only while a plugin with `releases` is
-turned on. A `releases` plugin may have a boolean setting `show_hidden_filter`: when one sets it
-to `false`, the Catalog has no "Hidden" filter.
-
-An emulator that provides `releases` itself is its console's only catalog: the core asks no
-other plugin for that console (the Steam plugin's console, `Steam`). The Game Catalog gives no
-list for a console whose `show_<console>` setting (`show_ps5`) is `false`. Its settings schema
-names one such toggle for each console an emulator turned on plays. The library is the
-emulator's, so that console's installed games stay.
-
-### Metadata
-
-`describe(&GameRef)` returns a store's `GameMetadata` for a game, by `platform`, `title_id`,
-`content_id`, `title` and `region`, or `None`. Every field may be empty. `playstation-store`
-caches answers in `catalog.json` in its storage.
-
-### The machine (system plugins)
-
-One trait per capability, in `crates/nexus-api/src/system.rs`: `NetworkSettings`,
-`VpnSettings`, `BluetoothSettings`, `AudioSettings`, `PowerSettings`, `OsUpdates` and
-`OsInstall`. Each async trait can say why it's unavailable here (`unavailable()`, for example
-"This PC has no Bluetooth adapter"), and the core shows that reason. `VpnSettings` is blocking,
-like the port it replaced: the host calls it off its async threads.
-
-Quick calls answer within the call timeout. Long work (joining a network, a Bluetooth scan,
-pairing, installing Nexus OS) starts in the background and returns at once; it reports through
-the `SystemJob` the host passes in: `progress(percent, text)`, then `done(text)` or
-`failed(reason)`, and it checks `cancelled()`. An install's `done` text is `Installed` as JSON.
-
-The core keeps "Download only through a VPN" itself: once a system plugin provides `vpn`, it
-reads and switches the VPNs through it, and binds torrents to the VPN's interface as before.
-
-## Settings
-
-A plugin with `configurator` describes its settings as JSON Schema, usually generated from a
-Rust struct with `schemars::schema_for!`. The host stores the values; the theme draws the form.
-From `plugins/services/release-catalog/src/lib.rs`:
-
-```rust
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(crate = "nexus_api::serde")]
-#[schemars(crate = "nexus_api::schemars")]
-pub struct Settings {
-    /// Where the catalog files are: `https://xyz.dev/catalog` gives
-    /// `https://xyz.dev/catalog/ps5.json`. Empty for the catalog that ships with Nexus.
-    #[serde(default)]
-    #[schemars(title = "Catalog address")]
-    pub catalog_url: String,
-    // ...
-    #[serde(default)]
-    #[schemars(title = "Refresh from the forums")]
-    pub refresh_from_forums: bool,
-    // ...
-}
-
-#[async_trait]
-impl Configurator for Catalogs {
-    async fn schema(&self, _scope: &ConfigScope) -> PluginResult<Value> {
-        let mut schema = serde_json::to_value(schemars::schema_for!(Settings))?;
-        // ... adds a "Show <console> games" toggle for each console an emulator plays.
-        Ok(schema)
-    }
-    async fn defaults(&self, _scope: &ConfigScope) -> PluginResult<Value> {
-        Ok(serde_json::to_value(Settings::default())?)
-    }
-    async fn validate(&self, _scope: &ConfigScope, value: &Value) -> PluginResult<()> {
-        // InvalidInput with a sentence the player can read.
-    }
-}
-```
-
-How the core turns a schema into fields (`fields` in `crates/nexus-core/src/settings_schema.rs`):
-
-- `boolean` is a toggle, `integer` and `number` a number, `string` a text field, and an `enum`
-  or `oneOf`/`anyOf` of `const`s a choice. Other properties are left out.
-- The label is the property's `title` (`#[schemars(title = "...")]`), else its key. The help
-  line is its `description`, which schemars takes from the doc comment.
-- A Rust enum variant's doc comment labels that choice.
-- An `Option<_>` choice gets a first entry, "As the emulator", which leaves the value unset.
-- Fields come in the order of the schema's `x-order` list, then the rest by name:
-  `#[schemars(extend("x-order" = ["own_build", "release_repo", ...]))]` in KytyPS5.
-
-`ConfigScope` is `Emulator` (the plugin's own settings) or `Game(id)` (one game's). KytyPS5
-returns a different schema per scope: `Settings` for the emulator, `GameSettings`, with
-optional fields, for a game. Every change goes through `validate` before the host stores it.
-Read the values with `ctx.config().get(&ConfigScope::Emulator)`; a missing value is `Null`, so
-deserialise into a struct with `#[serde(default)]` fields.
-
-The form shows where a `settings_panel` slot item points it; see the next section.
-
-## Slots
-
-Slots are UI a plugin adds as data. The theme decides where and how each one shows, so every
-theme shows them. `Slots::items(&SlotRequest)` returns `SlotItem`s for one `SlotId`; the
-request has a `game` for the per-game slots.
-
-| `SlotId` | Name | Where |
-|---|---|---|
-| `GameBadge` | `game.badge` | Small labels on a game's card and Game Hub |
-| `GameAction` | `game.action` | Buttons on a game's Game Hub |
-| `GameDetailSection` | `game.detail-section` | Blocks of facts on a game's Game Hub |
-| `SettingsPanel` | `settings.panel` | A settings form |
-| `EmulatorPanel` | `emulator.panel` | Blocks on the plugin's page, for an emulator or a service |
-| `CatalogAction` | `catalog.action` | Buttons and status badges on the Catalog, from a `releases` service |
-
-The per-game slots are asked only of the plugin that owns the game.
-
-A `SlotItem` has an `id` (unique in the plugin), an `Order`, and `SlotContent`:
-
-| `SlotContent` | Fields |
-|---|---|
-| `Badge` | `label`, `short` (for small places; empty for the same), `tone` (`Tone`: neutral, info, success, warning, danger), `icon` |
-| `Action` | `label`, `action`, `args` (JSON), `style` (`ActionStyle`: primary, secondary), `icon` |
-| `Section` | `title`, `rows` of `SectionRow { label, value }` |
-| `SettingsPanel` | `title`, `scope` (a `ConfigScope`): the theme draws the `Configurator` form for that scope |
-
-When the player picks an action, the host calls `run_action(action, game, args)` with the
-item's `action` and `args`. After it, the host reads the plugin's slots again. Two action names
-are the host's own: `HOST_OPEN_SETTINGS` (`"host:open-settings"`) opens Settings, and
-`HOST_INSTALL_GAME` installs a package.
-
-The emulator kit's `ConsoleEmulator::items`, which KytyPS5 and shadPS4 provide, shows each
-kind (trimmed):
-
-```rust
-Ok(match (request.slot, request.game.as_deref()) {
-    (SlotId::GameBadge, Some(game)) => {
-        vec![item("compat", games::compat_badge(&self.status(game).await?, self.host.platform))]
-    }
-    (SlotId::GameDetailSection, Some(game)) => {
-        // ... the title id, the version and the build, as rows.
-        vec![item(self.spec.section, SlotContent::Section { title: F::NAME.into(), rows })]
-    }
-    (SlotId::EmulatorPanel, None) => {
-        let mut items = self.builds.switch_items().await;
-        for found in self.candidates().await.unwrap_or_default() {
-            items.push(item(
-                &format!("install-{}", found.label),
-                SlotContent::Action {
-                    label: format!("Install {}", found.label),
-                    action: HOST_INSTALL_GAME.into(),
-                    args: serde_json::to_value(&found.source)?,
-                    style: ActionStyle::Secondary,
-                    icon: None,
-                },
-            ));
-        }
-        items.push(self.controls().keyboard_panel());
-        items.extend(self.builds.update_items().await);
-        items
-    }
-    (SlotId::SettingsPanel, None) => vec![item(
-        "settings",
-        SlotContent::SettingsPanel { title: F::NAME.into(), scope: ConfigScope::Emulator },
-    )],
-    _ => Vec::new(),
-})
-```
-
-Themes render each item with the accessible label `<plugin-id>:<item-id>`, such as
-`emu-kyty:compat`. Tests find slot items by that label.
-
-## Errors
-
-`PluginError` (`crates/nexus-api/src/error.rs`) carries text, except a typed precondition, which
-carries data:
-
-| Variant | Use it for |
-|---|---|
-| `NotFound` | No such game, build or file |
-| `InvalidInput` | Bad settings or arguments; the message is for the player |
-| `PermissionDenied` | The host's refusals |
-| `Network` | HTTP failures |
-| `Storage` | File failures |
-| `Unsupported` | A request this plugin doesn't handle, such as a `DownloadRequest` kind |
-| `Precondition` | Something must happen first: install a build, map a folder |
-| `OwnBuildMissing` | Own build is on, but it isn't there: `has_downloaded`, `folder`, `program`. The host words it |
-| `Timeout`, `Panicked` | Set by the host's guard |
-| `Other` | Anything else |
-
-`InvalidPath`, `InvalidId` and `serde_json::Error` convert into `InvalidInput`, so `?` works on
-`RelPath::new` and on JSON.
-
-## Shared code: emulator-kit
-
-`plugins/shared/emulator-kit` is a library, not a plugin. A console emulator describes itself,
-and the kit runs the rest:
-
-- A `Flavor` describes the emulator's builds: its release source, which asset fits this system,
-  the archive format, where the program is in a build, the test run, where your own build may
-  be, and two hooks. `on_switch` runs when the current build changes, and `on_leave_own` runs
-  when your own build gives way to an official one. KytyPS5 moves its saves and caches in
-  them; shadPS4 needs neither.
-- The `BuildManager` runs the flow over a flavor. It is the plugin's `Downloader` and
-  `Installer`, gives the build panel's buttons (use your own build, switch to official builds,
-  check for new builds, go back) and runs their actions. It also picks the program a game
-  starts, and checks your own build is there first: if not, it fails with
-  `PluginError::OwnBuildMissing`.
-- A `ConsoleSpec` describes the console: its games, package formats, compatibility list (the
-  parser is the real plug point), keyboard keys and game page section. The `ConsoleEmulator`
-  over a spec and a flavor is the plugin's `Catalog`, `Compatibility`, `Configurator` and
-  `Slots`, and lists its packages to install (`candidates`).
-- The plugin's settings type implements `Settings`. The kit reads the stored settings over
-  this system's defaults, for both emulators. `SettingsStore<S>` is the default
-  `Configurator` of a settings type: the schema, defaults and checks of `S` and its per-game
-  settings. `ConsoleEmulator` hands its settings capability to it.
-
-The plugin keeps its settings type, its launch arguments and its game installs. Its `lib.rs`
-holds the flavor, the settings and the launch arguments.
-
-The kit never takes the whole `PluginContext`. It takes the narrow facades in `Host`
-(`Host::of(&ctx)`): storage, folders, programs, HTTP, settings and the log. So its unit tests
-run on in-memory doubles of those alone.
-
-| Module | What it does |
-|---|---|
-| `builds` | `Flavor` and `BuildManager`: official builds, your own build, and the own-build precondition |
-| `console` | `ConsoleSpec` and `ConsoleEmulator`: games, compatibility, settings and the emulator's page |
-| `settings` | The `Settings` trait, the stored settings over this system's defaults, and the default `Configurator` |
-| `host` | `Host`, the narrow facades the kit takes |
-| `github` | GitHub releases as the REST API returns them |
-| `cache` | JSON from the web, kept in storage for a time, and the last copy when the web is down. Only GitHub's API gets GitHub's `Accept` header |
-| `versions` | Builds in `builds/<tag>`, the current one and the one before it, in `versions.json`, changed under one lock |
-| `games` | Installed PS5 and PS4 games in a host folder, up to three folders down; `GameIndex`, `compat_badge` |
-| `compat` | The community compatibility lists, by title id |
-| `controls` | A console's keyboard keys: `Controls { keys }` gives `keyboard_panel()` |
-| `args` | Extra arguments the player types, split as a shell would |
-| `installs` | The background work of a `GameInstaller` |
-| `archive_sets` | A download's archive sets, as the host unpacks them |
-| `pkg5`, `exfat`, `sfo`, `read_at` | The PS5 package, exFAT and `param.sfo` readers |
-| `fail` | A small error type for the readers |
-
-Its `fixtures` feature builds synthetic packages and images for tests.
+For the PC games flow that these folders and installs feed, see
+[reference/archives-and-pc-games.md](reference/archives-and-pc-games.md).
 
 ## Testing
 
-### Unit tests
+`nexus-testkit` (`crates/nexus-testkit`) gives plugin tests a real core over fakes. The root
+module comment in `crates/nexus-testkit/src/lib.rs` lists the pieces. The ones a plugin author
+uses:
 
-Test pure logic inside the plugin crate, as `playstation-store` tests `regions` and
-`release-catalog` tests that every bundled catalog reads:
+- `FakeHost`: builds a real core over a temporary data folder, with fake HTTP, fake processes and
+  a `FakeClock`. `.plugin(StubPlugin)` adds a stub, `.built_in(PluginBox)` adds a real plugin such
+  as `PluginBox::code(KytyPlugin)`, `.third_party(PluginBox)` adds one with the third-party origin.
+  `.boot()` returns a `TestHost` with the `Kernel` and the `BootReport`. `.boot_core()` also starts
+  the app and returns a `TestCore`.
+- `StubPlugin`: a plugin from a manifest and test-chosen behavior. `from_toml(..)` builds it,
+  `.provides(..)` sets what `init` returns, and `panics_on_init`, `hangs_on_init`, `fails_on_init`
+  and `hangs_on_shutdown` script a failure. `init_calls` and `shutdown_calls` count calls.
+- `FakeEmulator`: a small emulator a test scripts, from its catalog to the download, install,
+  launch and exit of its build. It keeps every capability contract.
+- `FakeCatalog`, `FakeStore` and `FakeService`: plugins built from a few choices.
+- `FakeSystem`: a system plugin over a machine the test controls.
+- `FakeHttp`: serves bodies by URL (`serve`, which returns the body's SHA-256) and redirects.
+- `MemStorage`: a plugin's data folder in memory.
 
-```sh
-cargo test -p playstation-store
-cargo test -p release-catalog
+`StubPlugin` and `FakeEmulator` show how a plugin is built from a manifest string and a closure.
+This is how `FakeEmulator` makes its plugin:
+
+```rust
+StubPlugin::from_toml(&format!(
+    "id = \"{plugin_id}\"\nkind = \"emulator\"\n{names}\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
+     capabilities = [\"catalog\", \"downloader\", \"installer\", \"launcher\", \"slots\"]\n[permissions]\n{permissions}\n"
+))
+.provides(move |ctx| {
+    *emu.storage.lock().unwrap() = Some(ctx.storage().clone());
+    let e = Arc::new(emu.clone());
+    Ok(Provided {
+        catalog: Some(e.clone()),
+        downloader: Some(e.clone()),
+        installer: Some(e.clone()),
+        launcher: Some(e.clone()),
+        slots: Some(e),
+        ..Provided::default()
+    })
+})
 ```
 
-Code that takes a `Storage` tests over `nexus_testkit::MemStorage`, a plugin's data folder in
-memory, as the emulator kit and `release-catalog` do.
-
-### The fake host
-
-`crates/nexus-testkit` runs a real core over a temporary data folder with fake HTTP, processes,
-windows, login session, opener, torrents, VPNs and archives, and a fake clock.
-
-- `FakeHost::new()` builds one. Add plugins with `built_in(PluginBox)`,
-  `third_party(PluginBox)`, `plugin(StubPlugin)` or `discover(dir)`. Set the system with
-  `platform(Some(Platform::Linux))`, the home folder with `home(path)`, and more
-  (`safe_mode`, `hardware`, `free_space`, `call_timeout`, `max_downloads`).
-- `host.http()` is a `FakeHttp`: `serve(url, bytes)` returns the body's SHA-256, `redirect`,
-  `hold_next`, `cut_next_after`, and `sent()` lists the requests.
-- `boot().await` gives a `TestHost` (kernel, `BootReport`, fakes); `boot_core().await` gives a
-  `TestCore`, with the app started on it as `test.core`.
-- `test.spawner` is a `FakeSpawner`: `prints(program, output)` sets what a program prints,
-  `on_path(name, path)` puts a system program on `PATH`, `wait_for(n)` returns the n-th
-  `SpawnedProcess`, which can `exit(code)`.
-- `test.core.dispatch(Command::...)` drives the app as the UI does; `test.core.view()` reads
-  the view models a theme would get.
-- Time is the `FakeClock`'s (`host.clock()` before boot, `test.clock` after): tokio's time,
-  paused at boot. A test never sleeps. `test.until(Area::Library, |core| ...)` returns once the
-  check holds, asking again after each change in that area. `test.clock.advance(d)` fires the
-  timers due in `d`, and `run_until_idle()` lets the woken work run.
-
-`StubPlugin::from_toml(manifest)` is a plugin made from a manifest, with `provides(|ctx| ...)`
-for its `init`, `console(name)`, and `panics_on_init`, `hangs_on_init`, `fails_on_init`,
-`hangs_on_shutdown` to test the host's guards. It counts `init_calls` and `shutdown_calls`.
-
-Most tests need a plugin of a usual shape, and build it from a few choices:
-
-- `FakeCatalog::new(id).games(["Alpha", "Beta"]).build()` is an emulator with a catalog, with
-  `system(console)`, `playable()`, `tested()`, `key(button, keys)`, `requires(toml)`,
-  `needing_its_emulator()`, `installed(build)`, `waiting_installer()` and more.
-  `FakeCatalog::kyty()` is KytyPS5 for a console's catalog, with no games of its own.
-- `FakeStore::new(id).knows(title_id, score, tagline).build()` is a store that describes games;
-  `covers()` gives every game a cover.
-- `FakeService::new(id, name).section(slot, item, title, rows).build()` is a service that fills
-  slots.
-- `FakeEmulator::new(titles)` is an emulator a test scripts, from its catalog to the download,
-  install, launch and exit of its build: the core seam's tests drive the core with it. It
-  keeps every contract (`tests/tests/seams/contracts.rs`).
+Source: `crates/nexus-testkit/src/emulator.rs`, `FakeEmulator::plugin_named`.
 
 ### The contract suite
 
-`nexus_testkit::contract::emulator(&test, &plugin_id)` checks a loaded plugin against the
-rules the host relies on, for every capability it provides: unique game ids, an unknown game
-failing, a schema that is a JSON object and defaults that pass `validate`, slot ids unique in
-each slot, each `[[keymap]]` button once, and a full install, uninstall and launch through the
-host. Each broken rule panics with `contract <capability>: ...`. From
-`tests/tests/seams/shadps4.rs`:
+`contract::emulator(&test, &plugin_id)` checks any emulator plugin against the capability contracts
+(`crates/nexus-testkit/src/contract.rs`). Run it on a started core with the plugin loaded. It
+panics with a message that starts `contract <capability>:` when the plugin breaks a rule. It runs the
+checks for the capabilities the plugin declares:
 
-```rust
-#[tokio::test]
-async fn shadps4_meets_every_contract() {
-    let (test, _games) = boot().await;
-    contract::emulator(&test, &shad()).await;
-}
-```
+- `catalog`: the list is not empty, ids are unique, paging gives the same items, an unknown game is
+  `NotFound`, and a search finds a game by its title.
+- `downloader`: a plan has a label, files, a 64-digit hex SHA-256, and a destination for each file.
+- `configurator`: the schema is a JSON object, the defaults validate, and garbage is `InvalidInput`.
+- `compatibility`: a known game answers, and an unknown game fails.
+- `slots`: item ids are unique within each slot.
+- `installer`: an install through the host shows up as installed, and an uninstall removes it.
+- `launcher`: a launch through the host spawns a program from the data folder, a granted host
+  folder, or the system `PATH`, and the host reports the exit.
+- `keymap`: each button appears once, and no button or key text is empty.
 
-where `boot` serves a release and a compatibility list on `FakeHttp`, writes a game folder, and
-boots the plugin:
+`contract::archives` does the same for an `Archives` adapter (host code, not plugins).
 
-```rust
-let host = FakeHost::new().platform(Some(Platform::Linux));
-host.http().serve(RELEASES, serde_json::to_vec(&releases).unwrap());
-// ... the compatibility list and a game folder.
-let test = host.built_in(PluginBox::code(ShadPlugin)).boot_core().await;
-```
+The tests live in the `tests` crate, one module per area, in `tests/tests/seams/`
+(see [development.md](development.md)). `contracts.rs` there shows the suite catching a plugin that
+lists one game twice, and passing `FakeEmulator`. `kyty.rs`, `shadps4.rs`, `pc.rs` and `steam.rs`
+each boot the real plugin on a fake host and call `contract::emulator`. Unit tests of the plugin's
+own functions sit in the plugin crate, in `#[cfg(test)]` modules.
 
-`tests/tests/seams/contracts.rs` shows the suite catching a stub catalog that lists one game
-twice.
-
-### The tests crate
-
-`tests/` (package `nexus-tests`) holds the seam tests: one module per area in
-`tests/tests/seams/` (one test binary), with shared helpers in
-`tests/tests/seams/common/mod.rs`. Each plugin has its own file: `kyty.rs`, `shadps4.rs`,
-`pc.rs`, `steam.rs`, `metadata.rs`, `catalog_refresh.rs`, `slots.rs` and more. An area with
-many tests is a folder with a module per part, such as `releases/`, `app/` and
-`default_theme/`. A new plugin adds its crate to `[dev-dependencies]` in `tests/Cargo.toml`, a
-file here, and its `mod` line in `main.rs`.
-
-```sh
-cargo test -p nexus-tests --test seams shadps4::  # one area
-cargo test -p nexus-tests                   # every seam test
-scripts/check.sh                            # format, clippy, every test (as CI)
-```
-
-`tests/tests/seams/real_archives.rs` installs real release archives when `NEXUS_REAL_ARCHIVES` names
-a folder of them, and `NEXUS_REAL_RELEASES=1 cargo test -p nexus-app real` downloads real
-emulator releases; see [docs/development.md](development.md).
+Run the checks with the project's check command, in [development.md](development.md).
 
 ## Checklist for a new plugin
 
-1. Make the crate under `plugins/emulators/<name>` or `plugins/services/<name>`, depending on
-   `nexus-api` (and `emulator-kit` if it helps).
-2. Write `plugin.toml`: `id`, `kind`, `name`, `version`, `host_api = "^0.2"`, `capabilities`,
-   and only the permissions it needs.
-3. Implement `Plugin` and `CodePlugin`. Return exactly the declared capabilities from `init`.
-4. Register it: `inventory::submit! { PluginFactory::code(|| Box::new(MyPlugin)) }`.
-5. Add it to the workspace `members` and `[workspace.dependencies]` in the root `Cargo.toml`,
-   to `crates/nexus-app/Cargo.toml`, and as `use my_plugin as _;` in
-   `crates/nexus-app/src/main.rs`.
-6. Test it: unit tests in the crate, and a module in `tests/tests/seams/` (and its `mod`
-   line in `main.rs`) that runs `contract::emulator` on it.
-7. Run `scripts/check.sh`.
+1. Pick the kind. Pick it by the privileges you need. Data capabilities work in any kind.
+2. Create the crate under `plugins/emulators/`, `plugins/services/` or `plugins/system/`. Copy
+   a small one: `plugins/services/playstation-store` for a service. Depend on `nexus-api` (and
+   `emulator-kit` for a console emulator). Use `[lints] workspace = true`.
+3. Add the crate to `[workspace] members` and to `[workspace.dependencies]` in the root
+   `Cargo.toml`.
+4. Write `plugin.toml`: `id`, `kind`, `name`, `version`, `host_api` (a range that matches
+   `API_VERSION`), `platforms`, `capabilities`, and `console` for an emulator.
+5. Ask for the least permissions: only the hosts in `network`, only the folders in `filesystem`
+   (`write = true` only where needed), only the programs in `process`, and only the prefixes in `links`.
+6. Write the `Plugin` and `CodePlugin` impls. Embed the manifest with `include_str!`. Return in
+   `Provided` exactly the capabilities the manifest declares.
+7. Implement the traits. Return `PluginError::NotFound`, `InvalidInput` and the other typed
+   errors. Do not block a thread without awaiting.
+8. Register the plugin with `inventory::submit! { PluginFactory::code(..) }`.
+9. Link the crate from `crates/nexus-app`: add it to its `Cargo.toml` and add a `use <crate> as _;`
+   line in `crates/nexus-app/src/main.rs`.
+10. Write tests. Boot the plugin with `FakeHost::new().built_in(PluginBox::code(..)).boot_core()`
+    and call `contract::emulator` for an emulator. Add a module in `tests/tests/seams/` and a
+    dev-dependency in `tests/Cargo.toml`.
+11. Run the repo's check command (format, clippy with warnings as errors, and every test): see
+    [development.md](development.md).
+12. If you raise `API_VERSION`, raise `host_api` in every built-in `plugin.toml` in the same change.
 
-To see it in the app, `cargo run -p nexus-app -- --windowed`; the plugin shows under Emulators.
-The README's [What is where](../README.md#what-is-where) lists where each part lives.
+## Limitations
+
+- **No runtime for third-party code.** A folder in `extensions/` can only be a data-only theme.
+  Writing a plugin means adding a crate to this repo and building Nexus. The `Loader` trait
+  exists so a runtime could be added, but the app registers none. The comment on `Origin` says
+  built-in plugins run "without a sandbox", which suggests a sandbox for others. None exists.
+- **Manifest `config_schema` is not read.** `PluginManifest` has the field, but no code outside
+  `nexus-api` uses it. Settings schemas come from `Configurator::schema`.
+- **Panic guard and timeout are cooperative.** A plugin that blocks a thread without awaiting is
+  not stopped. See [Timeouts and panics](#timeouts-and-panics).
+- **Not verified here.** The doc samples are not compiled. The checklist is derived from reading
+  the code and the existing plugins, not from adding a new plugin.

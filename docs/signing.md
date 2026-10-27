@@ -1,96 +1,216 @@
 # Signing the release
 
-`.github/workflows/package.yml` signs the macOS and Windows packages when their secrets are set.
-Without them it writes a warning in the run and goes on. The secrets go in the GitHub repo under
-Settings, Secrets and variables, Actions. How a release runs is in
-[development.md](development.md#releases).
+This page is for maintainers. It says how the release workflow signs and notarizes Nexus
+packages, which secrets it reads, and how the launcher checks an update. How to build and test
+packages is in [development.md](development.md).
+
+Signing is optional in the workflow. Without the secrets, the build works and the packages
+carry only the signing the build does by itself (macOS: ad hoc; Windows: none). The workflow
+prints a warning for each missing set of secrets.
+
+## What is signed
+
+| Package | Signed with | When |
+| --- | --- | --- |
+| macOS app, zip and disk image | Apple Developer ID, notarized and stapled | The macOS secrets are set. |
+| macOS app without secrets | Ad hoc (`codesign --sign -`) | Always. Apple Silicon runs nothing unsigned. |
+| Windows `nexus.exe` and `.dll` files | Authenticode | The two Windows secrets are set. |
+| Windows installer (`-setup.exe`) | Authenticode | The two Windows secrets are set. |
+| Linux tar.gz, AppImage, deb, rpm, Arch package | Not signed | Never. |
+| Every package | A `.sha256` file and a signed build provenance attestation | Release tags only. |
+
+## The workflow
+
+`.github/workflows/package.yml` is named "Package". It runs only by hand (`workflow_dispatch`)
+or from `release.yml` on a release tag. It does not run the tests.
+
+| Job | Does |
+| --- | --- |
+| `version` | Reads the version from `Cargo.toml`. On a tag, fails when the tag is not `v<version>`. |
+| `build` | One job each for Linux, macOS arm64, macOS x86-64 and Windows. Builds, packs, signs the Windows files, and uploads artifacts. |
+| `macos` | Joins the two Mac apps into one universal app, signs and notarizes it, and makes the disk image. |
+| `publish` | On a tag only. Writes checksums and `latest.json`, attests, attaches the files to the draft release, and publishes it as the latest. |
+| `os` | On a tag only. Names this release in `os/nexus.txt` and starts `os.yml`. See [os/README.md](../os/README.md). |
+
+On a branch, the workflow only builds. The files stay as artifacts of the run. Use that to try
+a packaging change.
+
+The `publish` job has write access to the release (`contents: write`) and may attest
+(`id-token: write`, `attestations: write`). The `os` job may write `os/nexus.txt` and start
+workflows (`contents: write`, `actions: write`). The other jobs have `contents: read`.
 
 ## macOS
 
-`scripts/package.sh` signs `Nexus.app` ad hoc: Apple Silicon runs nothing unsigned. The
-release's "Sign and notarize (macOS)" step then replaces that signature with a Developer ID one
-when `MACOS_CERT_P12` is set:
+### Without secrets
 
-| Secret | What it holds |
-|---|---|
-| `MACOS_CERT_P12` | The "Developer ID Application" certificate and its private key, as a `.p12`, in base64 |
-| `MACOS_CERT_PASSWORD` | The `.p12`'s password |
-| `APPLE_ID` | The Apple account that submits for notarization |
-| `APPLE_TEAM_ID` | That account's team id |
-| `APPLE_APP_PASSWORD` | An app-specific password for that account |
+`scripts/package.sh` signs each `Nexus.app` ad hoc: `codesign --force --deep --sign -`.
+`packaging/macos/universal.sh` joins the arm64 and the x86-64 app with `lipo` and signs the
+result ad hoc again. Libraries that `scripts/bundle-libmpv.sh` and `scripts/bundle-libarchive.sh`
+add are also signed ad hoc. Gatekeeper asks before the first start of such an app.
 
-With `MACOS_CERT_P12` set, the step:
+### With secrets
 
-1. imports the certificate into a temporary keychain;
-2. signs each `.dylib` in `Contents/Frameworks` (libmpv, libarchive and the libraries they need),
-   then the bundle, with `codesign --timestamp --options runtime` (the hardened runtime);
-3. zips the folder, sends the zip to `xcrun notarytool submit --wait`, staples the ticket to
-   `Nexus.app` with `xcrun stapler staple`, and zips it again.
+The `macos` job reads these secrets:
 
-The step checks only `MACOS_CERT_P12`. Set all five together: with the certificate but without
-the Apple account, notarization fails and the release fails with it.
+| Secret | Holds |
+| --- | --- |
+| `MACOS_CERT_P12` | The Developer ID certificate as a `.p12` file, in base64. |
+| `MACOS_CERT_PASSWORD` | The password of the `.p12` file. |
+| `APPLE_ID` | The Apple ID used to notarize. |
+| `APPLE_TEAM_ID` | The Apple team ID. |
+| `APPLE_APP_PASSWORD` | An app-specific password for that Apple ID. |
 
-The certificate needs a paid Apple Developer Program membership. It can be added at any time:
-set the secrets, and the next release signs. The workflow doesn't change.
+Set them all together. The workflow tests only `MACOS_CERT_P12`. If that one is set and the
+others are not, `notarytool` fails and so does the job.
 
-**Without the secrets** the app stays signed ad hoc and isn't notarized. It runs, but
-Gatekeeper blocks the first start of a downloaded copy. The player gets past it once:
+The step "Sign and notarize the app" does this:
 
-- macOS 15 and later: open `Nexus.app`, close the warning, then in System Settings, Privacy &
-  Security, choose Open Anyway and confirm.
-- macOS 12 to 14: Control-click `Nexus.app`, choose Open, and confirm.
-- Any version: `xattr -dr com.apple.quarantine /path/to/Nexus.app`.
+1. Makes a keychain in `$RUNNER_TEMP`, decodes the certificate with `base64 --decode`, and
+   imports it for `codesign`.
+2. Signs every `.dylib` in `Contents/Frameworks`, then the app, with
+   `--timestamp --options runtime --sign "Developer ID Application"`. The hardened runtime and
+   a timestamp are what notarization asks for.
+3. Zips the app with `ditto` and submits it with `xcrun notarytool submit … --wait`.
+4. Staples the ticket to the app with `xcrun stapler staple`.
+5. Zips the app again. This zip is the release file `nexus-macos-universal.zip`.
+
+The step "Disk image" runs `packaging/macos/make-dmg.sh`, which makes a disk image holding
+`Nexus.app` and a link to `/Applications`. With `MACOS_CERT_P12` set, it signs the image,
+notarizes it, and staples it. It then checks the image with `hdiutil verify`, mounts it, and
+tests that the app's program and the link are there.
+
+The workflow passes no entitlements file to `codesign`.
 
 ## Windows
 
-The release's "Sign (Windows)" step signs every `.exe` and `.dll` in `dist/nexus-windows-*/`
-(`nexus.exe`, `libmpv-2.dll`, and libarchive's MSYS2 DLLs) when `WINDOWS_CERT_PFX` is set:
+The build job signs with `scripts/sign-windows.ps1`, in three steps:
 
-| Secret | What it holds |
-|---|---|
-| `WINDOWS_CERT_PFX` | The code-signing certificate and its private key, as a `.pfx`, in base64 |
-| `WINDOWS_CERT_PASSWORD` | The `.pfx`'s password |
+1. Before packing: the `.exe` and `.dll` files in `dist\nexus-windows-*`.
+2. The zip and the installer are built from those signed files.
+3. After building: the installer `dist\nexus-windows-x86_64-setup.exe`.
 
-It runs the Windows SDK's `signtool sign /fd sha256` with a timestamp from
-`http://timestamp.digicert.com`, before the folder is zipped and its checksum written. A file that
-fails to sign fails the release.
+The zip itself is not signed.
 
-**Without the secrets** nothing is signed, and SmartScreen warns on the first start: the player
-chooses More info, then Run anyway. A signature lets SmartScreen build a reputation for the
-publisher over time; it doesn't stop the warning at once.
+The script reads these secrets:
 
-**A `.pfx` fits only an older certificate, or a test one.** Since June 2023 the certificate
-authorities must keep the private key of a new code-signing certificate on a hardware token or in
-a cloud HSM, so it usually can't be exported as a `.pfx`. A cloud signing service is the usual
-route now. Each needs its own workflow step in place of the `signtool /f` one:
+| Secret | Holds |
+| --- | --- |
+| `WINDOWS_CERT_PFX` | The code-signing certificate as a `.pfx` file, in base64. |
+| `WINDOWS_CERT_PASSWORD` | The password of the `.pfx` file. |
 
-- **SignPath Foundation**: free signing for open-source projects that it accepts.
-- **Microsoft's Artifact Signing** (formerly Trusted Signing): a monthly fee and an identity
-  check. Which countries and individuals it accepts changes; check before choosing it.
-- **DigiCert KeyLocker** or **SSL.com eSigner**: paid certificates with cloud-held keys.
+Without `WINDOWS_CERT_PFX`, the script prints a warning and signs nothing. SmartScreen then
+warns on the first start.
 
-**A self-signed certificate is for testing only.** It shows that the step works, but Windows
-doesn't trust it, so SmartScreen still warns. To make one, in PowerShell:
+With it, the script writes the certificate to `$RUNNER_TEMP\cert.pfx`, finds the newest
+`signtool.exe` in the Windows Kits, and signs each file with SHA-256 for the file digest
+(`/fd sha256`) and DigiCert's timestamp server (`/tr http://timestamp.digicert.com /td
+sha256`). It deletes the certificate file at the end.
 
-```powershell
-$cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=Nexus Test" -CertStoreLocation Cert:\CurrentUser\My
-$pw = Read-Host -AsSecureString "Password"
-Export-PfxCertificate -Cert $cert -FilePath nexus-test.pfx -Password $pw
-[Convert]::ToBase64String([IO.File]::ReadAllBytes("nexus-test.pfx")) | Set-Clipboard
-```
-
-Then set `WINDOWS_CERT_PFX` to the base64 text on the clipboard, and `WINDOWS_CERT_PASSWORD` to
-the password you typed.
+The workflow then installs the signed installer silently, checks that the file
+`installed-by-setup` and `nexus.exe --help` work, and runs the uninstaller. The installer is
+`packaging/windows/nexus.iss`.
 
 ## Linux
 
-Nothing is signed. Each file in the release has a `.sha256` file beside it and signed build
-provenance: `gh attestation verify <file> --repo <owner>/<repo>` checks where it was built.
+Nothing is signed. The Linux job builds the tar.gz, the AppImage (`scripts/appimage.sh`), and
+the deb, rpm and Arch packages (`.github/actions/linux-packages` with nfpm). The action checks
+the downloaded nfpm against a pinned SHA-256, then checks the packages
+(`packaging/linux/check-packages.sh`).
+
+Tools that other actions download are pinned and checked the same way: linuxdeploy and the
+Windows mpv build in `.github/actions/libmpv`. The Windows libarchive comes from MSYS2's
+packages, which the workflow does not pin.
+
+## Checksums, attestations and `latest.json`
+
+The `publish` job does this for each package file (`*.tar.gz`, `*.zip`, `*.tar`, `*.AppImage`,
+`*.deb`, `*.rpm`, `*.pkg.tar.zst`, `*.exe`, `*.dmg`):
+
+1. Writes `<file>.sha256` with `sha256sum`.
+2. Attests the file with `actions/attest-build-provenance`, which signs a build provenance
+   record with GitHub's identity. The record is not a code-signing certificate.
+3. Attaches it to the release with `gh release upload --clobber`.
+
+It also writes `latest.json` with `scripts/update-manifest.sh`. Last, it publishes the draft
+with `gh release edit --draft=false --latest`. The launcher's update reads the latest release,
+so it never sees a release without its files.
+
+The files `nexus-macos-aarch64.zip` and `nexus-macos-x86_64.zip` are removed first. They were
+only input for the universal app.
+
+`scripts/update-manifest.sh <folder> <tag> <owner/repo>` takes each package's SHA-256 from its
+`.sha256` file. The keys are one per kind of install:
+
+| Key | File |
+| --- | --- |
+| `linux-<arch>` | `nexus-linux-<arch>.tar.gz` |
+| `linux-<arch>-appimage` | `Nexus-<arch>.AppImage` |
+| `linux-x86_64-deb` | `nexus_<version>-1_amd64.deb` |
+| `linux-x86_64-rpm` | `nexus-<version>-1.x86_64.rpm` |
+| `linux-x86_64-arch` | `nexus-<version>-1-x86_64.pkg.tar.zst` |
+| `macos-aarch64`, `macos-x86_64` | `nexus-macos-universal.zip` (one app for both) |
+| `windows-<arch>` | `nexus-windows-<arch>.zip` |
+| `windows-<arch>-setup` | `nexus-windows-<arch>-setup.exe` |
+
+Each entry has a `url` into the release and a `sha256`. Files such as
+`nexus-*-third-party-sources.tar` and the disk image get no entry.
 
 ## The launcher's own update
 
-The update checks no signature. It reads `latest.json` from the newest published release,
-downloads only from GitHub's release hosts, and refuses a package whose SHA-256 isn't the one in
-`latest.json`. A signed and notarized `Nexus.app` stays signed after the update, because the
-update swaps in the whole bundle from the release. See
-[development.md](development.md#the-launchers-own-update).
+The launcher checks its update in `crates/nexus-core/src/launcher_update.rs`. The startup code
+that applies it is `crates/nexus-app/src/update.rs`.
+
+The default theme's Settings row sends the command `LauncherUpdate` with `Check`, then with
+`Download` when an update is available. This page found no automatic check at startup.
+
+### Check
+
+1. The repo is the setting `app.update_repo`, `owner/name`. The default is
+   `mohamed-rekiba/nexus` (`DEFAULT_REPO`). An empty value turns the checks off.
+2. The core reads `https://github.com/<repo>/releases/latest/download/latest.json`.
+3. It compares the version in the file with its own, as semver. It reports an update only when
+   the file's version is newer.
+4. It picks the entry for this install. `Install::detect` decides the key: the AppImage
+   (`APPIMAGE` is set), a deb, rpm or Arch package (the file `packaged` beside the binary),
+   the Windows installer (the file `installed-by-setup`), `Nexus.app`, the unpacked folder, or
+   Nexus OS. If the file has no entry, the state is "Nexus `<version>` has no package for this
+   system".
+
+### Download and check
+
+The core downloads only from `github.com`, `objects.githubusercontent.com` and
+`release-assets.githubusercontent.com` (`HOSTS`), over HTTPS. It follows at most 5 redirects
+(`MAX_REDIRECTS`). Any other host stops the download.
+
+It then computes the SHA-256 of the file and compares it with the `sha256` in `latest.json`. A
+mismatch fails the update. The core keeps the package in `updates/` in the data folder, with
+`ready.json`.
+
+### Applying
+
+`Install::method` decides how an update goes in.
+
+| Install | Method | What happens |
+| --- | --- | --- |
+| tar.gz folder, AppImage, `Nexus.app`, Windows zip | `swap` | At the next start, `apply_staged` swaps the new package in and starts it. It renames the old one aside first and puts it back if anything fails. It tries once. |
+| Windows installer | `installer` | At the next start, Nexus runs the new installer with `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART` and ends. The installer starts the new version. |
+| deb, rpm, Arch | `package` | The core runs `pkexec` with `apt-get install -y`, `dnf install -y` or `pacman -U --noconfirm` on the file. The system asks for the administrator password. |
+| Nexus OS | `system` | Nothing downloads. The new version comes with the next system update. |
+
+A build that is not installed (`cargo run`, for example) never swaps in an update. A package
+manager or Nexus OS owns its files, so `apply_launcher_update` returns early for the methods
+`package` and `system`.
+
+## Limitations
+
+- **The update check proves the download, not the publisher.** `latest.json` and the package
+  come from the same release. The SHA-256 catches a damaged or swapped download, but a
+  release that someone else controls would carry its own matching hash. The launcher does not
+  check the Authenticode signature, the Apple signature or the build attestation.
+- **Linux packages are not signed.** No GPG key signs the deb, rpm or Arch package, or the
+  AppImage.
+- **The Windows zip and the macOS zip are not signed as files.** Their contents are.
+- **Notarization needs all the macOS secrets.** See above.
+- **Not tested here.** This page was written from the workflow and the scripts. No build,
+  signing or notarization ran for it. How the hardened runtime treats a library that Nexus
+  loads from outside the app, such as a system libarchive, was not tested.

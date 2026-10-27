@@ -3,8 +3,7 @@
 A PC that starts straight into Nexus. This page is for people working on it; players start at the
 [README](../README.md#download-nexus-os). What Nexus and the OS expect from each other (the
 marker, the installer's protocol, the polkit rules, `nexus --supports`) is in
-[docs/nexus-os.md](../docs/nexus-os.md), and the reasons are in
-[docs/specs/nexus-os.md](../docs/specs/nexus-os.md).
+[docs/nexus-os.md](../docs/nexus-os.md).
 
 There are two images and one USB stick:
 
