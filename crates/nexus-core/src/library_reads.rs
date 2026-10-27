@@ -28,9 +28,9 @@ impl Core {
     ) -> Vec<InstalledOffer> {
         // Collected first: the games outlive the snapshots read here.
         let library: Vec<&Entry> = library.into_iter().collect();
-        let (torrents, installs) = (self.torrents().snapshot(), self.installs().snapshot());
-        let owned = crate::view::Owned::new(library, &torrents.jobs, &installs);
-        crate::view::installed_offers(&owned, offers)
+        let (snapshot, torrents, installs) =
+            (self.library().snapshot(), self.torrents().snapshot(), self.installs().snapshot());
+        crate::ownership::Ownership::over(library, &snapshot, &torrents.jobs, &installs).installed_offers(offers)
     }
 
     pub(crate) async fn refresh_library(&self) -> CoreResult<()> {

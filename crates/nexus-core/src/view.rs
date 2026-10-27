@@ -13,6 +13,7 @@ use crate::app::{AppState, EmulatorState, Grid, Route};
 use crate::game_installs::InstallsSnapshot;
 use crate::library::{Entry, LibrarySnapshot, PluginImage};
 use crate::order::sort_by_order;
+use crate::ownership::Ownership;
 use crate::sessions::SessionsSnapshot;
 use crate::torrents::{TorrentJob, TorrentsSnapshot};
 use crate::{Core, Job, JobPhase, Kernel, PluginStatus, PreferencesSnapshot};
@@ -119,34 +120,6 @@ pub(crate) fn update_for(emu: &EmulatorState) -> Option<String> {
 /// The game's square art (see [`LibrarySnapshot::tile`]).
 fn cover_of(library: &LibrarySnapshot, entry: &Entry) -> Option<ImageRef> {
     library.tile(entry).map(plugin_image)
-}
-
-/// The offer each installed game is (see [`installed_game`]), by the game, with its cover.
-pub(crate) fn installed_offers(
-    owned: &Owned,
-    offers: &[crate::releases::Offer],
-) -> Vec<crate::library::InstalledOffer> {
-    offers
-        .iter()
-        .filter_map(|offer| {
-            let game = installed_game(owned, offer)?;
-            let cover = offer.entry.summary.cover.clone().map(|c| (offer.entry.key.plugin.clone(), c));
-            Some((game.key.clone(), offer.entry.key.clone(), cover))
-        })
-        .collect()
-}
-
-/// The game Play starts for `key`: for a Catalog offer the player has installed, the installed
-/// game it is; else `key` itself.
-pub(crate) fn played_game(
-    library: &LibrarySnapshot,
-    torrents: &TorrentsSnapshot,
-    installs: &InstallsSnapshot,
-    key: &GameKey,
-) -> GameKey {
-    let owned = Owned::new(library.library(), &torrents.jobs, installs);
-    let offer = library.offer(key);
-    offer.and_then(|o| installed_game(&owned, o)).map(|g| g.key.clone()).unwrap_or_else(|| key.clone())
 }
 
 /// Whether `key`'s game can be uninstalled: its folder is known, isn't a whole player's folder,
@@ -315,7 +288,7 @@ fn grid<'a>(
 ) -> GridGames<'a> {
     let view = if catalog { &state.catalog_view } else { &state.library_view };
     let offers = offers_by_key(library);
-    let owned = Owned::new(library.library(), &torrents.jobs, installs);
+    let owned = Ownership::new(library, &torrents.jobs, installs);
     let entries: Vec<&Entry> =
         if catalog { library.offers.iter().map(|o| &o.entry).collect() } else { library.library().collect() };
     // The Catalog's hidden games: out, but for the "Hidden" filter, which shows only them. With
@@ -391,7 +364,7 @@ fn grid<'a>(
         });
     }
     // The Catalog's offers of the games the player has.
-    let installed = |e: &Entry| offers.get(&e.key).is_some_and(|o| installed_game(&owned, o).is_some());
+    let installed = |e: &Entry| offers.get(&e.key).is_some_and(|o| owned.installed_game(o).is_some());
     let installed_count = if catalog { searched.iter().filter(|e| installed(e)).count() } else { 0 };
     if installed_count > 0 || (catalog && view.installed) {
         systems.push(FilterVm {
@@ -446,14 +419,14 @@ fn grid<'a>(
         in_system.into_iter().filter(|e| view.genre.as_ref().is_none_or(|g| chips_of(e).contains(g))).collect();
     let size = |e: &Entry| -> Option<u64> {
         match offers.get(&e.key) {
-            Some(o) => best_release(library, &owned, o).size_bytes,
+            Some(o) => owned.best_release(o).size_bytes,
             None => library.detail(&e.key).and_then(|d| d.details.size_bytes),
         }
     };
     let added = |e: &Entry| offers.get(&e.key).map(|o| o.releases[0].added.clone()).unwrap_or_default();
     // The catalog's own date of its best release first, then the store's, then the year.
     let released = |e: &Entry| {
-        let catalog = offers.get(&e.key).and_then(|o| crate::releases::release_day(best_release(library, &owned, o)));
+        let catalog = offers.get(&e.key).and_then(|o| crate::releases::release_day(owned.best_release(o)));
         let store = || library.meta(&e.key).and_then(|(_, m)| crate::releases::date_key(&m.release));
         catalog.or_else(store).or_else(|| e.summary.release_year.map(|y| y.to_string())).unwrap_or_default()
     };
@@ -544,7 +517,7 @@ fn grid_vm(
     let view = if catalog { &state.catalog_view } else { &state.library_view };
     let GridGames { shown, all, systems, genres } = grid(kernel, state, library, torrents, installs, catalog);
     let offers = offers_by_key(library);
-    let owned = Owned::new(library.library(), &torrents.jobs, installs);
+    let owned = Ownership::new(library, &torrents.jobs, installs);
     let today = crate::releases::today();
     let total = shown.len();
     let games: Vec<GameCardVm> = shown
@@ -688,120 +661,21 @@ fn badge(plugin: &PluginId, id: &str, text: &str, tone: Tone) -> SlotVm {
     )
 }
 
-/// The emulators' installed games by title id and by name, to find the game an offer is. A
-/// view builds it once: the Catalog asks it about every offer.
-pub(crate) struct Owned<'a> {
-    /// The downloads, whose installs say which game an offer is.
-    jobs: &'a BTreeMap<String, TorrentJob>,
-    /// The game installs, which say which game a download installed.
-    installs: &'a InstallsSnapshot,
-    /// The Library's games.
-    library: Vec<&'a Entry>,
-    by_id: std::collections::HashMap<(&'a PluginId, &'a str), &'a Entry>,
-    /// By the emulator, and the console and the title as letters and digits (`ps5/astrobot`).
-    by_name: std::collections::HashMap<(&'a PluginId, String), &'a Entry>,
-}
-
-impl<'a> Owned<'a> {
-    pub(crate) fn new(
-        library: impl IntoIterator<Item = &'a Entry>,
-        jobs: &'a BTreeMap<String, TorrentJob>,
-        installs: &'a InstallsSnapshot,
-    ) -> Self {
-        let library: Vec<&Entry> = library.into_iter().collect();
-        let mut owned =
-            Owned { jobs, installs, library: library.clone(), by_id: Default::default(), by_name: Default::default() };
-        for e in library {
-            if let Some(id) = e.summary.title_id.as_deref().filter(|t| !t.is_empty()) {
-                owned.by_id.entry((&e.key.plugin, id)).or_insert(e);
-            }
-            if let Some(name) = Self::name(&e.summary.platform, &e.summary.title) {
-                owned.by_name.entry((&e.key.plugin, name)).or_insert(e);
-            }
-        }
-        owned
-    }
-
-    /// A game's name to find it by: its console and its title, as letters and digits.
-    fn name(console: &str, title: &str) -> Option<String> {
-        let title = crate::releases::plain(title);
-        (!title.is_empty()).then(|| format!("{}/{title}", console.to_ascii_lowercase()))
-    }
-
-    /// The game of the emulator's library that the download `j` installed: the one with the
-    /// title its install reported. A PC game has no title id, so this is how its download
-    /// finds it.
-    fn installed_from(&self, j: &TorrentJob) -> Option<&'a Entry> {
-        let install = self.installs.latest(&j.emulator, &j.source)?;
-        let done = install.phase == crate::game_installs::GamePhase::Done;
-        let title = &install.installed.as_ref().filter(|_| done)?.title;
-        self.library.iter().copied().find(|e| e.key.plugin == j.emulator && &e.summary.title == title)
-    }
-}
-
-/// The installed game an offer is, from the emulator's library: the game a download of one of
-/// its releases installed, else the game with one of its title ids, else the game of its name
-/// on the same console. A PS4 and a PS5 game of one name are two games.
-pub(crate) fn installed_game<'a>(owned: &Owned<'a>, offer: &crate::releases::Offer) -> Option<&'a Entry> {
-    let downloaded = owned.jobs.values().filter(|j| j.offer == offer.entry.key).find_map(|j| owned.installed_from(j));
-    let emulator = &offer.emulator;
-    let by_id = || {
-        let mut ids = offer.releases.iter().flat_map(|r| std::iter::once(&r.title_id).chain(&r.title_ids));
-        ids.find_map(|t| owned.by_id.get(&(emulator, t.as_str())).copied())
-    };
-    let by_name = || {
-        let console = &offer.entry.summary.platform;
-        let mut names = offer.releases.iter().filter_map(|r| Owned::name(console, &r.title));
-        names.find_map(|name| owned.by_name.get(&(emulator, name)).copied())
-    };
-    downloaded.or_else(by_id).or_else(by_name)
-}
-
-/// The release an offer's card shows: the version the player has, then a release whose
-/// download installed the game, then one with a magnet link, then one with art, then the
-/// highest version, then the one most people share. Of equals, the newest upload.
-pub(crate) fn best_release<'a>(
-    library: &LibrarySnapshot,
-    owned: &Owned,
-    offer: &'a crate::releases::Offer,
-) -> &'a nexus_api::Release {
-    use crate::releases::version_key;
-    let game = installed_game(owned, offer);
-    let has = game
-        .and_then(|e| library.detail(&e.key))
-        .and_then(|d| d.details.facts.iter().find(|f| f.id == "version"))
-        .map(|f| version_key(&f.value))
-        .filter(|v| !v.is_empty());
-    let rank = |r: &nexus_api::Release| {
-        let downloaded = owned.jobs.get(&r.id).and_then(|j| owned.installed_from(j)).is_some();
-        (
-            has.as_ref().is_some_and(|v| *v == version_key(&r.version)),
-            downloaded,
-            !r.torrent.is_empty(),
-            r.metadata.is_some() || !r.image_urls.is_empty(),
-            version_key(&r.version),
-            r.seeders.unwrap_or(0),
-        )
-    };
-    // The releases are newest upload first, and `max_by_key` keeps the last of equals.
-    offer.releases.iter().rev().max_by_key(|r| rank(r)).unwrap_or(&offer.releases[0])
-}
-
 fn offer_card(
     kernel: &Kernel,
     state: &AppState,
     library: &LibrarySnapshot,
-    owned: &Owned,
+    owned: &Ownership,
     offer: &crate::releases::Offer,
     today: i64,
 ) -> GameCardVm {
     let mut card = card(kernel, state, library, &offer.entry);
     card.selected = state.catalog_selected.as_ref() == Some(&offer.entry.key);
-    let best = best_release(library, owned, offer);
+    let best = owned.best_release(offer);
     card.size_bytes = best.size_bytes;
     card.availability = crate::releases::availability(best.seeders).into();
     card.releases = offer.releases.len();
-    let installed = installed_game(owned, offer);
+    let installed = owned.installed_game(offer);
     card.can = game_actions(kernel, library, &offer.entry.key, Some((offer, installed)));
     // A game its store installs has no torrent to be available.
     if offer.releases.iter().any(|r| !r.store.is_empty()) {
@@ -965,11 +839,11 @@ fn detail_vm(
     let summary = &details.summary;
     let manifest = kernel.manifest(&key.plugin).ok();
     let offer = library.offer(key);
-    let owned = Owned::new(library.library(), &torrents.jobs, installs);
+    let owned = Ownership::new(library, &torrents.jobs, installs);
     let has_installer = manifest.is_some_and(|m| m.capabilities.contains(&Capability::Installer));
     let installed = state.emulators.get(&key.plugin).is_some_and(|e| !e.installed.is_empty());
     // A Catalog offer plays as the installed game it is, and not at all before it is installed.
-    let installed_as = offer.and_then(|o| installed_game(&owned, o));
+    let installed_as = offer.and_then(|o| owned.installed_game(o));
     let played = installed_as.map(|g| &g.key).unwrap_or(key);
     let can = game_actions(kernel, library, key, offer.map(|o| (o, installed_as)));
     let needs_emulator = has_installer && !installed;
@@ -1040,7 +914,7 @@ fn detail_vm(
     let releases = offer.map_or(&[][..], |o| &o.releases[..]);
     let (this_pc, pc_warning) = on_this_pc(kernel, state, offer.map_or(&key.plugin, |o| &o.emulator), releases);
     // A game that starts here but doesn't fit says so instead, from its best release.
-    let this_pc = match (this_pc, offer.map(|o| no_room(best_release(library, &owned, o))), free) {
+    let this_pc = match (this_pc, offer.map(|o| no_room(owned.best_release(o))), free) {
         (Some(v), Some(short), Some(free)) if v.level != "no" && !short.is_empty() => Some(VerdictVm {
             level: "no".into(),
             headline: "Not enough space".into(),
@@ -1093,7 +967,7 @@ fn detail_vm(
         releases: offer
             .map(|o| {
                 let today = crate::releases::today();
-                let best = &best_release(library, &owned, o).id;
+                let best = &owned.best_release(o).id;
                 // By version, highest first; of one version, the newest upload first. A release
                 // its store installs is no use once the game is installed.
                 let mut ordered: Vec<&nexus_api::Release> =
@@ -1148,7 +1022,7 @@ fn detail_vm(
             .map(|p| short_home(&p.display().to_string(), kernel.host().home.as_ref().and_then(|h| h.to_str())))
             .unwrap_or_default(),
         availability: offer
-            .map(|o| crate::releases::availability(best_release(library, &owned, o).seeders).to_owned())
+            .map(|o| crate::releases::availability(owned.best_release(o).seeders).to_owned())
             .unwrap_or_default(),
         download_error: torrents
             .download_error
@@ -1250,7 +1124,7 @@ fn downloads_vm(
     });
     let jobs = install_jobs.chain(downloads).collect();
     let home = kernel.host().home.as_ref().and_then(|h| h.to_str()).map(str::to_owned);
-    let owned = Owned::new(library.library(), &torrents.jobs, installs);
+    let owned = Ownership::new(library, &torrents.jobs, installs);
     let mut cards: Vec<TorrentVm> = torrents
         .jobs
         .values()
@@ -1260,7 +1134,7 @@ fn downloads_vm(
             install_folder: crate::release_downloads::install_folder(kernel, &j.emulator, None)
                 .map(|(_, path)| short_home(&path.display().to_string(), home.as_deref()))
                 .unwrap_or_default(),
-            ..torrent_vm(library, &owned, j)
+            ..torrent_vm(library, installs, &owned, j)
         })
         .collect();
     cards.reverse();
@@ -1317,9 +1191,9 @@ fn bytes_label(bytes: u64) -> String {
     if gb >= 1.0 { format!("{gb:.1} GB") } else { format!("{:.0} MB", bytes as f64 / 1e6) }
 }
 
-fn torrent_vm(library: &LibrarySnapshot, owned: &Owned, j: &TorrentJob) -> TorrentVm {
+fn torrent_vm(library: &LibrarySnapshot, installs: &InstallsSnapshot, owned: &Ownership, j: &TorrentJob) -> TorrentVm {
     use crate::torrents::TorrentState as S;
-    let install = owned.installs.latest(&j.emulator, &j.source);
+    let install = installs.latest(&j.emulator, &j.source);
     let installing = install.is_some_and(|g| g.phase == crate::game_installs::GamePhase::Installing);
     let installed = install.is_some_and(|g| g.phase == crate::game_installs::GamePhase::Done);
     // The installed game: the one this download's install reported, else the offer's, as its
@@ -1328,7 +1202,7 @@ fn torrent_vm(library: &LibrarySnapshot, owned: &Owned, j: &TorrentJob) -> Torre
     let offer = library.offer(&j.offer);
     let game = owned
         .installed_from(j)
-        .or_else(|| offer.and_then(|o| installed_game(owned, o)))
+        .or_else(|| offer.and_then(|o| owned.installed_game(o)))
         .map(|e| e.key.to_string())
         .unwrap_or_default();
     use crate::archives::UnpackPhase as U;

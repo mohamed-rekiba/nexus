@@ -521,11 +521,11 @@ impl Core {
                 let installed = {
                     let library = self.library().snapshot();
                     let (torrents, installs) = (self.torrents().snapshot(), self.installs().snapshot());
-                    let owned = crate::view::Owned::new(library.library(), &torrents.jobs, &installs);
+                    let owned = crate::ownership::Ownership::new(&library, &torrents.jobs, &installs);
                     library.offers.iter().any(|o| {
                         &o.entry.key.plugin == plugin
                             && o.releases.iter().any(|r| r.id == install.release)
-                            && crate::view::installed_game(&owned, o).is_some()
+                            && owned.installed_game(o).is_some()
                     })
                 };
                 if installed {
@@ -537,13 +537,12 @@ impl Core {
     }
 
     /// An offer's Game Hub: the words and facts of its best release (see
-    /// [`crate::view::best_release`]), with how many share it and when the catalog counted them.
+    /// [`crate::ownership::Ownership::best_release`]), with how many share it and when the catalog counted them.
     pub(crate) fn offer_detail(&self, offer: &Offer) -> Detail {
         let best = {
             let library = self.library().snapshot();
             let (torrents, installs) = (self.torrents().snapshot(), self.installs().snapshot());
-            let owned = crate::view::Owned::new(library.library(), &torrents.jobs, &installs);
-            crate::view::best_release(&library, &owned, offer).clone()
+            crate::ownership::Ownership::new(&library, &torrents.jobs, &installs).best_release(offer).clone()
         };
         let mut facts = Vec::new();
         let mut fact = |id: &str, label: &str, value: &str| {
