@@ -314,6 +314,11 @@ impl ImageCache {
         }
     }
 
+    /// The images asked for that it still keeps track of: in memory, failed or loading.
+    pub fn asked(&self) -> Vec<ImageKey> {
+        self.loaded.keys().chain(&self.failed).chain(&self.pending).cloned().collect()
+    }
+
     /// How many images are in memory.
     pub fn loaded_count(&self) -> usize {
         self.loaded.len()

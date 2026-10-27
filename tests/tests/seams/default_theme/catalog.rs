@@ -288,12 +288,12 @@ fn the_catalog_loads_only_the_covers_near_the_screen() {
     host.advance(std::time::Duration::from_millis(100));
     host.settle();
     host.pump();
-    host.ui.render().unwrap();
     let catalog = host.core().view().catalog.games;
     assert_eq!(catalog.games.len(), 60);
     assert!(catalog.games.iter().all(|g| g.cover.is_some()), "every game has a cover to load");
 
-    let wanted = host.ui.wanted_images();
+    // The shell's renders started the loads.
+    let wanted = host.ui.images_asked();
     assert!(!wanted.is_empty() && wanted.len() < 40, "{} of 60 covers asked for", wanted.len());
     assert!(wanted.iter().all(|(_, size, _)| *size == nexus_ui_host::ImageSize::Thumb), "card-sized");
 }

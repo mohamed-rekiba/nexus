@@ -135,12 +135,13 @@ impl Composed {
         &self.test.core
     }
 
-    /// Runs a command on the core through the shell, as a theme's request, then renders. The
-    /// renders a test asks for load no images: [`Composed::load_images`] does.
+    /// Runs a command on the core through the shell, as a theme's request, then has the shell
+    /// render what waits ([`AppShell::flush`]): a render when the core changed. A render starts
+    /// its image loads; they run with the next work, or in [`Composed::load_images`].
     pub fn dispatch(&mut self, command: Command) {
         self.shell.on_request(UiRequest::Core(command)).unwrap();
         self.run_work();
-        self.shell.ui.render().unwrap();
+        self.shell.flush().unwrap();
     }
 
     /// Runs the work the shell started (commands and image loads), in order, and hands the
@@ -158,7 +159,7 @@ impl Composed {
     /// bundled copy.
     pub fn catalogs_fetched(&mut self) {
         self.rt.block_on(catalogs_fetched(&self.test.core));
-        self.shell.ui.render().unwrap();
+        self.shell.render().unwrap();
     }
 
     /// Runs the core until `done` holds: see [`TestCore::until`]. It doesn't render.
@@ -179,17 +180,14 @@ impl Composed {
     }
 
     /// Carries out what the theme asked for through the shell, as the app would, one request
-    /// at a time: a core command runs to its end, and then, as for a render the theme asked
-    /// for, the view renders now.
+    /// at a time: a core command runs to its end, and then the shell renders what waits, as
+    /// for a render the theme asked for.
     pub fn pump(&mut self) {
         let requests: Vec<UiRequest> = self.requests.borrow_mut().drain(..).collect();
         for request in requests {
-            let render = matches!(request, UiRequest::Core(_) | UiRequest::Render);
             self.shell.on_request(request).unwrap();
             self.run_work();
-            if render {
-                self.shell.ui.render().unwrap();
-            }
+            self.shell.flush().unwrap();
         }
     }
 
@@ -223,7 +221,7 @@ impl ThemeDriver for Composed {
     }
 
     fn redraw(&mut self) {
-        self.shell.ui.render().unwrap();
+        self.shell.render().unwrap();
     }
 
     fn carry_out(&mut self) {

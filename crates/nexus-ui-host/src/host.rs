@@ -525,6 +525,12 @@ impl ThemeHost {
         self.images.insert_pixels(key, pixels);
     }
 
+    /// The images renders asked to load that it still keeps track of: in memory, failed or
+    /// loading.
+    pub fn images_asked(&self) -> Vec<ImageKey> {
+        self.images.asked()
+    }
+
     /// How many images are in memory.
     pub fn images_loaded(&self) -> usize {
         self.images.loaded_count()

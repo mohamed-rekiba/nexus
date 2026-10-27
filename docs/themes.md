@@ -613,8 +613,8 @@ window (`tests/tests/seams/common/mod.rs`):
 - `write_theme(parent, id, theme_section, files)` writes a data-only theme folder for a test.
 - `fixture_themes()` is `tests/fixtures/themes`, holding `fixture-grid`.
 - `host.ui.start()` shows the saved theme, `host.ui.switch(&id)` another one.
-- `host.dispatch(Command::...)` drives the core and renders; `host.pump()` carries out what the
-  theme asked through `Host`.
+- `host.dispatch(Command::...)` drives the core through the shell, which renders when the core
+  changed; `host.pump()` carries out what the theme asked through `Host`.
 
 `Composed` is a `ThemeDriver` (`nexus-testkit`): a test drives the theme as a player does, through
 accessible labels, keys, clicks and the passing of time, and never through the `Vm` globals or

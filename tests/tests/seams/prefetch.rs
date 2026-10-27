@@ -1,5 +1,7 @@
 //! Seam 3, composed host: the core fetches the art the player is likely to see next. The fake
 //! network records each address asked for; it serves none of them, so each fetch is a 404.
+//! With no image cached, the shell's own loads ask for the same addresses again: a test that
+//! counts the core's fetches selects on the core, and leaves the shell out.
 
 use std::time::Duration;
 
@@ -43,7 +45,14 @@ fn twelve() -> Composed {
         composed(|h| h.plugin(FakeCatalog::new("emu-a").system("PS4").games(titles).build()).plugin(art_store()));
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
+    // The first screen's art, as the app loads it.
+    host.load_images();
     host
+}
+
+/// Selects `game` on the core alone: the shell doesn't render the selection or load its art.
+fn select(host: &Composed, game: &str) {
+    host.rt.block_on(host.core().dispatch(Command::Select(game.parse().unwrap()))).unwrap();
 }
 
 /// The art addresses asked for so far.
@@ -77,7 +86,7 @@ fn the_games_beside_the_selection_are_fetched_then_its_screenshots_once_it_rests
     run(&mut host, 700);
     let before = asked(&host).len();
 
-    host.dispatch(Command::Select("emu-a:G5".parse().unwrap()));
+    select(&host, "emu-a:G5");
     until_asked(&mut host, &[art(4, "bg"), art(4, "logo"), art(6, "bg"), art(6, "logo")]);
     assert!(!asked(&host).contains(&art(5, "shot1")), "the screenshots wait for the selection to rest");
     assert!(!asked(&host).contains(&art(3, "bg")), "one game each side");

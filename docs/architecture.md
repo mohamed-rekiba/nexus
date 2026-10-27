@@ -835,9 +835,10 @@ Four seams, from the highest:
    (`i-slint-backend-testing`, pinned with Slint), with `FakePlatform` and the core's
    `FakeClock`: theme completeness, inheritance, switching and rollback, slots, gamepad,
    screenshots, and the shell's own rules (`shell.rs`: render coalescing, the tick, the requests
-   only the app carries out). `Composed::pump` hands the theme's requests to the shell and runs
-   the work it started; the renders a test asks for load no images until it calls
-   `load_images`. A test drives the theme through `ThemeDriver`, by accessible labels, keys and
+   only the app carries out). `Composed::pump` hands the theme's requests to the shell, runs
+   the work it started and hands the core's events to it, then has the shell render what
+   waits (`AppShell::flush`). Each render starts its image loads, as in the app; they run with
+   the next work, or when the test calls `load_images`. A test drives the theme through `ThemeDriver`, by accessible labels, keys and
    clicks, and checks the view through `core.view()`, not the `Vm` globals.
 4. **The desktop adapter against real windows** (`crates/nexus-app/tests/desktop.rs`). It opens
    windows, so it runs only with `NEXUS_DESKTOP_TESTS=1`.
