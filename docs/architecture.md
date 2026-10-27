@@ -71,15 +71,16 @@ The UI thread's state (`App`, which holds the `AppShell`) lives in a thread-loca
 ## Data flows one way
 
 ```
-theme callback ─▶ UiRequest::Core(Command) ─▶ Core::dispatch ─▶ subsystem or flow
+Host.command ───▶ UiRequest::Core(Command) ─▶ Core::dispatch ─▶ subsystem or flow
       ▲                                                               │
       │                                                   Core::changed()
       │                                                               ▼
   Slint `Vm` ◀─ bind::vm_values ◀─ view::build ◀─ ThemeHost::render ◀─ Event::StateChanged
 ```
 
-1. A theme calls a `Host` callback. `ThemeHost::wire` turns it into a `UiRequest`: a core
-   `Command`, or something only the app can do (`SwitchTheme`, `PlaySound`, `OpenUrl`,
+1. A theme calls a `Host` callback. `Host.command(name, args)` carries a core `Command` as its
+   variant's name and its payload as JSON; `ThemeHost::wire` reads it with `serde`, with no
+   code per command, into `UiRequest::Core`. The other callbacks are things only the app can do (`SwitchTheme`, `PlaySound`, `OpenUrl`,
    `OpenPath`, `Quit`, `Restart`, `LogOut`, `Trailer`, `Render`). `AppShell::on_request`
    carries it out: a command goes to the runtime, the rest to the `Platform`.
 2. `Core::dispatch` routes the command, one line per command, to the subsystem or the flow
@@ -102,7 +103,11 @@ theme callback ─▶ UiRequest::Core(Command) ─▶ Core::dispatch ─▶ subs
    or image loads renders once. Each render starts loading the images it asks for.
 6. `ThemeHost::render` calls `Core::view`. It takes a `Snapshot` (`Core::snapshot()`) and
    runs `view::build` over it, which returns an `AppView`. `view::build` is pure: it takes no
-   lock and does no I/O, and reads only the snapshot (see [The view](#the-view)). `bind::vm_values` turns it into Slint values, set on the theme's `Vm` global.
+   lock and does no I/O, and reads only the snapshot (see [The view](#the-view)). `bind::vm_values` turns it into Slint values with one `serde` converter (`values.rs`):
+   each field is a `Vm` property or a struct field of the same name, kebab-cased, and the
+   fields `nexus_ui_api::mark` names become images, colors, `has-` flags or kept card lists.
+   The display text (sizes, dates, durations) is built in the core, in `display.rs`, when the
+   view is built.
    Lists are changed in place where the rows allow it, so row animations don't restart.
 
 Themes hold no state of their own. That is why a theme switch loses nothing: the new view tree
@@ -705,8 +710,10 @@ The view's rules live in pure modules over the snapshot, each with its own tests
 A theme owns presentation: layout, navigation, components, tokens, assets, motion and sound.
 The contract lives in `crates/nexus-ui-api`:
 
-- `contract/types.slint`: the `Vm` global (everything to show) and the `Host` global (every
-  callback). The host serves it; a theme never ships a copy. It also generates `tokens.slint`
+- `contract/types.slint`: the `Vm` global (everything to show, the `AppView` field for field),
+  the `Host` global (`command` for the core's commands, and the app's own callbacks) and the
+  `Json` helpers. It is written by hand, for theme authors; a drift test in nexus-ui-host fails
+  when it and the view models name other fields. The host serves it; a theme never ships a copy. It also generates `tokens.slint`
   (`Tokens`), `assets.slint` (`Assets`) and `options.slint` (`Options`).
 - Screens (`ScreenId`): one file and component each, such as `screens/home.slint` exporting
   `HomeScreen`. The root is `shell.slint` exporting `Shell`.

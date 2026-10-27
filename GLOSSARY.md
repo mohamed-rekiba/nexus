@@ -61,6 +61,10 @@ then its meta file.
 **Current build**: the downloaded build games start. The build before it stays for a rollback.
 Both are saved in the plugin's `versions.json`.
 
+**Display text**: the words a theme shows for a fact of the view, such as "7.6 GB" for a size
+or "Mar 12, 2024" for a date. The core builds it when it builds the view (`display.rs`); the
+view model keeps the fact too, for the core's tests.
+
 **Disks** (`Disks`): each console's download folder and the free space on the disk that holds
 it, read ahead so the view doesn't ask the disk. The core reads them again when a Game Hub
 opens, the catalogs are read, a folder changes, and a download starts or ends.
@@ -112,6 +116,10 @@ fresh time.
 **Host facades** (`Host`, emulator-kit): the narrow parts of a `PluginContext` the kit takes:
 storage, folders, programs, HTTP, settings and the log.
 
+**Host command**: a core `Command` a theme sends with `Host.command(name, args)`: the
+variant's name and its payload as JSON. The host reads it with `serde`; nothing else names the
+commands.
+
 **Install event** (`InstallEvent`): what the game installs subsystem asks of the core: refresh
 the library for a new game, tell the player of a failure, or start the install of a download
 whose archives just unpacked. The subsystem waits until the core is done with each.
@@ -134,6 +142,10 @@ name as the archive spells it, its size, its kind, and whether it needs a passwo
 **Login session** (`LoginSession`): the port for the player's login session: starting the
 launcher at login, and installing the launcher's own package with the administrator prompt.
 Not a play session.
+
+**Mark** (`nexus_ui_api::mark`): the name a view model field goes to the theme under when its
+contract form isn't its plain `serde` form: an image, a color, an optional part with its
+`has-` flag, or a long list of cards kept in place.
 
 **Notice**: a short message for the player, such as "Download complete", until they close it.
 The notices subsystem keeps the newest three, each with its own id.

@@ -61,7 +61,7 @@ capabilities = ["theme"]
 type = "data"
 
 [theme]
-ui_api = "^0.1"
+ui_api = "^0.2"
 extends = "default"
 screens = ["home"]
 components = ["card"]
@@ -106,7 +106,7 @@ fixture-grid/
 Its Home screen (`screens/home.slint`), shortened:
 
 ```slint
-import { Vm, Host } from "../types.slint";
+import { Vm, Host, Json } from "../types.slint";
 import { Tokens } from "../tokens.slint";
 import { Card } from "../components/card.slint";
 
@@ -117,7 +117,7 @@ export component HomeScreen inherits Rectangle {
             x: Math.mod(i, root.columns) * 184px;
             y: Math.floor(i / root.columns) * 284px;
             game: game;
-            activated => { Host.open-game(game.key); }
+            activated => { Host.command("OpenGame", Json.text(game.key)); }
         }
     }
 }
@@ -209,7 +209,7 @@ The host serves four files in every theme. Import them; never ship a file with t
 
 | File | Global | What it holds |
 |---|---|---|
-| `types.slint` | `Vm`, `Host`, and the structs | The data to show, and the callbacks. Fixed: `crates/nexus-ui-api/contract/types.slint`. |
+| `types.slint` | `Vm`, `Host`, `Json`, and the structs | The data to show, the callbacks, and the helpers that build a command's args. Fixed: `crates/nexus-ui-api/contract/types.slint`. |
 | `tokens.slint` | `Tokens` | One property per design token, with the merged values. |
 | `assets.slint` | `Assets` | One `image` per name in `[theme.assets.images]`, and `loaded`. |
 | `options.slint` | `Options` | One property per theme option, holding its value. |
@@ -223,7 +223,11 @@ read it before writing a screen. This section gives the shape.
 ### Vm: what to show
 
 `Vm` is a global of `in-out` properties. The host sets them after every change; themes only read
-them. The main groups:
+them. They are the core's view models, `AppView` in `crates/nexus-ui-api/src/vm.rs`, field for
+field with the names kebab-cased: one converter turns them into Slint values
+(`crates/nexus-ui-host/src/values.rs`), and a drift test fails when `types.slint` and the view
+models name other fields. An optional part comes with a `has-` flag, such as `has-detail`. The
+main groups:
 
 | Properties | What they are |
 |---|---|
@@ -245,7 +249,7 @@ them. The main groups:
 | `can-play-trailers`, `has-trailer`, `trailer`, `trailer-frame` | The trailer player |
 | `viewport` (`Viewport`) | Window size, scale, size of everything, aspect, breakpoint |
 | `input-mode`, `pad-name` | `pointer`, `gamepad` or `touch`; the controller's name |
-| `system` (`System`) | The machine: `whole-screen`, `nexus-os`, `stick`; the network, Wi-Fi list, sound, Bluetooth and devices, battery, power, Nexus OS's update, the stick's disks, and running jobs. Each part has `*-available` and a `*-reason`. The callbacks `join-wifi`, `set-volume`, `pair-device`, `restart-pc`, `install-os` and the rest change it. `log-out` (UI API 0.1.1) ends the Nexus session on a desktop |
+| `system` (`System`) | The machine: `whole-screen`, `nexus-os`, `stick`; the network, Wi-Fi list, sound, Bluetooth and devices, battery, power, Nexus OS's update, the stick's disks, and running jobs. Each part has `*-available` and a `*-reason`. The `System` commands change it. `Host.log-out` ends the Nexus session on a desktop |
 | `pad-key` | True while a controller's button is delivered as a key: a keyboard's keys leave it false |
 | `power-menu` | Goes up by one each time the PS or Xbox button is held with no game running (UI API 0.1.1): a theme opens its power menu when it changes |
 
@@ -256,11 +260,11 @@ Recent additions to know about:
   it. The default theme hides Search, and its shoulder buttons skip the Catalog.
 - **A game's actions**, `GameCard.can` and `GameDetail.can` (`GameActions`), are worked out by
   the core, the same for every game of every plugin, Library or Catalog: draw them, don't work
-  them out. `primary` is the main action: `play` when it is installed (`Host.launch(key)`; a
-  Catalog game starts the installed game it is), else `get` (its label in `get`: "Download"
+  them out. `primary` is the main action: `play` when it is installed (the command `Session` `Launch`;
+  a Catalog game starts the installed game it is), else `get` (its label in `get`: "Download"
   opens its Game Hub's releases; with a `get-store`, "Install in Steam",
-  `Host.download-release(key, get-release, "")` asks the store). `uninstall` is the key to pass
-  to `Host.uninstall-game` after asking; `uninstall-store` names the store that then asks its
+  the command `Torrent` `Download` of `get-release` asks the store). `uninstall` is the key for
+  the command `UninstallGame`, after asking; `uninstall-store` names the store that then asks its
   own way. Uninstall is never the main action: the default theme puts it in the game's menu.
 - `GameCard.system-name` and `system-color` (and `GameDetail`'s) are the game's system as its
   plugin describes it (`[system]` in the plugin's manifest): its full name, "PlayStation 5",
@@ -272,44 +276,88 @@ Recent additions to know about:
   of a game, with the state `queued`, `downloading` or `paused` (or `install` `installing`),
   one action, `open-store` (the store's own Downloads page), and no folder. Empty for a torrent.
 - `Release.store` names the store that installs a release ("Steam"); empty for a torrent. Its
-  Download asks the store, with no download sheet: call `Host.download-release(key, id, "")`
+  Download asks the store, with no download sheet: send `Torrent` `Download` with no folder,
   and stay on the Game Hub. The default theme's button says "Install in Steam".
-- `GameCard.hidden` and `GameDetail.hidden` say the player hid a Catalog game. Call
-  `Host.hide-game(key, hidden)` to hide one or show it again. A hidden game leaves the Catalog,
+- `GameCard.hidden` and `GameDetail.hidden` say the player hid a Catalog game. Send
+  `Library` `Hide` to hide one or show it again. A hidden game leaves the Catalog,
   but for the systems row's "Hidden" filter (id `hidden`), which shows only hidden games. The
   default theme puts an eye on the Catalog's cards and in the Game Hub, and an item in the
   game's menu.
 
 ### Host: what to ask for
 
-`Host` is a global of callbacks. Each one becomes a command to the core
-(`ThemeHost::wire` in `crates/nexus-ui-host/src/host.rs`). Arguments are strings unless the
-comment says otherwise. Text fields that hold JSON (`Slot.args`, `Slot.scope`) go back
-unchanged. The groups:
+`Host` is a global of callbacks. One, `command(name, args)`, asks the core; the others are the
+app's own and never reach it.
+
+`name` is a command of the core's `Command` enum (`crates/nexus-core/src/app.rs`), and `args` its
+payload as JSON, `""` for a command with none. The host reads the two with `serde`, as
+`{name: args}`, so a command is declared once, in the core. A command whose args don't read is
+dropped, with a warning in the log. Build the args with the `Json` global: `Json.text(s)` is a
+JSON string, escaped; `Json.text-or-null(s)` is `null` for `""`; `Json.flag(b)` is `true` or
+`false`. Text fields that hold JSON (`Slot.args`, `Slot.scope`) go in as they are.
+
+```slint
+Host.command("Back", "");
+Host.command("Select", Json.text(game.key));
+Host.command("Session", "{\"Launch\":" + Json.text(game.key) + "}");
+Host.command("Pref", "[\"sounds\"," + Json.flag(on) + "]");
+```
+
+The default theme puts its commands in one global, `Commands` in `commands.slint`, one function
+per thing the player does. Copy it to start a theme.
+
+The commands, by name. A key is a game's key; `?` marks a value that may be `null`.
+
+| Name | Args | What it does |
+|---|---|---|
+| `Navigate` | `"Home"`, `"Catalog"`, `"Downloads"`, `"Settings"`, `"Emulators"`, `"Themes"`; `{"GameDetail": key}`, `{"Plugin": id}`, `{"GameSettings": key}` | Opens a screen |
+| `Back` | none | Goes back |
+| `Select`, `OpenGame` | key | Selects a game; opens its Game Hub |
+| `LibrarySearch`, `LibrarySort` | text | The Library's search and sort (`title`, `played`, `size`, `smallest`, `rating`, `release`, `compat`, `added`) |
+| `LibrarySystem`, `LibraryGenre` | text? | A filter's id; `null` for All |
+| `LibraryMore` | none | The next page |
+| `CatalogSearch`, `CatalogSort`, `CatalogSystem`, `CatalogGenre`, `CatalogMore` | as the Library's | The Catalog's |
+| `GridColumns` | `{"grid": "Library" or "Catalog", "columns": n}` | How many columns a grid shows |
+| `Library` | `"Refresh"`; `{"Hide": {"game": key, "hidden": bool}}` | Reads the games again; hides a Catalog game or shows it again |
+| `Session` | `{"Launch": key}`, `{"Stop": session}`, `{"ShowGame": session}` | Plays, stops, and brings a game's window back |
+| `ConfirmInstall`, `CancelInstall` | none | Answers "Install the emulator first?" |
+| `AskResult` | key | Asks "How far did it get?" |
+| `ReportResult` | text? | `ingame`, `menus`, `boots` or `nothing`; `null` for Not now |
+| `UninstallGame` | key | Deletes an installed game |
+| `Torrent` | `{"Download": {"offer": key, "release": id, "folder": text?}}`; `{"Act": {"id": id, "action": action}}`; `{"SeedDownloads": bool}` | The catalogs' downloads. A blank folder is the one the sheet offers. See [Torrent actions](#torrent-actions). |
+| `GameInstall` | `{"Download": {"id": id, "folder": text?}}`, `{"RemoveUnpacked": {"id": id}}`, `{"Cancel": {"id": id}}` | Installs a finished download, deletes its unpacked archives, stops its install |
+| `PauseDownload`, `ResumeDownload`, `CancelDownload` | a job's `id` | Build downloads |
+| `InstallEmulator` | `{"plugin": id, "version": text?}` | `null` installs the newest |
+| `UpdateEmulator` | `{"plugin": id}` | |
+| `UninstallEmulator` | `{"plugin": id, "version": text}` | |
+| `RunAction` | `{"plugin": id, "action": text, "game": key?, "args": Slot.args or null}` | A slot's action button |
+| `SetConfigField` | `{"plugin": id, "scope": Slot.scope, "key": text, "value": text}` | A settings field |
+| `SetPluginEnabled` | `{"plugin": id, "enabled": bool}` | Turns a plugin on or off |
+| `SetThemeOption` | `{"key": text, "value": text}` | The current theme's option |
+| `SetFolders` | `{"name": text, "paths": text}` | A named folder: its folders as typed, separated by `;`; `""` for the default |
+| `Pref` | `[name, value]` | A preference: `sounds`, `fullscreen`, `return_on_exit`, `auto_update`, `start_at_login` (bool), `scale` (0.8 to 1.4), `monitor` (text, `""` for the one it is on), `welcomed` (true: the Welcome screen's Start) |
+| `Vpn` | `{"SetOnly": bool}`, `{"Choose": name}`, `{"Connect": name}`, `{"Disconnect": name}`, `{"Import": path}` | "Download only through a VPN", and the VPNs |
+| `Notice` | `"DismissAll"`, `{"Dismiss": id}`, `{"Open": id}` | Notices |
+| `LauncherUpdate` | `"Check"`, `"Download"` | The launcher's own update |
+| `System` | `"Refresh"`, `"ScanWifi"`, `{"JoinWifi": {"ssid": text, "password": text?}}`, `{"ForgetWifi": ssid}`, `{"SetBluetooth": bool}`, `"ScanBluetooth"`, `{"Pair": address}`, `{"ConnectDevice": address}`, `{"DisconnectDevice": address}`, `{"RemoveDevice": address}`, `{"SetOutput": name}`, `{"SetVolume": 0 to 100}`, `{"SetMuted": bool}`, `"Restart"`, `"ShutDown"`, `"CheckOsUpdate"`, `{"InstallOs": path}`, `"ChoosePartitions"`, `{"CancelJob": id}` | The machine (`Vm.system`) |
+
+The app's own callbacks:
 
 | Callbacks | Use |
 |---|---|
-| `navigate(screen)`, `back()`, `open-game(key)`, `open-game-settings(key)`, `open-plugin(id)`, `select(key)` | Moving around. `navigate` takes `home`, `catalog`, `downloads`, `settings`, `emulators` or `themes`; the other screens open through their own callbacks. |
-| `library-search`, `library-system`, `library-genre`, `library-sort`, `library-more`, and the same for `catalog-` | Search, filters, sort and the next page. The core does the work; the theme shows the result. |
-| `grid-window(grid, first, last)`, `grid-columns(grid, columns)` | Which cards are on screen, for images; see [Images](#images). |
-| `launch(key)`, `stop(session)`, `show-game(session)`, `confirm-install()`, `cancel-install()`, `report-result(level)`, `ask-result(key)` | Playing |
-| `download-release(key, release, folder)`, `torrent-action(id, action)`, `install-download(id, folder)`, `open-download-folder(id)` | The catalogs' downloads |
-| `pause-download`, `resume-download`, `cancel-download` (by `int` id) | Build downloads |
-| `install(plugin, version)`, `update(plugin)`, `uninstall(plugin, version)` | Emulator builds |
-| `uninstall-game(key)`, `hide-game(key, hidden)`, `open-game-folder(key)`, `open-game-log(key)`, `clear-shader-cache(key)` | A game's menu |
-| `run-action(plugin, action, game, args)` | A slot action button |
-| `set-setting(plugin, scope, key, value)` | A settings field |
-| `set-plugin-enabled(id, bool)`, `switch-theme(id)`, `set-theme-option(key, value)` | Plugins and themes |
-| `set-folder`, `set-sounds`, `set-fullscreen`, `set-return-on-exit`, `set-auto-update`, `set-scale`, `set-start-at-login`, `set-monitor`, `set-seed-downloads`, `set-vpn-only`, `set-vpn`, `connect-vpn`, `disconnect-vpn`, `import-vpn` | Settings |
-| `dismiss-notices()`, `dismiss-notice(id)`, `open-notice(id)` | Notices |
-| `play-trailer(url)`, `pause-trailer()`, `seek-trailer(seconds)`, `close-trailer()`, `open-url(url)` | Trailers and links |
-| `refresh-library()`, `finish-welcome()`, `check-launcher-update()`, `download-launcher-update()`, `restart()`, `quit()` | The rest |
+| `grid-window(grid, first, last)` | Which cards are on screen, for images; see [Images](#images) |
+| `switch-theme(id)` | Shows another theme |
 | `play-sound(name)` | A sound from `[theme.assets.sounds]` |
+| `open-url(url)`, `open-game-folder(key)`, `open-game-log(key)`, `open-download-folder(id)` | Opens a page, a folder or a log with the system's opener |
+| `play-trailer(url)`, `pause-trailer()`, `seek-trailer(seconds)`, `close-trailer()` | The trailer player |
+| `quit()`, `restart()`, `log-out()` | Closes the launcher; starts it again; ends the Nexus session |
 
 ### Torrent actions
 
-`Torrent.actions` lists, in order, what the player can do with a catalog download now. Pass one
-back with `Host.torrent-action(id, action)`:
+`Torrent.actions` lists, in order, what the player can do with a catalog download now. Most
+are a `TorrentAction`: send `Torrent` `{"Act": {"id": id, "action": name}}` with its variant
+name, `Start`, `Pause`, `Cancel`, `Remove`, `DeleteFiles`, `StopSeeding` or `OpenStore`. The
+others are game installs. The default theme's `Commands.torrent-action` does the mapping:
 
 | Action | Effect |
 |---|---|
@@ -318,9 +366,10 @@ back with `Host.torrent-action(id, action)`:
 | `cancel` | Stop it; the files stay. While its archives unpack, stop the unpacking. |
 | `remove` | Forget a download that isn't running; the files stay |
 | `stop-seeding` | Stop sharing the finished files |
-| `install` | Hand the finished download to its emulator's game installer, into the folder it offers. To let the player pick the folder, show a sheet and call `Host.install-download(id, folder)` instead, as the default theme does. |
-| `play` | Not a torrent action: call `Host.launch(torrent.game)` |
-| `remove-unpacked` | Delete the unpacked archives; the downloaded files stay |
+| `install` | `GameInstall` `Download`: hand the finished download to its emulator's game installer, into the folder the player picks on a sheet, or the one it offers |
+| `play` | Not a torrent action: `Session` `Launch` of `torrent.game` |
+| `remove-unpacked` | `GameInstall` `RemoveUnpacked`: delete the unpacked archives; the downloaded files stay |
+| `open-store` | A store's install: open the store's own Downloads page |
 
 Two more actions are accepted but never listed:
 
@@ -328,7 +377,7 @@ Two more actions are accepted but never listed:
   unpacked copies. An installed game is elsewhere and stays. Offer it beside `remove`: the
   default theme's remove sheet asks "keep the files" (`remove`) or "delete them"
   (`delete-files`).
-- `cancel-install`: stop the download's install; what it wrote goes.
+- `cancel-install`: `GameInstall` `Cancel`, stop the download's install; what it wrote goes.
 
 ### Slots
 
@@ -350,10 +399,10 @@ for item in root.items : Rectangle {
 }
 ```
 
-A button runs `Host.run-action(item.plugin, item.action, game-key, item.args)`. A settings panel
-draws its `fields` (`Field`: `kind` is `toggle`, `number`, `text` or `choice`, with `choices` and
-their `labels`) and saves each with `Host.set-setting(item.plugin, item.scope, field.key,
-value)`.
+A button sends `RunAction` with `item.plugin`, `item.action`, the game's key and `item.args`. A
+settings panel draws its `fields` (`Field`: `kind` is `toggle`, `number`, `text` or `choice`,
+with `choices` and their `labels`) and saves each with `SetConfigField`, with `item.plugin`,
+`item.scope`, `field.key` and the value.
 
 ## Tokens and options
 
@@ -413,8 +462,8 @@ import { Options } from "../options.slint";
 Text { text: Options.motion; }
 ```
 
-`Vm.theme-options` lists the options as `Field`s for a settings form, and
-`Host.set-theme-option(key, value)` changes one.
+`Vm.theme-options` lists the options as `Field`s for a settings form, and the command
+`SetThemeOption` changes one.
 
 ## Responsive layout
 
@@ -468,7 +517,7 @@ Handle the keys in a `FocusScope`:
 keys := FocusScope {
     key-pressed(event) => {
         if (event.repeat && event.text == Key.Return) { return accept; }
-        if (event.text == Key.Escape) { Host.back(); return accept; }
+        if (event.text == Key.Escape) { Host.command("Back", ""); return accept; }
         reject
     }
 }
@@ -490,7 +539,7 @@ Covers load only near the screen. A grid tells the host which cards it shows wit
 `Host.grid-window(grid, first, last)`, where `grid` is `library` or `catalog` and `first` and
 `last` are card indices. Cards within one screen of that window load; cards further away ask for
 nothing and show empty. Before a grid reports, the host assumes cards 0 to 29.
-`Host.grid-columns(grid, columns)` tells the core how many columns the grid shows, so it fetches
+The command `GridColumns` tells the core how many columns the grid shows, so it fetches
 the art of the games above and below the selection. The default theme's
 `components/library-view.slint` reports both whenever it scrolls or resizes:
 
