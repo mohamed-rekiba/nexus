@@ -287,13 +287,15 @@ stick of 8 GB or more. When the ISO is over 2 GiB it comes in parts
 - Linux and macOS:
 
   ```sh
-  cat nexus-os-x86_64-0.3.0.iso.part-* > nexus-os-x86_64-0.2.0.iso
+  v=0.3.0
+  cat nexus-os-x86_64-$v.iso.part-* > nexus-os-x86_64-$v.iso
   ```
 
 - Windows (Command Prompt), naming every part in order:
 
   ```bat
-  copy /b nexus-os-x86_64-0.3.0.iso.part-aa + nexus-os-x86_64-0.2.0.iso.part-ab nexus-os-x86_64-0.2.0.iso
+  set v=0.3.0
+  copy /b nexus-os-x86_64-%v%.iso.part-aa + nexus-os-x86_64-%v%.iso.part-ab nexus-os-x86_64-%v%.iso
   ```
 
 Then check the ISO against `nexus-os-x86_64-0.3.0.iso.sha256` (each part also has its own
