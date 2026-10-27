@@ -5,6 +5,7 @@
 //! reads headless view models and sends commands.
 
 mod app;
+mod app_state;
 mod archive_plan;
 mod archives;
 mod bus;
@@ -41,7 +42,8 @@ mod unpack;
 mod view;
 mod vpn;
 
-pub use app::{Command, Core, GRID_PAGE, Grid, HIDDEN_FILTER, INGAME_FILTER, INSTALLED_FILTER, Route};
+pub use app::{Command, Core, Grid, HIDDEN_FILTER, INGAME_FILTER, INSTALLED_FILTER, Route};
+pub use app_state::GRID_PAGE;
 pub use archive_plan::{ArchiveEntry, EntryKind, Plan, Planned, UNPACK_SPARE, plan_unpack, room};
 pub use archives::embedded_archive;
 pub use bus::EventBus;

@@ -714,16 +714,18 @@ fn notice_vm(kernel: &Kernel, library: &LibrarySnapshot, notice: &crate::notices
 
 pub(crate) fn build(core: &Core) -> AppView {
     let kernel = core.kernel();
-    let jobs = core.inner.downloads.jobs();
-    let statuses = kernel.statuses();
-    let library = core.library().snapshot();
-    let torrents = core.torrents().snapshot();
-    let prefs = core.prefs();
-    let installs = core.installs().snapshot();
-    let sessions = core.sessions().snapshot();
-    let notices = core.notices().snapshot();
-    let launcher_update = core.launcher_update().snapshot();
-    let vpn = core.vpn().snapshot();
+    let crate::app::Snapshot {
+        library,
+        torrents,
+        prefs,
+        installs,
+        sessions,
+        notices,
+        launcher_update,
+        vpn,
+        jobs,
+        statuses,
+    } = core.snapshot();
     let mut state = core.state();
 
     let route = state.nav.last().cloned().unwrap_or(Route::Home);

@@ -3,7 +3,7 @@
 //! All state lives here, never in a theme, so the UI can be rebuilt (or a theme swapped) at
 //! any time without losing navigation, selection, downloads or running games.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use futures::stream::BoxStream;
@@ -20,6 +20,9 @@ use crate::error::require;
 use crate::library::DetailState;
 use crate::preferences::{Pref, Preferences, PreferencesSnapshot};
 use crate::view;
+// The view reads them from here.
+pub(crate) use crate::app_state::{AppState, EmulatorState, SettingsPanel};
+use crate::app_state::{GRID_PAGE, InstallPrompt, LibraryView};
 use crate::{CoreError, CoreResult, Kernel};
 
 /// Where the player is. The navigation stack is a list of routes.
@@ -188,16 +191,6 @@ pub use nexus_api::HOST_INSTALL_GAME;
 pub const UPDATE_CHECK_EVERY: std::time::Duration = std::time::Duration::from_secs(6 * 3600);
 const FIRST_UPDATE_CHECK: std::time::Duration = std::time::Duration::from_secs(60);
 
-/// A first play waiting for the player to agree to install its emulator.
-#[derive(Clone, Debug)]
-pub(crate) struct InstallPrompt {
-    pub game: GameKey,
-    pub emulator: String,
-    pub version: String,
-    pub title: String,
-    pub size_bytes: Option<u64>,
-}
-
 /// An install in progress, saved under `app.installs.<plugin>` so a crash resumes it.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 struct InstallRecord {
@@ -255,106 +248,8 @@ pub const INSTALLED_FILTER: &str = "installed";
 /// The Catalog's "Hidden" filter, among the systems: only the games the player hid.
 pub const HIDDEN_FILTER: &str = "hidden";
 
-#[derive(Clone, Debug, Default)]
-pub(crate) struct EmulatorState {
-    pub installed: Vec<String>,
-    /// The installed build is the player's own: it never updates by itself.
-    pub own: bool,
-    pub available: Vec<String>,
-    pub busy: bool,
-    /// Its `emulator.panel` slot items.
-    pub panels: Vec<nexus_api::SlotItem>,
-}
-
-/// A plugin's settings panel on the Settings screen: its slot item, and the schema and the
-/// values of the settings scope it names.
-#[derive(Clone, Debug)]
-pub(crate) struct SettingsPanel {
-    pub plugin: PluginId,
-    pub item: nexus_api::SlotItem,
-    pub schema: Value,
-    pub values: Value,
-}
-
-/// The Library's search, filters and sort.
-#[derive(Clone, Debug)]
-pub(crate) struct LibraryView {
-    pub query: String,
-    pub system: Option<String>,
-    /// Only games that reach gameplay: the community's result or the player's own.
-    pub ingame: bool,
-    /// Only the games the player has: in the Catalog, the offers of installed games.
-    pub installed: bool,
-    /// Only the games the player hid; else the Catalog leaves them out.
-    pub hidden: bool,
-    pub genre: Option<String>,
-    pub sort: String,
-    /// How many games show: pages of [`GRID_PAGE`], more as the player scrolls.
-    pub shown: usize,
-}
-
-/// How many more games a Library or Catalog page shows each time.
-pub const GRID_PAGE: usize = 60;
-
-impl Default for LibraryView {
-    fn default() -> Self {
-        Self {
-            query: String::new(),
-            system: None,
-            ingame: false,
-            installed: false,
-            hidden: false,
-            genre: None,
-            sort: "title".into(),
-            shown: GRID_PAGE,
-        }
-    }
-}
-
-impl LibraryView {
-    /// The Catalog's: newest added first.
-    fn catalog() -> Self {
-        Self { sort: "added".into(), ..Self::default() }
-    }
-}
-
 /// How long a selection must stay before its details load.
 const SELECT_SETTLE: std::time::Duration = std::time::Duration::from_millis(150);
-
-pub(crate) struct AppState {
-    pub nav: Vec<Route>,
-    pub selected: Option<GameKey>,
-    /// Each emulator's builds and blocks, and a service plugin's blocks once its page opens.
-    pub emulators: BTreeMap<PluginId, EmulatorState>,
-    pub settings: Vec<SettingsPanel>,
-    pub theme: Option<PluginId>,
-    /// The Library's search, filters and sort.
-    pub library_view: LibraryView,
-    /// The Catalog's.
-    pub catalog_view: LibraryView,
-    /// A game that just closed, to ask the player how far it got, and the emulator build it
-    /// ran on.
-    pub result_prompt: Option<(GameKey, Option<String>)>,
-    /// This PC, once the check ran.
-    pub hardware: Option<crate::Specs>,
-    /// The machine's settings, from the system plugins.
-    pub system: crate::system::SystemState,
-    pub install_prompt: Option<InstallPrompt>,
-    /// Emulators with an update that waits for their game to close.
-    pub pending_updates: BTreeSet<PluginId>,
-    /// The installs stores are doing (Steam's), by the catalog plugin, as last read.
-    pub store_installs: Vec<(PluginId, nexus_api::StoreInstall)>,
-    /// Until when the stores' installs are read often: a minute after Nexus asked a store to
-    /// install, as the store writes its install down a moment later.
-    pub store_watch_until: Option<std::time::Instant>,
-    /// The game selected in the Catalog. Home's selection stays a library game.
-    pub catalog_selected: Option<GameKey>,
-    /// The Catalog's grid as last built: on another screen, each view shows this one instead
-    /// of searching and sorting every offer again.
-    pub catalog_grid: Option<nexus_ui_api::LibraryVm>,
-    /// Each grid's columns.
-    pub grid_columns: HashMap<Grid, usize>,
-}
 
 pub(crate) struct Inner {
     pub kernel: Kernel,
@@ -379,6 +274,23 @@ pub(crate) struct Inner {
     pub reading_catalogs: tokio::sync::Mutex<()>,
 }
 
+/// The whole state, read once per subsystem, for the view to build from. Each read is the
+/// subsystem's own snapshot; none changes anything.
+pub(crate) struct Snapshot {
+    pub library: crate::library::LibrarySnapshot,
+    pub torrents: crate::torrents::TorrentsSnapshot,
+    pub prefs: PreferencesSnapshot,
+    pub installs: crate::game_installs::InstallsSnapshot,
+    pub sessions: crate::sessions::SessionsSnapshot,
+    pub notices: Arc<Vec<crate::notices::Notice>>,
+    pub launcher_update: crate::launcher_update::LauncherUpdateSnapshot,
+    pub vpn: crate::vpn::VpnSnapshot,
+    /// The download manager's jobs: the plugins' downloads.
+    pub jobs: Vec<crate::Job>,
+    /// Each plugin's status.
+    pub statuses: BTreeMap<PluginId, crate::PluginStatus>,
+}
+
 /// The app. Cheap to clone; every clone is the same app.
 #[derive(Clone)]
 pub struct Core {
@@ -389,25 +301,7 @@ impl Core {
     /// Starts the app on a booted kernel and resumes installs a crash interrupted.
     pub async fn start(kernel: Kernel) -> Core {
         let theme = Pref::Theme.load(kernel.config()).as_str().and_then(|s| PluginId::new(s).ok());
-        let state = AppState {
-            nav: vec![Route::Home],
-            selected: None,
-            emulators: BTreeMap::new(),
-            settings: Vec::new(),
-            theme,
-            library_view: LibraryView::default(),
-            catalog_view: LibraryView::catalog(),
-            result_prompt: None,
-            hardware: None,
-            system: Default::default(),
-            install_prompt: None,
-            pending_updates: BTreeSet::new(),
-            store_installs: Vec::new(),
-            store_watch_until: None,
-            catalog_selected: None,
-            catalog_grid: None,
-            grid_columns: HashMap::new(),
-        };
+        let state = AppState::new(theme);
         let ports = kernel.ports().clone();
         let downloads = Downloads::spawn(crate::downloads::DownloadContext {
             ports: ports.downloads(),
@@ -656,6 +550,22 @@ impl Core {
     /// Shows the player a problem outside the core, such as a theme's logic failing.
     pub fn report(&self, message: String) {
         self.notices().report(message);
+    }
+
+    /// Every subsystem's state, read once each.
+    pub(crate) fn snapshot(&self) -> Snapshot {
+        Snapshot {
+            library: self.library().snapshot(),
+            torrents: self.torrents().snapshot(),
+            prefs: self.prefs(),
+            installs: self.installs().snapshot(),
+            sessions: self.sessions().snapshot(),
+            notices: self.notices().snapshot(),
+            launcher_update: self.launcher_update().snapshot(),
+            vpn: self.vpn().snapshot(),
+            jobs: self.inner.downloads.jobs(),
+            statuses: self.inner.kernel.statuses(),
+        }
     }
 
     /// The view models for the current state.
@@ -1666,25 +1576,6 @@ fn check_sort(sort: &str) -> CoreResult<()> {
     match sort {
         "title" | "played" | "size" | "smallest" | "rating" | "release" | "compat" | "added" => Ok(()),
         _ => Err(CoreError::Invalid(format!("no sort {sort:?}"))),
-    }
-}
-
-impl LibraryView {
-    /// A system, or `INGAME_FILTER`, `INSTALLED_FILTER` or `HIDDEN_FILTER` to turn "In-game",
-    /// "Installed" or "Hidden" on or off; `None` clears them all.
-    fn set_system(&mut self, system: Option<String>) {
-        match system.as_deref() {
-            Some(INGAME_FILTER) => self.ingame = !self.ingame,
-            Some(INSTALLED_FILTER) => self.installed = !self.installed,
-            Some(HIDDEN_FILTER) => self.hidden = !self.hidden,
-            None => {
-                self.system = None;
-                self.ingame = false;
-                self.installed = false;
-                self.hidden = false;
-            }
-            Some(_) => self.system = system,
-        }
     }
 }
 
