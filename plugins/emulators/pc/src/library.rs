@@ -13,7 +13,7 @@ use emulator_kit::installs::Download;
 
 use crate::manifest::{self, GAME_FILE, GameManifest, Start};
 use crate::runner::Runner;
-use crate::{CONSOLE_FOLDER, GAMES, GOG_INFO, Pc, WRAPPER_INFO, WRAPPER_NAME_LINE, install, path, probe, settings};
+use crate::{CONSOLE_FOLDER, GAMES, GOG_INFO, Pc, WRAPPER_INFO, WRAPPER_NAME_LINE, install, probe, settings};
 
 /// A game's own cover, in its folder, in this order.
 const COVERS: [&str; 3] = ["cover.jpg", "cover.png", "cover.webp"];
@@ -55,7 +55,7 @@ impl Pc {
     /// The `PC/` folder of each of the player's game folders.
     async fn pc_folders(&self) -> PluginResult<Vec<HostPath>> {
         let roots = self.ctx.folders().roots(GAMES).await?;
-        roots.into_iter().map(|root| Ok(HostPath::new(GAMES, root.root, path(CONSOLE_FOLDER)?))).collect()
+        roots.into_iter().map(|root| Ok(HostPath::new(GAMES, root.root, RelPath::new(CONSOLE_FOLDER)?))).collect()
     }
 
     /// The game in the folder `dir` named `id`, when it has a manifest file.

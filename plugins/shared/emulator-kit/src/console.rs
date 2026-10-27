@@ -53,10 +53,6 @@ pub struct ConsoleEmulator<F: Flavor> {
     builds: Arc<BuildManager<F>>,
 }
 
-fn path(p: impl Into<String>) -> PluginResult<RelPath> {
-    Ok(RelPath::new(p)?)
-}
-
 impl<F: Flavor> ConsoleEmulator<F> {
     /// The emulator, with settings stored in an older shape rewritten first.
     pub async fn start(flavor: F, spec: ConsoleSpec, host: Host) -> PluginResult<Self> {
@@ -88,7 +84,7 @@ impl<F: Flavor> ConsoleEmulator<F> {
         let folders = &self.host.folders;
         let mut out = Vec::new();
         for root in folders.roots(PACKAGES_FOLDER).await? {
-            let dir = HostPath::new(PACKAGES_FOLDER, root.root, path(F::CONSOLE)?);
+            let dir = HostPath::new(PACKAGES_FOLDER, root.root, RelPath::new(F::CONSOLE)?);
             let Ok(entries) = folders.list(&dir).await else { continue };
             for entry in entries {
                 if entry.is_dir {
@@ -105,7 +101,7 @@ impl<F: Flavor> ConsoleEmulator<F> {
     }
 
     async fn compat_list(&self) -> HashMap<String, CompatInfo> {
-        let Ok(cache) = path("cache/compatibility.json") else { return Default::default() };
+        let Ok(cache) = RelPath::new("cache/compatibility.json") else { return Default::default() };
         let host = &self.host;
         let list = &self.spec.compat;
         match cache::cached_json(host.storage.as_ref(), host.http.as_ref(), &host.log, list.url, &cache, LISTS_TTL)

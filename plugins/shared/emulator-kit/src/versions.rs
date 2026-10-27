@@ -19,13 +19,9 @@ pub struct State {
     pub previous: Option<String>,
 }
 
-fn path(p: &str) -> PluginResult<RelPath> {
-    Ok(RelPath::new(p)?)
-}
-
 /// The folder of a version.
 pub fn folder(tag: &str) -> PluginResult<RelPath> {
-    path(BUILDS)?.join(tag).map_err(Into::into)
+    RelPath::new(BUILDS)?.join(tag).map_err(Into::into)
 }
 
 /// The versions in one plugin's storage.
@@ -51,13 +47,18 @@ impl Versions {
 
     async fn save(&self, state: &State) -> PluginResult<()> {
         let body = json!({ "current": state.current, "previous": state.previous });
-        self.storage.write(&path(STATE)?, body.to_string().as_bytes()).await
+        self.storage.write(&RelPath::new(STATE)?, body.to_string().as_bytes()).await
     }
 
     /// Installed versions, the current one last (the host shows the last one as installed).
     pub async fn installed(&self) -> PluginResult<Vec<String>> {
-        let mut tags: Vec<String> =
-            self.storage.list(&path(BUILDS)?).await?.into_iter().filter(|t| !t.ends_with(".unpacking")).collect();
+        let mut tags: Vec<String> = self
+            .storage
+            .list(&RelPath::new(BUILDS)?)
+            .await?
+            .into_iter()
+            .filter(|t| !t.ends_with(".unpacking"))
+            .collect();
         let current = self.state().await.current;
         tags.sort_by_key(|t| Some(t) == current.as_ref());
         Ok(tags)

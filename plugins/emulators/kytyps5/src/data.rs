@@ -7,7 +7,7 @@ use emulator_kit::host::Host;
 use emulator_kit::versions;
 use nexus_api::*;
 
-use crate::{MAC_BUNDLE, OWN_BUILD, path};
+use crate::{MAC_BUNDLE, OWN_BUILD};
 
 /// Folders KytyPS5 writes relative to its working folder.
 pub const DATA_DIRS: [&str; 6] = ["_SaveData", "_PipelineCache", "_DownloadData", "_TempData", "_Textures", "_Patches"];
@@ -27,7 +27,7 @@ pub async fn binary(storage: &dyn Storage, tag: &str, platform: Option<Platform>
     if storage.exists(&top).await? {
         return Ok(top);
     }
-    let bundled = path(format!("{build}/{MAC_BUNDLE}/{binary}"))?;
+    let bundled = RelPath::new(format!("{build}/{MAC_BUNDLE}/{binary}"))?;
     if storage.exists(&bundled).await? {
         return Ok(bundled);
     }
@@ -45,10 +45,7 @@ pub async fn binary(storage: &dyn Storage, tag: &str, platform: Option<Platform>
 pub async fn work_dir(storage: &dyn Storage, tag: &str, platform: Option<Platform>) -> PluginResult<RelPath> {
     let binary = binary(storage, tag, platform).await?;
     let parent = binary.as_str().rsplit_once('/').map(|(dir, _)| dir).unwrap_or_default();
-    match parent.strip_suffix(&format!("/{MAC_BUNDLE}")) {
-        Some(build) => path(build),
-        None => path(parent),
-    }
+    Ok(RelPath::new(parent.strip_suffix(&format!("/{MAC_BUNDLE}")).unwrap_or(parent))?)
 }
 
 /// The data folders' home with `tag` current: its folder, or the parking folder when there
@@ -57,9 +54,9 @@ pub async fn home(storage: &dyn Storage, tag: Option<&str>, platform: Option<Pla
     match tag {
         Some(tag) => match work_dir(storage, tag, platform).await {
             Ok(dir) => Ok(dir),
-            Err(_) => path(PARKED),
+            Err(_) => Ok(RelPath::new(PARKED)?),
         },
-        None => path(PARKED),
+        None => Ok(RelPath::new(PARKED)?),
     }
 }
 
@@ -103,7 +100,7 @@ pub async fn adopt_own_data(host: &Host, own: Option<&Location>, to: &RelPath) -
         // folder, so it moves instead of copying.
         Some(_) => {
             for name in DATA_DIRS {
-                let (from, target) = (path(format!("{OWN_DATA}/{name}"))?, to.join(name)?);
+                let (from, target) = (RelPath::new(format!("{OWN_DATA}/{name}"))?, to.join(name)?);
                 if storage.exists(&from).await? && empty(target.clone()).await? {
                     storage.remove(&target).await?;
                     storage.rename(&from, &target).await?;
@@ -120,7 +117,7 @@ pub async fn adopt_own_data(host: &Host, own: Option<&Location>, to: &RelPath) -
     };
     for name in DATA_DIRS {
         let from = if dir.is_empty() { name.to_owned() } else { format!("{dir}/{name}") };
-        let source = HostPath::new(OWN_BUILD, binary.root, path(from)?);
+        let source = HostPath::new(OWN_BUILD, binary.root, RelPath::new(from)?);
         let target = to.join(name)?;
         if !host.folders.exists(&source).await? {
             continue;

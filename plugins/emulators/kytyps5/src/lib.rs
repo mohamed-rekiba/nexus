@@ -338,7 +338,7 @@ fn releases_url(repo: &str) -> String {
 
 /// Where the releases list of `repo` is cached, so a new release repo is not served the old list.
 fn releases_cache(repo: &str) -> PluginResult<RelPath> {
-    path(format!("cache/releases-{}.json", repo.replace('/', "-")))
+    Ok(RelPath::new(format!("cache/releases-{}.json", repo.replace('/', "-")))?)
 }
 
 /// "KytyPS5-2026-09-29-59a1760" -> "2026-09-29 · 59a1760".
@@ -361,10 +361,6 @@ pub fn banner_version(banner: &str) -> Option<String> {
         Some(date) => Some(format!("{} ({git})", date.replace('.', "-"))),
         None => Some(git),
     }
-}
-
-fn path(p: impl Into<String>) -> PluginResult<RelPath> {
-    Ok(RelPath::new(p)?)
 }
 
 // The old app's keyboard screen, for KytyPS5's default layout.

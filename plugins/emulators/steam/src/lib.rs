@@ -59,10 +59,6 @@ fn flags(app: &vdf::Block) -> u64 {
 /// Steamworks Common Redistributables: a tool, whatever its name.
 const REDISTRIBUTABLES: &str = "228980";
 
-fn path(p: impl Into<String>) -> PluginResult<RelPath> {
-    RelPath::new(p).map_err(|e| PluginError::InvalidInput(e.to_string()))
-}
-
 /// Whether the app is one of Steam's tools, not a game.
 fn is_tool(id: &str, name: &str) -> bool {
     id == REDISTRIBUTABLES || name.starts_with("Proton") || name.starts_with("Steam Linux Runtime")
@@ -137,7 +133,7 @@ impl Steam {
         let mut seen = BTreeSet::new();
         let mut out = Vec::new();
         for library in self.libraries().await? {
-            let apps = HostPath::new(STEAM, library.root, path("steamapps")?);
+            let apps = HostPath::new(STEAM, library.root, RelPath::new("steamapps")?);
             for entry in self.ctx.folders().list(&apps).await.unwrap_or_default() {
                 if !(entry.name.starts_with("appmanifest_") && entry.name.ends_with(".acf")) {
                     continue;
@@ -237,7 +233,7 @@ impl Steam {
     async fn cached(&self, id: &str, file: &str) -> PluginResult<Option<ImageSource>> {
         let folders = self.ctx.folders();
         for library in self.libraries().await? {
-            let cache = HostPath::new(STEAM, library.root, path("appcache/librarycache")?);
+            let cache = HostPath::new(STEAM, library.root, RelPath::new("appcache/librarycache")?);
             let own = cache.join(id)?;
             let mut places = vec![own.join(file)?, cache.join(&format!("{id}_{file}"))?];
             for entry in folders.list(&own).await.unwrap_or_default() {
@@ -275,7 +271,7 @@ impl Steam {
         let read: BTreeSet<&str> = libraries.iter().map(|l| l.path.trim_end_matches('/')).collect();
         let mut rows = Vec::new();
         for library in &libraries {
-            let list = HostPath::new(STEAM, library.root, path("steamapps/libraryfolders.vdf")?);
+            let list = HostPath::new(STEAM, library.root, RelPath::new("steamapps/libraryfolders.vdf")?);
             let Some(file) = self.read_vdf(&list).await else { continue };
             let Some(folders) = file.block("libraryfolders") else { continue };
             for (_, folder) in &folders.0 {

@@ -36,10 +36,6 @@ const GOG_INFO: &str = "data/noarch/gameinfo";
 const WRAPPER_INFO: &str = "game_info/game_info.txt";
 const WRAPPER_NAME_LINE: usize = 5;
 
-fn path(p: impl Into<String>) -> PluginResult<RelPath> {
-    RelPath::new(p).map_err(|e| PluginError::InvalidInput(e.to_string()))
-}
-
 pub struct PcPlugin;
 
 #[async_trait]

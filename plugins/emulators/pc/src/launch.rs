@@ -8,11 +8,11 @@
 use nexus_api::serde_json::Value;
 use nexus_api::*;
 
+use crate::Pc;
 use crate::library::Game;
 use crate::manifest::Start;
 use crate::probe::Kind;
 use crate::settings::{RESOLUTION, resolution};
-use crate::{Pc, path};
 
 /// A program as an argument of gamescope: a system program by its name, which gamescope finds
 /// on the PATH, and any other by its path.
@@ -91,7 +91,7 @@ impl Pc {
         spec.program = runner.program;
         spec.args = vec![LaunchArg::path(exe)];
         // Each game in its own Wine prefix, in this plugin's data folder.
-        spec.env.insert("WINEPREFIX".into(), LaunchArg::path(path(format!("prefixes/{}", game.id))?));
+        spec.env.insert("WINEPREFIX".into(), LaunchArg::path(RelPath::new(format!("prefixes/{}", game.id))?));
         if runner.umu {
             // umu downloads and updates Proton (GE-Proton) by itself.
             spec.env.insert("GAMEID".into(), "umu-default".into());

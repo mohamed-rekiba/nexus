@@ -105,10 +105,6 @@ pub fn pretty(tag: &str) -> String {
     tag.trim_start_matches('v').trim_start_matches('.').to_owned()
 }
 
-fn path(p: impl Into<String>) -> PluginResult<RelPath> {
-    Ok(RelPath::new(p)?)
-}
-
 /// The program a build starts.
 fn program(tag: &str, platform: Option<Platform>) -> PluginResult<RelPath> {
     match platform {
@@ -153,7 +149,7 @@ impl Flavor for ShadFlavor {
     const CONSOLE: &'static str = CONSOLE;
 
     fn release_source(&self, _settings: &Settings) -> PluginResult<ReleaseSource> {
-        Ok(ReleaseSource { url: RELEASES.into(), cache: path("cache/releases.json")?, prereleases: false })
+        Ok(ReleaseSource { url: RELEASES.into(), cache: RelPath::new("cache/releases.json")?, prereleases: false })
     }
 
     fn asset_matches(&self, name: &str) -> bool {

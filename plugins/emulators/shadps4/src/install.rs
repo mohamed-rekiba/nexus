@@ -7,7 +7,7 @@ use std::sync::Arc;
 use emulator_kit::installs::{self, Entry, Format, Tree, Writer};
 use nexus_api::*;
 
-use crate::{CONSOLE, DATA, GAMES, Shad, path, pkg4};
+use crate::{CONSOLE, DATA, GAMES, Shad, pkg4};
 
 #[async_trait]
 impl Catalog for Shad {
@@ -26,10 +26,10 @@ impl Catalog for Shad {
         let mut details = self.emu.details(game).await?;
         let mut also = Vec::new();
         if let Some(dir) = &details.folder {
-            also.push(HostPath::new(GAMES, dir.root, path(format!("{}-patch", dir.path))?));
+            also.push(HostPath::new(GAMES, dir.root, RelPath::new(format!("{}-patch", dir.path))?));
         }
         if let (Some(title_id), Some(data)) = (&details.summary.title_id, self.root_of(DATA).await?) {
-            also.push(HostPath::new(DATA, data, path(format!("addcont/{title_id}"))?));
+            also.push(HostPath::new(DATA, data, RelPath::new(format!("addcont/{title_id}"))?));
         }
         for folder in also {
             if folders.exists(&folder).await.unwrap_or(false) {
@@ -145,7 +145,7 @@ impl GameInstaller for Shad {
                 }
                 return Err(PluginError::Precondition(format!("{} is already installed", dest.path)));
             }
-            let work = HostPath::new(&dest.folder, dest.root, path(format!("{}.part", dest.path))?);
+            let work = HostPath::new(&dest.folder, dest.root, RelPath::new(format!("{}.part", dest.path))?);
             folders.remove(&work).await?;
             steps.push(Step { package, root, kind, dest, work });
         }
@@ -239,7 +239,7 @@ impl Shad {
                             "this download's update is for {title_id}, not for its game"
                         )));
                     }
-                    return Ok(HostPath::new(GAMES, game.root, path(format!("{}-patch", game.path))?));
+                    return Ok(HostPath::new(GAMES, game.root, RelPath::new(format!("{}-patch", game.path))?));
                 }
                 let installed = self.emu.games().refresh(self.emu.host().folders.as_ref()).await?;
                 let game = installed.iter().find(|g| g.title_id == title_id).ok_or_else(|| {
@@ -247,11 +247,11 @@ impl Shad {
                 })?;
                 let folder = game.dir.path.file_name().unwrap_or(title_id).to_owned();
                 let beside = game.dir.path.as_str().rsplit_once('/').map(|(d, _)| format!("{d}/")).unwrap_or_default();
-                HostPath::new(GAMES, game.dir.root, path(format!("{beside}{folder}-patch"))?)
+                HostPath::new(GAMES, game.dir.root, RelPath::new(format!("{beside}{folder}-patch"))?)
             }
             pkg4::Kind::Dlc => {
                 let data = self.root_of(DATA).await?.ok_or_else(|| need("DLC", DATA))?;
-                HostPath::new(DATA, data, path(format!("addcont/{root}"))?)
+                HostPath::new(DATA, data, RelPath::new(format!("addcont/{root}"))?)
             }
         })
     }
@@ -278,7 +278,7 @@ impl Shad {
             if folders.exists(&dest).await? {
                 return Err(PluginError::Precondition(format!("{title} is already installed")));
             }
-            let work = HostPath::new(&dest.folder, dest.root, path(format!("{}.part", dest.path))?);
+            let work = HostPath::new(&dest.folder, dest.root, RelPath::new(format!("{}.part", dest.path))?);
             folders.remove(&work).await?;
             let mut tree = download.tree(folders.clone(), &prefix);
             let into = work.clone();

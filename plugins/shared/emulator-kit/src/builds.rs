@@ -134,10 +134,6 @@ pub fn own_build_missing(folder: &str, program: &str, has_downloaded: bool) -> P
     PluginError::OwnBuildMissing { has_downloaded, folder: folder.into(), program: program.into() }
 }
 
-fn path(p: impl Into<String>) -> PluginResult<RelPath> {
-    Ok(RelPath::new(p)?)
-}
-
 /// Runs an emulator's builds over its [`Flavor`].
 pub struct BuildManager<F: Flavor> {
     flavor: F,
@@ -240,12 +236,12 @@ impl<F: Flavor> BuildManager<F> {
                 Location::Folder(file) if file.path.is_root() => None,
                 Location::Folder(file) => {
                     let dir = file.path.as_str().rsplit_once('/').map(|(d, _)| d).unwrap_or("");
-                    let dir = if dir.is_empty() { RelPath::root() } else { path(dir)? };
+                    let dir = if dir.is_empty() { RelPath::root() } else { RelPath::new(dir)? };
                     Some(Location::Folder(HostPath::new(&file.folder, file.root, dir)))
                 }
                 _ => {
-                    self.host.storage.write(&path(format!("{OWN_DATA}/.keep"))?, b"").await?;
-                    Some(Location::Data(path(OWN_DATA)?))
+                    self.host.storage.write(&RelPath::new(format!("{OWN_DATA}/.keep"))?, b"").await?;
+                    Some(Location::Data(RelPath::new(OWN_DATA)?))
                 }
             };
             return Ok(Run { program, cwd, tag: None });
@@ -360,7 +356,7 @@ impl<F: Flavor> Downloader for BuildManager<F> {
                 size: (asset.size > 0).then_some(asset.size),
                 sha256,
                 signature: None,
-                dest: path(format!("downloads/{}", asset.name))?,
+                dest: RelPath::new(format!("downloads/{}", asset.name))?,
                 unpack: Some(Unpack {
                     format: self.flavor.archive_format(&asset.name),
                     into: versions::folder(&release.tag)?,
@@ -393,7 +389,7 @@ impl<F: Flavor> Installer for BuildManager<F> {
                 Some(v) => format!("{OWN_LABEL} · {v}"),
                 None => OWN_LABEL.to_owned(),
             };
-            return Ok(vec![InstalledVersion { version, path: path(OWN_DATA)?, own: true }]);
+            return Ok(vec![InstalledVersion { version, path: RelPath::new(OWN_DATA)?, own: true }]);
         }
         let mut out = Vec::new();
         for tag in self.versions.installed().await? {
@@ -482,7 +478,7 @@ mod tests {
         fn release_source(&self, settings: &TestSettings) -> PluginResult<ReleaseSource> {
             Ok(ReleaseSource {
                 url: RELEASES.into(),
-                cache: path(format!("cache/releases-{}.json", settings.repo))?,
+                cache: RelPath::new(format!("cache/releases-{}.json", settings.repo))?,
                 prereleases: false,
             })
         }
@@ -553,9 +549,9 @@ mod tests {
             let program = format!("builds/{tag}/emu");
             self.host.storage.put(&program, b"#!");
             let out = runs.then_some("TestEmu 1.0\nusage");
-            self.host.programs.add(&Location::Data(path(program.as_str()).unwrap()), &program, out);
+            self.host.programs.add(&Location::Data(RelPath::new(program.as_str()).unwrap()), &program, out);
             vec![DownloadedArtifact {
-                dest: path(format!("downloads/{tag}.zip")).unwrap(),
+                dest: RelPath::new(format!("downloads/{tag}.zip")).unwrap(),
                 sha256: String::new(),
                 size: 0,
                 unpacked: Some(versions::folder(tag).unwrap()),
@@ -599,7 +595,7 @@ mod tests {
         let run = t.builds.run().await.unwrap();
         assert_eq!(
             run,
-            Run { program: Location::Data(path("builds/v1/emu").unwrap()), cwd: None, tag: Some("v1".into()) }
+            Run { program: Location::Data(RelPath::new("builds/v1/emu").unwrap()), cwd: None, tag: Some("v1".into()) }
         );
     }
 
@@ -676,12 +672,20 @@ mod tests {
         let installed = t.builds.installed().await.unwrap();
         assert_eq!(
             installed,
-            [InstalledVersion { version: "Your own build · 2.0-dev".into(), path: path("own").unwrap(), own: true }]
+            [InstalledVersion {
+                version: "Your own build · 2.0-dev".into(),
+                path: RelPath::new("own").unwrap(),
+                own: true
+            }]
         );
         let run = t.builds.run().await.unwrap();
         assert_eq!(
             run,
-            Run { program: Location::System("emu".into()), cwd: Some(Location::Data(path("own").unwrap())), tag: None }
+            Run {
+                program: Location::System("emu".into()),
+                cwd: Some(Location::Data(RelPath::new("own").unwrap())),
+                tag: None
+            }
         );
         assert!(t.host.storage.file("own/.keep").is_some(), "its working folder exists");
         assert_eq!(t.builds.build_label().await.as_deref(), Some("Your own build"));
@@ -766,7 +770,7 @@ mod tests {
         assert_eq!(plan.label, "TestEmu v1");
         assert_eq!(
             plan.artifacts[0].unpack,
-            Some(Unpack { format: ArchiveFormat::Zip, into: path("builds/v1").unwrap() })
+            Some(Unpack { format: ArchiveFormat::Zip, into: RelPath::new("builds/v1").unwrap() })
         );
         let old = t.builds.plan(&DownloadRequest::EmulatorBuild { version: Some("v0".into()) }).await.unwrap_err();
         assert_eq!(old, PluginError::Precondition("GitHub has no checksum for emu-linux.zip".into()));
