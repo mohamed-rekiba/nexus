@@ -14,25 +14,35 @@
 //!
 //! A game is its processes, as `processes.rs` lists them: every call here takes their ids.
 //!
-//! Start at login writes the system's own entry for the installed launcher (`login`): a
-//! `nexus.desktop` in `$XDG_CONFIG_HOME/autostart` on Linux, a launch agent in
-//! `~/Library/LaunchAgents` on macOS, and a value in the `Run` key of the registry on Windows,
-//! through `reg.exe`.
+//! Three adapters, one per port:
+//! - [`SystemWindows`]: the windows, above.
+//! - [`SystemLoginSession`]: start at login writes the system's own entry for the installed
+//!   launcher (`login`): a `nexus.desktop` in `$XDG_CONFIG_HOME/autostart` on Linux, a launch
+//!   agent in `~/Library/LaunchAgents` on macOS, and a value in the `Run` key of the registry on
+//!   Windows, through `reg.exe`. The launcher's own package goes in through `pkexec` (Linux).
+//! - [`SystemOpener`]: links and paths, with `open`, `xdg-open`, or `start` and `explorer`.
 
 use std::process::{Command, Stdio};
 
-use nexus_core::{Desktop, Front};
-#[cfg(target_os = "linux")]
+use nexus_core::{Front, LoginSession, Opener, Windows};
+#[cfg(any(target_os = "linux", test))]
 use nexus_core::{PackageError, PackageManager};
 
-/// The system's desktop. The launcher's own window comes to the front through `raise`, on the
+/// The system's windows. The launcher's own window comes to the front through `raise`, on the
 /// UI thread: winit asks the system directly, with no permission needed.
-pub struct SystemDesktop {
+pub struct SystemWindows {
     pub raise: Box<dyn Fn() + Send + Sync>,
+}
+
+/// The player's login session on this system.
+pub struct SystemLoginSession {
     /// The program the system starts at login: the installed launcher. `None` for a build
     /// that isn't installed.
     pub login: Option<std::path::PathBuf>,
 }
+
+/// The system's opener.
+pub struct SystemOpener;
 
 /// What a helper program printed, or `None` when it failed or isn't there.
 #[cfg(unix)]
@@ -433,7 +443,7 @@ pub fn claim_gamescope() -> bool {
     false
 }
 
-impl Desktop for SystemDesktop {
+impl Windows for SystemWindows {
     fn front(&self) -> Front {
         match system::front() {
             Some(id) if id == std::process::id() => Front::Launcher,
@@ -466,7 +476,9 @@ impl Desktop for SystemDesktop {
     fn problem(&self) -> Option<String> {
         system::problem()
     }
+}
 
+impl LoginSession for SystemLoginSession {
     fn can_start_at_login(&self) -> bool {
         self.login.is_some()
     }
@@ -485,48 +497,76 @@ impl Desktop for SystemDesktop {
             .stdin(Stdio::null())
             .output()
             .map_err(|e| PackageError::Failed(format!("couldn't ask for the password (pkexec): {e}")))?;
-        match output.status.code() {
-            Some(0) => Ok(()),
-            // pkexec: the prompt was dismissed (126), or the password wasn't accepted (127).
-            Some(126 | 127) => Err(PackageError::Cancelled),
-            code => {
-                // Its last line says why, for example a dependency nothing provides.
-                let said = String::from_utf8_lossy(&output.stderr);
-                let why = said.lines().map(str::trim).rfind(|l| !l.is_empty()).map(str::to_owned);
-                Err(PackageError::Failed(why.unwrap_or_else(|| format!("the package manager ended with {code:?}"))))
-            }
-        }
+        package_outcome(output.status.code(), &output.stderr)
     }
+}
 
-    fn open_link(&self, link: &str) -> Result<(), String> {
-        let (program, args): (&str, Vec<&str>) = if cfg!(target_os = "macos") {
-            ("open", vec![link])
-        } else if cfg!(windows) {
-            ("cmd", vec!["/C", "start", "", link])
-        } else {
-            ("xdg-open", vec![link])
-        };
-        // Not waited for: without a desktop's own opener, xdg-open runs the handler itself, and
-        // `steam` may become Steam's client and keep running. Reaped in the background.
+impl SystemOpener {
+    /// Starts `program` with `args` and doesn't wait: without a desktop's own opener, xdg-open
+    /// runs the handler itself, and `steam` may become Steam's client and keep running. Reaped
+    /// in the background.
+    fn spawn(what: &str, program: &str, args: &[&std::ffi::OsStr]) -> Result<(), String> {
         let mut opener = Command::new(program)
             .args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
-            .map_err(|e| format!("couldn't open the link ({program}): {e}"))?;
+            .map_err(|e| format!("couldn't open {what} ({program}): {e}"))?;
         std::thread::spawn(move || opener.wait());
         Ok(())
     }
 }
 
+impl Opener for SystemOpener {
+    fn open_link(&self, link: &str) -> Result<(), String> {
+        let link = std::ffi::OsStr::new(link);
+        if cfg!(target_os = "macos") {
+            Self::spawn("the link", "open", &[link])
+        } else if cfg!(windows) {
+            let (start, empty) = (std::ffi::OsStr::new("start"), std::ffi::OsStr::new(""));
+            Self::spawn("the link", "cmd", &[std::ffi::OsStr::new("/C"), start, empty, link])
+        } else {
+            Self::spawn("the link", "xdg-open", &[link])
+        }
+    }
+
+    /// A folder opens in the file manager, a log in the system's text viewer.
+    fn open_path(&self, path: &std::path::Path) -> Result<(), String> {
+        let opener = if cfg!(target_os = "macos") {
+            "open"
+        } else if cfg!(windows) {
+            "explorer"
+        } else {
+            "xdg-open"
+        };
+        Self::spawn("the file", opener, &[path.as_os_str()])
+    }
+}
+
 /// The package manager's command that installs a local package file, which follows it.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", test))]
 fn package_command(manager: PackageManager) -> &'static [&'static str] {
     match manager {
         PackageManager::Dnf => &["dnf", "install", "-y"],
         PackageManager::Apt => &["apt-get", "install", "-y"],
         PackageManager::Pacman => &["pacman", "-U", "--noconfirm"],
+    }
+}
+
+/// What pkexec's exit `code` and the package manager's `stderr` mean.
+#[cfg(any(target_os = "linux", test))]
+fn package_outcome(code: Option<i32>, stderr: &[u8]) -> Result<(), PackageError> {
+    match code {
+        Some(0) => Ok(()),
+        // pkexec: the prompt was dismissed (126), or the password wasn't accepted (127).
+        Some(126 | 127) => Err(PackageError::Cancelled),
+        code => {
+            // Its last line says why, for example a dependency nothing provides.
+            let said = String::from_utf8_lossy(stderr);
+            let why = said.lines().map(str::trim).rfind(|l| !l.is_empty()).map(str::to_owned);
+            Err(PackageError::Failed(why.unwrap_or_else(|| format!("the package manager ended with {code:?}"))))
+        }
     }
 }
 
@@ -707,6 +747,33 @@ mod tests {
         assert!(agent.contains(&format!("<key>Label</key><string>{AGENT}</string>")));
         assert!(agent.contains("<string>/Applications/Nexus &amp; Co.app/Contents/MacOS/nexus</string>"), "{agent}");
         assert!(agent.contains("<key>RunAtLoad</key><true/>"));
+    }
+
+    #[test]
+    fn each_package_manager_installs_a_local_file_without_asking_again() {
+        use nexus_core::PackageManager;
+        assert_eq!(super::package_command(PackageManager::Dnf), ["dnf", "install", "-y"]);
+        assert_eq!(super::package_command(PackageManager::Apt), ["apt-get", "install", "-y"]);
+        assert_eq!(super::package_command(PackageManager::Pacman), ["pacman", "-U", "--noconfirm"]);
+    }
+
+    #[test]
+    fn pkexec_s_exit_says_installed_cancelled_or_why_it_failed() {
+        use nexus_core::PackageError;
+        assert_eq!(super::package_outcome(Some(0), b""), Ok(()));
+        assert_eq!(super::package_outcome(Some(126), b"dismissed"), Err(PackageError::Cancelled));
+        assert_eq!(super::package_outcome(Some(127), b""), Err(PackageError::Cancelled), "a wrong password");
+        let said = b"Last metadata check: now\nError: nothing provides libfoo.so\n\n";
+        assert_eq!(
+            super::package_outcome(Some(1), said),
+            Err(PackageError::Failed("Error: nothing provides libfoo.so".into())),
+            "the last line that says something"
+        );
+        assert_eq!(
+            super::package_outcome(None, b"  \n"),
+            Err(PackageError::Failed("the package manager ended with None".into())),
+            "killed, with nothing said"
+        );
     }
 
     #[test]

@@ -132,7 +132,7 @@ fn a_notice_that_is_not_a_problem_plays_no_error() {
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     settle(&mut host);
-    host.test.desktop.set_problem("Install xdotool so games come to the front and the launcher comes back");
+    host.test.windows.set_problem("Install xdotool so games come to the front and the launcher comes back");
     host.requests.borrow_mut().clear();
     host.dispatch(Command::Launch("emu-a:G0".parse().unwrap()));
     watch_until(&mut host, "the notice shows", |core| !core.view().notices.is_empty());

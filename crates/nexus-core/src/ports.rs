@@ -422,7 +422,7 @@ pub enum PackageError {
 
 /// The desktop's windows: which one is in front, and bringing one to the front. A game is
 /// its processes, as [`ProcessTree::members`] lists them.
-pub trait Desktop: Send + Sync {
+pub trait Windows: Send + Sync {
     fn front(&self) -> Front;
     /// Brings a window of one of the game's processes `ids` to the front. `false` when none has
     /// a window yet, or the system refused.
@@ -445,6 +445,26 @@ pub trait Desktop: Send + Sync {
     fn problem(&self) -> Option<String> {
         None
     }
+}
+
+/// Windows the launcher can't see or change. The default until the app plugs in real ones.
+pub struct NoWindows;
+
+impl Windows for NoWindows {
+    fn front(&self) -> Front {
+        Front::Unknown
+    }
+
+    fn show_game(&self, _ids: &[u32]) -> bool {
+        false
+    }
+
+    fn show_launcher(&self) {}
+}
+
+/// The player's login session: starting the launcher when the player logs in, and the
+/// administrator prompt that installs the launcher's own package. Not a play session.
+pub trait LoginSession: Send + Sync {
     /// Whether the launcher can start when the player logs in. `false` for a build that isn't
     /// installed, such as `cargo run`'s: the system would start a program that moves.
     fn can_start_at_login(&self) -> bool {
@@ -460,28 +480,34 @@ pub trait Desktop: Send + Sync {
     fn install_package(&self, _file: &Path, _manager: PackageManager) -> Result<(), PackageError> {
         Err(PackageError::Failed("this system can't install packages".into()))
     }
-    /// Opens `link` with the system's handler for it, as a click on it would: `steam://install/440`
-    /// asks Steam to install a game, starting Steam on its own when it isn't running. The core
-    /// checked the link against the plugin's `permissions.links`. The error says why it didn't.
+}
+
+/// A session that can't start the launcher at login or install packages. The default until the
+/// app plugs in a real one.
+pub struct NoLoginSession;
+
+impl LoginSession for NoLoginSession {}
+
+/// The system's opener: what a click on a link or a file does.
+pub trait Opener: Send + Sync {
+    /// Opens `link` with the system's handler for it: an `https://` page in the browser, and
+    /// `steam://install/440` asks Steam to install a game, starting Steam on its own when it
+    /// isn't running. The caller checked the link (the core against the plugin's
+    /// `permissions.links`). The error says why it didn't open.
     fn open_link(&self, _link: &str) -> Result<(), String> {
         Err("this desktop can't open links".into())
     }
+    /// Opens `path` with the system's opener: a folder in the file manager, a log in the text
+    /// viewer. The error says why it didn't open.
+    fn open_path(&self, _path: &Path) -> Result<(), String> {
+        Err("this desktop can't open files".into())
+    }
 }
 
-/// A desktop the launcher can't see or change. The default until the app plugs in a real one.
-pub struct NoDesktop;
+/// An opener that opens nothing. The default until the app plugs in a real one.
+pub struct NoOpener;
 
-impl Desktop for NoDesktop {
-    fn front(&self) -> Front {
-        Front::Unknown
-    }
-
-    fn show_game(&self, _ids: &[u32]) -> bool {
-        false
-    }
-
-    fn show_launcher(&self) {}
-}
+impl Opener for NoOpener {}
 
 /// A running game's processes: the one the launcher started, the ones in its process group,
 /// and the ones a sandbox moved out of the group below them (Proton's pressure-vessel does).

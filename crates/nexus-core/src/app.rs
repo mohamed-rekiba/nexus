@@ -1295,9 +1295,7 @@ impl Core {
                 });
             }
             let opening = link.clone();
-            crate::running::blocking(self, move |desktop, _| desktop.open_link(&opening))
-                .await
-                .map_err(CoreError::Invalid)?;
+            crate::running::open_link(self, opening).await.map_err(CoreError::Invalid)?;
             let store = crate::view::system_of(&self.inner.kernel, &platform).name;
             tracing::info!(%game, %link, "asked the store to uninstall");
             self.notice(format!("{store} is uninstalling {title}: it leaves your Library when it's done"));

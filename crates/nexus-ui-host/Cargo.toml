@@ -8,6 +8,7 @@ publish.workspace = true
 license.workspace = true
 
 [dependencies]
+futures.workspace = true
 image.workspace = true
 nexus-api.workspace = true
 nexus-core.workspace = true
@@ -17,7 +18,12 @@ serde_json.workspace = true
 slint.workspace = true
 slint-interpreter.workspace = true
 spin_on.workspace = true
+# The image loader's files, turns and decoding off the UI thread.
+tokio.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true

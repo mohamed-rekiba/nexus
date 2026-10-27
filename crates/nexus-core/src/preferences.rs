@@ -23,7 +23,7 @@ use serde_json::Value;
 use crate::changes::{Area, Notifier};
 use crate::config::ConfigService;
 use crate::vpn::NetworkSource;
-use crate::{CoreError, CoreResult, Desktop};
+use crate::{CoreError, CoreResult, LoginSession};
 
 /// The smallest and the largest size of everything ([`Pref::Scale`]).
 pub const MIN_SCALE: f32 = 0.8;
@@ -215,7 +215,7 @@ pub struct PreferencesSnapshot {
 /// The ports the subsystem uses, and nothing else.
 pub(crate) struct PrefPorts {
     /// For "Start at login".
-    pub desktop: Arc<dyn Desktop>,
+    pub login_session: Arc<dyn LoginSession>,
     /// For "Download only through a VPN": whether the system can bind downloads to a VPN.
     pub network: NetworkSource,
 }
@@ -295,11 +295,11 @@ impl Preferences {
 
     /// Asks the system to start the launcher at login, or not, and keeps why it refused.
     async fn start_at_login(&self, on: bool) -> CoreResult<()> {
-        let desktop = self.ports.desktop.clone();
-        if !desktop.can_start_at_login() {
+        let session = self.ports.login_session.clone();
+        if !session.can_start_at_login() {
             return Err(CoreError::Invalid("this build can't start when you log in".into()));
         }
-        let done = tokio::task::spawn_blocking(move || desktop.start_at_login(on))
+        let done = tokio::task::spawn_blocking(move || session.start_at_login(on))
             .await
             .map_err(|e| CoreError::Io(e.to_string()))?;
         *self.login_error() = done.as_ref().err().cloned();

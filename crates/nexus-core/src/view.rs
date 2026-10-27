@@ -1719,7 +1719,7 @@ fn settings_vm(core: &Core, prefs: &PreferencesSnapshot, state: &AppState) -> Se
         return_on_exit: prefs.return_on_exit,
         auto_update: prefs.auto_update,
         scale: prefs.scale,
-        can_start_at_login: kernel.desktop().can_start_at_login(),
+        can_start_at_login: kernel.login_session().can_start_at_login(),
         start_at_login: prefs.start_at_login,
         start_at_login_error: prefs.start_at_login_error.clone().unwrap_or_default(),
         vpn: vpn_vm(core, prefs, state),

@@ -140,10 +140,10 @@ fn the_default_theme_on_a_real_library() {
     shoot(&mut host, &window, &out.join("new-downloads.png"));
     host.dispatch(Command::Navigate(Route::Home));
     // A game that starts: the fake spawner starts nothing.
-    host.test.desktop.no_windows();
+    host.test.windows.no_windows();
     host.dispatch(Command::Launch(first.parse().unwrap()));
     shoot(&mut host, &window, &out.join("new-launch.png"));
-    host.test.desktop.windows_open();
+    host.test.windows.windows_open();
     if host.core().view().install_prompt.is_some() {
         eprintln!("SKIPPED the running game: no KytyPS5 build in NEXUS_COMPARE_BUILDS, so Play asks to install it");
         return;

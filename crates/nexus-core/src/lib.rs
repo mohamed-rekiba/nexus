@@ -52,10 +52,11 @@ pub use kernel::{BootReport, HostConfig, Kernel, KernelBuilder, Loader, Origin, 
 pub use library::LibraryCmd;
 pub use ports::{ArchiveError, Escape};
 pub use ports::{
-    ArchiveKind, Archives, Body, Clock, Desktop, Front, Gpu, GroupTree, Hardware, HttpTransport, Network, NoArchives,
-    NoDesktop, NoHardware, NoNetwork, NoTorrents, NoVpn, Opened, PackageError, PackageManager, ProcessExit,
-    ProcessHandle, ProcessSpawner, ProcessTree, SEED_UPLOAD_LIMIT, SpawnCommand, Specs, TokioClock, TokioSpawner,
-    TorrentFile, TorrentInfo, TorrentStats, Torrents, TransferState, UnpackProgress, Vpn,
+    ArchiveKind, Archives, Body, Clock, Front, Gpu, GroupTree, Hardware, HttpTransport, LoginSession, Network,
+    NoArchives, NoHardware, NoLoginSession, NoNetwork, NoOpener, NoTorrents, NoVpn, NoWindows, Opened, Opener,
+    PackageError, PackageManager, ProcessExit, ProcessHandle, ProcessSpawner, ProcessTree, SEED_UPLOAD_LIMIT,
+    SpawnCommand, Specs, TokioClock, TokioSpawner, TorrentFile, TorrentInfo, TorrentStats, Torrents, TransferState,
+    UnpackProgress, Vpn, Windows,
 };
 pub use preferences::{MAX_SCALE, MIN_SCALE, Pref, PrefKind, PrefSpec, PreferencesSnapshot};
 pub use storage::DirStorage;

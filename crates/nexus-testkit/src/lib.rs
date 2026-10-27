@@ -4,6 +4,7 @@
 //!   [`FakeClock`].
 //! - [`StubPlugin`]: a plugin built from a manifest and test-supplied behaviour.
 //! - [`FakeSystem`]: a system plugin over a machine the test controls.
+//! - [`FakePlatform`]: the app shell's platform, which records each call.
 //! - [`contract`]: checks any emulator plugin against the capability contracts.
 
 mod archives;
@@ -12,6 +13,7 @@ pub mod contract;
 mod fakes;
 mod host;
 mod network;
+mod platform;
 mod spans;
 mod stub;
 mod system;
@@ -19,9 +21,13 @@ mod torrents;
 
 pub use archives::FakeArchives;
 pub use clock::FakeClock;
-pub use fakes::{FIRST_PID, FakeDesktop, FakeHttp, FakeProcessTree, FakeSpawner, Gate, Shown, Signal, SpawnedProcess};
+pub use fakes::{
+    FIRST_PID, FakeHttp, FakeLoginSession, FakeOpener, FakeProcessTree, FakeSpawner, FakeWindows, Gate, Shown, Signal,
+    SpawnedProcess,
+};
 pub use host::{FakeHost, TestCore, TestHost, until};
 pub use network::FakeNetwork;
+pub use platform::{FakePlatform, PlatformCall};
 pub use spans::SpanRecorder;
 pub use stub::StubPlugin;
 pub use system::{FakeMachine, FakeSystem};

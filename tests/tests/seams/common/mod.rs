@@ -1,5 +1,5 @@
-//! A composed host for seam 3: the core and the theme host, wired the way the app wires them,
-//! on Slint's testing backend.
+//! A composed host for seam 3: the core and the app shell the app ships, on Slint's testing
+//! backend, with a fake platform and the core's fake clock.
 
 #![allow(dead_code)] // Each test binary uses part of this module.
 
@@ -8,13 +8,13 @@ use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use i_slint_backend_testing::ElementHandle;
 use nexus_api::*;
 use nexus_core::Clock;
 use nexus_core::{Area, Command, Core};
-use nexus_testkit::{FakeClock, FakeHost, StubPlugin, TestCore};
-use nexus_ui_host::{ThemeHost, UiRequest};
+use nexus_testkit::{FakeClock, FakeHost, FakePlatform, StubPlugin, TestCore};
+use nexus_ui_host::{AppShell, ShellOptions, UiRequest};
 use slint_interpreter::ComponentHandle;
 
 /// `path` with this system's separator: `~/Games` is `~\Games` on Windows, as the app shows it.
@@ -31,14 +31,31 @@ pub fn id(s: &str) -> PluginId {
     PluginId::new(s).unwrap()
 }
 
+/// The core and the app shell on it. It derefs to the shell: `host.ui` is the theme host.
 pub struct Composed {
     pub rt: tokio::runtime::Runtime,
     pub test: TestCore,
-    pub ui: ThemeHost,
+    pub shell: AppShell,
+    pub platform: FakePlatform,
+    /// The theme's requests the shell hasn't carried out: [`Composed::pump`] does.
     pub requests: Rc<RefCell<Vec<UiRequest>>>,
+    events: futures::stream::BoxStream<'static, Event>,
 }
 
-/// Boots a core with the default theme plus whatever `build` adds, and a theme host on it.
+impl std::ops::Deref for Composed {
+    type Target = AppShell;
+    fn deref(&self) -> &AppShell {
+        &self.shell
+    }
+}
+
+impl std::ops::DerefMut for Composed {
+    fn deref_mut(&mut self) -> &mut AppShell {
+        &mut self.shell
+    }
+}
+
+/// Boots a core with the default theme plus whatever `build` adds, and an app shell on it.
 /// Starts Slint's testing backend for this thread.
 pub fn composed(build: impl FnOnce(FakeHost) -> FakeHost) -> Composed {
     thread_local!(static SLINT: () = quiet_testing_backend());
@@ -105,10 +122,13 @@ pub fn composed_on_current_platform(build: impl FnOnce(FakeHost) -> FakeHost) ->
     let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
     let host = build(FakeHost::new().built_in(nexus_api::PluginBox::theme(theme_default::DefaultTheme)));
     let test = rt.block_on(host.boot_core());
-    let requests: Rc<RefCell<Vec<UiRequest>>> = Rc::default();
-    let sink = requests.clone();
-    let ui = rt.block_on(ThemeHost::new(test.core.clone(), Rc::new(move |r| sink.borrow_mut().push(r))));
-    Composed { rt, test, ui, requests }
+    let platform = FakePlatform::default();
+    let options = ShellOptions { dev: false, monitor: None, thumbs: test.data_dir().join("cache/thumbs") };
+    let clock = Arc::new(test.clock.clone());
+    let shell = rt.block_on(AppShell::new(test.core.clone(), Rc::new(platform.clone()), clock, options));
+    let requests = shell.requests();
+    let events = test.core.events();
+    Composed { rt, test, shell, platform, requests, events }
 }
 
 impl Composed {
@@ -116,10 +136,22 @@ impl Composed {
         &self.test.core
     }
 
-    /// Runs a command on the core, then renders.
+    /// Runs a command on the core through the shell, as a theme's request, then renders. The
+    /// renders a test asks for load no images: [`Composed::load_images`] does.
     pub fn dispatch(&mut self, command: Command) {
-        self.rt.block_on(self.test.core.dispatch(command)).unwrap();
-        self.ui.render().unwrap();
+        self.shell.on_request(UiRequest::Core(command)).unwrap();
+        self.run_work();
+        self.shell.ui.render().unwrap();
+    }
+
+    /// Runs the work the shell started (commands and image loads), in order, and hands the
+    /// core's events since to the shell. A command that failed fails the test.
+    pub fn run_work(&mut self) {
+        let errors = self.rt.block_on(self.platform.run_work());
+        assert!(errors.is_empty(), "a command failed: {errors:?}");
+        while let Some(Some(event)) = self.events.next().now_or_never() {
+            self.shell.on_core_event(&event);
+        }
     }
 
     /// Waits until each catalog on the Catalog is the copy fetched from the catalog address,
@@ -127,7 +159,7 @@ impl Composed {
     /// bundled copy.
     pub fn catalogs_fetched(&mut self) {
         self.rt.block_on(catalogs_fetched(&self.test.core));
-        self.ui.render().unwrap();
+        self.shell.ui.render().unwrap();
     }
 
     /// Runs the core until `done` holds: see [`TestCore::until`]. It doesn't render.
@@ -147,33 +179,27 @@ impl Composed {
         self.rt.block_on(self.test.clock.run_until_idle());
     }
 
-    /// Carries out what the theme asked for, as the app would.
+    /// Carries out what the theme asked for through the shell, as the app would, one request
+    /// at a time: a core command runs to its end, and then, as for a render the theme asked
+    /// for, the view renders now.
     pub fn pump(&mut self) {
         let requests: Vec<UiRequest> = self.requests.borrow_mut().drain(..).collect();
         for request in requests {
-            match request {
-                UiRequest::Core(command) => self.dispatch(command),
-                UiRequest::SwitchTheme(theme) => self.ui.switch(&theme).unwrap(),
-                UiRequest::PlaySound(_)
-                | UiRequest::OpenUrl(_)
-                | UiRequest::OpenPath(_)
-                | UiRequest::Quit
-                | UiRequest::Restart
-                | UiRequest::LogOut
-                | UiRequest::Trailer(_) => {}
-                UiRequest::Render => self.ui.render().unwrap(),
+            let render = matches!(request, UiRequest::Core(_) | UiRequest::Render);
+            self.shell.on_request(request).unwrap();
+            self.run_work();
+            if render {
+                self.shell.ui.render().unwrap();
             }
         }
     }
 
-    /// Loads every image the last render asked for, then renders again.
+    /// Loads every image the last render asked for through the shell's loader, then shows
+    /// them, as the app does when they come in.
     pub fn load_images(&mut self) {
-        for key in self.ui.wanted_images() {
-            let bytes = self.rt.block_on(self.test.core.image_bytes(&key.0)).map_err(|e| e.to_string());
-            self.ui.add_image(key, bytes);
-        }
-        // As the app: images coming in bind the last view again.
-        self.ui.render_images().unwrap();
+        self.shell.load_wanted();
+        self.run_work();
+        self.shell.flush().unwrap();
     }
 
     pub fn instance(&self) -> &slint_interpreter::ComponentInstance {

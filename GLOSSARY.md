@@ -2,6 +2,12 @@
 
 Terms used in the code and the docs, in alphabetical order.
 
+**App shell** (`AppShell`, nexus-ui-host): what the launcher does on the UI thread around the
+theme host: it carries out the theme's requests, coalesces renders, loads images and runs the
+tick. It reaches the system only through its platform. The app and the seam tests run the same
+shell.
+_Avoid_: event loop, main loop
+
 **Archive error** (`ArchiveError`): why an archive didn't unpack, typed: `Password`, `Escapes`,
 `NoRoom`, `Unsupported`, `Missing`, `Corrupt`, `Io` or `Cancelled`. The core shows its text;
 an adapter picks a fallback reader by its kind, never by its text.
@@ -112,8 +118,16 @@ the player's results). It asks no plugin; the core hands it the plugins' answers
 **Listing** (`ArchiveEntry`): an archive's entries as a format reader gives them, unchecked: each
 name as the archive spells it, its size, its kind, and whether it needs a password.
 
+**Login session** (`LoginSession`): the port for the player's login session: starting the
+launcher at login, and installing the launcher's own package with the administrator prompt.
+Not a play session.
+
 **Offer**: one game a catalog offers, grouped from its releases by title id or by title
 without its edition words. An installed game can be an offer too: its record names the offer.
+
+**Opener** (`Opener`): the port that opens a link or a file with the system's opener, as a click
+on it would. The core opens plugins' store links with it; the app shell's platform opens pages
+and folders with it.
 
 **Own build**: an emulator build the player built or installed, used instead of a downloaded
 one while the `own_build` setting is on. The host never updates it.
@@ -121,6 +135,10 @@ one while the `own_build` setting is on. The host never updates it.
 **Phase rules** (`torrents::phase::next`): what the BitTorrent engine's stats mean for a
 download, and what the core does next: unpause, stop, finished or stopped. They exist once, in
 the core; the adapter and the fake decide nothing.
+
+**Platform** (`Platform`, nexus-ui-host): the app shell's port: running work off the UI thread,
+waking the shell, opening links and paths, quitting, the lines the Nexus session reads, sounds,
+trailers, the local time, and the window's monitors and focus. The test fake records each call.
 
 **Plugin box** (`PluginBox`): a plugin as the host registers it: code or a theme.
 
@@ -165,3 +183,6 @@ share.
 **Torrent stats** (`TorrentStats`): what the BitTorrent engine reports for a torrent: its
 state (checking, live, paused or error), whether every piece is in, bytes, rates, peers and
 the error. Raw numbers, with no decision.
+
+**Windows** (`Windows`): the port for the desktop's windows: which window is in front, bringing
+a game's window or the launcher's to the front, and whether a game has a window.

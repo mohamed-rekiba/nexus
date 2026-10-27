@@ -4193,8 +4193,10 @@ dependencies = [
  "hex",
  "nexus-api",
  "nexus-core",
+ "nexus-ui-host",
  "serde_json",
  "sha2",
+ "slint-interpreter",
  "tempfile",
  "tokio",
  "tracing",
@@ -4248,6 +4250,7 @@ dependencies = [
 name = "nexus-ui-host"
 version = "0.6.2"
 dependencies = [
+ "futures",
  "image",
  "nexus-api",
  "nexus-core",
@@ -4257,6 +4260,8 @@ dependencies = [
  "slint",
  "slint-interpreter",
  "spin_on",
+ "tempfile",
+ "tokio",
  "tracing",
 ]
 

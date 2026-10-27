@@ -38,9 +38,9 @@ nexus-app (the binary)         ──▶ nexus-ui-host, nexus-core, every built-
 | `crates/nexus-api` | The plugin API. The plugin traits, `PluginManifest`, `Capability`, `Provided`, `PluginContext` and its facades (`ConfigStore`, `Storage`, `Folders`, `Programs`, `HttpClient`, `Logger`, `EventSink`, `ServiceRegistry`), `RelPath` and `HostPath`, plans (`DownloadPlan`, `LaunchSpec`), slots, `Event`, `VpnGate`. Semver-versioned: a manifest's `host_api` must match `API_VERSION`, which is set by hand with the API, not from Nexus's version. |
 | `crates/nexus-core` | The kernel and the app. Plugin lifecycle and registry (`Kernel`), the event bus (`EventBus`), settings (`ConfigService`), the app state and commands (`Core`, `AppState`, `Command`), the subsystems (`torrents/`, `game_installs/`, `library/`), view building (`view.rs`), HTTP downloads, unpacking, launches, VPN rules, catalogs, "This PC", the launcher update, and the port traits. |
 | `crates/nexus-ui-api` | The theme contract. View models (`vm.rs`: `AppView` and the rest), the theme manifest (`ThemeManifest`), design tokens, and `contract/types.slint` with the `Vm` and `Host` globals. No toolkit code. |
-| `crates/nexus-ui-host` | `ThemeSet` (finds themes, resolves `extends`) and `ThemeHost`: compiles a theme with `slint-interpreter`, binds the view models, loads images, turns gamepad buttons into keys, and swaps themes. |
-| `crates/nexus-app` | The binary. The event loop, render scheduling, the image loader, and the system adapters: `desktop.rs`, `processes.rs` (a running game's processes), `torrents.rs` (librqbit), `archives.rs` and `libarchive.rs`, `hardware.rs` and `gpu_probe.rs` (Vulkan), `trailer.rs` (libmpv), `gamepad.rs` (gilrs), `audio.rs` (rodio), `http.rs` (reqwest), `disk.rs`, `clock.rs`. |
-| `crates/nexus-testkit` | `FakeHost` (a real core over a temporary data folder), `FakeClock`, `StubPlugin`, fakes for every port, `SpanRecorder`, and `contract::emulator`, the capability contract checks. |
+| `crates/nexus-ui-host` | `ThemeSet` (finds themes, resolves `extends`), `ThemeHost`: compiles a theme with `slint-interpreter`, binds the view models, turns gamepad buttons into keys, and swaps themes. `AppShell` (`shell.rs`) owns the `ThemeHost` on the UI thread: it routes the theme's requests, coalesces renders, loads images (`loader.rs`) and runs the tick, through its `Platform` port. |
+| `crates/nexus-app` | The binary. The wiring (`main.rs`), the command line (`args.rs`), the launcher's update at startup (`update.rs`), the shell's platform (`platform.rs`), and the system adapters: `desktop.rs`, `processes.rs` (a running game's processes), `torrents.rs` (librqbit), `archives.rs` and `libarchive.rs`, `hardware.rs` and `gpu_probe.rs` (Vulkan), `trailer.rs` (libmpv), `gamepad.rs` (gilrs), `audio.rs` (rodio), `http.rs` (reqwest), `disk.rs`, `clock.rs`. |
+| `crates/nexus-testkit` | `FakeHost` (a real core over a temporary data folder), `FakeClock`, `StubPlugin`, fakes for every port, `FakePlatform` (the app shell's platform), `SpanRecorder`, and `contract::emulator`, the capability contract checks. |
 | `plugins/emulators/*` | `emu-kyty` (KytyPS5, PS5), `emu-shadps4` (shadPS4, PS4), `emu-pc` (PC games), `emu-steam` (the games Steam installed, Linux). |
 | `plugins/services/*` | `playstation-store` (store art and details) and `release-catalog` (the Catalog's releases). |
 | `plugins/themes/default` | The built-in theme, id `default`. A crate only so its files are embedded in the binary. |
@@ -53,15 +53,20 @@ a crate changes nothing for the player.
 ## Threads
 
 The core runs on a multi-threaded tokio runtime. The UI runs on the main thread in Slint's
-event loop. They meet in two places:
+event loop, where the `AppShell` owns the `ThemeHost`. They meet in two places:
 
-- Theme callbacks become `UiRequest`s on the UI thread. Core commands among them are spawned
-  on the runtime (`core.dispatch(command)`).
-- Core events, image loads, gamepad presses and trailer frames come back to the UI thread with
-  `slint_interpreter::invoke_from_event_loop`.
+- Theme callbacks become `UiRequest`s. The shell queues them and carries them out on its next
+  `poll`, so a request never runs inside the callback that made it. The shell hands core
+  commands and image loads to `Platform::spawn`, which the app runs on the runtime.
+- Core events, finished work, gamepad presses and trailer frames come back to the UI thread
+  with `slint_interpreter::invoke_from_event_loop` (in `main.rs` and `platform.rs`).
 
-The app's state for the UI thread (`App`: the `ThemeHost`, the `Core`, the runtime handle and
-the image loader) lives in a thread-local in `crates/nexus-app/src/main.rs`.
+The shell takes its time from the core's `Clock` port and keeps no timer of its own. It asks the
+platform to call `poll` again (`Platform::wake_in`); the app does that with a Slint timer, and a
+poll does what the clock says is due. The app also calls `on_tick` every `TICK` (250 ms).
+
+The UI thread's state (`App`, which holds the `AppShell`) lives in a thread-local in
+`crates/nexus-app/src/main.rs`.
 
 ## Data flows one way
 
@@ -75,22 +80,22 @@ theme callback ─▶ UiRequest::Core(Command) ─▶ Core::dispatch ─▶ AppS
 
 1. A theme calls a `Host` callback. `ThemeHost::wire` turns it into a `UiRequest`: a core
    `Command`, or something only the app can do (`SwitchTheme`, `PlaySound`, `OpenUrl`,
-   `OpenPath`, `Quit`, `Restart`, `Trailer`, `Render`).
+   `OpenPath`, `Quit`, `Restart`, `LogOut`, `Trailer`, `Render`). `AppShell::on_request`
+   carries it out: a command goes to the runtime, the rest to the `Platform`.
 2. `Core::dispatch` runs the command. Most state lives in one `AppState` behind a mutex in
-   `Core`: navigation (`nav`, a stack of `Route`s), selection, the library, details, store
-   metadata, catalogs and offers, downloads, sessions, notices and more. An area that became a
-   subsystem keeps its own state behind its own lock: the torrents so far (see
-   [Subsystems](#subsystems)). `view::build` reads each subsystem's snapshot before it locks
+   `Core`: navigation (`nav`, a stack of `Route`s), selection, sessions, notices and more. An
+   area that became a subsystem keeps its own state behind its own lock: the torrents, the game
+   installs, the library and the preferences (see [Subsystems](#subsystems)). `view::build` reads each subsystem's snapshot before it locks
    `AppState`.
 3. A change calls `Core::changed(area)`, or a subsystem's `Notifier`. It sends a `Change { area }` (the torrents, the
    catalogs, the installs, …) to `Core::changes()`, a broadcast for the core and its tests, and
    publishes `Event::StateChanged` on the `EventBus` (a `tokio::sync::broadcast` channel of
    1024; a reader that falls behind skips the oldest). Plugins see neither the change nor its
    area.
-4. The app reads every event from `core.events()`. Any event asks for a render. An atomic flag
-   keeps at most one such request waiting on the UI thread.
-5. `schedule_render` renders at most once per `RENDER_GAP` (8 ms, a frame at 120 Hz). A burst
-   of events or image loads renders once.
+4. The app reads every event from `core.events()` and hands it to `AppShell::on_core_event`,
+   which asks for a render. An atomic flag keeps at most one event waiting on the UI thread.
+5. The shell renders at most once per `RENDER_GAP` (8 ms, a frame at 120 Hz). A burst of events
+   or image loads renders once. Each render starts loading the images it asks for.
 6. `ThemeHost::render` calls `Core::view`, which runs `view::build` over the state and returns
    an `AppView`. `bind::vm_values` turns it into Slint values, set on the theme's `Vm` global.
    Lists are changed in place where the rows allow it, so row animations don't restart.
@@ -98,9 +103,11 @@ theme callback ─▶ UiRequest::Core(Command) ─▶ Core::dispatch ─▶ AppS
 Themes hold no state of their own. That is why a theme switch loses nothing: the new view tree
 binds to the same `AppView`.
 
-The app also renders on a 250 ms timer when the window size changes, the clock's minute turns,
-a trailer is open, the boot screen waits for Home's art, or every 15 s while a game runs. In
-dev mode (`--dev`) the same timer reloads edited theme files.
+The shell's tick (`AppShell::on_tick`, every 250 ms) also renders when the window size changes,
+the clock's minute turns, a trailer is open, the boot screen waits for Home's art, or every
+15 s by the clock while a game runs. The same tick moves the window to its monitor, writes
+`window shown` to the standard output once, makes the window show under Gamescope, and in dev
+mode (`--dev`) reloads edited theme files.
 
 ## Plugins
 
@@ -267,7 +274,9 @@ starts with a stand-in for each; the app plugs in the real ones; the test kit ha
 | `HttpTransport` | `NoNetwork` | `http::ReqwestTransport` | `FakeHttp` |
 | `ProcessSpawner` | `TokioSpawner` (real; the app keeps it) | `TokioSpawner` | `FakeSpawner` |
 | `ProcessTree` | `GroupTree` (the process group alone) | `processes::SystemProcesses` | `FakeProcessTree` |
-| `Desktop` | `NoDesktop` | `desktop::SystemDesktop` | `FakeDesktop` |
+| `Windows` | `NoWindows` | `desktop::SystemWindows` | `FakeWindows` |
+| `LoginSession` | `NoLoginSession` | `desktop::SystemLoginSession` | `FakeLoginSession` |
+| `Opener` | `NoOpener` | `desktop::SystemOpener` | `FakeOpener` |
 | `Hardware` | `NoHardware` | `hardware::SystemHardware` | `FakeHost::hardware` / `free_space` |
 | `Torrents` | `NoTorrents` | `torrents::RqbitTorrents` | `FakeTorrents` |
 | `Network` (VPNs) | `NoVpn` | none: a system plugin's `vpn` replaces it once one provides it | `FakeNetwork` |
@@ -283,9 +292,14 @@ starts with a stand-in for each; the app plugs in the real ones; the test kit ha
   in their command line, for a game another program started (Unix only: `ps -A -ww -o args=`). It
   is the one place that knows which processes are the game; the core and the desktop both work
   from its list.
-- `Desktop` says which window is in front (`front`), brings one of the game's processes' windows
-  up (`show_game`), brings the launcher back (`show_launcher`), and answers `has_window`,
-  `window_close_ends_game` (macOS only), `problem` and start at login.
+- `Windows` says which window is in front (`front`), brings one of the game's processes'
+  windows up (`show_game`), brings the launcher back (`show_launcher`), and answers
+  `has_window`, `window_close_ends_game` (macOS only) and `problem`.
+- `LoginSession` starts the launcher at login (`can_start_at_login`, `start_at_login`) and
+  installs the launcher's own package with the administrator prompt (`install_package`, `pkexec`
+  on Linux). It is the player's login session, not a play session.
+- `Opener` opens a link (`open_link`, such as `steam://install/440`) or a file or folder
+  (`open_path`) with the system's opener.
 - `Torrents` is raw: `start` (paused or not), `unpause`, `stop`, and `stats`, which reports the
   engine's state (`TransferState`: checking, live, paused, error), whether every piece is in,
   bytes, rates, peers and the error. Reading `stats` changes nothing. What those numbers mean
@@ -300,7 +314,15 @@ starts with a stand-in for each; the app plugs in the real ones; the test kit ha
   plan holds. Failures are a typed `ArchiveError`, and `HostArchives` picks its `unar` fallback
   by the error's kind. `contract::archives` in the test kit checks the same refusals against
   `HostArchives` and `FakeArchives`.
-- Calls into `Desktop`, `ProcessTree` and `Network` run in `spawn_blocking`.
+- Calls into `Windows`, `LoginSession`, `Opener`, `ProcessTree` and `Network` run in
+  `spawn_blocking`.
+
+The app shell has a port of its own, `Platform` (`nexus-ui-host/src/shell.rs`): it runs work
+off the UI thread, wakes the shell, opens links and paths (the app's adapter uses
+`SystemOpener`), quits and restarts, writes the lines the Nexus session reads, plays sounds and
+trailers, reads the local time, and asks the window system about monitors and focus. The app
+plugs in `platform::SystemPlatform`; tests plug in `FakePlatform`, which records each call and
+runs the work only when the test says.
 - `Clock` is the core's time: `now`, `sleep` and `interval`, and on `dyn Clock`, `sleep_until`
   and `timeout`. Every timer of the core runs on it: the pollers, the game watcher, the
   plugin calls' timeouts (`Kernel::guard`), the select settle, the prefetch, the update checks.
@@ -369,8 +391,8 @@ The preferences are the second subsystem (`crates/nexus-core/src/preferences.rs`
 app's one-value settings is a `Pref`, saved as `app.<key>` with the same key and value as
 before. A `Pref`'s spec says what values it takes, its default, and whether the player sets it.
 `Command::Pref(Pref, Value)` checks the value against that spec: a size goes to the nearest end
-of its range, and a value of the wrong type is refused. "Start at login" asks the `Desktop`
-port first, and "Download only through a VPN" is refused where the `Network` port can't bind
+of its range, and a value of the wrong type is refused. "Start at login" asks the
+`LoginSession` port first, and "Download only through a VPN" is refused where the `Network` port can't bind
 downloads. The core reads them typed, through `Core::prefs()`. The theme, the PC the hardware
 notice was for and the update repo are prefs the core sets; a command can't. The config is
 the subsystem's store: it keeps no copy of its own, so a setting can't drift from what is saved.
@@ -643,7 +665,8 @@ keyboard's (the default theme's on-screen keyboard opens for a controller only).
 
 1. Tracing starts. `--supports <feature>` and `--probe-gpu` (the Vulkan probe's child process)
    answer and exit.
-2. Arguments parse. `apply_launcher_update` swaps in a kept update and restarts if there is one.
+2. Arguments parse (`args.rs`). `apply_launcher_update` (`update.rs`) swaps in a kept update
+   and restarts if there is one.
 3. A tokio runtime starts. `Kernel::builder` gets the ports, `built_in_plugins()`, the two
    `discover` folders, and `boot()`s.
 4. `Core::start` builds the `AppState`, spawns the download manager, removes work folders a
@@ -651,9 +674,10 @@ keyboard's (the default theme's on-screen keyboard opens for a controller only).
    downloads, schedules emulator update checks, reads the hardware once in the background, and
    starts `watch_catalogs`.
 5. `--folder` mappings apply as `Command::SetFolders`. `quit_on_signal` is spawned.
-6. `ThemeHost::new` collects the themes; `start_with` shows the chosen theme or `default`.
-7. Old thumbnails are swept, the image loader is made, and the gamepad thread, the core event
-   task and the 250 ms timer start.
+6. `AppShell::new` makes the `ThemeHost`, which collects the themes; `start_with` shows the
+   chosen theme or `default`.
+7. Old thumbnails are swept, and the gamepad thread, the core event task and the 250 ms tick
+   start.
 8. `Command::Library(LibraryCmd::Refresh)` is dispatched, the first render runs, and Slint's event loop runs.
 
 The event loop ends on Quit, Restart, or a signal: Ctrl-C, SIGTERM or SIGHUP quit the same way
@@ -672,20 +696,20 @@ After a Restart, the launcher starts itself again with the same arguments.
 These shape the code; keep them in mind when changing it.
 
 - **One render per frame.** Each render rebuilds the whole `AppView` and rebinds it, so renders
-  are coalesced: one pending flag for core events and `RENDER_GAP` between renders.
+  are coalesced: one pending flag for core events, and the shell's `RENDER_GAP` between renders.
 - **The Catalog grid is built only while the Catalog is on screen.** `view::build` keeps the
   last grid in `AppState.catalog_grid`. On other screens `catalog_vm` reuses it instead of
   searching and sorting every offer again. It is cleared when the last catalog plugin turns off.
 - **Genre matching is cached.** `releases::genres_in` keeps each genre text it matched (up to
   16,384 texts), since every view asks for every offer's genres and a catalog has few
   distinct texts.
-- **Images.** Only cards on or near the screen ask for art. The app's `ImageLoader` fetches 8
+- **Images.** Only cards on or near the screen ask for art. The shell's `ImageLoader` fetches 8
   and decodes 4 at once, off the UI thread, drops loads that left the screen (`StillWanted`),
   and keeps smaller JPEGs in `cache/thumbs`, so a warm start decodes small files.
   `prefetch.rs` fetches the art beside the selection; each select cancels the last prefetch.
 - **Select settles.** `Command::Select` waits 150 ms before loading details, so scrolling past
   games loads nothing.
-- **Images show in batches.** A cover that comes in doesn't change the core: the app shows
+- **Images show in batches.** A cover that comes in doesn't change the core: the shell shows
   the covers that came in at most every `IMAGES_GAP` (100 ms), with `ThemeHost::render_images`,
   which binds the last view again instead of asking the core for a new one.
 - **Long card lists change by row.** `bind::CardModels` keeps the Catalog's, the Library's and
@@ -715,9 +739,13 @@ Four seams, from the highest:
    time themselves.
 2. **Capability contracts**: `nexus_testkit::contract::emulator`, run on KytyPS5, shadPS4 and
    PC.
-3. **The composed host**: the core and `ThemeHost` wired as the app wires them, on Slint's
-   testing backend (`i-slint-backend-testing`, pinned with Slint): theme completeness,
-   inheritance, switching and rollback, slots, gamepad, screenshots.
+3. **The composed host**: the core and the `AppShell` the app ships, on Slint's testing backend
+   (`i-slint-backend-testing`, pinned with Slint), with `FakePlatform` and the core's
+   `FakeClock`: theme completeness, inheritance, switching and rollback, slots, gamepad,
+   screenshots, and the shell's own rules (`shell.rs`: render coalescing, the tick, the requests
+   only the app carries out). `Composed::pump` hands the theme's requests to the shell and runs
+   the work it started; the renders a test asks for load no images until it calls
+   `load_images`.
 4. **The desktop adapter against real windows** (`crates/nexus-app/tests/desktop.rs`). It opens
    windows, so it runs only with `NEXUS_DESKTOP_TESTS=1`.
 
