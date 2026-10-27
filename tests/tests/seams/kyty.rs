@@ -384,7 +384,9 @@ async fn own_build_on_without_one_says_to_turn_it_off_when_a_build_is_downloaded
 
     let err = k.test.core.dispatch(Command::Launch("emu-kyty:PPSA01234".parse().unwrap())).await.unwrap_err();
 
-    assert!(err.to_string().contains("turn off Own build on the PS5 page"), "{err}");
+    // The plugin says what is missing; the core words it, with the emulator's page.
+    let notices = k.test.core.view().notices;
+    assert!(notices.iter().any(|n| n.contains("turn off Own build on the PS5 page")), "{err}: {notices:?}");
     assert!(k.test.spawner.spawned().is_empty());
 }
 

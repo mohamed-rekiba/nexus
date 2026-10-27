@@ -311,9 +311,27 @@ pub(crate) fn cant_start(core: &Core, game: &GameKey, error: &CoreError) -> Stri
         .unwrap_or_else(|| game.local.clone());
     let reason = match error {
         CoreError::Plugin { error: PluginError::Precondition(why) | PluginError::NotFound(why), .. } => why.clone(),
+        CoreError::Plugin { plugin, error: PluginError::OwnBuildMissing { has_downloaded, folder, program } } => {
+            let page = core.kernel().manifest(plugin).map(|m| m.name.clone()).unwrap_or_else(|_| plugin.to_string());
+            own_build_missing(&page, folder, program, *has_downloaded)
+        }
         other => other.to_string(),
     };
     format!("Can't start {title}: {reason}")
+}
+
+/// Why a game with own build on doesn't start: `page` is the emulator's page, `folder` the
+/// host folder for the build, `program` its name on the PATH. A downloaded build is the
+/// likely way out, so with one the words say so first.
+fn own_build_missing(page: &str, folder: &str, program: &str, has_downloaded: bool) -> String {
+    let fix = if has_downloaded {
+        format!(
+            "turn off Own build on the {page} page to play with the downloaded build, or map the {folder} folder, or put {program} on your PATH"
+        )
+    } else {
+        format!("map the {folder} folder on the {page} page, or put {program} on your PATH")
+    };
+    format!("Own build is on, but your build isn't there: {fix}")
 }
 
 /// "Astro Bot closed right after it started (code 1). Its log: …".
@@ -363,4 +381,20 @@ pub(crate) async fn toggle_focus(core: &Core) {
 pub(crate) fn game_in_front(core: &Core) -> bool {
     let state = core.state();
     !state.sessions.is_empty() && state.game_in_front
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn own_build_missing_says_how_out() {
+        assert_eq!(
+            super::own_build_missing("PS9", "emu-build", "emu", false),
+            "Own build is on, but your build isn't there: map the emu-build folder on the PS9 page, or put emu on your PATH"
+        );
+        assert_eq!(
+            super::own_build_missing("PS9", "emu-build", "emu", true),
+            "Own build is on, but your build isn't there: turn off Own build on the PS9 page to play with the downloaded build, or map the emu-build folder, or put emu on your PATH",
+            "with a downloaded build, turning own build off comes first"
+        );
+    }
 }
