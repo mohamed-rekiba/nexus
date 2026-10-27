@@ -9,10 +9,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use futures::{FutureExt, StreamExt};
-use i_slint_backend_testing::ElementHandle;
 use nexus_api::*;
 use nexus_core::{Area, Command, Core};
-pub use nexus_testkit::{FakeCatalog, FakeService, FakeStore};
+pub use nexus_testkit::{FakeCatalog, FakeService, FakeStore, ThemeDriver};
 use nexus_testkit::{FakeHost, FakePlatform, TestCore};
 use nexus_ui_host::{AppShell, ShellOptions, UiRequest};
 use slint_interpreter::ComponentHandle;
@@ -206,17 +205,29 @@ impl Composed {
         self.ui.instance().expect("a theme is shown")
     }
 
-    /// How many rendered elements carry this accessible label.
-    pub fn count(&self, label: &str) -> usize {
-        ElementHandle::find_by_accessible_label(self.instance(), label).count()
-    }
-
-    pub fn first(&self, label: &str) -> ElementHandle {
-        ElementHandle::find_by_accessible_label(self.instance(), label).next().unwrap_or_else(|| panic!("no {label}"))
+    /// A controller button, as the app hands it to the theme, carried out.
+    pub fn pad(&mut self, button: nexus_ui_host::PadButton) {
+        self.shell.ui.pad(button).unwrap();
+        self.pump();
+        self.settle();
     }
 
     pub fn resize(&self, width: f32, height: f32) {
         self.instance().window().set_size(slint::LogicalSize::new(width, height));
+    }
+}
+
+impl ThemeDriver for Composed {
+    fn shown(&self) -> &slint_interpreter::ComponentInstance {
+        self.instance()
+    }
+
+    fn redraw(&mut self) {
+        self.shell.ui.render().unwrap();
+    }
+
+    fn carry_out(&mut self) {
+        self.pump();
     }
 }
 
@@ -243,7 +254,7 @@ pub fn watch_until(host: &mut Composed, what: &str, done: impl Fn(&Core) -> bool
         rounds += 1;
     }
     host.ui.render().unwrap();
-    settle(host);
+    host.settle();
 }
 
 /// Lets the theme's moves reach the core, as the app would: a move in the Home row or a grid
@@ -255,16 +266,6 @@ pub fn rest(host: &mut Composed) {
         host.ui.render().unwrap();
     }
     host.pump();
-}
-
-/// Lets entrance animations finish: the testing backend's clock moves only when told to. It
-/// moves twice: a step fires the timers due, then runs change handlers, so a timer that a
-/// handler starts fires on the next step.
-pub fn settle(host: &mut Composed) {
-    for _ in 0..2 {
-        i_slint_backend_testing::mock_elapsed_time(std::time::Duration::from_secs(3));
-        host.ui.render().unwrap();
-    }
 }
 
 /// Writes a data-only theme folder `<parent>/<theme_id>` with `theme.toml` built from

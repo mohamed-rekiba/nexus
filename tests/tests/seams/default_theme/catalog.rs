@@ -12,20 +12,20 @@ fn with_the_game_catalog_turned_off_the_ways_to_the_catalog_go() {
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.load_images();
-    settle(&mut host);
+    host.settle();
     assert_eq!(host.count("Search"), 1, "with a catalog, the top bar's Search");
     assert_eq!(key_asks(&mut host, Key::Tab), [Command::Navigate(nexus_core::Route::Catalog)]);
     host.dispatch(Command::Navigate(nexus_core::Route::Home));
 
     host.dispatch(Command::SetPluginEnabled { plugin: id("release-catalog"), enabled: false });
-    settle(&mut host);
+    host.settle();
 
     assert_eq!(host.count("Search"), 0, "no Search in the top bar");
-    let hints = values(&host, "hint");
+    let hints = host.values("hint");
     assert!(hints.contains(&"Downloads".to_owned()) && !hints.contains(&"Search".to_owned()), "R1's hint: {hints:?}");
     assert_eq!(key_asks(&mut host, Key::Tab), [Command::Navigate(nexus_core::Route::Downloads)], "R1 skips it");
     host.dispatch(Command::Navigate(nexus_core::Route::Downloads));
-    settle(&mut host);
+    host.settle();
     assert_eq!(key_asks(&mut host, Key::Backtab), [Command::Navigate(nexus_core::Route::Home)], "and L1");
 }
 
@@ -57,22 +57,22 @@ fn the_catalog_is_the_library_s_view_and_loads_a_page_at_a_time() {
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.resize(1600.0, 900.0);
     host.dispatch(Command::Navigate(nexus_core::Route::Catalog));
-    settle(&mut host);
+    host.settle();
     let shown = |host: &Composed| host.core().view().catalog.games.games.len();
     assert_eq!(shown(&host), nexus_core::GRID_PAGE, "the first page");
     assert!(host.count("library-sort") == 1 && host.count("filter:All") == 1, "the Library's bar and filters");
-    assert_eq!(values(&host, "default-count"), ["130 games · 130 releases"], "the games and the releases");
+    assert_eq!(host.values("default-count"), ["130 games · 130 releases"], "the games and the releases");
 
     // Down the grid with Page Down: near the end of each page, the next one comes, to the last.
-    key(&mut host, Key::PageDown);
+    host.navigate(Key::PageDown);
     assert_eq!(shown(&host), nexus_core::GRID_PAGE, "not yet near the end");
     for _ in 0..10 {
-        key(&mut host, Key::PageDown);
+        host.navigate(Key::PageDown);
     }
     assert_eq!(shown(&host), 130);
 
     // Escape leaves the Catalog, and Home keeps its own selection.
-    key(&mut host, Key::Escape);
+    host.navigate(Key::Escape);
     assert_eq!(host.core().view().screen, nexus_ui_api::ScreenId::Home);
     assert!(host.core().view().home.selected.is_some(), "Home's game, not the Catalog's");
 }
@@ -107,7 +107,7 @@ fn three_on_the_catalog() -> Composed {
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.load_images();
     host.dispatch(Command::Navigate(nexus_core::Route::Catalog));
-    settle(&mut host);
+    host.settle();
     host
 }
 
@@ -115,45 +115,41 @@ fn three_on_the_catalog() -> Composed {
 fn in_the_catalog_s_header_rows_the_hints_say_how_the_keys_move() {
     use slint::platform::Key;
     let mut host = three_on_the_catalog();
-    assert!(values(&host, "hint").is_empty(), "no pill over the cards");
-    key(&mut host, Key::UpArrow);
-    assert_eq!(values(&host, "hint"), ["Move", "Choose", "Rows", "Back"], "on the systems");
-    key(&mut host, Key::UpArrow);
-    assert_eq!(values(&host, "hint"), ["Move", "Choose", "Rows", "Back"], "on the bar");
-    key(&mut host, Key::DownArrow);
-    key(&mut host, Key::DownArrow);
-    assert!(values(&host, "hint").is_empty(), "back on the cards");
+    assert!(host.values("hint").is_empty(), "no pill over the cards");
+    host.navigate(Key::UpArrow);
+    assert_eq!(host.values("hint"), ["Move", "Choose", "Rows", "Back"], "on the systems");
+    host.navigate(Key::UpArrow);
+    assert_eq!(host.values("hint"), ["Move", "Choose", "Rows", "Back"], "on the bar");
+    host.navigate(Key::DownArrow);
+    host.navigate(Key::DownArrow);
+    assert!(host.values("hint").is_empty(), "back on the cards");
 }
 
 #[test]
 fn the_eye_on_a_catalog_card_hides_the_game_and_the_hidden_filter_shows_it_again() {
     let mut host = three_on_the_catalog();
-    assert_eq!(values(&host, "default-game"), ["Astro", "Bolt", "Comet"]);
-    assert_eq!(values(&host, "card-hide"), ["Hide Astro", "Hide Bolt", "Hide Comet"], "each card's eye");
+    assert_eq!(host.values("default-game"), ["Astro", "Bolt", "Comet"]);
+    assert_eq!(host.values("card-hide"), ["Hide Astro", "Hide Bolt", "Hide Comet"], "each card's eye");
     // The pad's way: the game's details, then Options: its menu hides it too. The details
     // have the eye as well.
-    key(&mut host, slint::platform::Key::Return);
+    host.navigate(slint::platform::Key::Return);
     assert_eq!(host.core().view().screen, nexus_ui_api::ScreenId::GameDetail);
-    assert_eq!(values(&host, "hub-hide"), ["Hide"]);
-    key(&mut host, slint::platform::Key::Menu);
-    assert!(
-        values(&host, "game-menu").contains(&"Hide from the Catalog".to_owned()),
-        "{:?}",
-        values(&host, "game-menu")
-    );
-    key(&mut host, slint::platform::Key::Escape);
-    key(&mut host, slint::platform::Key::Escape);
+    assert_eq!(host.values("hub-hide"), ["Hide"]);
+    host.navigate(slint::platform::Key::Menu);
+    assert!(host.values("game-menu").contains(&"Hide from the Catalog".to_owned()), "{:?}", host.values("game-menu"));
+    host.navigate(slint::platform::Key::Escape);
+    host.navigate(slint::platform::Key::Escape);
     assert_eq!(host.core().view().screen, nexus_ui_api::ScreenId::Catalog);
 
-    press(&mut host, "card-hide", "Hide Bolt");
-    assert_eq!(values(&host, "default-game"), ["Astro", "Comet"]);
+    host.press("card-hide", "Hide Bolt");
+    assert_eq!(host.values("default-game"), ["Astro", "Comet"]);
 
-    press_filter(&mut host, "Hidden");
-    assert_eq!(values(&host, "default-game"), ["Bolt"], "the Hidden filter: only the hidden games");
-    assert_eq!(values(&host, "card-hide"), ["Show Bolt"]);
-    press(&mut host, "card-hide", "Show Bolt");
-    press_filter(&mut host, "Hidden");
-    assert_eq!(values(&host, "default-game"), ["Astro", "Bolt", "Comet"]);
+    host.press_first("filter:Hidden");
+    assert_eq!(host.values("default-game"), ["Bolt"], "the Hidden filter: only the hidden games");
+    assert_eq!(host.values("card-hide"), ["Show Bolt"]);
+    host.press("card-hide", "Show Bolt");
+    host.press_first("filter:Hidden");
+    assert_eq!(host.values("default-game"), ["Astro", "Bolt", "Comet"]);
 }
 
 #[test]
@@ -184,27 +180,27 @@ fn the_bar_under_the_catalog_s_header_shows_how_far_down_all_its_games_the_grid_
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.load_images();
     host.dispatch(Command::Navigate(nexus_core::Route::Catalog));
-    settle(&mut host);
+    host.settle();
     let progress = |host: &Composed| -> u32 {
-        let value = values(host, "grid-progress");
+        let value = host.values("grid-progress");
         assert_eq!(value.len(), 1, "one bar: {value:?}");
         value[0].trim_end_matches('%').parse().unwrap()
     };
     let top = progress(&host);
     assert!(top > 0 && top < 30, "at the top, against all 200 games, not the 60 loaded: {top}%");
     for _ in 0..10 {
-        key(&mut host, Key::DownArrow);
+        host.navigate(Key::DownArrow);
     }
     rest(&mut host);
-    settle(&mut host);
+    host.settle();
     let lower = progress(&host);
     assert!(lower > top && lower < 100, "further down: {top}% then {lower}%");
     for _ in 0..40 {
-        key(&mut host, Key::DownArrow);
+        host.navigate(Key::DownArrow);
         host.pump();
     }
     rest(&mut host);
-    settle(&mut host);
+    host.settle();
     assert_eq!(progress(&host), 100, "at the end");
 }
 
@@ -237,12 +233,12 @@ fn back_from_a_game_s_details_the_catalog_is_where_it_was() {
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.load_images();
     host.dispatch(Command::Navigate(nexus_core::Route::Catalog));
-    settle(&mut host);
+    host.settle();
     for _ in 0..5 {
-        key(&mut host, Key::DownArrow);
+        host.navigate(Key::DownArrow);
     }
     rest(&mut host);
-    settle(&mut host);
+    host.settle();
     let selected = host.core().view().catalog.games.games.into_iter().find(|g| g.selected).expect("a selection").title;
     let place = |host: &Composed| {
         i_slint_backend_testing::ElementHandle::find_by_accessible_label(host.instance(), "default-game")
@@ -254,11 +250,11 @@ fn back_from_a_game_s_details_the_catalog_is_where_it_was() {
     let before = place(&host);
     assert!(before > 0.0 && before < 900.0, "the selected card is on screen: {before}");
 
-    key(&mut host, Key::Return);
+    host.navigate(Key::Return);
     assert_eq!(host.core().view().screen, nexus_ui_api::ScreenId::GameDetail);
-    key(&mut host, Key::Escape);
+    host.navigate(Key::Escape);
     assert_eq!(host.core().view().screen, nexus_ui_api::ScreenId::Catalog);
-    settle(&mut host);
+    host.settle();
     assert_eq!(place(&host), before, "{selected} where it was");
 }
 
@@ -290,7 +286,7 @@ fn the_catalog_loads_only_the_covers_near_the_screen() {
     host.dispatch(Command::Navigate(nexus_core::Route::Catalog));
     // The store describes the page in the background.
     host.advance(std::time::Duration::from_millis(100));
-    settle(&mut host);
+    host.settle();
     host.pump();
     host.ui.render().unwrap();
     let catalog = host.core().view().catalog.games;
@@ -314,15 +310,15 @@ fn the_catalog_s_header_says_when_the_list_was_updated_and_how_many_games_of_all
         home.path(),
         serde_json::json!([topic(1, "Astro", 'a'), topic(2, "Astro", 'b'), topic(3, "Bolt", 'c')]),
     );
-    key(&mut host, slint::platform::Key::Escape);
+    host.navigate(slint::platform::Key::Escape);
     assert_eq!(host.core().view().screen, nexus_ui_api::ScreenId::Catalog);
-    assert_eq!(values(&host, "default-count"), ["2 games · 3 releases"]);
-    assert_eq!(values(&host, "catalog-updated"), ["List updated Oct 19, 2026"]);
+    assert_eq!(host.values("default-count"), ["2 games · 3 releases"]);
+    assert_eq!(host.values("catalog-updated"), ["List updated Oct 19, 2026"]);
     assert_eq!(host.count("catalog-source"), 0, "the copies in use are on the Game Catalog's page");
 
     host.dispatch(Command::CatalogSearch("bolt".into()));
-    settle(&mut host);
-    assert_eq!(values(&host, "default-count"), ["1 of 2 games · 3 releases"]);
+    host.settle();
+    assert_eq!(host.values("default-count"), ["1 of 2 games · 3 releases"]);
 }
 
 #[test]
@@ -356,14 +352,14 @@ fn the_catalog_says_loading_catalog_until_the_catalogs_are_read() {
     let navigate = host.rt.spawn(async move { core.dispatch(Command::Navigate(nexus_core::Route::Catalog)).await });
     host.advance(std::time::Duration::from_millis(50));
     host.ui.render().unwrap();
-    settle(&mut host);
-    assert_eq!(values(&host, "grid-empty"), ["Loading catalog…"]);
+    host.settle();
+    assert_eq!(host.values("grid-empty"), ["Loading catalog…"]);
 
     open.add_permits(10);
     host.rt.block_on(navigate).unwrap().unwrap();
     host.ui.render().unwrap();
-    settle(&mut host);
-    assert_eq!(values(&host, "grid-empty"), ["No catalog lists any game yet"]);
+    host.settle();
+    assert_eq!(host.values("grid-empty"), ["No catalog lists any game yet"]);
 }
 
 /// The Catalog with Alpha, which the emulator has, in two releases, and Bolt in one.
@@ -392,27 +388,27 @@ fn alpha_and_bolt_on_the_catalog() -> Composed {
     host.resize(1600.0, 900.0);
     host.dispatch(Command::Navigate(nexus_core::Route::Catalog));
     host.dispatch(Command::CatalogSort("title".into()));
-    settle(&mut host);
+    host.settle();
     host
 }
 
 #[test]
 fn a_catalog_card_says_its_releases_and_how_available_it_is() {
     let mut host = alpha_and_bolt_on_the_catalog();
-    assert_eq!(values(&host, "default-game"), ["Alpha", "Bolt"]);
-    assert_eq!(values(&host, "card-releases"), ["2 releases", "1 release"]);
-    assert_eq!(values(&host, "card-availability"), ["Good", "Low"]);
-    assert_eq!(values(&host, "card-console"), ["PS5", "PS5"], "the console badge");
+    assert_eq!(host.values("default-game"), ["Alpha", "Bolt"]);
+    assert_eq!(host.values("card-releases"), ["2 releases", "1 release"]);
+    assert_eq!(host.values("card-availability"), ["Good", "Low"]);
+    assert_eq!(host.values("card-console"), ["PS5", "PS5"], "the console badge");
     assert!(x_of(&host, "card-size") < x_of(&host, "card-releases"), "the size, then the releases");
 
     host.dispatch(Command::SetThemeOption { key: "direction".into(), value: "rtl".into() });
-    settle(&mut host);
+    host.settle();
     assert!(x_of(&host, "card-size") > x_of(&host, "card-releases"), "right to left, the size on the right");
 
     // The Library's cards have neither.
     host.dispatch(Command::Back);
-    press_tab(&mut host, "Library");
-    assert_eq!(values(&host, "default-game"), ["Alpha"]);
+    host.press("default-system", "Library");
+    assert_eq!(host.values("default-game"), ["Alpha"]);
     assert_eq!((host.count("card-releases"), host.count("card-availability")), (0, 0));
 }
 
@@ -422,20 +418,20 @@ fn the_catalog_s_selected_card_gets_the_ring() {
     let mut host = alpha_and_bolt_on_the_catalog();
     // The card itself says it is selected, as its ring and its size show it: not only the grid.
     for _ in 0..2 {
-        key(&mut host, Key::RightArrow);
-        let [selected] = focused(&host, "default-game").try_into().expect("one selected card");
+        host.navigate(Key::RightArrow);
+        let [selected] = host.focused("default-game").try_into().expect("one selected card");
         let other = if selected == "Alpha" { "Bolt" } else { "Alpha" };
-        assert!(lit(&host, &selected) && !lit(&host, other), "the ring is on {selected}");
+        assert!(host.lit(&selected) && !host.lit(other), "the ring is on {selected}");
     }
 }
 
 #[test]
 fn the_catalog_s_chip_row_has_installed_for_the_games_the_player_has() {
     let mut host = alpha_and_bolt_on_the_catalog();
-    assert_eq!(values(&host, "filter:Installed"), ["off"]);
-    press_filter(&mut host, "Installed");
-    assert_eq!(values(&host, "default-game"), ["Alpha"], "only the game the player has");
-    assert_eq!(values(&host, "filter:Installed"), ["on"]);
+    assert_eq!(host.values("filter:Installed"), ["off"]);
+    host.press_first("filter:Installed");
+    assert_eq!(host.values("default-game"), ["Alpha"], "only the game the player has");
+    assert_eq!(host.values("filter:Installed"), ["on"]);
 }
 
 /// The Catalog of one PS5 game, with Refresh from the forums on or off.
@@ -458,16 +454,16 @@ fn catalog_with_refresh(refresh: bool) -> Composed {
     host.catalogs_fetched();
     host.resize(1600.0, 900.0);
     host.dispatch(Command::Navigate(nexus_core::Route::Catalog));
-    settle(&mut host);
+    host.settle();
     host
 }
 
 #[test]
 fn with_the_refresh_off_the_catalog_s_button_opens_settings() {
     let mut host = catalog_with_refresh(false);
-    assert_eq!(values(&host, "release-catalog:catalog-refresh"), ["Turn on Refresh from the forums in Settings"]);
+    assert_eq!(host.values("release-catalog:catalog-refresh"), ["Turn on Refresh from the forums in Settings"]);
     assert_eq!(host.count("release-catalog:catalog-refresh-state"), 0);
-    press(&mut host, "release-catalog:catalog-refresh", "Turn on Refresh from the forums in Settings");
+    host.press("release-catalog:catalog-refresh", "Turn on Refresh from the forums in Settings");
     assert_eq!(host.core().view().screen, nexus_ui_api::ScreenId::Settings);
 }
 
@@ -475,21 +471,21 @@ fn with_the_refresh_off_the_catalog_s_button_opens_settings() {
 fn the_catalog_s_refresh_button_is_on_its_bar_and_the_keys_reach_it() {
     use slint::platform::Key;
     let mut host = catalog_with_refresh(true);
-    assert_eq!(values(&host, "release-catalog:catalog-refresh"), ["Refresh"]);
+    assert_eq!(host.values("release-catalog:catalog-refresh"), ["Refresh"]);
     assert_eq!(host.count("release-catalog:catalog-refresh-state"), 1, "what it says of the refresh");
     assert!(x_of(&host, "library-sort") < x_of(&host, "release-catalog:catalog-refresh"), "after the sort");
 
     // Up from the grid to the bar, then right past the sort and the card sizes.
-    key(&mut host, Key::UpArrow);
-    key(&mut host, Key::UpArrow);
+    host.navigate(Key::UpArrow);
+    host.navigate(Key::UpArrow);
     for _ in 0..4 {
-        key(&mut host, Key::RightArrow);
+        host.navigate(Key::RightArrow);
     }
     let asked = key_asks(&mut host, Key::Return);
     let refresh = asked.iter().any(|c| matches!(c, Command::RunAction { action, .. } if action == "refresh-now"));
     assert!(refresh, "Enter refreshes: {asked:?}");
 
     host.dispatch(Command::SetThemeOption { key: "direction".into(), value: "rtl".into() });
-    settle(&mut host);
+    host.settle();
     assert!(x_of(&host, "library-sort") > x_of(&host, "release-catalog:catalog-refresh"), "right to left, mirrored");
 }

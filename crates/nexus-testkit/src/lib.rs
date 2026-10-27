@@ -5,6 +5,7 @@
 //! - [`StubPlugin`]: a plugin built from a manifest and test-supplied behaviour.
 //! - [`FakeCatalog`], [`FakeStore`] and [`FakeService`]: plugins built from a few choices.
 //! - [`FakeSystem`]: a system plugin over a machine the test controls.
+//! - [`ThemeDriver`]: drives a shown theme through its accessible labels, keys and clicks.
 //! - [`FakePlatform`]: the app shell's platform, which records each call.
 //! - [`contract`]: checks any emulator plugin against the capability contracts.
 
@@ -12,6 +13,7 @@ mod archives;
 mod catalog;
 mod clock;
 pub mod contract;
+mod driver;
 mod fakes;
 mod host;
 mod network;
@@ -24,6 +26,7 @@ mod torrents;
 pub use archives::FakeArchives;
 pub use catalog::{FakeCatalog, FakeService, FakeStore};
 pub use clock::FakeClock;
+pub use driver::ThemeDriver;
 pub use fakes::{
     FIRST_PID, FakeHttp, FakeLoginSession, FakeOpener, FakeProcessTree, FakeSpawner, FakeWindows, Gate, Shown, Signal,
     SpawnedProcess,

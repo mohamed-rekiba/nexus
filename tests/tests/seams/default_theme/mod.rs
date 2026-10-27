@@ -35,47 +35,8 @@ fn default_theme_with(more: impl FnOnce(nexus_testkit::FakeHost) -> nexus_testki
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.resize(1600.0, 900.0);
-    settle(&mut host);
+    host.settle();
     host
-}
-
-fn values(host: &Composed, label: &str) -> Vec<String> {
-    let found = i_slint_backend_testing::ElementHandle::find_by_accessible_label(host.instance(), label);
-    found.map(|e| e.accessible_value().unwrap_or_default().to_string()).collect()
-}
-
-/// The element labelled `label` whose value is `value`, invoked.
-fn press(host: &mut Composed, label: &str, value: &str) {
-    let found = i_slint_backend_testing::ElementHandle::find_by_accessible_label(host.instance(), label);
-    let target = found
-        .into_iter()
-        .find(|e| e.accessible_value().as_deref() == Some(value))
-        .unwrap_or_else(|| panic!("no {label} {value}"));
-    target.invoke_accessible_default_action();
-    host.pump();
-    settle(host);
-}
-
-/// A top bar tab, invoked: Home or Library.
-fn press_tab(host: &mut Composed, name: &str) {
-    press(host, "default-system", name);
-}
-
-/// A Library filter, invoked.
-fn press_filter(host: &mut Composed, name: &str) {
-    let label = format!("filter:{name}");
-    let found = i_slint_backend_testing::ElementHandle::find_by_accessible_label(host.instance(), &label);
-    found.into_iter().next().unwrap_or_else(|| panic!("no filter {name}")).invoke_accessible_default_action();
-    host.pump();
-    settle(host);
-}
-
-fn key(host: &mut Composed, key: slint::platform::Key) {
-    let text: slint::SharedString = key.into();
-    host.instance().window().dispatch_event(slint::platform::WindowEvent::KeyPressed { text: text.clone() });
-    host.instance().window().dispatch_event(slint::platform::WindowEvent::KeyReleased { text });
-    host.pump();
-    settle(host);
 }
 
 /// Home's line for the first game, once its details are in.
@@ -83,46 +44,15 @@ fn home_line(host: &mut Composed) -> String {
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.until(Area::Library, |core| core.view().detail.is_some());
     host.ui.render().unwrap();
-    settle(host);
-    let shown = values(host, "default-description");
+    host.settle();
+    let shown = host.values("default-description");
     let [text] = shown.as_slice() else { panic!("one line, got {shown:?}") };
     text.clone()
-}
-
-/// Moves the testing clock on by `ms`, then carries out what the theme asked for.
-fn wait(host: &mut Composed, ms: u64) {
-    i_slint_backend_testing::mock_elapsed_time(std::time::Duration::from_millis(ms));
-    host.ui.render().unwrap();
-    host.pump();
-    host.ui.render().unwrap();
 }
 
 /// The x of the first element labelled `label`.
 fn x_of(host: &Composed, label: &str) -> f32 {
     host.first(label).absolute_position().x
-}
-
-/// A key, as the window gets it, with nothing carried out and no time passing.
-fn tap(host: &mut Composed, key: slint::platform::Key) {
-    let text: slint::SharedString = key.into();
-    host.instance().window().dispatch_event(slint::platform::WindowEvent::KeyPressed { text: text.clone() });
-    host.instance().window().dispatch_event(slint::platform::WindowEvent::KeyReleased { text });
-    host.ui.render().unwrap();
-}
-
-/// The value of the element labelled `label` that shows as selected.
-fn focused(host: &Composed, label: &str) -> Vec<String> {
-    let found = i_slint_backend_testing::ElementHandle::find_by_accessible_label(host.instance(), label);
-    found
-        .filter(|e| e.accessible_item_selected() == Some(true))
-        .map(|e| e.accessible_value().unwrap_or_default().to_string())
-        .collect()
-}
-
-/// Whether an element labelled `label` shows as selected.
-fn lit(host: &Composed, label: &str) -> bool {
-    i_slint_backend_testing::ElementHandle::find_by_accessible_label(host.instance(), label)
-        .any(|e| e.accessible_item_selected() == Some(true))
 }
 
 /// An emulator with no games of its own that installs from the packages folder.
@@ -159,7 +89,7 @@ fn astro_with(home: &std::path::Path, emulator: nexus_testkit::StubPlugin) -> Co
     host.resize(1600.0, 900.0);
     host.dispatch(Command::Navigate(nexus_core::Route::Catalog));
     host.dispatch(Command::OpenGame("release-catalog:emu-kyty/PPSA01234".parse().unwrap()));
-    settle(&mut host);
+    host.settle();
     host
 }
 
@@ -167,9 +97,9 @@ fn astro_with(home: &std::path::Path, emulator: nexus_testkit::StubPlugin) -> Co
 /// for when it saw it (the download sheet opens Downloads once the download is there).
 fn until_torrent(host: &mut Composed, state: &str) {
     host.until(Area::Torrents, |core| core.view().downloads.torrents.first().is_some_and(|t| t.state == state));
-    settle(host);
+    host.settle();
     host.pump();
-    settle(host);
+    host.settle();
     assert_eq!(host.core().view().downloads.torrents.first().map(|t| t.state.clone()).as_deref(), Some(state));
 }
 
@@ -206,20 +136,14 @@ fn first_offer_on(
     host.dispatch(Command::Navigate(nexus_core::Route::Catalog));
     let offer = host.core().view().catalog.games.games.first().cloned().expect("the offer");
     host.dispatch(Command::OpenGame(offer.key.parse().unwrap()));
-    settle(&mut host);
+    host.settle();
     host
-}
-
-fn description(host: &Composed, label: &str) -> String {
-    host.first(label).accessible_description().unwrap_or_default().to_string()
 }
 
 /// Presses `key` and carries out what the theme asked for, as the app would, where the core
 /// may refuse: gives the refusals.
 fn key_refused(host: &mut Composed, key: slint::platform::Key) -> Vec<String> {
-    let text: slint::SharedString = key.into();
-    host.instance().window().dispatch_event(slint::platform::WindowEvent::KeyPressed { text: text.clone() });
-    host.instance().window().dispatch_event(slint::platform::WindowEvent::KeyReleased { text });
+    host.send_key(key);
     let requests: Vec<nexus_ui_host::UiRequest> = host.requests.borrow_mut().drain(..).collect();
     let mut refused = Vec::new();
     for request in requests {
@@ -230,24 +154,16 @@ fn key_refused(host: &mut Composed, key: slint::platform::Key) -> Vec<String> {
         }
     }
     host.ui.render().unwrap();
-    settle(host);
+    host.settle();
     refused
 }
 
 /// Presses `key` and gives the core commands the theme asked for, without carrying them out.
 fn key_asks(host: &mut Composed, key: slint::platform::Key) -> Vec<Command> {
-    let text: slint::SharedString = key.into();
-    host.instance().window().dispatch_event(slint::platform::WindowEvent::KeyPressed { text: text.clone() });
-    host.instance().window().dispatch_event(slint::platform::WindowEvent::KeyReleased { text });
+    host.send_key(key);
     let requests: Vec<nexus_ui_host::UiRequest> = host.requests.borrow_mut().drain(..).collect();
     requests
         .into_iter()
         .filter_map(|r| if let nexus_ui_host::UiRequest::Core(command) = r { Some(command) } else { None })
         .collect()
-}
-
-fn pad(host: &mut Composed, button: nexus_ui_host::PadButton) {
-    host.ui.pad(button).unwrap();
-    host.pump();
-    settle(host);
 }

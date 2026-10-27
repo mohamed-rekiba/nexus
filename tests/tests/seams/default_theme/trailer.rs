@@ -10,8 +10,8 @@ fn the_menu_watches_the_store_s_trailer() {
     });
     host.ui.start().unwrap();
     home_line(&mut host);
-    press(&mut host, "game-options", "Options");
-    assert!(values(&host, "game-menu").contains(&"Watch trailer".to_owned()));
+    host.press("game-options", "Options");
+    assert!(host.values("game-menu").contains(&"Watch trailer".to_owned()));
     // `press` carries out what the theme asked for; record it first.
     let found = i_slint_backend_testing::ElementHandle::find_by_accessible_label(host.instance(), "game-menu")
         .find(|e| e.accessible_value().as_deref() == Some("Watch trailer"))
@@ -35,13 +35,13 @@ fn the_game_hub_has_a_trailer_button_when_the_game_has_a_trailer() {
     host.ui.start().unwrap();
     home_line(&mut host);
     host.dispatch(Command::OpenGame("emu-a:G0".parse().unwrap()));
-    settle(&mut host);
-    assert_eq!(values(&host, "hub-trailer"), ["Trailer"]);
+    host.settle();
+    assert_eq!(host.values("hub-trailer"), ["Trailer"]);
     // The keys reach it: after the store's button, before the game's menu at the end.
     for _ in 0..10 {
-        key(&mut host, Key::RightArrow);
+        host.navigate(Key::RightArrow);
     }
-    key(&mut host, Key::LeftArrow);
+    host.navigate(Key::LeftArrow);
     host.requests.borrow_mut().clear();
     let text: slint::SharedString = Key::Return.into();
     host.instance().window().dispatch_event(slint::platform::WindowEvent::KeyPressed { text });
@@ -78,8 +78,8 @@ fn a_trailer_plays_in_the_window_when_the_app_can() {
     // The app's player says it plays.
     host.ui.set_trailer(Some(TrailerStatus { playing: true, loading: false, position: 42.0, duration: 130.0 }));
     host.ui.render().unwrap();
-    settle(&mut host);
-    assert_eq!(values(&host, "trailer-time"), ["playing 0:42 / 2:10"]);
+    host.settle();
+    assert_eq!(host.values("trailer-time"), ["playing 0:42 / 2:10"]);
 
     host.requests.borrow_mut().clear();
     for k in [Key::Return, Key::RightArrow, Key::Escape] {
@@ -118,13 +118,13 @@ fn right_to_left_the_trailer_s_progress_fills_from_the_right() {
     let text: slint::SharedString = "t".into();
     host.instance().window().dispatch_event(slint::platform::WindowEvent::KeyPressed { text });
     host.ui.set_trailer(Some(TrailerStatus { playing: true, loading: false, position: 42.0, duration: 130.0 }));
-    wait(&mut host, 100);
+    host.wait(std::time::Duration::from_millis(100));
     let left = host.first("trailer-progress");
     assert!(left.absolute_position().x < 400.0, "left to right, from the left: {:?}", left.absolute_position());
     assert!(x_of(&host, "trailer-pause") < x_of(&host, "trailer-progress"), "the pause button on the left");
 
     host.dispatch(Command::SetThemeOption { key: "direction".into(), value: "rtl".into() });
-    wait(&mut host, 1000);
+    host.wait(std::time::Duration::from_millis(1000));
     let right = host.first("trailer-progress");
     let end = right.absolute_position().x + right.size().width;
     assert!(right.absolute_position().x > 800.0, "right to left, from the right: {:?}", right.absolute_position());
@@ -147,28 +147,28 @@ fn the_trailer_s_controls_hide_while_it_plays_and_a_key_shows_them() {
     host.pump();
     let playing = TrailerStatus { playing: true, loading: false, position: 42.0, duration: 130.0 };
     host.ui.set_trailer(Some(playing.clone()));
-    wait(&mut host, 100);
-    assert_eq!(values(&host, "trailer-title"), ["Alpha"], "the controls name the game");
+    host.wait(std::time::Duration::from_millis(100));
+    assert_eq!(host.values("trailer-title"), ["Alpha"], "the controls name the game");
     assert_eq!(host.count("trailer-paused"), 0);
 
     // About 3 s with no key: the controls and the hints go.
     for _ in 0..4 {
-        wait(&mut host, 1000);
+        host.wait(std::time::Duration::from_millis(1000));
     }
-    assert!(values(&host, "trailer-title").is_empty(), "the controls hide");
-    assert!(values(&host, "hint").is_empty(), "and the hints: {:?}", values(&host, "hint"));
+    assert!(host.values("trailer-title").is_empty(), "the controls hide");
+    assert!(host.values("hint").is_empty(), "and the hints: {:?}", host.values("hint"));
 
     // Any key shows them again.
     let text: slint::SharedString = slint::platform::Key::UpArrow.into();
     host.instance().window().dispatch_event(slint::platform::WindowEvent::KeyPressed { text });
-    wait(&mut host, 100);
-    assert_eq!(values(&host, "trailer-title"), ["Alpha"]);
+    host.wait(std::time::Duration::from_millis(100));
+    assert_eq!(host.values("trailer-title"), ["Alpha"]);
 
     // Paused: the controls stay, with the paused sign.
     host.ui.set_trailer(Some(TrailerStatus { playing: false, ..playing }));
     for _ in 0..5 {
-        wait(&mut host, 1000);
+        host.wait(std::time::Duration::from_millis(1000));
     }
-    assert_eq!(values(&host, "trailer-title"), ["Alpha"], "they stay while it is paused");
+    assert_eq!(host.values("trailer-title"), ["Alpha"], "they stay while it is paused");
     assert_eq!(host.count("trailer-paused"), 1);
 }

@@ -2,18 +2,6 @@
 
 use super::*;
 
-/// Down in Settings until the row labelled `label` is in view: rows below the sheet's edge are
-/// not drawn.
-fn down_to(host: &mut Composed, label: &str) {
-    for _ in 0..40 {
-        if host.count(label) > 0 {
-            return;
-        }
-        key(host, slint::platform::Key::DownArrow);
-    }
-    panic!("no {label} in Settings");
-}
-
 #[test]
 fn settings_show_this_pc_and_how_each_emulator_runs_on_it() {
     let specs = nexus_core::Specs {
@@ -35,16 +23,16 @@ fn settings_show_this_pc_and_how_each_emulator_runs_on_it() {
     host.ui.start().unwrap();
     host.until(Area::Hardware, |core| core.view().settings.hardware.known);
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
-    settle(&mut host);
+    host.settle();
 
     // Down to the end of the sheet, as a pad does: the rows take the focus, so it scrolls.
     for _ in 0..20 {
-        key(&mut host, slint::platform::Key::DownArrow);
+        host.navigate(slint::platform::Key::DownArrow);
     }
-    assert_eq!(values(&host, "pc-cpu"), ["Apple M4 Max · 14 cores"]);
-    assert_eq!(values(&host, "pc-memory"), ["36 GB"]);
-    assert_eq!(values(&host, "pc-graphics"), ["Apple M4 Max · shared memory · Vulkan 1.3"]);
-    assert_eq!(values(&host, "pc-verdict"), ["emu-a: Should run well"], "a plugin that asks for nothing");
+    assert_eq!(host.values("pc-cpu"), ["Apple M4 Max · 14 cores"]);
+    assert_eq!(host.values("pc-memory"), ["36 GB"]);
+    assert_eq!(host.values("pc-graphics"), ["Apple M4 Max · shared memory · Vulkan 1.3"]);
+    assert_eq!(host.values("pc-verdict"), ["emu-a: Should run well"], "a plugin that asks for nothing");
 }
 
 #[test]
@@ -52,13 +40,13 @@ fn with_two_monitors_settings_choose_the_one_the_launcher_fills() {
     let mut host = default_theme();
     host.ui.set_monitors(vec!["Built-in Retina Display".into(), "LEN G32qc-10".into()]);
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
-    settle(&mut host);
-    down_to(&mut host, "monitor");
-    press(&mut host, "monitor", "");
+    host.settle();
+    host.down_to("monitor", 40);
+    host.press("monitor", "");
     assert_eq!(host.core().prefs().monitor.as_deref(), Some("LEN G32qc-10"), "the next monitor after the one it is on");
     host.ui.render().unwrap();
-    settle(&mut host);
-    press(&mut host, "monitor", "LEN G32qc-10");
+    host.settle();
+    host.press("monitor", "LEN G32qc-10");
     assert_eq!(host.core().prefs().monitor.as_deref(), Some("Built-in Retina Display"), "round again");
 }
 
@@ -69,7 +57,7 @@ fn the_direction_option_moves_the_top_bar_to_the_right() {
     assert!(left < 400.0, "the systems start on the left: {left}");
 
     host.dispatch(Command::SetThemeOption { key: "direction".into(), value: "rtl".into() });
-    settle(&mut host);
+    host.settle();
     let right = host.first("default-system").absolute_position().x;
     assert!(right > 800.0, "the systems move to the right: {right}");
 }
@@ -94,7 +82,7 @@ fn the_keys_move_through_settings_and_change_the_focused_row() {
     use slint::platform::Key;
     let mut host = default_theme();
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
-    settle(&mut host);
+    host.settle();
 
     // Enter on the first row, "Rescan game folders", scans the folders again.
     let text: slint::SharedString = Key::Return.into();
@@ -111,25 +99,25 @@ fn the_keys_move_through_settings_and_change_the_focused_row() {
     // sharing finished downloads", then up past the VPN rows to "Download only through a
     // VPN". The theme's options are in Themes now.
     for _ in 0..30 {
-        key(&mut host, Key::DownArrow);
+        host.navigate(Key::DownArrow);
     }
     let pc = host.core().view().settings.hardware;
     let pc_rows = if pc.known { 2 + pc.graphics.len() + pc.verdicts.len() } else { 1 };
     for _ in 0..pc_rows {
-        key(&mut host, Key::UpArrow);
+        host.navigate(Key::UpArrow);
     }
     assert_eq!(host.first("seed-downloads").accessible_value().as_deref(), Some("on"));
-    key(&mut host, Key::Return);
+    host.navigate(Key::Return);
     assert_eq!(host.first("seed-downloads").accessible_value().as_deref(), Some("off"), "Enter stops sharing");
     // Up past "Add a VPN" and the row that says there is no VPN.
     for _ in 0..3 {
-        key(&mut host, Key::UpArrow);
+        host.navigate(Key::UpArrow);
     }
-    key(&mut host, Key::Return);
+    host.navigate(Key::Return);
     assert_eq!(host.first("vpn-only").accessible_value().as_deref(), Some("on"), "Enter turns the VPN switch on");
 
     // Up once more, "Quit Nexus".
-    key(&mut host, Key::UpArrow);
+    host.navigate(Key::UpArrow);
     assert_eq!(host.count("option:direction"), 0, "no theme options in Settings");
     let text: slint::SharedString = Key::Return.into();
     host.instance().window().dispatch_event(slint::platform::WindowEvent::KeyPressed { text });
@@ -138,11 +126,11 @@ fn the_keys_move_through_settings_and_change_the_focused_row() {
     host.pump();
 
     // Up one, "Start at login", and one more, "Interface sounds".
-    key(&mut host, Key::UpArrow);
+    host.navigate(Key::UpArrow);
     assert_eq!(host.first("start-at-login").accessible_value().as_deref(), Some("off"));
-    key(&mut host, Key::UpArrow);
+    host.navigate(Key::UpArrow);
     assert_eq!(host.first("sounds").accessible_value().as_deref(), Some("on"));
-    key(&mut host, Key::Return);
+    host.navigate(Key::Return);
     assert_eq!(host.first("sounds").accessible_value().as_deref(), Some("off"), "Enter turns the sounds off");
 }
 
@@ -151,12 +139,12 @@ fn settings_keep_the_launcher_behind_a_closed_game() {
     let mut host = composed(|h| h);
     host.ui.start().unwrap();
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
-    settle(&mut host);
+    host.settle();
     assert_eq!(host.first("return-on-exit").accessible_value().as_deref(), Some("on"), "on by default");
 
     host.first("return-on-exit").invoke_accessible_default_action();
     host.pump();
-    settle(&mut host);
+    host.settle();
 
     assert_eq!(host.first("return-on-exit").accessible_value().as_deref(), Some("off"));
     assert!(!host.core().prefs().return_on_exit);
@@ -170,11 +158,11 @@ fn settings_turn_automatic_updates_off() {
     });
     host.ui.start().unwrap();
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
-    settle(&mut host);
+    host.settle();
     assert_eq!(host.first("auto-update").accessible_value().as_deref(), Some("on"));
     host.first("auto-update").invoke_accessible_default_action();
     host.pump();
-    settle(&mut host);
+    host.settle();
     assert_eq!(host.first("auto-update").accessible_value().as_deref(), Some("off"));
     assert!(!host.core().view().settings.auto_update);
 }
@@ -184,44 +172,44 @@ fn settings_change_the_size_of_everything_and_the_rows_grow_with_it() {
     use slint::platform::Key;
     let mut host = default_theme();
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
-    settle(&mut host);
-    assert_eq!(values(&host, "scale"), ["1.0"]);
+    host.settle();
+    assert_eq!(host.values("scale"), ["1.0"]);
     let before = host.first("fullscreen").size().height;
 
-    press(&mut host, "scale", "1.0");
+    host.press("scale", "1.0");
     assert_eq!(host.core().view().settings.scale, 1.1);
-    assert_eq!(values(&host, "scale"), ["1.1"]);
+    assert_eq!(host.values("scale"), ["1.1"]);
     assert!(host.first("fullscreen").size().height > before, "everything draws bigger at once");
 
     // Down past the game folders, Rescan, UPDATES' two rows and Full screen to the size:
     // right is bigger, left smaller.
     let folders = host.core().view().settings.folders.len();
     for _ in 0..folders + 4 {
-        key(&mut host, Key::DownArrow);
+        host.navigate(Key::DownArrow);
     }
-    key(&mut host, Key::RightArrow);
-    assert_eq!(values(&host, "scale"), ["1.2"]);
-    key(&mut host, Key::LeftArrow);
-    key(&mut host, Key::LeftArrow);
-    assert_eq!(values(&host, "scale"), ["1.0"]);
+    host.navigate(Key::RightArrow);
+    assert_eq!(host.values("scale"), ["1.2"]);
+    host.navigate(Key::LeftArrow);
+    host.navigate(Key::LeftArrow);
+    assert_eq!(host.values("scale"), ["1.0"]);
     // The largest goes round to the smallest.
     host.dispatch(Command::Pref(Pref::Scale, 1.4.into()));
-    settle(&mut host);
-    press(&mut host, "scale", "1.4");
-    assert_eq!(values(&host, "scale"), ["0.8"]);
+    host.settle();
+    host.press("scale", "1.4");
+    assert_eq!(host.values("scale"), ["0.8"]);
 }
 
 #[test]
 fn nexus_scale_wins_over_the_setting_for_the_run() {
     let mut host = default_theme();
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
-    settle(&mut host);
+    host.settle();
     let before = host.first("fullscreen").size().height;
     host.ui.set_size(1.3);
     host.ui.render().unwrap();
-    settle(&mut host);
+    host.settle();
     assert!(host.first("fullscreen").size().height > before);
-    assert_eq!(values(&host, "scale"), ["1.0"], "the setting stays");
+    assert_eq!(host.values("scale"), ["1.0"], "the setting stays");
     let hint = host.first("scale").accessible_description().unwrap_or_default();
     assert_eq!(hint.as_str(), "NEXUS_SCALE sets it for this run");
 }
@@ -230,9 +218,9 @@ fn nexus_scale_wins_over_the_setting_for_the_run() {
 fn settings_start_the_launcher_at_login_and_say_why_the_system_refused() {
     let mut host = default_theme();
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
-    settle(&mut host);
-    press(&mut host, "start-at-login", "off");
-    assert_eq!(values(&host, "start-at-login"), ["on"]);
+    host.settle();
+    host.press("start-at-login", "off");
+    assert_eq!(host.values("start-at-login"), ["on"]);
     assert_eq!(host.test.login_session.logins(), [true]);
 
     // The app logs a command that fails; the row says why.
@@ -245,8 +233,8 @@ fn settings_start_the_launcher_at_login_and_say_why_the_system_refused() {
         }
     }
     host.ui.render().unwrap();
-    settle(&mut host);
-    assert_eq!(values(&host, "start-at-login"), ["on"], "it stays as it was");
+    host.settle();
+    assert_eq!(host.values("start-at-login"), ["on"], "it stays as it was");
     let why = host.first("start-at-login").accessible_description().unwrap_or_default();
     assert_eq!(why.as_str(), "reg.exe: access is denied");
 }
@@ -259,7 +247,7 @@ fn settings_hide_start_at_login_for_a_build_that_isn_t_installed() {
     });
     host.ui.start().unwrap();
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
-    settle(&mut host);
+    host.settle();
     assert_eq!(host.count("start-at-login"), 0);
 }
 
@@ -268,7 +256,7 @@ fn settings_have_no_emulator_settings() {
     let mut host = composed(|h| h.built_in(nexus_api::PluginBox::code(emu_kyty::KytyPlugin)));
     host.ui.start().unwrap();
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
-    settle(&mut host);
+    host.settle();
     assert_eq!(host.count("setting:fullscreen"), 0, "they are on the plugin's page");
     assert_eq!(host.count("folder:kyty-build"), 0, "and so are its own folders");
     assert_eq!(host.count("folder:games"), 1, "the game folders stay");
@@ -280,11 +268,11 @@ fn the_window_is_full_screen_by_default_and_settings_turn_it_off() {
     let mut host = default_theme();
     assert!(host.instance().window().is_fullscreen(), "full screen by default, as in the old launcher");
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
-    settle(&mut host);
+    host.settle();
     assert_eq!(host.first("fullscreen").accessible_value().as_deref(), Some("on"));
     host.first("fullscreen").invoke_accessible_default_action();
     host.pump();
-    settle(&mut host);
+    host.settle();
     assert!(!host.instance().window().is_fullscreen());
     assert_eq!(host.first("fullscreen").accessible_value().as_deref(), Some("off"));
 }
@@ -298,8 +286,8 @@ fn downloads_settings(vpns: impl FnOnce(&nexus_testkit::FakeNetwork)) -> Compose
     host.ui.start().unwrap();
     host.resize(1600.0, 900.0);
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
-    settle(&mut host);
-    down_to(&mut host, "seed-downloads");
+    host.settle();
+    host.down_to("seed-downloads", 40);
     host
 }
 
@@ -309,19 +297,19 @@ fn settings_list_the_vpns_and_say_where_downloads_go() {
         n.up("wg0");
         n.down("work");
     });
-    assert_eq!(values(&host, "vpn"), ["wg0", "work"]);
-    assert_eq!(description(&host, "vpn-only"), "Hides your IP address from other peers · uses your own VPN");
+    assert_eq!(host.values("vpn"), ["wg0", "work"]);
+    assert_eq!(host.description("vpn-only"), "Hides your IP address from other peers · uses your own VPN");
 
-    press(&mut host, "vpn-only", "off");
-    assert_eq!(values(&host, "vpn-only"), ["on"]);
-    assert_eq!(description(&host, "vpn-only"), "Protected · downloads only use wg0");
-    assert_eq!(description(&host, "vpn"), "WireGuard · connected · downloads use it");
+    host.press("vpn-only", "off");
+    assert_eq!(host.values("vpn-only"), ["on"]);
+    assert_eq!(host.description("vpn-only"), "Protected · downloads only use wg0");
+    assert_eq!(host.description("vpn"), "WireGuard · connected · downloads use it");
 
     // Enter on a VPN the system can switch connects or disconnects it.
-    press(&mut host, "vpn", "work");
-    press(&mut host, "vpn", "wg0");
+    host.press("vpn", "work");
+    host.press("vpn", "wg0");
     assert_eq!(host.test.network.calls(), ["connect work", "disconnect wg0"]);
-    assert_eq!(description(&host, "vpn-only"), "Protected · downloads only use work");
+    assert_eq!(host.description("vpn-only"), "Protected · downloads only use work");
 }
 
 #[test]
@@ -329,18 +317,14 @@ fn settings_add_a_vpn_from_the_file_the_player_types() {
     let mut host = downloads_settings(|_| {});
     assert_eq!(host.count("vpn-none"), 1);
     host.first("vpn-import").invoke_accessible_default_action();
-    settle(&mut host);
+    host.settle();
     let file = full_path("/vpn/se-1.conf");
-    for c in file.chars() {
-        let text: slint::SharedString = c.to_string().into();
-        host.instance().window().dispatch_event(slint::platform::WindowEvent::KeyPressed { text: text.clone() });
-        host.instance().window().dispatch_event(slint::platform::WindowEvent::KeyReleased { text });
-    }
-    key(&mut host, slint::platform::Key::Return);
+    host.send_text(&file);
+    host.navigate(slint::platform::Key::Return);
     let calls = host.test.network.calls();
     assert_eq!(calls.len(), 1);
     assert_eq!(calls, [format!("import {file}")]);
-    assert_eq!(values(&host, "vpn"), ["se-1"]);
+    assert_eq!(host.values("vpn"), ["se-1"]);
 }
 
 #[test]
@@ -350,21 +334,21 @@ fn where_the_system_can_t_tell_a_vpn_the_player_picks_the_network() {
         n.up("en0");
         n.up("utun4");
     });
-    press(&mut host, "vpn-only", "off");
-    assert_eq!(description(&host, "vpn-only"), "Downloads wait until you pick the network your VPN uses");
-    press(&mut host, "vpn", "utun4");
+    host.press("vpn-only", "off");
+    assert_eq!(host.description("vpn-only"), "Downloads wait until you pick the network your VPN uses");
+    host.press("vpn", "utun4");
     assert_eq!(host.core().view().settings.vpn.chosen, "utun4");
-    assert_eq!(description(&host, "vpn-only"), "Protected · downloads only use utun4");
+    assert_eq!(host.description("vpn-only"), "Protected · downloads only use utun4");
     assert!(host.test.network.calls().is_empty(), "nothing is connected for the player");
 }
 
 #[test]
 fn where_downloads_can_t_be_bound_the_vpn_switch_says_why_and_stays_off() {
     let mut host = downloads_settings(|n| n.unavailable("Not available on Windows"));
-    assert_eq!(description(&host, "vpn-only"), "Not available on Windows");
+    assert_eq!(host.description("vpn-only"), "Not available on Windows");
     assert_eq!((host.count("vpn"), host.count("vpn-none"), host.count("vpn-import")), (0, 0, 0));
-    press(&mut host, "vpn-only", "off");
-    assert_eq!(values(&host, "vpn-only"), ["off"]);
+    host.press("vpn-only", "off");
+    assert_eq!(host.values("vpn-only"), ["off"]);
 }
 
 #[test]
@@ -383,17 +367,17 @@ fn a_packaged_install_updates_from_settings_then_offers_a_restart() {
     host.core().kernel().config().set(&["app", "update_repo"], "owner/nexus".into()).unwrap();
     host.ui.start().unwrap();
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
-    settle(&mut host);
-    down_to(&mut host, "launcher-update");
+    host.settle();
+    host.down_to("launcher-update", 40);
 
     host.first("launcher-update").invoke_accessible_default_action();
     host.pump();
-    settle(&mut host);
+    host.settle();
     assert_eq!(host.first("launcher-update").accessible_value().as_deref(), Some("available"));
 
     host.first("launcher-update").invoke_accessible_default_action();
     host.pump();
-    settle(&mut host);
+    host.settle();
     assert_eq!(host.first("launcher-update").accessible_value().as_deref(), Some("installed"));
 
     host.first("launcher-update").invoke_accessible_default_action();

@@ -125,7 +125,7 @@ fn the_library_grid_tells_the_core_its_columns() {
     use slint::platform::Key;
     let mut host = twelve();
     host.resize(1600.0, 900.0);
-    settle(&mut host);
+    host.settle();
     host.requests.borrow_mut().clear();
     // Up to the top bar, right to Library, Enter opens it.
     for key in [Key::UpArrow, Key::RightArrow, Key::Return] {
@@ -133,7 +133,7 @@ fn the_library_grid_tells_the_core_its_columns() {
         host.instance().window().dispatch_event(slint::platform::WindowEvent::KeyPressed { text: text.clone() });
         host.instance().window().dispatch_event(slint::platform::WindowEvent::KeyReleased { text });
     }
-    settle(&mut host);
+    host.settle();
     let told =
         host.requests.borrow().iter().any(
             |r| matches!(r, UiRequest::Core(Command::GridColumns { grid: Grid::Library, columns }) if *columns > 1),

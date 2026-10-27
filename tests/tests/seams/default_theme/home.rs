@@ -6,12 +6,12 @@ use super::*;
 fn the_boot_screen_shows_until_the_library_is_in() {
     let mut host = composed(|h| h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha"]).build()));
     host.ui.start().unwrap();
-    settle(&mut host);
-    assert_eq!(values(&host, "boot"), ["Loading..."], "from the first frame");
+    host.settle();
+    assert_eq!(host.values("boot"), ["Loading..."], "from the first frame");
 
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
-    settle(&mut host);
-    assert!(values(&host, "boot").is_empty(), "it fades out over Home");
+    host.settle();
+    assert!(host.values("boot").is_empty(), "it fades out over Home");
 }
 
 #[test]
@@ -83,12 +83,12 @@ fn the_boot_screen_waits_for_homes_art() {
     });
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
-    settle(&mut host);
-    assert_eq!(values(&host, "boot"), ["All set · 1 installed game found"], "the library is in, its art isn't");
+    host.settle();
+    assert_eq!(host.values("boot"), ["All set · 1 installed game found"], "the library is in, its art isn't");
 
     host.load_images();
-    settle(&mut host);
-    assert!(values(&host, "boot").is_empty(), "it goes once the art is in");
+    host.settle();
+    assert!(host.values("boot").is_empty(), "it goes once the art is in");
 }
 
 #[test]
@@ -103,14 +103,14 @@ fn a_tile_shows_a_light_while_its_cover_loads_and_the_name_only_without_art() {
     host.test.http.serve("https://art.example/alpha.png", png.into_inner());
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
-    settle(&mut host);
+    host.settle();
     assert_eq!(host.count("cover-loading"), 1, "Alpha's cover is on its way");
-    assert_eq!(values(&host, "cover-name"), ["Beta"], "only the game without art shows its name");
+    assert_eq!(host.values("cover-name"), ["Beta"], "only the game without art shows its name");
 
     host.load_images();
-    settle(&mut host);
+    host.settle();
     assert_eq!(host.count("cover-loading"), 0, "the cover is in");
-    assert_eq!(values(&host, "cover-name"), ["Beta"]);
+    assert_eq!(host.values("cover-name"), ["Beta"]);
 }
 
 #[test]
@@ -120,23 +120,23 @@ fn the_first_run_welcomes_the_player_and_enter_starts() {
         composed(|h| h.first_run().plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha", "Beta"]).build()));
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
-    settle(&mut host);
-    assert_eq!(values(&host, "welcome"), ["All set · 2 installed games found"]);
-    let steps = values(&host, "welcome-step");
+    host.settle();
+    assert_eq!(host.values("welcome"), ["All set · 2 installed games found"]);
+    let steps = host.values("welcome-step");
     assert_eq!(steps.first().map(String::as_str), Some("Game folders: 2 games"));
     assert_eq!(steps.last().map(String::as_str), Some("Covers & Home screen: Ready"));
 
-    key(&mut host, Key::Return);
+    host.navigate(Key::Return);
 
     assert!(host.core().prefs().welcomed, "saved: it doesn't show again");
-    assert!(values(&host, "welcome").is_empty());
+    assert!(host.values("welcome").is_empty());
 }
 
 #[test]
 fn the_top_bar_has_home_and_library_and_home_shows_every_game() {
     let host = default_theme();
-    assert_eq!(values(&host, "default-system"), ["Home", "Library"]);
-    let mut tiles = values(&host, "default-tile");
+    assert_eq!(host.values("default-system"), ["Home", "Library"]);
+    let mut tiles = host.values("default-tile");
     tiles.sort();
     assert_eq!(tiles, ["Alpha", "Beta", "Gamma"], "Home's row has every game");
 }
@@ -151,29 +151,29 @@ fn the_key_hints_name_the_trailer_and_options_and_hide_over_the_grids() {
     });
     host.ui.start().unwrap();
     home_line(&mut host);
-    assert_eq!(values(&host, "hint"), ["Select", "Search", "Trailer", "Options"], "Home, on a game with a trailer");
+    assert_eq!(host.values("hint"), ["Select", "Search", "Trailer", "Options"], "Home, on a game with a trailer");
 
     host.dispatch(Command::OpenGame("emu-a:G0".parse().unwrap()));
-    settle(&mut host);
-    let hub = values(&host, "hint");
+    host.settle();
+    let hub = host.values("hint");
     assert!(hub.ends_with(&["Back".into(), "Trailer".into(), "Options".into()]), "the Game Hub: {hub:?}");
 
     // The Library's grid: no pill over the cards.
-    key(&mut host, Key::Escape);
-    key(&mut host, Key::UpArrow);
-    key(&mut host, Key::RightArrow);
-    key(&mut host, Key::Return);
+    host.navigate(Key::Escape);
+    host.navigate(Key::UpArrow);
+    host.navigate(Key::RightArrow);
+    host.navigate(Key::Return);
     assert_eq!(host.count("default-game"), 1, "in the Library");
-    assert!(values(&host, "hint").is_empty(), "{:?}", values(&host, "hint"));
+    assert!(host.values("hint").is_empty(), "{:?}", host.values("hint"));
 
     // The game's menu over the Library has its own hints.
-    key(&mut host, Key::Menu);
-    assert_eq!(values(&host, "hint"), ["Pick", "Close"]);
-    key(&mut host, Key::Escape);
+    host.navigate(Key::Menu);
+    assert_eq!(host.values("hint"), ["Pick", "Close"]);
+    host.navigate(Key::Escape);
 
     host.dispatch(Command::Navigate(nexus_core::Route::Catalog));
-    settle(&mut host);
-    assert!(values(&host, "hint").is_empty(), "the Catalog's grid: {:?}", values(&host, "hint"));
+    host.settle();
+    assert!(host.values("hint").is_empty(), "the Catalog's grid: {:?}", host.values("hint"));
 }
 
 #[test]
@@ -185,27 +185,27 @@ fn a_new_game_s_hero_waits_for_its_details_but_not_for_ever() {
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::Select("emu-a:G0".parse().unwrap()));
-    settle(&mut host);
-    assert_eq!(values(&host, "default-title"), ["Alpha"]);
+    host.settle();
+    assert_eq!(host.values("default-title"), ["Alpha"]);
 
     host.dispatch(Command::Select("emu-a:G1".parse().unwrap()));
     i_slint_backend_testing::mock_elapsed_time(std::time::Duration::from_millis(100));
     host.ui.render().unwrap();
-    assert_eq!(values(&host, "default-title"), ["Alpha"], "the hero waits for Beta's details");
+    assert_eq!(host.values("default-title"), ["Alpha"], "the hero waits for Beta's details");
 
     i_slint_backend_testing::mock_elapsed_time(std::time::Duration::from_millis(500));
     host.ui.render().unwrap();
-    settle(&mut host);
-    assert_eq!(values(&host, "default-title"), ["Beta"], "and comes in without them");
+    host.settle();
+    assert_eq!(host.values("default-title"), ["Beta"], "and comes in without them");
 }
 
 #[test]
 fn the_hero_shows_the_selected_games_details_once_loaded() {
     let mut host = default_theme();
     host.dispatch(Command::Select("emu-b:G0".parse().unwrap()));
-    settle(&mut host);
-    assert_eq!(values(&host, "default-title"), ["Gamma"]);
-    assert_eq!(values(&host, "default-description"), ["About Gamma"]);
+    host.settle();
+    assert_eq!(host.values("default-title"), ["Gamma"]);
+    assert_eq!(host.values("default-description"), ["About Gamma"]);
 }
 
 /// The selections the theme asked the core for, and not yet carried out.
@@ -227,17 +227,17 @@ fn a_move_in_home_s_row_shows_at_once_and_the_core_hears_once_the_moves_stop() {
     let view = host.core().view();
     let first = view.home.selected.expect("a game");
     let titles: Vec<String> = view.home.games.iter().map(|g| g.title.clone()).collect();
-    assert_eq!(focused(&host, "default-tile"), [titles[first].clone()]);
+    assert_eq!(host.focused("default-tile"), [titles[first].clone()]);
 
     let wait = |host: &mut Composed, ms: u64| {
         i_slint_backend_testing::mock_elapsed_time(std::time::Duration::from_millis(ms));
         host.ui.render().unwrap();
     };
     // Two moves 60 ms apart: the row shows the new game at once, before the core hears of it.
-    tap(&mut host, Key::RightArrow);
+    host.tap(Key::RightArrow);
     wait(&mut host, 60);
-    tap(&mut host, Key::RightArrow);
-    assert_eq!(focused(&host, "default-tile"), [titles[first + 2].clone()], "the theme moved");
+    host.tap(Key::RightArrow);
+    assert_eq!(host.focused("default-tile"), [titles[first + 2].clone()], "the theme moved");
     // 120 ms after the first move, 60 ms after the last: each move starts the wait again.
     wait(&mut host, 60);
     assert_eq!(selects(&host), Vec::<String>::new(), "the core hasn't heard yet");
@@ -251,12 +251,12 @@ fn a_move_in_home_s_row_shows_at_once_and_the_core_hears_once_the_moves_stop() {
     assert_eq!(host.core().view().home.selected, Some(first + 2));
     // A frame goes by, as in the app, so the theme sees the core caught up.
     rest(&mut host);
-    assert_eq!(focused(&host, "default-tile"), [titles[first + 2].clone()]);
+    assert_eq!(host.focused("default-tile"), [titles[first + 2].clone()]);
 
     // The core's selection changes for another reason: the row follows the core.
     host.dispatch(Command::Select(view.home.games[first].key.parse().unwrap()));
     rest(&mut host);
-    assert_eq!(focused(&host, "default-tile"), [titles[first].clone()], "the row follows the core");
+    assert_eq!(host.focused("default-tile"), [titles[first].clone()], "the row follows the core");
 }
 
 #[test]
@@ -265,9 +265,9 @@ fn a_key_that_acts_tells_the_core_of_the_move_first() {
     let mut host = default_theme();
     let view = host.core().view();
     let first = view.home.selected.expect("a game");
-    tap(&mut host, Key::RightArrow);
+    host.tap(Key::RightArrow);
     // Enter at once opens the game on screen, not the one the core had.
-    key(&mut host, Key::Return);
+    host.navigate(Key::Return);
     assert_eq!(host.core().view().screen, nexus_ui_api::ScreenId::GameDetail);
     assert_eq!(host.core().view().game.as_deref(), Some(view.home.games[first + 1].key.as_str()));
 }
@@ -286,7 +286,7 @@ fn the_mouse_wheel_moves_along_home_s_row() {
             delta_y,
         });
         host.pump();
-        settle(host);
+        host.settle();
     };
     wheel(&mut host, 120.0);
     rest(&mut host);
@@ -302,12 +302,12 @@ fn holding_enter_does_not_repeat_it() {
     let text: slint::SharedString = slint::platform::Key::Return.into();
     host.instance().window().dispatch_event(slint::platform::WindowEvent::KeyPressRepeated { text: text.clone() });
     host.pump();
-    settle(&mut host);
+    host.settle();
     assert_eq!(host.core().view().screen, nexus_ui_api::ScreenId::Home, "a repeat of Enter does nothing");
 
     host.instance().window().dispatch_event(slint::platform::WindowEvent::KeyPressed { text });
     host.pump();
-    settle(&mut host);
+    host.settle();
     assert_eq!(host.core().view().screen, nexus_ui_api::ScreenId::GameDetail, "a press opens the game");
 }
 
@@ -318,6 +318,6 @@ fn selecting_a_game_keeps_the_tiles() {
         i_slint_backend_testing::ElementHandle::find_by_accessible_label(host.instance(), "default-tile").collect();
     assert_eq!(tiles.len(), 3);
     host.dispatch(Command::Select("emu-a:G1".parse().unwrap()));
-    settle(&mut host);
+    host.settle();
     assert!(tiles.iter().all(|t| t.is_valid()), "the tiles from before the selection are still shown");
 }

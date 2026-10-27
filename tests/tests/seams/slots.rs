@@ -21,7 +21,7 @@ fn shown(theme: &str, width: f32, height: f32) -> Composed {
             tabs.into_iter().find(|t| t.accessible_value().as_deref() == Some("Library")).expect("a Library tab");
         library.invoke_accessible_default_action();
         host.pump();
-        settle(&mut host);
+        host.settle();
     }
     host
 }

@@ -40,17 +40,17 @@ fn the_d_pad_moves_the_selection_and_the_buttons_open_and_go_back() {
     assert_eq!(host.core().view().game.as_deref(), Some("emu-a:G1"));
     press(&mut host, PadButton::East);
     assert_eq!(host.core().view().screen, ScreenId::Home);
-    settle(&mut host);
+    host.settle();
     assert!(host.count("default-tile") > 0, "back on the row");
 
     // Up to the top bar, right to Library, A opens it; B leaves it.
     press(&mut host, PadButton::Up);
     press(&mut host, PadButton::Right);
     press(&mut host, PadButton::South);
-    settle(&mut host);
+    host.settle();
     assert_eq!(host.count("default-game"), 3, "the Library grid");
     press(&mut host, PadButton::East);
-    settle(&mut host);
+    host.settle();
     assert_eq!(host.count("default-game"), 0, "B leaves the Library for the row");
     assert!(host.count("default-tile") > 0);
 }

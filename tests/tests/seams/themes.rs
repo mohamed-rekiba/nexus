@@ -109,7 +109,7 @@ export component Card inherits Rectangle {
     // The default Catalog screen draws the child's Card for each game.
     host.dispatch(Command::Navigate(nexus_core::Route::Catalog));
     host.dispatch(Command::Search("a".into()));
-    settle(&mut host);
+    host.settle();
     assert_eq!(host.count("child-card"), 3);
 }
 
@@ -209,7 +209,7 @@ fn the_default_settings_screen_maps_a_folder_through_the_host() {
     host.ui.start().unwrap();
     let games = tempfile::tempdir().unwrap();
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
-    settle(&mut host);
+    host.settle();
 
     assert_eq!(host.count("folder:games"), 1, "a row for the folder");
     // As the theme sends the folder's text.
@@ -282,7 +282,7 @@ fn the_default_settings_screen_edits_a_folder_with_the_keys() {
     let mut host = composed(|h| h.plugin(plugin));
     host.ui.start().unwrap();
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
-    settle(&mut host);
+    host.settle();
     let press = |host: &Composed, text: slint::SharedString| {
         use slint_interpreter::ComponentHandle;
         host.instance().window().dispatch_event(WindowEvent::KeyPressed { text: text.clone() });
@@ -292,14 +292,14 @@ fn the_default_settings_screen_edits_a_folder_with_the_keys() {
     // The focus starts on the folder's row. Enter opens its text box; Enter again saves it.
     press(&host, Key::Return.into());
     host.pump();
-    settle(&mut host);
+    host.settle();
     let typed = full_path("/games");
     for c in typed.chars() {
         press(&host, c.to_string().into());
     }
     press(&host, Key::Return.into());
     host.pump();
-    settle(&mut host);
+    host.settle();
     assert_eq!(host.core().kernel().config().get(&["app", "folders", "games"]), serde_json::json!([typed]));
 
     // The keys reach the sheet again: Down moves on to the Rescan row, and Enter there scans.

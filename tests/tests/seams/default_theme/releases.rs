@@ -28,12 +28,12 @@ fn a_pc_release_says_its_system_and_when_this_computer_can_t_start_it() {
     assert_eq!(offer.platform, "PC");
     let badges: Vec<_> = offer.badges.iter().map(|b| b.text.clone()).collect();
     assert!(badges.contains(&"Can't run here".to_owned()), "the Catalog marks it: {badges:?}");
-    settle(&mut host);
+    host.settle();
     assert_eq!(host.count("filter:PC"), 1, "a PC choice in the system filter");
     host.dispatch(Command::OpenGame(offer.key.parse().unwrap()));
-    settle(&mut host);
+    host.settle();
 
-    assert_eq!(values(&host, "release-not-here"), ["This is a Linux release: it can't run on Windows"]);
+    assert_eq!(host.values("release-not-here"), ["This is a Linux release: it can't run on Windows"]);
 }
 
 #[test]
@@ -44,11 +44,11 @@ fn a_click_on_the_game_hub_s_store_button_moves_the_highlight_to_it() {
         serde_json::json!([{ "id": "1", "title": "Celeste [Wine]", "magnet": format!("magnet:?xt=urn:btih:{ASTRO_HASH}"),
             "game_info": {}, "steam": { "appid": 504230, "short": "Help Madeline survive." } }]),
     );
-    assert_eq!(focused(&host, "hub-store"), ["Store"], "the first button");
-    key(&mut host, slint::platform::Key::RightArrow);
-    assert!(focused(&host, "hub-store").is_empty(), "the keys moved on");
-    press(&mut host, "hub-store", "Store");
-    assert_eq!(focused(&host, "hub-store"), ["Store"], "one highlight, on what was clicked");
+    assert_eq!(host.focused("hub-store"), ["Store"], "the first button");
+    host.navigate(slint::platform::Key::RightArrow);
+    assert!(host.focused("hub-store").is_empty(), "the keys moved on");
+    host.press("hub-store", "Store");
+    assert_eq!(host.focused("hub-store"), ["Store"], "one highlight, on what was clicked");
 }
 
 #[test]
@@ -59,11 +59,11 @@ fn a_game_packed_with_wine_shows_its_protondb_tier_and_its_page() {
         serde_json::json!([{ "id": "1", "title": "Celeste [Wine]", "magnet": format!("magnet:?xt=urn:btih:{ASTRO_HASH}"),
             "game_info": {}, "steam": { "appid": 504230, "short": "Help Madeline survive.", "protondb": "gold" } }]),
     );
-    assert_eq!(values(&host, "protondb"), ["Gold"], "the ProtonDB card");
-    assert_eq!(values(&host, "hub-store"), ["Store"], "Steam's page is the store page");
+    assert_eq!(host.values("protondb"), ["Gold"], "the ProtonDB card");
+    assert_eq!(host.values("hub-store"), ["Store"], "Steam's page is the store page");
 
-    press(&mut host, "game-options", "Options");
-    assert!(values(&host, "game-menu").contains(&"ProtonDB page".to_owned()));
+    host.press("game-options", "Options");
+    assert!(host.values("game-menu").contains(&"ProtonDB page".to_owned()));
     let found = i_slint_backend_testing::ElementHandle::find_by_accessible_label(host.instance(), "game-menu")
         .find(|e| e.accessible_value().as_deref() == Some("ProtonDB page"))
         .expect("the ProtonDB item");
@@ -96,7 +96,7 @@ fn the_game_hub_s_facts_wrap_in_rows_of_three() {
 
     // Right to left: the same rows, each in the other order.
     host.dispatch(Command::SetThemeOption { key: "direction".into(), value: "rtl".into() });
-    settle(&mut host);
+    host.settle();
     let (played_x, played_y) = place(&host, "played");
     let (proton_x, proton_y) = place(&host, "protondb");
     assert!(proton_y > played_y);
@@ -114,9 +114,9 @@ fn as_the_whole_screen_the_game_menu_opens_nothing_outside_nexus() {
         serde_json::json!([{ "id": "1", "title": "Celeste [Wine]", "magnet": format!("magnet:?xt=urn:btih:{ASTRO_HASH}"),
             "game_info": {}, "steam": { "appid": 504230, "short": "Help Madeline survive.", "protondb": "gold" } }]),
     );
-    assert_eq!(values(&host, "protondb"), ["Gold"], "the tier still shows");
-    press(&mut host, "game-options", "Options");
-    let items = values(&host, "game-menu");
+    assert_eq!(host.values("protondb"), ["Gold"], "the tier still shows");
+    host.press("game-options", "Options");
+    let items = host.values("game-menu");
     for outside in ["Open game folder", "View emulator log", "Compatibility list", "ProtonDB page"] {
         assert!(!items.contains(&outside.to_owned()), "no file manager or browser is on screen: {items:?}");
     }
@@ -126,9 +126,9 @@ fn as_the_whole_screen_the_game_menu_opens_nothing_outside_nexus() {
 fn a_game_without_a_protondb_tier_has_no_card_or_menu_item() {
     let home = tempfile::tempdir().unwrap();
     let mut host = astro_on_its_game_hub(home.path());
-    assert!(values(&host, "protondb").is_empty());
-    press(&mut host, "game-options", "Options");
-    assert!(!values(&host, "game-menu").contains(&"ProtonDB page".to_owned()));
+    assert!(host.values("protondb").is_empty());
+    host.press("game-options", "Options");
+    assert!(!host.values("game-menu").contains(&"ProtonDB page".to_owned()));
 }
 
 #[test]
@@ -141,9 +141,9 @@ fn a_ps5_package_says_on_its_row_and_its_sheet_that_it_may_not_install() {
             "game_info": { "name": "Astro", "title_id": "PPSA01234", "version": "v01.05", "region": "EUR" } }]),
     );
     let warning = "Retail PS5 packages can't be installed; pick a folder, an archive or an exFAT image";
-    assert_eq!(values(&host, "release-warning"), [warning], "the row");
-    press(&mut host, "release-download", ASTRO_HASH);
-    assert_eq!(values(&host, "release-warning"), [warning, warning], "the row and the sheet");
+    assert_eq!(host.values("release-warning"), [warning], "the row");
+    host.press("release-download", ASTRO_HASH);
+    assert_eq!(host.values("release-warning"), [warning, warning], "the row and the sheet");
     assert_eq!(host.count("download-agree"), 1, "it still downloads");
 }
 
@@ -174,7 +174,7 @@ fn every_release_s_download_button_ends_at_the_same_place_inside_its_row() {
             i_slint_backend_testing::ElementHandle::find_by_accessible_label(host.instance(), "release-download")
                 .find(|e| e.accessible_value().as_deref() == Some(release.id.as_str()))
                 .unwrap_or_else(|| {
-                    panic!("a download button for {}: {:?}", release.id, values(&host, "release-download"))
+                    panic!("a download button for {}: {:?}", release.id, host.values("release-download"))
                 });
         assert!(end(&button) <= end(&row), "release {}'s button ends in its row", release.id);
         ends.push(end(&button));
@@ -182,7 +182,7 @@ fn every_release_s_download_button_ends_at_the_same_place_inside_its_row() {
     assert!((ends[0] - ends[1]).abs() < 1.0, "the buttons end at the same place: {ends:?}");
 
     // One highlight: the focused row, not its button too.
-    key(&mut host, Key::DownArrow);
+    host.navigate(Key::DownArrow);
     let row = host.first(&format!("release-{}", releases[0].id));
     assert_eq!(row.accessible_item_selected(), Some(true), "the row has the keys");
     let button = host.first("release-download");
@@ -204,7 +204,7 @@ fn the_game_hub_scrolls_to_the_focused_release() {
     let releases = host.core().view().detail.expect("a Game Hub").releases;
     assert_eq!(releases.len(), 8);
     for release in &releases {
-        key(&mut host, slint::platform::Key::DownArrow);
+        host.navigate(slint::platform::Key::DownArrow);
         let row = host.first(&format!("release-{}", release.id));
         let bottom = row.absolute_position().y + row.size().height;
         assert!(bottom <= 900.0, "release {} is in view: its bottom at {bottom}", release.version);
@@ -230,15 +230,15 @@ fn a_game_hub_opened_after_another_shows_its_own_releases() {
     let first = hub.releases[0].id.clone();
     let second = if first == ASTRO_HASH { other } else { ASTRO_HASH };
     // The first game's release row, focused, and its download sheet, closed.
-    key(&mut host, slint::platform::Key::DownArrow);
-    key(&mut host, slint::platform::Key::Return);
+    host.navigate(slint::platform::Key::DownArrow);
+    host.navigate(slint::platform::Key::Return);
     assert_eq!(host.count("download-agree"), 1, "the sheet is open");
-    key(&mut host, slint::platform::Key::Escape);
+    host.navigate(slint::platform::Key::Escape);
     // The second game opens while the first game's Game Hub shows.
     let offers = host.core().view().catalog.games.games;
     let next = offers.iter().find(|g| g.key != hub.key).expect("the second game").key.clone();
     host.dispatch(Command::OpenGame(next.parse().unwrap()));
-    settle(&mut host);
+    host.settle();
 
     let core_release = host.core().view().detail.unwrap().releases[0].id.clone();
     assert_eq!(core_release, second, "the core has the second game's release");
@@ -284,17 +284,17 @@ fn astro_on(
 fn the_game_hub_says_how_the_game_runs_on_this_pc() {
     let home = tempfile::tempdir().unwrap();
     let host = astro_on(home.path(), |h| h.hardware(this_pc((1, 3))));
-    assert_eq!(values(&host, "on-this-pc"), ["Should run well"]);
+    assert_eq!(host.values("on-this-pc"), ["Should run well"]);
 }
 
 #[test]
 fn a_game_that_won_t_start_here_says_why_on_its_card_and_its_sheet() {
     let home = tempfile::tempdir().unwrap();
     let mut host = astro_on(home.path(), |h| h.hardware(this_pc((1, 2))));
-    assert_eq!(values(&host, "on-this-pc"), ["Won't start"]);
-    assert!(values(&host, "download-pc-warning").is_empty(), "only on the sheet");
-    press(&mut host, "release-download", ASTRO_HASH);
-    assert_eq!(values(&host, "download-pc-warning"), ["This PC can't run PS5 games: No Vulkan 1.3"]);
+    assert_eq!(host.values("on-this-pc"), ["Won't start"]);
+    assert!(host.values("download-pc-warning").is_empty(), "only on the sheet");
+    host.press("release-download", ASTRO_HASH);
+    assert_eq!(host.values("download-pc-warning"), ["This PC can't run PS5 games: No Vulkan 1.3"]);
     assert_eq!(host.count("download-agree"), 1, "it still downloads");
 }
 
@@ -302,10 +302,10 @@ fn a_game_that_won_t_start_here_says_why_on_its_card_and_its_sheet() {
 fn a_game_bigger_than_the_free_space_says_so_on_its_card_and_its_sheet() {
     let home = tempfile::tempdir().unwrap();
     let mut host = astro_on(home.path(), |h| h.hardware(this_pc((1, 3))).free_space(10_000_000_000));
-    assert_eq!(values(&host, "on-this-pc"), ["Not enough space"]);
-    press(&mut host, "release-download", ASTRO_HASH);
+    assert_eq!(host.values("on-this-pc"), ["Not enough space"]);
+    host.press("release-download", ASTRO_HASH);
     assert_eq!(
-        values(&host, "release-no-room"),
+        host.values("release-no-room"),
         ["Not enough free space in the download folder: 53.7 GB needed, 10.0 GB free"]
     );
 }
@@ -321,19 +321,19 @@ fn the_game_hub_shows_the_best_release_s_facts_and_each_release_s_place_and_avai
     };
     let mut host =
         first_offer_with(home.path(), serde_json::json!([topic(2, "1.00", 1, 'b'), topic(1, "1.05", 5, 'a')]));
-    assert_eq!(values(&host, "hub-availability"), ["Good"], "the best release's");
-    assert_eq!(values(&host, "release-version"), ["Version 2 of 2 (newest)", "Version 1 of 2"]);
-    assert_eq!(values(&host, "release-availability"), ["Good", "Low"]);
-    assert_eq!(values(&host, "release-peers"), ["5 seeders · 1 leecher", "1 seeder · 1 leecher"]);
+    assert_eq!(host.values("hub-availability"), ["Good"], "the best release's");
+    assert_eq!(host.values("release-version"), ["Version 2 of 2 (newest)", "Version 1 of 2"]);
+    assert_eq!(host.values("release-availability"), ["Good", "Low"]);
+    assert_eq!(host.values("release-peers"), ["5 seeders · 1 leecher", "1 seeder · 1 leecher"]);
 
-    press(&mut host, "technical-details", "closed");
-    assert_eq!(values(&host, "fact:publisher"), ["Sony"]);
-    assert_eq!(values(&host, "fact:seeders"), ["5"]);
+    host.press("technical-details", "closed");
+    assert_eq!(host.values("fact:publisher"), ["Sony"]);
+    assert_eq!(host.values("fact:seeders"), ["5"]);
     assert!(x_of(&host, "fact-name:publisher") < x_of(&host, "fact:publisher"), "the name, then the value");
     assert!(x_of(&host, "release-availability") < x_of(&host, "release-peers"));
 
     host.dispatch(Command::SetThemeOption { key: "direction".into(), value: "rtl".into() });
-    settle(&mut host);
+    host.settle();
     assert!(x_of(&host, "fact-name:publisher") > x_of(&host, "fact:publisher"), "right to left, the name on the right");
     assert!(x_of(&host, "release-availability") > x_of(&host, "release-peers"), "right to left, mirrored");
 }
