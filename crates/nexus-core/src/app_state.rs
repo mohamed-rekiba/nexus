@@ -69,7 +69,7 @@ pub(crate) struct AppState {
     pub selected: Option<GameKey>,
     /// Each emulator's builds and blocks, and a service plugin's blocks once its page opens.
     pub emulators: BTreeMap<PluginId, EmulatorState>,
-    pub settings: Vec<SettingsPanel>,
+    pub settings: std::sync::Arc<Vec<SettingsPanel>>,
     pub theme: Option<PluginId>,
     /// The Library's search, filters and sort.
     pub library_view: GridQuery,
@@ -107,7 +107,7 @@ impl AppState {
             nav: vec![Route::Home],
             selected: None,
             emulators: BTreeMap::new(),
-            settings: Vec::new(),
+            settings: Default::default(),
             theme,
             library_view: GridQuery::library(),
             catalog_view: GridQuery::catalog(),

@@ -33,7 +33,7 @@ pub(crate) async fn refresh_settings(core: &Core) {
             panels.push(SettingsPanel { plugin: plugin.clone(), item, schema, values });
         }
     }
-    core.state().settings = panels;
+    core.state().settings = std::sync::Arc::new(panels);
 }
 
 pub(crate) async fn set_config(core: &Core, plugin: &PluginId, scope: ConfigScope, value: Value) -> CoreResult<()> {
