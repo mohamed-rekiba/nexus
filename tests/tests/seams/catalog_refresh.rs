@@ -3,7 +3,7 @@
 
 use crate::common::*;
 use nexus_api::{ConfigScope, ReleaseList};
-use nexus_core::{Area, Command};
+use nexus_core::{Area, Command, Core};
 
 use nexus_testkit::{FakeHost, TestCore};
 
@@ -105,7 +105,9 @@ async fn fetched(t: &TestCore) -> ReleaseList {
 /// refreshes run in its own task, which says only that the catalogs changed.
 const TICK: std::time::Duration = std::time::Duration::from_millis(10);
 
-/// Waits until `done`, or a second of the clock passes. `true` when it is done.
+/// Waits until `done`, or a second of the clock passes. `true` when it is done. For what the
+/// Game Catalog does outside the core, its files and its HTTP requests, which no core change
+/// announces; [`TestCore::until`] waits on the core's own state.
 async fn until(t: &TestCore, mut done: impl FnMut() -> bool) -> bool {
     for _ in 0..100 {
         if done() {
@@ -788,7 +790,7 @@ async fn a_refresh_that_adds_releases_says_how_many_and_the_first_copy_says_noth
     // The refresh adds Astro's new release, drops Echo's and puts Bolt's torrent uploaded again
     // in place of its old one: one new release.
     gate.release();
-    assert!(until(&t, || !notices(&t).is_empty()).await, "a notice");
+    t.until(Area::Notices, |_| !notices(&t).is_empty()).await;
     assert_eq!(notices(&t), [("1 new release in the Catalog".to_owned(), "Open the Catalog".to_owned())]);
     let kind = t.core.view().notice_cards[0].kind;
     assert_eq!(kind, nexus_ui_api::NoticeKind::Info);
@@ -839,16 +841,15 @@ async fn with_the_refresh_off_the_catalog_s_button_says_to_turn_it_on_in_setting
 #[tokio::test]
 async fn the_catalog_s_refresh_button_runs_refresh_now_and_says_refreshing_then_when_it_ran() {
     let t = on_the_catalog(true).await;
-    let refreshed = || catalog_status(&t).first().is_some_and(|s| s.starts_with("Refreshed "));
-    assert!(until(&t, refreshed).await, "the first refresh ran: {:?}", catalog_status(&t));
+    let refreshed = |_: &Core| catalog_status(&t).first().is_some_and(|s| s.starts_with("Refreshed "));
+    t.until(Area::Catalogs, refreshed).await;
     assert_eq!(catalog_buttons(&t), [("Refresh".to_owned(), "refresh-now".to_owned())]);
 
     let gate = t.http.hold_next(&pvc_url());
     t.core.dispatch(refresh_now()).await.unwrap();
     assert_eq!(catalog_status(&t), ["Refreshing…"]);
     gate.release();
-    let refreshed = || catalog_status(&t).first().is_some_and(|s| s.starts_with("Refreshed "));
-    assert!(until(&t, refreshed).await, "it says when it ran: {:?}", catalog_status(&t));
+    t.until(Area::Catalogs, refreshed).await;
 }
 
 #[tokio::test]
@@ -860,6 +861,5 @@ async fn the_catalog_says_why_its_refresh_did_not_run() {
         .await;
     serve(&t, true, "{ not json".to_owned()).await;
     t.core.dispatch(Command::Navigate(nexus_core::Route::Catalog)).await.unwrap();
-    let failed = || catalog_status(&t).first().is_some_and(|s| s.starts_with("PS5: Failed: "));
-    assert!(until(&t, failed).await, "{:?}", catalog_status(&t));
+    t.until(Area::Catalogs, |_| catalog_status(&t).first().is_some_and(|s| s.starts_with("PS5: Failed: "))).await;
 }
