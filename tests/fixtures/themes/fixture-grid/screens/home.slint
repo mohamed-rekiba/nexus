@@ -1,4 +1,4 @@
-import { Vm, Host } from "../types.slint";
+import { Vm, Host, Json } from "../types.slint";
 import { Tokens } from "../tokens.slint";
 import { Card } from "../components/card.slint";
 
@@ -43,7 +43,7 @@ export component HomeScreen inherits Rectangle {
                 y: Math.floor(i / root.columns) * (root.row-height + root.gap);
                 width: root.cell;
                 game: game;
-                activated => { Host.open-game(game.key); }
+                activated => { Host.command("OpenGame", Json.text(game.key)); }
             }
         }
     }

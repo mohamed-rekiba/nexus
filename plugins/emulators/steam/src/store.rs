@@ -9,7 +9,7 @@ use nexus_api::serde::{Deserialize, Serialize};
 use nexus_api::serde_json::{self, Value};
 use nexus_api::*;
 
-use crate::{PLATFORM, Steam, path};
+use crate::{PLATFORM, Steam};
 
 /// Steam's public game details.
 const DETAILS: &str = "https://store.steampowered.com/api/appdetails";
@@ -92,7 +92,7 @@ impl Steam {
     /// Steam's store's details of `app`: kept a week, else asked; the kept one when Steam
     /// can't be reached.
     pub(crate) async fn store_details(&self, app: u32) -> PluginResult<Option<GameMetadata>> {
-        let file = path(format!("store/{app}.json"))?;
+        let file = RelPath::new(format!("store/{app}.json"))?;
         let storage = self.ctx.storage();
         let kept: Option<Kept> = storage.read(&file).await.ok().and_then(|bytes| serde_json::from_slice(&bytes).ok());
         if let Some(kept) = kept.as_ref().filter(|k| now().saturating_sub(k.at) < FRESH) {

@@ -1,4 +1,5 @@
 import { Vm, Host } from "../types.slint";
+import { Commands } from "../commands.slint";
 import { Tokens } from "../tokens.slint";
 import { Look } from "look.slint";
 import { Nav } from "nav.slint";
@@ -147,7 +148,7 @@ export component TopBar inherits Rectangle {
             active: Vm.screen == "home" && (Nav.view == "library") == (i == 1);
             focused: root.keys && Nav.zone == "tabs" && Nav.tab == i;
             clicked => {
-                if (Vm.screen != "home") { Host.navigate("home"); }
+                if (Vm.screen != "home") { Commands.navigate("home"); }
                 Nav.activate-tab(i);
             }
         }
@@ -195,11 +196,11 @@ export component TopBar inherits Rectangle {
                 Text { text: Vm.running.elapsed; font-size: 16 * Look.px; color: Tokens.color-text-muted; vertical-alignment: center; }
                 VerticalLayout {
                     alignment: center;
-                    PillButton { text: "Resume"; clicked => { Host.show-game(Vm.running.session); } }
+                    PillButton { text: "Resume"; clicked => { Commands.show-game(Vm.running.session); } }
                 }
                 VerticalLayout {
                     alignment: center;
-                    PillButton { text: "Stop"; danger: true; clicked => { Host.stop(Vm.running.session); } }
+                    PillButton { text: "Stop"; danger: true; clicked => { Commands.stop(Vm.running.session); } }
                 }
             }
         }
@@ -226,7 +227,7 @@ export component TopBar inherits Rectangle {
                 background: #ffffff14;
                 Rectangle { x: 0; width: parent.width * Vm.downloads[0].progress; background: Tokens.color-accent; animate width { duration: Look.timed(300ms); } }
             }
-            TouchArea { mouse-cursor: pointer; clicked => { Host.navigate("downloads"); } }
+            TouchArea { mouse-cursor: pointer; clicked => { Commands.navigate("downloads"); } }
         }
         // Search opens the Catalog, which a turned-off Game Catalog takes away. The buttons
         // keep their places for the keys (`Nav.tabs` + 0 to 4): the keys skip Search's.
@@ -235,7 +236,7 @@ export component TopBar inherits Rectangle {
             label: "Search";
             current: Vm.screen == "catalog";
             focused: root.keys && Nav.zone == "tabs" && Nav.tab == Nav.tabs;
-            clicked => { Host.navigate("catalog"); }
+            clicked => { Commands.navigate("catalog"); }
         }
         for b[i] in [
             { icon: "disk", label: "Downloads", screen: "downloads" },
@@ -247,7 +248,7 @@ export component TopBar inherits Rectangle {
             label: b.label;
             current: Vm.screen == b.screen;
             focused: root.keys && Nav.zone == "tabs" && Nav.tab == Nav.tabs + 1 + i;
-            clicked => { Host.navigate(b.screen); }
+            clicked => { Commands.navigate(b.screen); }
         }
         // The machine, when Nexus is the whole screen: each icon opens its panel (`Sys`).
         if Vm.system.whole-screen : StatusButton {

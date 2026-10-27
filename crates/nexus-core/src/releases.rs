@@ -5,12 +5,9 @@
 
 use std::collections::HashMap;
 
-use nexus_api::{
-    Capability, Console, GameDetails, GameFact, GameKey, GameMetadata, GameSummary, ImageSource, PluginId, PluginKind,
-    Release, ReleaseList, SteamInfo,
-};
+use nexus_api::{FactKind, GameKey, GameMetadata, GameSummary, ImageSource, PluginId, Release, ReleaseList};
 
-use crate::app::{Core, Detail, Entry};
+use crate::library::Entry;
 
 /// A release added this many days ago, or fewer, is new.
 pub const NEW_DAYS: i64 = 14;
@@ -61,11 +58,10 @@ pub(crate) fn date_key(text: &str) -> Option<String> {
 }
 
 /// The day a release's game came out, to sort by (see [`date_key`]): the catalog's release
-/// date, else its year, else Steam's date.
+/// date or year, else the date in the release's store data.
 pub(crate) fn release_day(release: &Release) -> Option<String> {
-    date_key(&release.release_date)
-        .or_else(|| date_key(&release.release_year))
-        .or_else(|| release.steam.as_ref().and_then(|s| date_key(&s.release)))
+    date_key(release.fact_text(FactKind::ReleaseDate))
+        .or_else(|| release.metadata.as_ref().and_then(|m| date_key(&m.release)))
 }
 
 /// A `YYYY-MM-DD` date in words, "Sep 6, 2024"; other text stays as it is.
@@ -77,12 +73,6 @@ pub(crate) fn date_words(date: &str) -> String {
     let (year, month, day) =
         (&date[..4], date[5..7].parse::<usize>().unwrap_or(1), date[8..10].parse::<u32>().unwrap_or(1));
     format!("{} {day}, {year}", MONTHS[month - 1])
-}
-
-/// Today, in days since 1970-01-01.
-pub(crate) fn today() -> i64 {
-    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    (secs / 86_400) as i64
 }
 
 pub(crate) fn is_new(added: &str, today: i64) -> bool {
@@ -156,23 +146,26 @@ fn starts_with_pattern(text: &[char], pattern: &[char]) -> bool {
 /// when there are no words.
 ///
 /// Each view asks for every offer's genres, and a catalog has few different genre texts, so
-/// each text is matched once.
+/// each text is matched once on each thread. The answers are the thread's own: a view takes no
+/// lock.
 pub(crate) fn genres_in(texts: &[&str]) -> Vec<&'static str> {
     /// More texts than any catalog has; past it the answers start over.
     const MOST: usize = 16_384;
-    static MATCHED: std::sync::LazyLock<std::sync::Mutex<HashMap<String, Vec<&'static str>>>> =
-        std::sync::LazyLock::new(Default::default);
+    thread_local! {
+        static MATCHED: std::cell::RefCell<HashMap<String, Vec<&'static str>>> = Default::default();
+    }
     let text = texts.join(" | ").to_lowercase();
-    let mut matched = MATCHED.lock().unwrap_or_else(|p| p.into_inner());
-    if let Some(genres) = matched.get(&text) {
-        return genres.clone();
-    }
-    let genres = match_genres(&text);
-    if matched.len() >= MOST {
-        matched.clear();
-    }
-    matched.insert(text, genres.clone());
-    genres
+    MATCHED.with_borrow_mut(|matched| {
+        if let Some(genres) = matched.get(&text) {
+            return genres.clone();
+        }
+        let genres = match_genres(&text);
+        if matched.len() >= MOST {
+            matched.clear();
+        }
+        matched.insert(text, genres.clone());
+        genres
+    })
 }
 
 /// [`genres_in`] of one lower-case text.
@@ -206,6 +199,29 @@ pub(crate) fn version_key(version: &str) -> Vec<u64> {
         parts.pop();
     }
     parts
+}
+
+/// The releases of an offer in the order a game's page lists them, each with its label.
+pub(crate) struct Ordered<'a> {
+    pub release: &'a Release,
+    /// "Version 3 of 3 (newest)": its place among the ones listed.
+    pub label: String,
+}
+
+/// By version, highest first; of one version, the order the offer has them (newest upload
+/// first). A release its store installs is left out once the game is installed.
+pub(crate) fn ordered(releases: &[Release], installed: bool) -> Vec<Ordered<'_>> {
+    let mut listed: Vec<&Release> = releases.iter().filter(|r| r.store.is_empty() || !installed).collect();
+    listed.sort_by_cached_key(|r| std::cmp::Reverse(version_key(&r.version)));
+    let count = listed.len();
+    listed
+        .into_iter()
+        .enumerate()
+        .map(|(at, release)| Ordered {
+            release,
+            label: format!("Version {} of {count}{}", count - at, if at == 0 { " (newest)" } else { "" }),
+        })
+        .collect()
 }
 
 /// The title as a grouping key: lowercase letters and digits only.
@@ -312,11 +328,11 @@ pub(crate) fn offers(copy: &CatalogCopy) -> Vec<Offer> {
                 Some(t) => format!("{}/{t}", copy.emulator),
                 None => format!("{}/title-{}", copy.emulator, plain(&newest.title)),
             };
-            // Steam's cover, for a game the catalog found on Steam, else a topic's first picture.
-            // A store's art comes first.
-            let steam = group.iter().find_map(|r| r.steam.as_ref()).and_then(|s| steam_metadata(s).cover);
+            // The cover of the release's store data, else a release's first picture. A store's
+            // art comes first.
+            let store = group.iter().find_map(|r| r.metadata.as_ref()).and_then(|m| m.cover.clone());
             let picture = group.iter().find_map(|r| r.image_urls.first()).map(|url| ImageSource::Url(url.clone()));
-            let cover = steam.or(picture);
+            let cover = store.or(picture);
             Offer {
                 entry: Entry {
                     key: GameKey::new(copy.service.clone(), local),
@@ -356,7 +372,7 @@ pub(crate) fn offers(copy: &CatalogCopy) -> Vec<Offer> {
 /// emulator `before` didn't, by topic (a torrent uploaded again is no new release), else by
 /// id. A catalog that took the place of the bundled copy, or of none, adds none: only a
 /// catalog read before from its address or a refresh counts.
-fn added_releases(before: &[CatalogCopy], now: &[CatalogCopy]) -> usize {
+pub(crate) fn added_releases(before: &[CatalogCopy], now: &[CatalogCopy]) -> usize {
     let name = |r: &Release| if r.topic.is_empty() { format!("id:{}", r.id) } else { format!("topic:{}", r.topic) };
     now.iter()
         .filter_map(|copy| {
@@ -370,316 +386,17 @@ fn added_releases(before: &[CatalogCopy], now: &[CatalogCopy]) -> usize {
         .sum()
 }
 
-/// Each turned-on emulator that names a console in its manifest, with that console, in load
-/// order. Only the first emulator for a console is in the list: it gets that console's
-/// catalog. An emulator that names no console gets no catalog.
-fn consoles(kernel: &crate::Kernel) -> Vec<(PluginId, Console)> {
-    let mut out: Vec<(PluginId, Console)> = Vec::new();
-    for emulator in kernel.of_kind(PluginKind::Emulator) {
-        let Some(console) = kernel.manifest(&emulator).ok().and_then(|m| m.console.clone()) else { continue };
-        if !out.iter().any(|(_, c)| *c == console) {
-            out.push((emulator, console));
-        }
-    }
-    out
+/// The store data of the offer's newest release that has some.
+pub(crate) fn metadata_of(offer: &Offer) -> Option<&GameMetadata> {
+    offer.releases.iter().find_map(|r| r.metadata.as_ref())
 }
 
-impl Core {
-    /// Reads the catalogs again each time a catalog plugin says they changed
-    /// ([`nexus_api::RELEASES_CHANGED`]), for example after a refresh in the background.
-    pub(crate) fn watch_catalogs(&self) {
-        use futures::StreamExt;
-        let weak = std::sync::Arc::downgrade(&self.inner);
-        let mut events = self.events();
-        tokio::spawn(async move {
-            while let Some(event) = events.next().await {
-                let nexus_api::Event::Custom { plugin, topic, .. } = event else { continue };
-                if topic != nexus_api::RELEASES_CHANGED {
-                    continue;
-                }
-                let Some(inner) = weak.upgrade() else { return };
-                let core = Core { inner };
-                let lists =
-                    core.kernel().manifest(&plugin).is_ok_and(|m| m.capabilities.contains(&Capability::Releases));
-                if lists {
-                    // Not in this loop: the reads publish events of their own.
-                    tokio::spawn(async move { core.refresh_releases().await });
-                }
-            }
-        });
-    }
-
-    /// Asks every catalog plugin for the catalog of each console an emulator plays, and
-    /// groups the releases. Then asks each for its Catalog buttons (`catalog.action`): after the
-    /// catalogs, so the plugin knows which consoles they are for.
-    pub(crate) async fn refresh_releases(&self) {
-        let kernel = self.kernel();
-        let emulators = consoles(kernel);
-        let mut copies = Vec::new();
-        let mut buttons = Vec::new();
-        for (service, provided) in self.providers(Capability::Releases).await {
-            let Some(releases) = provided.releases else { continue };
-            for (emulator, console) in &emulators {
-                // An emulator that lists its own console's releases (Steam's library) gets no
-                // other catalog for it.
-                let own_list = kernel.manifest(emulator).is_ok_and(|m| m.capabilities.contains(&Capability::Releases));
-                if own_list && emulator != &service {
-                    continue;
-                }
-                match kernel.guard(&service, "releases.releases", releases.releases(console)).await {
-                    Ok(Some(list)) => {
-                        copies.push(CatalogCopy { service: service.clone(), emulator: emulator.clone(), list })
-                    }
-                    Ok(None) => {}
-                    Err(e) => self.problem(e.to_string()),
-                }
-            }
-            if let Some(slots) = &provided.slots {
-                let request = nexus_api::SlotRequest { slot: nexus_api::SlotId::CatalogAction, game: None };
-                match kernel.guard(&service, "slots.items", slots.items(&request)).await {
-                    Ok(items) => {
-                        buttons.extend(crate::view::slot_vms(&service, nexus_api::SlotId::CatalogAction, items))
-                    }
-                    Err(e) => self.problem(e.to_string()),
-                }
-            }
-        }
-        let offers: Vec<Offer> = copies.iter().flat_map(offers).collect();
-        let added = {
-            let mut state = self.state();
-            let added = added_releases(&state.catalogs, &copies);
-            state.catalogs = copies;
-            state.catalogs_read = true;
-            state.catalog_buttons = buttons;
-            state.offers = offers;
-            added
-        };
-        self.remember_offer_art();
-        if added > 0 {
-            let s = if added == 1 { "" } else { "s" };
-            self.notice_opening(
-                nexus_ui_api::NoticeKind::Info,
-                crate::app::Route::Catalog,
-                format!("{added} new release{s} in the Catalog"),
-            );
-        }
-        self.changed();
-        self.describe_catalog_page();
-        // A catalog refresh waits for the VPN: the VPN check reads the catalogs again when it is back.
-        if self.plugin_waiting_vpn() {
-            self.watch_torrents();
-        }
-    }
-
-    /// Reads the stores' installs (Steam's) in the background: often while one runs or right
-    /// after Nexus asked a store to install, rarely otherwise.
-    pub(crate) fn watch_store_installs(&self) {
-        let weak = std::sync::Arc::downgrade(&self.inner);
-        let every = self.kernel().host().store_poll;
-        tokio::spawn(async move {
-            loop {
-                let Some(inner) = weak.upgrade() else { return };
-                let core = Core { inner };
-                core.refresh_store_installs().await;
-                let busy = {
-                    let state = core.state();
-                    !state.store_installs.is_empty()
-                        || state.store_watch_until.is_some_and(|until| std::time::Instant::now() < until)
-                };
-                drop(core);
-                tokio::time::sleep(if busy { every } else { every * 10 }).await;
-            }
-        });
-    }
-
-    /// Asks each catalog plugin for its store's installs. One that is gone has ended: the
-    /// Library and the catalogs are read again, and an install that left its game installed
-    /// says so.
-    pub(crate) async fn refresh_store_installs(&self) {
-        let kernel = self.kernel();
-        let mut now = Vec::new();
-        for (plugin, provided) in self.providers(Capability::Releases).await {
-            let Some(releases) = provided.releases else { continue };
-            match kernel.guard(&plugin, "releases.store_installs", releases.store_installs()).await {
-                Ok(installs) => now.extend(installs.into_iter().map(|i| (plugin.clone(), i))),
-                Err(e) => tracing::warn!(error = %e, "could not read a store's installs"),
-            }
-        }
-        let ended: Vec<(PluginId, nexus_api::StoreInstall)> = {
-            let state = self.state();
-            if state.store_installs == now {
-                return;
-            }
-            let still =
-                |p: &PluginId, i: &nexus_api::StoreInstall| now.iter().any(|(q, j)| q == p && j.release == i.release);
-            state.store_installs.iter().filter(|(p, i)| !still(p, i)).cloned().collect()
-        };
-        // The game is in the Library before its card leaves Downloads.
-        if !ended.is_empty() {
-            if let Err(e) = Box::pin(self.refresh_library()).await {
-                tracing::warn!(error = %e, "could not read the Library again");
-            }
-            self.refresh_releases().await;
-        }
-        self.state().store_installs = now;
-        if !ended.is_empty() {
-            for (plugin, install) in &ended {
-                let installed = {
-                    let state = self.state();
-                    let owned = crate::view::Owned::new(&state);
-                    state.offers.iter().any(|o| {
-                        &o.entry.key.plugin == plugin
-                            && o.releases.iter().any(|r| r.id == install.release)
-                            && crate::view::installed_game(&state, &owned, o).is_some()
-                    })
-                };
-                if installed {
-                    self.notice(format!("{} is installed", install.title));
-                }
-            }
-        }
-        self.changed();
-    }
-
-    /// The offer `key` names, if it is one.
-    pub(crate) fn offer(&self, key: &GameKey) -> Option<Offer> {
-        self.state().offers.iter().find(|o| &o.entry.key == key).cloned()
-    }
-
-    /// An offer's Game Hub: the words and facts of its best release (see
-    /// [`crate::view::best_release`]), with how many share it and when the catalog counted them.
-    pub(crate) fn offer_detail(&self, offer: &Offer) -> Detail {
-        let best = {
-            let state = self.state();
-            let owned = crate::view::Owned::new(&state);
-            crate::view::best_release(&state, &owned, offer).clone()
-        };
-        let mut facts = Vec::new();
-        let mut fact = |id: &str, label: &str, value: &str| {
-            if !value.is_empty() {
-                facts.push(GameFact::new(id, label, value));
-            }
-        };
-        fact("region", "Region", &best.region);
-        fact("version", "Version", &best.version);
-        if let Some(t) = &offer.entry.summary.title_id {
-            fact("title-id", "Title ID", t);
-        }
-        let released = if best.release_date.is_empty() { &best.release_year } else { &best.release_date };
-        for (id, label, value) in [
-            ("publisher", "Publisher", &best.publisher),
-            ("developer", "Developer", &best.developer),
-            ("release-date", "Release date", &date_words(released)),
-            ("players", "Players", &best.players),
-            ("update", "Update", &best.update),
-            ("format", "Format", &best.format),
-            ("firmware", "Minimum firmware", &best.minimum_firmware),
-            ("interface-languages", "Interface languages", &best.interface_languages),
-            ("audio-languages", "Audio languages", &best.audio_languages),
-        ] {
-            fact(id, label, value);
-        }
-        // The catalog's counts, not live ones.
-        let count = |n: Option<u64>| n.map_or_else(|| "Unknown".to_owned(), |n| n.to_string());
-        fact("seeders", "Sharing it (seeders)", &count(best.seeders));
-        fact("leechers", "Getting it (leechers)", &count(best.leechers));
-        let counted = match best.counted_at.get(..10).filter(|d| days_of(d).is_some()) {
-            Some(day) => format!("{} · not live", date_words(day)),
-            None => "Date unknown".to_owned(),
-        };
-        fact("counted", "Counted", &counted);
-        Detail {
-            details: Some(GameDetails {
-                summary: offer.entry.summary.clone(),
-                description: best.description.clone(),
-                developer: Some(best.developer.clone()).filter(|d| !d.is_empty()),
-                genres: Vec::new(),
-                size_bytes: best.size_bytes,
-                background: None,
-                facts,
-                folder: None,
-                also: Vec::new(),
-                uninstall_link: None,
-            }),
-            ..Detail::default()
-        }
-    }
-
-    /// Asks the stores about the games on the Catalog's shown pages that they haven't
-    /// described yet, by title id and the newest release's region. In the background.
-    pub(crate) fn describe_catalog_page(&self) {
-        let todo: Vec<(GameKey, nexus_api::GameRef)> = {
-            let mut state = self.state();
-            let page = crate::view::catalog_page(self.kernel(), &state);
-            let todo: Vec<_> = page
-                .iter()
-                .filter(|key| !state.meta.contains_key(key) && !state.asked.contains(key))
-                .filter_map(|key| state.offers.iter().find(|o| &o.entry.key == key))
-                .filter_map(|o| {
-                    Some((
-                        o.entry.key.clone(),
-                        nexus_api::GameRef {
-                            platform: o.entry.summary.platform.clone(),
-                            title_id: o.entry.summary.title_id.clone()?,
-                            content_id: String::new(),
-                            title: o.entry.summary.title.clone(),
-                            region: o.releases[0].region.clone(),
-                        },
-                    ))
-                })
-                .collect();
-            state.asked.extend(todo.iter().map(|(key, _)| key.clone()));
-            todo
-        };
-        if todo.is_empty() {
-            return;
-        }
-        let core = self.clone();
-        tokio::spawn(async move { core.describe(todo).await });
-    }
-}
-
-/// The Steam data of the offer's newest release that has some.
-pub(crate) fn steam_of(offer: &Offer) -> Option<&SteamInfo> {
-    offer.releases.iter().find_map(|r| r.steam.as_ref())
-}
-
-/// Steam's data in the shape a store's catalog gives: the library portrait as the cover, the
-/// hero art (else the header) as the background, and the store page.
-pub(crate) fn steam_metadata(steam: &SteamInfo) -> GameMetadata {
-    let url = |url: &String| Some(url).filter(|u| !u.is_empty()).map(|u| ImageSource::Url(u.clone()));
-    GameMetadata {
-        description: steam.short.clone(),
-        publisher: steam.developers.first().or(steam.publishers.first()).cloned().unwrap_or_default(),
-        genres: steam.genres.clone(),
-        release: steam.release.clone(),
-        cover: url(&steam.portrait).or_else(|| url(&steam.header)),
-        background: url(&steam.hero).or_else(|| url(&steam.header)),
-        logo: url(&steam.logo),
-        screenshots: steam.screenshots.iter().filter_map(url).collect(),
-        store_url: format!("https://store.steampowered.com/app/{}/", steam.app_id),
-        ..GameMetadata::default()
-    }
-}
-
-/// ProtonDB's tier and page for an offer of a Windows game packed with Wine that the catalog
-/// found on Steam: empty for any other.
-pub(crate) fn protondb(offer: &Offer) -> (String, String) {
-    match steam_of(offer) {
-        Some(steam) if offer.releases.iter().any(|r| r.wine_packed) => {
-            (steam.protondb.clone(), format!("https://www.protondb.com/app/{}", steam.app_id))
-        }
-        _ => (String::new(), String::new()),
-    }
-}
-
-/// Why a release may not install, or empty. KytyPS5 installs debug packages, so a PS5
-/// package stays listed, with this.
-pub(crate) fn warning(release: &Release) -> &'static str {
-    if release.package && release.platform == "PS5" {
-        "Retail PS5 packages can't be installed; pick a folder, an archive or an exFAT image"
-    } else {
-        ""
+/// The compatibility tier of the offer's newest release that has one, and its page: empty for
+/// none.
+pub(crate) fn compatibility(offer: &Offer) -> (String, String) {
+    match offer.releases.iter().find_map(|r| r.fact(FactKind::Compatibility)) {
+        Some(tier) => (tier.value.clone(), tier.url.clone()),
+        None => (String::new(), String::new()),
     }
 }
 
@@ -729,6 +446,33 @@ mod tests {
         assert_eq!(genres_in(&["Card game"]), ["Other"], "words that name no genre");
         assert!(genres_in(&["", " "]).is_empty(), "no words, no genre");
         assert_eq!(GENRES.len(), 16);
+    }
+
+    #[test]
+    fn a_page_lists_the_releases_by_version_and_labels_each_one() {
+        let release = |id: &str, version: &str, store: &str| Release {
+            id: id.into(),
+            version: version.into(),
+            store: store.into(),
+            ..Release::default()
+        };
+        let all = [
+            release("old", "1.05", ""),
+            release("new-b", "1.10", ""),
+            release("new-a", "1.10.000", ""),
+            release("steam", "9.9", "steam"),
+        ];
+        let listed = |installed| -> Vec<(String, String)> {
+            ordered(&all, installed).into_iter().map(|o| (o.release.id.clone(), o.label)).collect()
+        };
+        let ids = |installed| listed(installed).into_iter().map(|(id, _)| id).collect::<Vec<_>>();
+        assert_eq!(ids(false), ["steam", "new-b", "new-a", "old"], "highest first; one version in the offer's order");
+        assert_eq!(ids(true), ["new-b", "new-a", "old"], "an installed game has no use for its store's release");
+        assert_eq!(
+            listed(true).into_iter().map(|(_, label)| label).collect::<Vec<_>>(),
+            ["Version 3 of 3 (newest)", "Version 2 of 3", "Version 1 of 3"]
+        );
+        assert!(ordered(&[], false).is_empty());
     }
 
     #[test]

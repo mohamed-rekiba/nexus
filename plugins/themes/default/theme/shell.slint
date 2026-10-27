@@ -1,4 +1,5 @@
 import { Vm, Host } from "types.slint";
+import { Commands } from "commands.slint";
 import { Tokens } from "tokens.slint";
 import { Look } from "components/look.slint";
 import { Nav } from "components/nav.slint";
@@ -163,7 +164,7 @@ export component Shell inherits Window {
             if (event.modifiers.control && (event.text == "p" || event.text == "P")) { PowerMenu.show(); return accept; }
             // The Welcome screen: Enter is Start, once the library is in.
             if (Vm.boot.welcome) {
-                if (event.text == Key.Return && Vm.boot.ready && Vm.art-ready) { Host.finish-welcome(); }
+                if (event.text == Key.Return && Vm.boot.ready && Vm.art-ready) { Commands.finish-welcome(); }
                 return accept;
             }
             // Nexus OS's USB stick: Welcome, then installing, before anything else.
@@ -191,7 +192,7 @@ export component Shell inherits Window {
             if (Vm.has-install-prompt) { Prompt.key(event.text); return accept; }
             // Ctrl+Q quits; Ctrl+D opens Downloads.
             if (event.modifiers.control && (event.text == "q" || event.text == "Q")) { Host.quit(); return accept; }
-            if (event.modifiers.control && (event.text == "d" || event.text == "D")) { Host.navigate("downloads"); return accept; }
+            if (event.modifiers.control && (event.text == "d" || event.text == "D")) { Commands.navigate("downloads"); return accept; }
             // Triangle or /: search the Catalog on its screen, else the Library.
             if (event.text == "/" && !Nav.typing && !Prefs.editing) {
                 if (!Nav.catalog) {
@@ -211,7 +212,7 @@ export component Shell inherits Window {
             }
             // L1 or Shift+Tab: the screen before.
             if (event.text == Key.Backtab && !Prefs.editing) {
-                Host.navigate(root.home ? "settings"
+                Commands.navigate(root.home ? "settings"
                     : Vm.screen == "settings" ? "themes"
                     : Vm.screen == "themes" ? "emulators"
                     : Vm.screen == "emulators" ? "downloads"
@@ -220,7 +221,7 @@ export component Shell inherits Window {
                 return accept;
             }
             if (event.text == Key.Tab && !Prefs.editing) {
-                Host.navigate(root.home && Vm.catalog-available ? "catalog"
+                Commands.navigate(root.home && Vm.catalog-available ? "catalog"
                     : root.home || Vm.screen == "catalog" ? "downloads"
                     : Vm.screen == "downloads" ? "emulators"
                     : Vm.screen == "emulators" ? "themes"
@@ -236,7 +237,7 @@ export component Shell inherits Window {
             if (event.text == Key.Escape || event.text == Key.Backspace) {
                 // Home is where back ends: no sound there.
                 if (!root.home) { Host.play-sound("back"); }
-                Host.back();
+                Commands.back();
                 return accept;
             }
             reject

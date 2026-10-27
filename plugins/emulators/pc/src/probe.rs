@@ -280,7 +280,7 @@ pub fn rank(files: &[(String, Probe)]) -> Vec<(String, Kind)> {
     ranked.into_iter().map(|(place, kind)| (place.path.to_owned(), kind)).collect()
 }
 
-/// A game's name from its release folder: "[GOG] Celeste (v1.4.0.0) [amd64] [Multi]" is
+/// A game's name from its release folder: "\[GOG\] Celeste (v1.4.0.0) \[amd64\] \[Multi\]" is
 /// "Celeste". Leading tags, tags after the name, a bracketed version, "+ DLC" and a bare
 /// version at the end go.
 pub fn clean_name(title: &str) -> String {

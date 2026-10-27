@@ -13,5 +13,8 @@ nexus-api.workspace = true
 # tokio, so the plugin's own list names no fs, process or io feature.
 tokio = { version = "1.54", default-features = false, features = ["rt", "sync", "time"] }
 
+[dev-dependencies]
+nexus-testkit.workspace = true
+
 [lints]
 workspace = true

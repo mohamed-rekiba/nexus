@@ -1,7 +1,7 @@
 # Development
 
 How to build Nexus, run it, test it, package it and release it. Every command runs from the
-repo root. The README's "Build, run, check" has the short version; how the code is laid out is
+repo root. The README's "From source" has the short version; how the code is laid out is
 in [architecture.md](architecture.md).
 
 ## Toolchain
@@ -17,6 +17,11 @@ in [architecture.md](architecture.md).
 - **Lints**: the workspace denies `unsafe_code` and warns on `clippy::all`. `make lint` and CI
   turn the warnings into errors.
 - **Git**, **Bash** for `scripts/` (Git Bash on Windows) and **make** for the `Makefile`.
+- **cargo-nextest** runs the tests as `make check` and CI do, each test in its own process:
+  `cargo install --locked cargo-nextest`, or the prebuilt binary:
+  `curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin`
+  (macOS and Windows: see [nexte.st](https://nexte.st/docs/installation/pre-built-binaries/)).
+  Without it, `scripts/check.sh` falls back to `cargo test`.
 - Optional tools:
 
 | Tool | For | Install |
@@ -39,11 +44,14 @@ opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 2
+debug = "line-tables-only"
 ```
 
 The workspace's own crates build at `opt-level = 1`, so a change rebuilds fast. Every dependency
 builds at `opt-level = 2`, so image decoding, JSON reading and Slint run near release speed under
-`make run` and in the tests. The first build after `cargo clean` takes longer for it. Release
+`make run` and in the tests. The first build after `cargo clean` takes longer for it.
+Dependencies keep only line tables for debug info: their backtraces still name files and lines,
+while a debug build is about a quarter smaller and a cold build about a fifth faster. Release
 builds (`make build`, `make package`) use Cargo's default release profile.
 
 ## System packages
@@ -229,14 +237,19 @@ cd scripts/catalog && npm test               # the catalog collector's tests (No
 ```
 
 `scripts/check.sh test` runs the tests with [cargo-nextest](https://nexte.st) when it's installed
-(`cargo install cargo-nextest`), as CI does, and with `cargo test` otherwise. Its settings are in
+(see [Toolchain](#toolchain)), as CI does, and with `cargo test` otherwise. Its settings are in
 `.config/nextest.toml`. The seam tests are one test binary, `seams` (`tests/tests/seams/main.rs`,
 one module per area), so their shared code builds and links once; `spans.rs` is its own binary.
 
 The tests need no window, GPU, controller or sound device: they use Slint's testing backend and
 fakes. `tests/` (the `nexus-tests` crate) holds the seam tests: the core's API, the plugin
-contracts and the composed host. `cargo test -p nexus-tests --test seams screenshots::` renders each
-default theme screen to PNG files in `target/tmp/screenshots/`.
+contracts and the composed host (the core and the app shell).
+`cargo test -p nexus-tests --test seams screenshots::` renders each default theme screen to PNG
+files in `target/tmp/screenshots/`.
+
+The core in a test runs on a fake clock. A test waits for work with `until(area, done)` and for a
+timer with `advance`, never with a sleep, and drives a theme through `ThemeDriver`. How to write
+one is in [architecture.md](architecture.md#tests).
 
 Some tests touch the real system, the network or files you supply. Each one skips, or returns at
 once, unless its variable is set:
@@ -248,7 +261,7 @@ once, unless its variable is set:
 | `NEXUS_KWIN_TESTS=1` | `cargo test -p nexus-app kwin_says`: asks the real KWin which window is in front | A KDE Plasma Wayland session |
 | `NEXUS_TRAILER_TESTS=1` | `cargo test -p nexus-app libmpv_plays`: plays a made-up video through the real libmpv | libmpv, and `ffmpeg` (`ffmpeg-free` on Fedora) to make the video |
 | `NEXUS_TORRENT_TESTS=1` | `cargo test -p nexus-app a_torrent_downloads`: a real BitTorrent transfer between two sessions on this computer, with no DHT, tracker or network | |
-| `NEXUS_VPN_TESTS=1` | `cargo test -p nexus-app lists_this_computer_s_networks`: lists this computer's networks; it connects nothing | |
+| `NEXUS_VPN_TESTS=1` | `cargo test -p system-host lists_this_computer_s_networks`: lists this computer's networks; it connects nothing | |
 | `NEXUS_REAL_RELEASES=1` | `cargo test -p nexus-app real -- --nocapture`: downloads and installs the newest real KytyPS5 and shadPS4 releases | The network, and some hundreds of megabytes. Anonymous GitHub API calls can hit the rate limit. |
 | `NEXUS_REAL_ARCHIVES=<folder>` | `cargo test -p nexus-tests --test seams real_archives::`: installs real release archives through the plugins on a fake web | The archives, named as GitHub has them (`KytyPS5-*-Linux-x86_64.tar.gz`, `shadps4-linux*.zip` and so on). A missing one is skipped. |
 | `NEXUS_CATALOG_FILES=<file>[:<file>…]` | `cargo test -p release-catalog catalog_files -- --nocapture`: reads catalog files through the plugin's reader and prints what each holds | Catalog files, such as the collector's |
@@ -275,7 +288,8 @@ NEXUS_DESKTOP_TESTS=1 NEXUS_DESKTOP_REQUIRE=1 xvfb-run -a -s "-screen 0 1280x800
 - Before each push: `cargo clippy --workspace --all-targets -- -D warnings` and
   `cargo test --workspace`.
 
-`make hooks-install` installs them; `make hooks-run` runs them on every file. Each cargo hook moves
+`make hooks-install` installs the commit hooks and the push hooks. `make hooks-run` runs them on
+every file. Each cargo hook moves
 into `nexus/` first when the repo root has a `nexus/Cargo.toml`, so the hooks also work while
 Nexus is a folder of a larger repo. There, name the config:
 `pre-commit run -c nexus/.pre-commit-config.yaml`.
@@ -361,8 +375,8 @@ The workflows are in `.github/workflows/`:
 |---|---|---|
 | `ci.yml` | Pull requests, pushes to `main`, by hand | On Linux, side by side: `Format` (`cargo fmt --check`), `Clippy` (`-D warnings`), `Test` (cargo-nextest) and `cargo-deny` |
 | `weekly.yml` | Mondays at 05:17 UTC, by hand | The tests on Windows; on Linux: the real emulator releases install (`NEXUS_REAL_RELEASES=1`), the desktop adapter under Xvfb and openbox (`NEXUS_DESKTOP_TESTS=1`), the trailer player plays a real video (`NEXUS_TRAILER_TESTS=1`), and `cargo deny check advisories` |
-| `release.yml` | Pushes to `main` | Release Please; then it starts `package.yml` or `os.yml` on the new tag ([Releases](#releases)) |
-| `package.yml` | On a Nexus tag (started by `release.yml`), by hand | The packages on Linux, both Mac processors and Windows; on a tag it publishes the release, then starts `os.yml` |
+| `release.yml` | Pushes to `main`, started by `package.yml` | Release Please; then it starts `package.yml` or `os.yml` on the new tag ([Releases](#releases)) |
+| `package.yml` | On a Nexus tag (started by `release.yml`), by hand | The packages on Linux, both Mac processors and Windows; on a tag it publishes the release, names it in `os/nexus.txt`, then starts `os.yml` |
 | `os.yml` | Daily, on a Nexus OS tag, after a Nexus release, by hand | The Nexus OS images and USB stick ([os/README.md](../os/README.md#releases)) |
 | `mirror-deps.yml` | By hand | Copies the pinned Windows libmpv build into the `deps` release |
 
@@ -430,10 +444,18 @@ Release Please, packaging and Nexus OS are separate workflows, each with its own
    tag made with a workflow's own token, but does start one asked for by name).
 3. Once the release is published, `package.yml` starts `os.yml`, so the images get the new
    Nexus.
-4. Merging Nexus OS's release pull request makes the tag `nexus-os-v<version>`, and
+4. The OS bundles Nexus, so a Nexus release is a change to the OS too. `package.yml` writes the
+   new tag to `os/nexus.txt` on `main`, as `feat(os): bundle Nexus v<version>` for a new major or
+   minor version and `fix(os)` for a patch, then starts `release.yml` (the push was made with the
+   workflow's own token, which starts nothing). Release Please opens Nexus OS's release pull
+   request. When an OS release came in the same push, the commit is a `chore(os)`, which
+   releases nothing: that OS release bundles this Nexus already.
+5. Merging Nexus OS's release pull request makes the tag `nexus-os-v<version>`, and
    `release.yml` starts `os.yml` on it: the images and the stick from the tag, and the OS
    release. When the same push made a Nexus tag too, `package.yml` starts the OS release instead,
-   once Nexus's release is published, since the images bundle it.
+   once Nexus's release is published, since the images bundle it. Merge Nexus OS's release
+   pull request only after Nexus's release is published: the stick bundles the latest Nexus
+   release.
 
 `package.yml` doesn't run the tests: CI did, on the commit, before it reached `main`.
 
@@ -449,8 +471,9 @@ Release Please, packaging and Nexus OS are separate workflows, each with its own
   `latest.json` (`scripts/update-manifest.sh`), signs the build provenance
   (`gh attestation verify <file> --repo <owner>/<repo>` checks it), attaches them all to the
   draft, and publishes it as the latest.
-- `Start Nexus OS` starts `os.yml`: on the OS tag made in the same push (its `os-release`
-  input), or on `main` for new images.
+- `Start Nexus OS` writes the release's tag to `os/nexus.txt` on `main` and starts
+  `release.yml`, so the OS release pull request opens (step 4 above). Then it starts `os.yml`:
+  on the OS tag made in the same push (its `os-release` input), or on `main` for new images.
 
 When `package.yml` fails for a release, run it again on the same tag: Actions → Package → Run
 workflow, with the tag under "Use workflow from" (and the OS tag as `os-release`, when that push
@@ -459,7 +482,7 @@ made one). Don't make a new release.
 ## The launcher's own update
 
 `crates/nexus-core/src/launcher_update.rs` and `apply_launcher_update` in
-`crates/nexus-app/src/main.rs` do it.
+`crates/nexus-app/src/update.rs` do it.
 
 - `latest.json` holds the version and, for each kind of install, its package's URL and SHA-256:
   `linux-x86_64` (the tar.gz), `linux-x86_64-appimage`, `linux-x86_64-deb`, `linux-x86_64-rpm`,

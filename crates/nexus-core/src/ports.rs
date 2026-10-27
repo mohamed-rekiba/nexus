@@ -4,12 +4,68 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+use futures::future::BoxFuture;
 use futures::stream::BoxStream;
+use futures::{FutureExt, StreamExt as _};
 use nexus_api::{HttpRequest, HttpResponse, PluginResult};
 use serde::{Deserialize, Serialize};
+
+pub use crate::process::{GroupTree, TokioSpawner};
+
+/// The time for the core: what time it is, and waits. Every timer in the core goes through
+/// it, so a test can move time instead of waiting for it.
+pub trait Clock: Send + Sync {
+    fn now(&self) -> Instant;
+
+    /// Ends `wait` from now.
+    fn sleep(&self, wait: Duration) -> BoxFuture<'static, ()>;
+
+    /// Ticks every `every`, the first one `every` from now. A tick that came late doesn't
+    /// bring the next ones closer.
+    fn interval(&self, every: Duration) -> BoxStream<'static, ()>;
+}
+
+impl dyn Clock + '_ {
+    /// Ends at `deadline`, or at once when it has passed.
+    pub fn sleep_until(&self, deadline: Instant) -> BoxFuture<'static, ()> {
+        self.sleep(deadline.saturating_duration_since(self.now()))
+    }
+
+    /// `work`'s result, or `None` when `limit` passed first. `work` is dropped then.
+    pub async fn timeout<T>(&self, limit: Duration, work: impl Future<Output = T>) -> Option<T> {
+        tokio::select! {
+            done = work => Some(done),
+            () = self.sleep(limit) => None,
+        }
+    }
+}
+
+/// Real time, from tokio's timers.
+pub struct TokioClock;
+
+impl Clock for TokioClock {
+    fn now(&self) -> Instant {
+        // Tokio's, not the system's: a runtime whose time a test paused gives the paused time.
+        tokio::time::Instant::now().into_std()
+    }
+
+    fn sleep(&self, wait: Duration) -> BoxFuture<'static, ()> {
+        tokio::time::sleep(wait).boxed()
+    }
+
+    fn interval(&self, every: Duration) -> BoxStream<'static, ()> {
+        let mut ticks = tokio::time::interval_at(tokio::time::Instant::now() + every, every);
+        ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        futures::stream::unfold(ticks, |mut ticks| async move {
+            ticks.tick().await;
+            Some(((), ticks))
+        })
+        .boxed()
+    }
+}
 
 /// The body of a download, from some offset.
 pub struct Body {
@@ -123,218 +179,6 @@ pub trait ProcessSpawner: Send + Sync {
     }
 }
 
-/// Spawns real processes with `tokio::process`.
-pub struct TokioSpawner;
-
-/// The child, its id kept after the child is reaped (its process group can outlive it), and
-/// when it started.
-#[cfg_attr(not(windows), allow(dead_code))] // Only Windows' orphan sweep reads the start time.
-struct TokioChild(tokio::process::Child, Option<u32>, std::time::SystemTime);
-
-#[async_trait]
-impl ProcessSpawner for TokioSpawner {
-    async fn spawn(&self, command: SpawnCommand) -> PluginResult<Box<dyn ProcessHandle>> {
-        let failed =
-            |e: std::io::Error| nexus_api::PluginError::Other(format!("could not start {:?}: {e}", command.program));
-        let mut process = tokio::process::Command::new(&command.program);
-        process.args(&command.args).envs(&command.env).current_dir(&command.cwd).kill_on_drop(!command.keep_running);
-        process.stdin(std::process::Stdio::null());
-        if let Some(log) = &command.log {
-            if let Some(dir) = log.parent() {
-                std::fs::create_dir_all(dir).map_err(failed)?;
-            }
-            let out = std::fs::File::create(log).map_err(failed)?;
-            process.stderr(out.try_clone().map_err(failed)?).stdout(out);
-        } else {
-            process.stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
-        }
-        #[cfg(unix)]
-        process.process_group(0);
-        let child = process.spawn().map_err(failed)?;
-        let id = child.id();
-        Ok(Box::new(TokioChild(child, id, std::time::SystemTime::now())))
-    }
-
-    async fn output(&self, command: SpawnCommand, timeout: Duration, limit: usize) -> PluginResult<Option<Vec<u8>>> {
-        use tokio::io::AsyncReadExt;
-        let mut child = tokio::process::Command::new(&command.program)
-            .args(&command.args)
-            .envs(&command.env)
-            .current_dir(&command.cwd)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
-            .kill_on_drop(true)
-            .spawn()
-            .map_err(|e| nexus_api::PluginError::Other(format!("could not start {:?}: {e}", command.program)))?;
-        let stdout = child.stdout.take().expect("stdout is piped");
-        let run = async {
-            let mut out = Vec::new();
-            stdout.take(limit as u64).read_to_end(&mut out).await?;
-            // The read dropped the pipe: a program with more to say stops on it, not on us.
-            child.wait().await?;
-            Ok::<_, std::io::Error>(out)
-        };
-        match tokio::time::timeout(timeout, run).await {
-            Ok(Ok(out)) => Ok(Some(out)),
-            Ok(Err(e)) => Err(nexus_api::PluginError::Other(format!("{:?}: {e}", command.program))),
-            Err(_) => {
-                let _ = child.kill().await;
-                Ok(None)
-            }
-        }
-    }
-
-    async fn stream(
-        &self,
-        command: SpawnCommand,
-        line: &(dyn for<'a> Fn(&'a str) + Send + Sync),
-        cancelled: &(dyn Fn() -> bool + Send + Sync),
-    ) -> PluginResult<i32> {
-        use tokio::io::{AsyncBufReadExt, BufReader};
-        let failed = |e: std::io::Error| nexus_api::PluginError::Other(format!("{:?}: {e}", command.program));
-        let mut child = tokio::process::Command::new(&command.program)
-            .args(&command.args)
-            .envs(&command.env)
-            .current_dir(&command.cwd)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-            .map_err(|e| nexus_api::PluginError::Other(format!("could not start {:?}: {e}", command.program)))?;
-        let mut out = BufReader::new(child.stdout.take().expect("stdout is piped")).lines();
-        let mut err = BufReader::new(child.stderr.take().expect("stderr is piped")).lines();
-        let (mut out_open, mut err_open) = (true, true);
-        let mut tick = tokio::time::interval(Duration::from_millis(250));
-        while out_open || err_open {
-            tokio::select! {
-                read = out.next_line(), if out_open => match read.map_err(failed)? {
-                    Some(text) => line(&text),
-                    None => out_open = false,
-                },
-                read = err.next_line(), if err_open => match read.map_err(failed)? {
-                    Some(text) => line(&text),
-                    None => err_open = false,
-                },
-                _ = tick.tick() => if cancelled() {
-                    let _ = child.kill().await;
-                    break;
-                },
-            }
-        }
-        Ok(child.wait().await.map_err(failed)?.code().unwrap_or(-1))
-    }
-
-    fn which(&self, name: &str) -> Option<PathBuf> {
-        let names: Vec<String> = if cfg!(windows) && Path::new(name).extension().is_none() {
-            vec![format!("{name}.exe"), name.into()]
-        } else {
-            vec![name.into()]
-        };
-        let path = std::env::var_os("PATH")?;
-        std::env::split_paths(&path).flat_map(|dir| names.iter().map(move |n| dir.join(n))).find(|p| p.is_file())
-    }
-}
-
-/// Sends `signal` to the process group `group` with the system's `kill`: this crate has no
-/// unsafe code to call it directly.
-#[cfg(unix)]
-async fn signal_group(group: u32, signal: &str) -> PluginResult<()> {
-    // A failed exit status means the group is already gone, which is what we wanted.
-    tokio::process::Command::new("kill")
-        .args([&format!("-{signal}"), "--", &format!("-{group}")])
-        .stderr(std::process::Stdio::null())
-        .status()
-        .await
-        .map_err(|e| nexus_api::PluginError::Other(format!("kill: {e}")))?;
-    Ok(())
-}
-
-/// Runs `taskkill` on process `id` and the processes it started. Without `force`, it asks
-/// their windows to close.
-#[cfg(windows)]
-async fn taskkill(id: u32, force: bool) -> PluginResult<()> {
-    let mut args = vec!["/PID".to_owned(), id.to_string(), "/T".to_owned()];
-    if force {
-        args.push("/F".into());
-    }
-    // A failed exit status means the processes are already gone, which is what we wanted.
-    tokio::process::Command::new("taskkill")
-        .args(&args)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .await
-        .map_err(|e| nexus_api::PluginError::Other(format!("taskkill: {e}")))?;
-    Ok(())
-}
-
-/// Kills what process `id` started, and what those started, after `id` ended: `taskkill /T`
-/// follows the tree from a running process only. A child keeps its parent's id, so a walk by
-/// parent id still finds it. Windows can give a dead process's id to a new one, so the walk
-/// takes only processes created since the game `started`: a stranger with a reused parent id
-/// is older than that, or not below the game.
-#[cfg(windows)]
-async fn orphans_of(id: u32, started: std::time::SystemTime) {
-    let since = started.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    let script = format!(
-        "$since = [DateTimeOffset]::FromUnixTimeSeconds({since}).LocalDateTime; \
-         $all = Get-CimInstance Win32_Process; $parents = @({id}); $seen = @(); \
-         while ($parents.Count -gt 0) {{ \
-           $next = @($all | Where-Object {{ $parents -contains $_.ParentProcessId -and $seen -notcontains $_.ProcessId -and $_.CreationDate -ge $since }}); \
-           $seen += $next.ProcessId; $parents = @($next.ProcessId) }}; \
-         $seen | ForEach-Object {{ Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }}"
-    );
-    let ran = tokio::process::Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .await;
-    if let Err(e) = ran {
-        tracing::debug!(error = %e, "could not look for what the game left running");
-    }
-}
-
-#[async_trait]
-impl ProcessHandle for TokioChild {
-    fn id(&self) -> Option<u32> {
-        self.0.id()
-    }
-
-    async fn wait(&mut self) -> PluginResult<ProcessExit> {
-        let status = self.0.wait().await.map_err(|e| nexus_api::PluginError::Other(e.to_string()))?;
-        Ok(ProcessExit { code: status.code(), success: status.success() })
-    }
-
-    async fn terminate(&mut self) -> PluginResult<()> {
-        let Some(id) = self.1 else { return Ok(()) };
-        #[cfg(unix)]
-        return signal_group(id, "TERM").await;
-        #[cfg(windows)]
-        return taskkill(id, false).await;
-    }
-
-    async fn kill(&mut self) -> PluginResult<()> {
-        // By the kept id: after the first process ends, the rest of its group can still run.
-        #[cfg(unix)]
-        if let Some(id) = self.1 {
-            signal_group(id, "KILL").await?;
-        }
-        #[cfg(windows)]
-        if let Some(id) = self.1 {
-            taskkill(id, true).await?;
-            orphans_of(id, self.2).await;
-        }
-        match self.0.kill().await {
-            // Already gone: the group signal reached it first.
-            Err(e) if e.kind() == std::io::ErrorKind::InvalidInput => Ok(()),
-            other => other.map_err(|e| nexus_api::PluginError::Other(e.to_string())),
-        }
-    }
-}
-
 /// Which program's window the player sees.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Front {
@@ -365,7 +209,7 @@ pub enum PackageError {
 
 /// The desktop's windows: which one is in front, and bringing one to the front. A game is
 /// its processes, as [`ProcessTree::members`] lists them.
-pub trait Desktop: Send + Sync {
+pub trait Windows: Send + Sync {
     fn front(&self) -> Front;
     /// Brings a window of one of the game's processes `ids` to the front. `false` when none has
     /// a window yet, or the system refused.
@@ -388,6 +232,26 @@ pub trait Desktop: Send + Sync {
     fn problem(&self) -> Option<String> {
         None
     }
+}
+
+/// Windows the launcher can't see or change. The default until the app plugs in real ones.
+pub struct NoWindows;
+
+impl Windows for NoWindows {
+    fn front(&self) -> Front {
+        Front::Unknown
+    }
+
+    fn show_game(&self, _ids: &[u32]) -> bool {
+        false
+    }
+
+    fn show_launcher(&self) {}
+}
+
+/// The player's login session: starting the launcher when the player logs in, and the
+/// administrator prompt that installs the launcher's own package. Not a play session.
+pub trait LoginSession: Send + Sync {
     /// Whether the launcher can start when the player logs in. `false` for a build that isn't
     /// installed, such as `cargo run`'s: the system would start a program that moves.
     fn can_start_at_login(&self) -> bool {
@@ -403,28 +267,34 @@ pub trait Desktop: Send + Sync {
     fn install_package(&self, _file: &Path, _manager: PackageManager) -> Result<(), PackageError> {
         Err(PackageError::Failed("this system can't install packages".into()))
     }
-    /// Opens `link` with the system's handler for it, as a click on it would: `steam://install/440`
-    /// asks Steam to install a game, starting Steam on its own when it isn't running. The core
-    /// checked the link against the plugin's `permissions.links`. The error says why it didn't.
+}
+
+/// A session that can't start the launcher at login or install packages. The default until the
+/// app plugs in a real one.
+pub struct NoLoginSession;
+
+impl LoginSession for NoLoginSession {}
+
+/// The system's opener: what a click on a link or a file does.
+pub trait Opener: Send + Sync {
+    /// Opens `link` with the system's handler for it: an `https://` page in the browser, and
+    /// `steam://install/440` asks Steam to install a game, starting Steam on its own when it
+    /// isn't running. The caller checked the link (the core against the plugin's
+    /// `permissions.links`). The error says why it didn't open.
     fn open_link(&self, _link: &str) -> Result<(), String> {
         Err("this desktop can't open links".into())
     }
+    /// Opens `path` with the system's opener: a folder in the file manager, a log in the text
+    /// viewer. The error says why it didn't open.
+    fn open_path(&self, _path: &Path) -> Result<(), String> {
+        Err("this desktop can't open files".into())
+    }
 }
 
-/// A desktop the launcher can't see or change. The default until the app plugs in a real one.
-pub struct NoDesktop;
+/// An opener that opens nothing. The default until the app plugs in a real one.
+pub struct NoOpener;
 
-impl Desktop for NoDesktop {
-    fn front(&self) -> Front {
-        Front::Unknown
-    }
-
-    fn show_game(&self, _ids: &[u32]) -> bool {
-        false
-    }
-
-    fn show_launcher(&self) {}
-}
+impl Opener for NoOpener {}
 
 /// A running game's processes: the one the launcher started, the ones in its process group,
 /// and the ones a sandbox moved out of the group below them (Proton's pressure-vessel does).
@@ -441,33 +311,6 @@ pub trait ProcessTree: Send + Sync {
     }
     /// Asks the processes `ids` to close (`force`: kills them). Blocking.
     fn end(&self, ids: &[u32], force: bool);
-}
-
-/// The process group alone: `root` while its group has a live process (Unix), nothing on
-/// Windows, which has no process groups. The default until the app plugs in a real one. Once
-/// the first process exits the core drops `root`, so with this default a game ends with its
-/// first process: plug in the app's adapter to follow the group.
-pub struct GroupTree;
-
-impl ProcessTree for GroupTree {
-    fn members(&self, root: u32) -> Vec<u32> {
-        #[cfg(unix)]
-        {
-            let alive = std::process::Command::new("kill")
-                .args(["-0", "--", &format!("-{root}")])
-                .stderr(std::process::Stdio::null())
-                .status()
-                .is_ok_and(|s| s.success());
-            if alive { vec![root] } else { Vec::new() }
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = root;
-            Vec::new()
-        }
-    }
-
-    fn end(&self, _ids: &[u32], _force: bool) {}
 }
 
 /// HTTP that always fails. The default until the app plugs in a real transport.
@@ -488,32 +331,6 @@ impl HttpTransport for NoNetwork {
 mod tests {
     use super::*;
 
-    fn sh(script: &str) -> SpawnCommand {
-        SpawnCommand {
-            program: "/bin/sh".into(),
-            args: vec!["-c".into(), script.into()],
-            env: BTreeMap::new(),
-            cwd: std::env::temp_dir(),
-            log: None,
-            keep_running: false,
-        }
-    }
-
-    /// A program that may become Steam's client outlives its handle, and so Nexus.
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn a_program_that_may_outlive_nexus_isn_t_stopped_when_its_handle_goes() {
-        let mut command = sh("sleep 30");
-        command.keep_running = true;
-        let process = TokioSpawner.spawn(command).await.unwrap();
-        let id = process.id().unwrap().to_string();
-        drop(process);
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        let alive = std::process::Command::new("kill").args(["-0", &id]).status().is_ok_and(|s| s.success());
-        let _ = std::process::Command::new("kill").args(["-KILL", &id]).status();
-        assert!(alive, "the program was stopped with its handle");
-    }
-
     #[test]
     fn a_command_reads_as_one_shell_line() {
         let command = SpawnCommand {
@@ -528,85 +345,6 @@ mod tests {
             command.shell_line(),
             r#"cd '/Games/My Game' && WINEPREFIX='/data/prefixes/a b' '/Games/My Game/run.sh' --fullscreen 'it'\''s' ''"#
         );
-    }
-
-    #[tokio::test]
-    async fn output_reads_what_a_program_prints_up_to_the_limit() {
-        let out = TokioSpawner.output(sh("echo hello"), Duration::from_secs(5), 1024).await.unwrap();
-        assert_eq!(out.as_deref(), Some(&b"hello\n"[..]));
-        // More than the limit: the read stops there, and the program stops on its closed pipe.
-        let out = TokioSpawner.output(sh("yes"), Duration::from_secs(5), 10).await.unwrap();
-        assert_eq!(out.map(|o| o.len()), Some(10));
-    }
-
-    #[tokio::test]
-    async fn output_stops_a_program_that_runs_past_the_timeout() {
-        let started = std::time::Instant::now();
-        let out = TokioSpawner.output(sh("sleep 30"), Duration::from_millis(200), 1024).await.unwrap();
-        assert_eq!(out, None);
-        assert!(started.elapsed() < Duration::from_secs(5));
-    }
-
-    async fn alive(pid: &str) -> bool {
-        let status =
-            tokio::process::Command::new("kill").args(["-0", pid]).stderr(std::process::Stdio::null()).status();
-        status.await.unwrap().success()
-    }
-
-    #[tokio::test]
-    async fn terminate_asks_a_program_to_close() {
-        let mut process = TokioSpawner.spawn(sh("sleep 30")).await.unwrap();
-        assert!(process.id().is_some());
-
-        process.terminate().await.unwrap();
-
-        let exit = tokio::time::timeout(Duration::from_secs(5), process.wait()).await.unwrap().unwrap();
-        assert!(!exit.success);
-    }
-
-    #[tokio::test]
-    async fn kill_stops_the_programs_a_game_started_too() {
-        let dir = tempfile::tempdir().unwrap();
-        let pidfile = dir.path().join("child");
-        // A start script that ignores the request to close and leaves a program running.
-        let script = format!("trap '' TERM; sleep 30 & echo $! > {}; wait", pidfile.display());
-        let mut process = TokioSpawner.spawn(sh(&script)).await.unwrap();
-        let child = loop {
-            match std::fs::read_to_string(&pidfile) {
-                Ok(pid) if pid.ends_with('\n') => break pid.trim().to_owned(),
-                _ => tokio::time::sleep(Duration::from_millis(20)).await,
-            }
-        };
-        assert!(alive(&child).await);
-
-        process.kill().await.unwrap();
-        process.wait().await.unwrap();
-
-        let gone = async {
-            while alive(&child).await {
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-        };
-        tokio::time::timeout(Duration::from_secs(5), gone).await.expect("the script's program stopped too");
-    }
-
-    #[tokio::test]
-    async fn a_program_s_output_goes_to_its_log() {
-        let dir = tempfile::tempdir().unwrap();
-        let log = dir.path().join("logs/game.log");
-        let mut command = sh("echo out; echo err >&2");
-        command.log = Some(log.clone());
-
-        let mut process = TokioSpawner.spawn(command).await.unwrap();
-        process.wait().await.unwrap();
-
-        assert_eq!(std::fs::read_to_string(log).unwrap(), "out\nerr\n");
-    }
-
-    #[test]
-    fn which_finds_a_program_on_the_path() {
-        assert!(TokioSpawner.which("sh").is_some_and(|p| p.is_file()));
-        assert_eq!(TokioSpawner.which("no-such-program-anywhere"), None);
     }
 }
 
@@ -675,23 +413,26 @@ pub struct TorrentInfo {
     pub files: Vec<TorrentFile>,
 }
 
+/// What the BitTorrent engine is doing with a torrent now.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TorrentPhase {
+pub enum TransferState {
     /// Checking the pieces already in the folder.
     Checking,
-    Downloading,
-    /// Every piece is in, and it uploads to others.
-    Seeding,
-    /// Every piece is in, and it doesn't upload.
-    Finished,
+    /// Connected to the swarm: it downloads what is missing, and uploads what it has.
+    Live,
+    /// Talks to no peer. A torrent started paused stays so once its check is done.
+    Paused,
     /// It stopped with an error.
-    Failed,
+    Error,
 }
 
-/// A torrent's state, as the transport sees it now.
+/// A torrent as the engine sees it now: raw numbers, no decision. The core's phase rules
+/// read them (`torrents::phase`).
 #[derive(Clone, Debug, PartialEq)]
-pub struct TorrentStatus {
-    pub phase: TorrentPhase,
+pub struct TorrentStats {
+    pub state: TransferState,
+    /// Every piece is in the folder and checked.
+    pub finished: bool,
     /// Bytes checked or downloaded of `total`.
     pub done: u64,
     pub total: u64,
@@ -699,18 +440,8 @@ pub struct TorrentStatus {
     pub download_rate: u64,
     pub upload_rate: u64,
     pub peers: u32,
-    /// For [`TorrentPhase::Failed`].
+    /// For [`TransferState::Error`].
     pub error: String,
-}
-
-/// How a torrent starts.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TorrentStart {
-    /// Downloads what is missing, then seeds if `seed` is on, else finishes.
-    Download { seed: bool },
-    /// Checks the pieces in the folder and seeds them. A missing piece fails it: nothing
-    /// downloads.
-    SeedOnly,
 }
 
 /// The upload limit while seeding, in bytes a second.
@@ -721,12 +452,17 @@ pub const SEED_UPLOAD_LIMIT: u64 = 128 * 1024;
 pub trait Torrents: Send + Sync {
     /// Reads the torrent's name and files from the swarm. Downloads no file.
     async fn resolve(&self, magnet: &str) -> PluginResult<TorrentInfo>;
-    /// Starts the torrent into `folder`, checking the pieces already there first.
-    async fn start(&self, id: &str, magnet: &str, folder: &Path, how: TorrentStart) -> PluginResult<()>;
+    /// Starts the torrent into `folder`, checking the pieces already there first. A torrent
+    /// started `paused` stays paused after its check: it downloads nothing until
+    /// [`Torrents::unpause`]. One the engine already has, paused, goes on unless `paused`.
+    async fn start(&self, id: &str, magnet: &str, folder: &Path, paused: bool) -> PluginResult<()>;
+    /// Connects a paused torrent to the swarm. No error when it already is.
+    async fn unpause(&self, id: &str) -> PluginResult<()>;
     /// Stops the torrent. Its files stay. No error when it isn't running.
     async fn stop(&self, id: &str) -> PluginResult<()>;
-    /// `None` when it isn't running.
-    fn status(&self, id: &str) -> Option<TorrentStatus>;
+    /// What the engine reports for the torrent now; `None` when it isn't running. Reading it
+    /// changes nothing.
+    fn stats(&self, id: &str) -> Option<TorrentStats>;
     /// The network interface that every connection uses from the next start; `None` for any.
     /// A change closes the connections the torrents shared, so the core stops them first.
     async fn route(&self, interface: Option<String>) -> PluginResult<()>;
@@ -742,13 +478,16 @@ impl Torrents for NoTorrents {
     async fn resolve(&self, _magnet: &str) -> PluginResult<TorrentInfo> {
         Err(nexus_api::PluginError::Unsupported("this build of Nexus can't download torrents".into()))
     }
-    async fn start(&self, _id: &str, _magnet: &str, _folder: &Path, _how: TorrentStart) -> PluginResult<()> {
+    async fn start(&self, _id: &str, _magnet: &str, _folder: &Path, _paused: bool) -> PluginResult<()> {
         Err(nexus_api::PluginError::Unsupported("this build of Nexus can't download torrents".into()))
+    }
+    async fn unpause(&self, _id: &str) -> PluginResult<()> {
+        Ok(())
     }
     async fn stop(&self, _id: &str) -> PluginResult<()> {
         Ok(())
     }
-    fn status(&self, _id: &str) -> Option<TorrentStatus> {
+    fn stats(&self, _id: &str) -> Option<TorrentStats> {
         None
     }
     async fn route(&self, _interface: Option<String>) -> PluginResult<()> {
@@ -838,21 +577,82 @@ pub enum ArchiveKind {
 /// How far an unpack is: `done` of `total` bytes written.
 pub type UnpackProgress = Arc<dyn Fn(u64, u64) + Send + Sync>;
 
+/// How an entry's path gets out of the unpack folder.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Escape {
+    /// Its path is absolute or climbs out with `..`.
+    Leaves,
+    /// It is a link whose target is absolute or climbs out with `..`.
+    LinksOut,
+    /// A link already on the disk sits where it would go.
+    ThroughLink,
+    /// Once the links on the disk are followed, its path is outside the folder.
+    LeavesThroughLink,
+}
+
+/// Why an archive didn't unpack. The core shows its text; an adapter picks a fallback reader
+/// by its variant, never by its text.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum ArchiveError {
+    #[error("This archive needs a password, which Nexus can't ask for")]
+    Password,
+    /// An entry's name, as the archive spells it, and how it gets out of the folder.
+    #[error("{}", escape_text(.entry, *.how))]
+    Escapes { entry: String, how: Escape },
+    /// The bytes the unpack needs, spare included, and the bytes the disk has.
+    #[error("This archive needs {} free, and the disk has {}", gigabytes(*.needed), gigabytes(*.free))]
+    NoRoom { needed: u64, free: u64 },
+    /// The reader can't read this archive: a format, a feature or a codec it lacks. Another
+    /// reader may.
+    #[error("{0}")]
+    Unsupported(String),
+    /// A library or program the archive needs isn't installed. The text says what to install.
+    #[error("{0}")]
+    Missing(String),
+    /// The archive is damaged, cut short, or changed while it was unpacked.
+    #[error("{0}")]
+    Corrupt(String),
+    /// Reading the parts or writing the folder failed.
+    #[error("{0}")]
+    Io(String),
+    #[error("The unpacking was cancelled")]
+    Cancelled,
+}
+
+fn escape_text(entry: &str, how: Escape) -> String {
+    match how {
+        Escape::Leaves => format!("{entry} leaves the folder"),
+        Escape::LinksOut => format!("{entry} links out of the folder"),
+        Escape::ThroughLink => format!("{entry} would write through a link"),
+        Escape::LeavesThroughLink => format!("{entry} leaves the folder through a link"),
+    }
+}
+
+fn gigabytes(bytes: u64) -> String {
+    format!("{:.1} GB", bytes as f64 / 1e9)
+}
+
 /// Unpacking archives. The work is blocking, so an adapter runs it off the async runtime.
+///
+/// An adapter lists the archive with its format readers, hands the listing to
+/// [`crate::plan_unpack`], and writes only what the plan holds. The safety rules live in the
+/// plan, so every adapter refuses the same archives.
 #[async_trait]
 pub trait Archives: Send + Sync {
-    /// Unpacks the archive cut into `parts` (in order) into the empty folder `into`. Before it
-    /// writes anything it refuses an archive that needs a password, an entry whose path leaves
-    /// `into` (an absolute path, `..`, or a link that points out), and an archive bigger than
-    /// the free space. It stops with an error soon after `cancel` is set.
+    /// Unpacks the archive cut into `parts` (in order) into the empty folder `into`, on a disk
+    /// with `free` bytes (`None` when the disk doesn't say). Before it writes anything it
+    /// refuses an archive that needs a password, an entry whose path leaves `into` (an absolute
+    /// path, `..`, or a link that points out), and an archive bigger than the free space. It
+    /// stops with [`ArchiveError::Cancelled`] soon after `cancel` is set.
     async fn unpack(
         &self,
         kind: ArchiveKind,
         parts: &[PathBuf],
         into: &Path,
+        free: Option<u64>,
         progress: UnpackProgress,
         cancel: Arc<AtomicBool>,
-    ) -> PluginResult<()>;
+    ) -> Result<(), ArchiveError>;
 }
 
 /// A host that can't unpack archives. The default until the app plugs in a real one.
@@ -865,10 +665,11 @@ impl Archives for NoArchives {
         _kind: ArchiveKind,
         _parts: &[PathBuf],
         _into: &Path,
+        _free: Option<u64>,
         _progress: UnpackProgress,
         _cancel: Arc<AtomicBool>,
-    ) -> PluginResult<()> {
-        Err(nexus_api::PluginError::Unsupported("this build of Nexus can't unpack archives".into()))
+    ) -> Result<(), ArchiveError> {
+        Err(ArchiveError::Unsupported("this build of Nexus can't unpack archives".into()))
     }
 }
 
@@ -903,5 +704,88 @@ impl Network for PluginVpn {
 
     fn disconnect(&self, name: &str) -> Result<(), String> {
         self.0.disconnect(name)
+    }
+}
+
+/// Every port the app plugged in, built once at boot and split per subsystem: each subsystem
+/// gets only the ports it names (`TorrentPorts`, `SessionPorts`, and so on). The bundle also
+/// makes the VPN rule over the `Network` port: the kernel hands it to each plugin as its
+/// [`nexus_api::VpnGate`], and the torrents and VPN subsystems share it.
+///
+/// The kernel uses the HTTP, process, clock and VPN ports for the plugins' contexts and
+/// calls, and hands the bundle on to the core. Cheap to clone.
+#[derive(Clone)]
+pub(crate) struct Ports {
+    pub http: Arc<dyn HttpTransport>,
+    pub spawner: Arc<dyn ProcessSpawner>,
+    pub processes: Arc<dyn ProcessTree>,
+    pub windows: Arc<dyn Windows>,
+    pub login_session: Arc<dyn LoginSession>,
+    pub opener: Arc<dyn Opener>,
+    pub hardware: Arc<dyn Hardware>,
+    pub torrents: Arc<dyn Torrents>,
+    pub archives: Arc<dyn Archives>,
+    pub clock: Arc<dyn Clock>,
+    /// "Download only through a VPN", over the `Network` port the app plugged in until a
+    /// system plugin provides the VPNs.
+    pub vpn: crate::vpn::VpnRule,
+}
+
+impl Ports {
+    /// The torrents subsystem's ports.
+    pub fn torrents(&self) -> crate::torrents::TorrentPorts {
+        crate::torrents::TorrentPorts {
+            torrents: self.torrents.clone(),
+            hardware: self.hardware.clone(),
+            clock: self.clock.clone(),
+        }
+    }
+
+    /// The game installs subsystem's ports. It reaches the downloads it installs through
+    /// `downloads`, and gives a plugin's `begin` at most `call_timeout`.
+    pub fn installs(
+        &self,
+        downloads: Arc<dyn crate::game_installs::TorrentDownloads>,
+        call_timeout: Duration,
+    ) -> crate::game_installs::InstallPorts {
+        crate::game_installs::InstallPorts {
+            archives: self.archives.clone(),
+            hardware: self.hardware.clone(),
+            clock: self.clock.clone(),
+            downloads,
+            call_timeout,
+        }
+    }
+
+    /// The sessions subsystem's ports.
+    pub fn sessions(&self) -> crate::sessions::SessionPorts {
+        crate::sessions::SessionPorts {
+            spawner: self.spawner.clone(),
+            processes: self.processes.clone(),
+            windows: self.windows.clone(),
+            clock: self.clock.clone(),
+        }
+    }
+
+    /// The preferences subsystem's ports.
+    pub fn preferences(&self) -> crate::preferences::PrefPorts {
+        crate::preferences::PrefPorts { login_session: self.login_session.clone() }
+    }
+
+    /// The download manager's ports.
+    pub fn downloads(&self) -> crate::downloads::DownloadPorts {
+        crate::downloads::DownloadPorts {
+            http: self.http.clone(),
+            spawner: self.spawner.clone(),
+            clock: self.clock.clone(),
+        }
+    }
+
+    /// The launcher update subsystem's ports.
+    pub fn launcher_update(&self) -> crate::launcher_update::LauncherUpdatePorts {
+        crate::launcher_update::LauncherUpdatePorts {
+            http: self.http.clone(),
+            login_session: self.login_session.clone(),
+        }
     }
 }

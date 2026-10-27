@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.7.0](https://github.com/mohamed-rekiba/nexus/compare/v0.6.2...v0.7.0) (2026-10-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* **ui:** one source for the theme contract, UI API 0.2.0
+
+### Bug Fixes
+
+* **core:** one catalog read at a time, so an older read can't put back older copies ([cb89134](https://github.com/mohamed-rekiba/nexus/commit/cb89134172fe9e7f1857455cd1af0a24f57a3a05))
+* log the errors the core and the app dropped, or say why they drop ([c2de39c](https://github.com/mohamed-rekiba/nexus/commit/c2de39c2827200519a21de2c073664d5f33c0d52))
+
+
+### Code Refactoring
+
+* **ui:** one source for the theme contract, UI API 0.2.0 ([b7b2c0f](https://github.com/mohamed-rekiba/nexus/commit/b7b2c0f2338667264eaf10da63278c57012647a5))
+
 ## [0.6.2](https://github.com/mohamed-rekiba/nexus/compare/v0.6.1...v0.6.2) (2026-10-26)
 
 

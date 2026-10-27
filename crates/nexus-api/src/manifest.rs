@@ -7,17 +7,22 @@ use serde::{Deserialize, Serialize};
 
 use crate::{PluginId, RelPath};
 
+/// What a plugin is. Every kind but `theme` has code ([`crate::CodePlugin`]) and may provide
+/// any data capability; the kind decides only the privileges. Only a `system` plugin may
+/// provide the system capabilities ([`Capability::SYSTEM`]), run programs long
+/// ([`Permissions::long_running`]) or through polkit ([`Permissions::polkit`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PluginKind {
     /// Runs games: catalog, builds, settings, launching.
     Emulator,
-    /// Code that adds to the games other plugins find, and runs none itself: a store's art
-    /// and details, for example.
+    /// Adds to the games other plugins find, and runs none itself: a store's art and details,
+    /// for example.
     Service,
+    /// Files only: no code and no init.
     Theme,
     /// The machine's own settings and devices: network, VPNs, Bluetooth, sound, power, and on
-    /// Nexus OS its updates and installer. See [`crate::SystemPlugin`].
+    /// Nexus OS its updates and installer.
     System,
 }
 
@@ -104,12 +109,8 @@ pub enum Capability {
     Configurator,
     Launcher,
     Compatibility,
-    Saves,
-    Controllers,
-    Shaders,
     Slots,
     GameInstaller,
-    LaunchMiddleware,
     /// Describes games from a store's catalog: art, rating, genres, description. See
     /// [`crate::Metadata`].
     Metadata,
@@ -565,7 +566,7 @@ mod tests {
         kind = "emulator"
         name = "Native example"
         version = "0.1.0"
-        host_api = "^0.1"
+        host_api = "^0.2"
         platforms = ["linux", "macos"]
         capabilities = ["catalog", "launcher"]
 
@@ -635,7 +636,7 @@ mod tests {
     fn an_emulator_names_its_console_in_any_case() {
         let with = |console: &str| {
             PluginManifest::from_toml(&format!(
-                "id = \"emu\"\nkind = \"emulator\"\nname = \"E\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+                "id = \"emu\"\nkind = \"emulator\"\nname = \"E\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
                  console = \"{console}\"\n"
             ))
         };
@@ -651,7 +652,7 @@ mod tests {
     fn folder_and_system_rules_need_their_own_pattern() {
         use crate::{HostPath, Location};
         let m = PluginManifest::from_toml(
-            "id = \"pc\"\nkind = \"emulator\"\nname = \"PC\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+            "id = \"pc\"\nkind = \"emulator\"\nname = \"PC\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
              [permissions]\nprocess = [\"folder:pc-games\", \"folder:not-granted\", \"system:wine\"]\n\
              [[permissions.filesystem]]\nfolder = \"pc-games\"",
         )
@@ -691,7 +692,7 @@ mod tests {
     fn a_folder_default_is_one_path_or_a_list_to_search() {
         let grant = |default: &str| {
             let m = PluginManifest::from_toml(&format!(
-                "id = \"emu\"\nkind = \"emulator\"\nname = \"E\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+                "id = \"emu\"\nkind = \"emulator\"\nname = \"E\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
                  [[permissions.filesystem]]\nfolder = \"emu-build\"\n{default}\n"
             ))
             .unwrap();
@@ -714,7 +715,7 @@ mod tests {
     fn rejects_bad_ids_and_bad_versions() {
         let bad_id = KYTY.replace("\"emu-kyty\"", "\"Emu Native\"");
         assert!(PluginManifest::from_toml(&bad_id).is_err());
-        let bad_req = KYTY.replace("\"^0.1\"", "\"not a range\"");
+        let bad_req = KYTY.replace("\"^0.2\"", "\"not a range\"");
         assert!(PluginManifest::from_toml(&bad_req).is_err());
     }
 }

@@ -6,7 +6,7 @@ use std::path::Path;
 use emu_shadps4::{COMPATIBILITY, RELEASES, ShadPlugin};
 use emulator_kit::sfo::{Value as Sfo, build};
 use nexus_api::*;
-use nexus_core::Command;
+use nexus_core::{Area, Command, SessionCmd};
 use nexus_testkit::{FakeHost, FakeHttp, FakeSpawner, TestCore, contract};
 
 const TAG: &str = "v.0.18.0";
@@ -95,7 +95,7 @@ async fn boot() -> (TestCore, tempfile::TempDir) {
     let games = tempfile::tempdir().unwrap();
     ps4_game(games.path(), "CUSA04118", "gd", "CUSA04118", "Firewatch");
     ps4_game(games.path(), "CUSA04118-patch", "gp", "CUSA04118", "Firewatch");
-    let test = host.built_in(nexus_api::PluginByKind::emulator(ShadPlugin)).boot_core().await;
+    let test = host.built_in(nexus_api::PluginBox::code(ShadPlugin)).boot_core().await;
     extract_appimages(test.spawner.clone());
     test.spawner.prints(&app_run(&test, TAG), HELP);
     test.core.dispatch(Command::SetFolders { name: "games".into(), paths: vec![games.path().into()] }).await.unwrap();
@@ -111,7 +111,7 @@ async fn shadps4_meets_every_contract() {
 #[tokio::test]
 async fn full_games_are_listed_with_their_status_and_updates_are_not() {
     let (test, _games) = boot().await;
-    test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
 
     let home = test.core.view().home;
     assert_eq!(home.games.iter().map(|g| g.key.as_str()).collect::<Vec<_>>(), ["emu-shadps4:CUSA04118"]);
@@ -122,7 +122,7 @@ async fn full_games_are_listed_with_their_status_and_updates_are_not() {
 #[tokio::test]
 async fn the_game_hub_says_when_the_result_was_tested() {
     let (test, _games) = boot().await;
-    test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     test.core.dispatch(Command::OpenGame("emu-shadps4:CUSA04118".parse().unwrap())).await.unwrap();
 
     let compat = test.core.view().detail.unwrap().compat.expect("the community's result");
@@ -137,7 +137,7 @@ async fn the_app_run_from_the_appimage_starts_the_game_folder() {
     let app_run = test.data_dir().join("plugins/emu-shadps4/builds").join(TAG).join("squashfs-root/AppRun");
     assert!(app_run.is_file());
 
-    test.core.dispatch(Command::Launch("emu-shadps4:CUSA04118".parse().unwrap())).await.unwrap();
+    test.core.dispatch(Command::Session(SessionCmd::Launch("emu-shadps4:CUSA04118".parse().unwrap()))).await.unwrap();
 
     let process = test.spawner.wait_for(2).await;
     assert_eq!(process.command.program, app_run);
@@ -168,7 +168,7 @@ async fn a_new_build_that_does_not_run_here_is_removed_and_the_build_before_stay
     assert_eq!(ran.last().map(|c| c.args.clone()), Some(vec!["--help".to_owned()]), "a test run with --help");
     assert!(!test.data_dir().join("plugins/emu-shadps4/builds").join(NEXT).exists(), "the broken build goes");
     assert_eq!(test.core.view().emulators.emulators[0].installed, [TAG]);
-    test.core.dispatch(Command::Launch("emu-shadps4:CUSA04118".parse().unwrap())).await.unwrap();
+    test.core.dispatch(Command::Session(SessionCmd::Launch("emu-shadps4:CUSA04118".parse().unwrap()))).await.unwrap();
     let program = test.spawner.spawned().last().unwrap().command.program.clone();
     assert_eq!(program, app_run(&test, TAG), "games start on the build before");
 }
@@ -212,7 +212,7 @@ async fn your_own_build_runs_games_from_its_folder() {
     let emu = view.emulators.emulators.iter().find(|e| e.plugin == shad()).unwrap();
     assert_eq!(emu.installed, ["Your own build"]);
 
-    test.core.dispatch(Command::Launch("emu-shadps4:CUSA04118".parse().unwrap())).await.unwrap();
+    test.core.dispatch(Command::Session(SessionCmd::Launch("emu-shadps4:CUSA04118".parse().unwrap()))).await.unwrap();
     let process = test.spawner.wait_for(1).await;
     assert_eq!(process.command.program, own.path().join("Shadps4-sdl.AppImage"));
     assert_eq!(process.command.cwd, own.path());
@@ -232,7 +232,7 @@ async fn a_shadps4_on_the_path_is_found_and_can_be_chosen() {
     let use_own =
         Command::RunAction { plugin: shad(), action: "use-own".into(), game: None, args: serde_json::Value::Null };
     test.core.dispatch(use_own).await.unwrap();
-    test.core.dispatch(Command::Launch("emu-shadps4:CUSA04118".parse().unwrap())).await.unwrap();
+    test.core.dispatch(Command::Session(SessionCmd::Launch("emu-shadps4:CUSA04118".parse().unwrap()))).await.unwrap();
     assert_eq!(test.spawner.wait_for(1).await.command.program, Path::new("shadps4"), "run from PATH, by name");
 }
 
@@ -243,7 +243,7 @@ async fn installing_an_official_build_switches_away_from_your_own() {
     test.core.dispatch(set("own_build", "true")).await.unwrap();
 
     test.core.dispatch(Command::InstallEmulator { plugin: shad(), version: None }).await.unwrap();
-    test.core.dispatch(Command::Launch("emu-shadps4:CUSA04118".parse().unwrap())).await.unwrap();
+    test.core.dispatch(Command::Session(SessionCmd::Launch("emu-shadps4:CUSA04118".parse().unwrap()))).await.unwrap();
     let program = test.spawner.spawned().last().unwrap().command.program.clone();
     assert!(program.ends_with("squashfs-root/AppRun"), "the official build runs: {program:?}");
 }
@@ -280,17 +280,13 @@ async fn install_game(test: &TestCore, file: &str) -> String {
     if let Err(e) = test.core.dispatch(start).await {
         return format!("failed {e}");
     }
-    for _ in 0..500 {
-        let jobs = test.core.view().downloads.jobs;
-        if jobs.len() > jobs_before
-            && let Some(job) = jobs.first()
-            && job.state != "installing"
-        {
-            return format!("{} {}", job.state, job.error);
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
-    panic!("the install never ended");
+    let ended = |core: &nexus_core::Core| {
+        let jobs = core.view().downloads.jobs;
+        jobs.len() > jobs_before && jobs.first().is_some_and(|j| j.state != "installing")
+    };
+    test.until(Area::Installs, ended).await;
+    let job = test.core.view().downloads.jobs.into_iter().next().unwrap();
+    format!("{} {}", job.state, job.error)
 }
 
 fn ps4_package(kind: emu_shadps4::pkg4::Kind, files: &[(&str, &[u8])]) -> Vec<u8> {
@@ -347,7 +343,7 @@ async fn uninstalling_a_game_deletes_its_update_and_its_add_ons_too() {
         .dispatch(Command::SetFolders { name: "shadps4-data".into(), paths: vec![data.path().into()] })
         .await
         .unwrap();
-    test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     let game: nexus_api::GameKey = "emu-shadps4:CUSA04118".parse().unwrap();
     test.core.dispatch(Command::OpenGame(game.clone())).await.unwrap();
 
@@ -379,12 +375,12 @@ async fn one_games_folder_holds_games_for_both_consoles_and_each_emulator_finds_
     std::fs::write(sce.join("param.json"), param.to_string()).unwrap();
     let test = FakeHost::new()
         .platform(Some(Platform::Linux))
-        .built_in(nexus_api::PluginByKind::emulator(ShadPlugin))
-        .built_in(nexus_api::PluginByKind::emulator(emu_kyty::KytyPlugin))
+        .built_in(nexus_api::PluginBox::code(ShadPlugin))
+        .built_in(nexus_api::PluginBox::code(emu_kyty::KytyPlugin))
         .boot_core()
         .await;
     test.core.dispatch(Command::SetFolders { name: "games".into(), paths: vec![games.path().into()] }).await.unwrap();
-    test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
 
     let mut keys: Vec<_> = test.core.view().home.games.into_iter().map(|g| g.key).collect();
     keys.sort();
@@ -415,7 +411,7 @@ async fn on_macos_the_official_zip_installs_and_its_shadps4_starts_the_game() {
     host.http().serve(RELEASES, serde_json::to_vec(&releases).unwrap());
     let games = tempfile::tempdir().unwrap();
     ps4_game(games.path(), "CUSA04118", "gd", "CUSA04118", "Firewatch");
-    let test = host.built_in(nexus_api::PluginByKind::emulator(ShadPlugin)).boot_core().await;
+    let test = host.built_in(nexus_api::PluginBox::code(ShadPlugin)).boot_core().await;
     assert!(test.core.kernel().order().contains(&shad()), "loaded on macOS");
     test.core.dispatch(Command::SetFolders { name: "games".into(), paths: vec![games.path().into()] }).await.unwrap();
     let program = test.data_dir().join("plugins/emu-shadps4/builds/v.0.20.0/shadps4");
@@ -423,7 +419,7 @@ async fn on_macos_the_official_zip_installs_and_its_shadps4_starts_the_game() {
 
     test.core.dispatch(Command::InstallEmulator { plugin: shad(), version: None }).await.unwrap();
     assert!(program.is_file());
-    test.core.dispatch(Command::Launch("emu-shadps4:CUSA04118".parse().unwrap())).await.unwrap();
+    test.core.dispatch(Command::Session(SessionCmd::Launch("emu-shadps4:CUSA04118".parse().unwrap()))).await.unwrap();
     assert_eq!(test.spawner.wait_for(1).await.command.program, program);
 }
 
@@ -434,15 +430,10 @@ async fn install_download(test: &TestCore, folder: &str) -> String {
     if let Err(e) = test.core.dispatch(start).await {
         return format!("failed {e}");
     }
-    for _ in 0..500 {
-        if let Some(job) = test.core.view().downloads.jobs.first()
-            && job.state != "installing"
-        {
-            return format!("{} {}", job.state, job.error);
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
-    panic!("the install never ended");
+    test.until(Area::Installs, |core| core.view().downloads.jobs.first().is_some_and(|j| j.state != "installing"))
+        .await;
+    let job = test.core.view().downloads.jobs.into_iter().next().unwrap();
+    format!("{} {}", job.state, job.error)
 }
 
 /// Writes `files` into the download folder `PS4/torrent-abc`.

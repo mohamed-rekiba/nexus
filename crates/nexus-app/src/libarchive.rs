@@ -10,6 +10,8 @@ use std::ffi::{CStr, c_char, c_int, c_void};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
+use nexus_core::{ArchiveEntry, ArchiveError, EntryKind};
+
 type Handle = *mut c_void;
 type Unary = unsafe extern "C" fn(Handle) -> c_int;
 type Text = unsafe extern "C" fn(Handle) -> *const c_char;
@@ -91,6 +93,7 @@ pub struct Api {
     size_set: Unary,
     filetype: unsafe extern "C" fn(Handle) -> Mode,
     encrypted: Unary,
+    has_encrypted: Unary,
 }
 
 /// libarchive with RAR 5 support, loaded once; `None` when there is none.
@@ -134,6 +137,7 @@ impl Api {
                 size_set: sym!("archive_entry_size_is_set"),
                 filetype: sym!("archive_entry_filetype"),
                 encrypted: sym!("archive_entry_is_encrypted"),
+                has_encrypted: sym!("archive_read_has_encrypted_entries"),
                 _lib: lib,
             };
             (api, rar5)
@@ -153,26 +157,6 @@ impl Api {
     }
 }
 
-/// What an entry is.
-#[derive(Debug, PartialEq)]
-pub enum Kind {
-    File,
-    Folder,
-    /// A link to its target, from the link's folder.
-    Link(PathBuf),
-    /// Another name for an entry, from the archive's top.
-    HardLink(PathBuf),
-    Other,
-}
-
-#[derive(Debug)]
-pub struct Header {
-    pub path: String,
-    pub size: u64,
-    pub kind: Kind,
-    pub encrypted: bool,
-}
-
 /// The archive's parts' names as libarchive takes them: C strings, wide on Windows.
 #[cfg(not(windows))]
 type Names = Vec<std::ffi::CString>;
@@ -180,16 +164,19 @@ type Names = Vec<std::ffi::CString>;
 type Names = Vec<Vec<u16>>;
 
 #[cfg(not(windows))]
-fn names(parts: &[PathBuf]) -> Result<Names, String> {
+fn names(parts: &[PathBuf]) -> Result<Names, ArchiveError> {
     use std::os::unix::ffi::OsStrExt;
     parts
         .iter()
-        .map(|p| std::ffi::CString::new(p.as_os_str().as_bytes()).map_err(|_| format!("{} has a nul", p.display())))
+        .map(|p| {
+            std::ffi::CString::new(p.as_os_str().as_bytes())
+                .map_err(|_| ArchiveError::Io(format!("{} has a nul", p.display())))
+        })
         .collect()
 }
 
 #[cfg(windows)]
-fn names(parts: &[PathBuf]) -> Result<Names, String> {
+fn names(parts: &[PathBuf]) -> Result<Names, ArchiveError> {
     use std::os::windows::ffi::OsStrExt;
     Ok(parts.iter().map(|p| p.as_os_str().encode_wide().chain(Some(0)).collect()).collect())
 }
@@ -201,6 +188,8 @@ pub struct Reader {
     _names: Names,
     /// What [`Reader::open_at`] reads from; freed after the handle.
     _stream: Option<Box<Stream>>,
+    /// The open call worked. Until it has, libarchive has no format to ask about encryption.
+    opened: bool,
 }
 
 /// The rest of a file from a place in it, as libarchive reads a stream: forward only.
@@ -226,16 +215,16 @@ unsafe extern "C" fn read_stream(_: Handle, data: *mut c_void, buffer: *mut *con
 
 impl Reader {
     /// Opens the archive cut into `parts`, in order: libarchive reads them as one stream.
-    pub fn open(api: &'static Api, parts: &[PathBuf]) -> Result<Self, String> {
+    pub fn open(api: &'static Api, parts: &[PathBuf]) -> Result<Self, ArchiveError> {
         let names = names(parts)?;
         let mut pointers: Vec<_> = names.iter().map(|n| n.as_ptr()).collect();
         pointers.push(std::ptr::null());
         // SAFETY: a new handle; `Drop` frees it.
         let handle = unsafe { (api.new)() };
         if handle.is_null() {
-            return Err("libarchive couldn't start".into());
+            return Err(ArchiveError::Io("libarchive couldn't start".into()));
         }
-        let reader = Self { api, handle, _names: names, _stream: None };
+        let mut reader = Self { api, handle, _names: names, _stream: None, opened: false };
         // SAFETY: `handle` is open, and `pointers` ends with a null and lives past the call;
         // libarchive keeps the names, which `_names` keeps alive.
         unsafe {
@@ -243,35 +232,46 @@ impl Reader {
             reader.status((api.filters)(handle))?;
             reader.status((api.open)(handle, pointers.as_ptr(), 64 * 1024))?;
         }
+        reader.opened = true;
         Ok(reader)
     }
 
     /// Opens the archive in the file at `path` from byte `offset` to its end, as a stream: a
     /// script installer's archive after its script.
-    pub fn open_at(api: &'static Api, path: &Path, offset: u64) -> Result<Self, String> {
+    pub fn open_at(api: &'static Api, path: &Path, offset: u64) -> Result<Self, ArchiveError> {
         use std::io::{Read, Seek, SeekFrom};
-        let mut file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        file.seek(SeekFrom::Start(offset)).map_err(|e| format!("{}: {e}", path.display()))?;
+        let io = |e: std::io::Error| ArchiveError::Io(format!("{}: {e}", path.display()));
+        let mut file = std::fs::File::open(path).map_err(io)?;
+        file.seek(SeekFrom::Start(offset)).map_err(io)?;
         let mut stream = Box::new(Stream { file: file.take(u64::MAX), buf: vec![0; 64 * 1024] });
         let data: *mut Stream = &mut *stream;
         // SAFETY: a new handle; `Drop` frees it.
         let handle = unsafe { (api.new)() };
         if handle.is_null() {
-            return Err("libarchive couldn't start".into());
+            return Err(ArchiveError::Io("libarchive couldn't start".into()));
         }
-        let reader = Self { api, handle, _names: Vec::new(), _stream: Some(stream) };
+        let mut reader = Self { api, handle, _names: Vec::new(), _stream: Some(stream), opened: false };
         // SAFETY: `handle` is open; the stream's box doesn't move and outlives the handle.
         unsafe {
             reader.status((api.formats)(handle))?;
             reader.status((api.filters)(handle))?;
             reader.status((api.open_stream)(handle, data.cast(), None, read_stream, None))?;
         }
+        reader.opened = true;
         Ok(reader)
     }
 
-    fn status(&self, code: c_int) -> Result<(), String> {
+    /// A failed call as an error: a password when libarchive saw encryption (an encrypted
+    /// header can't even be listed), or an archive libarchive can't read, which another reader
+    /// may.
+    fn status(&self, code: c_int) -> Result<(), ArchiveError> {
         if code >= ARCHIVE_WARN {
             return Ok(());
+        }
+        // SAFETY: the handle is open, and past a successful open its format is set. After a
+        // failed open the format is not safe to ask: the call crashed in libarchive 3.8.7.
+        if self.opened && unsafe { (self.api.has_encrypted)(self.handle) } > 0 {
+            return Err(ArchiveError::Password);
         }
         // SAFETY: the handle is open; the string, when there is one, lives until the next call.
         let message = unsafe {
@@ -282,15 +282,11 @@ impl Reader {
                 CStr::from_ptr(p).to_string_lossy().into_owned()
             }
         };
-        let lower = message.to_ascii_lowercase();
-        if lower.contains("encrypt") || lower.contains("password") || lower.contains("passphrase") {
-            return Err(crate::archives::password());
-        }
-        Err(format!("the archive couldn't be read: {message}"))
+        Err(ArchiveError::Unsupported(format!("the archive couldn't be read: {message}")))
     }
 
     /// The next entry, or `None` at the end.
-    pub fn next(&mut self) -> Result<Option<Header>, String> {
+    pub fn next(&mut self) -> Result<Option<ArchiveEntry>, ArchiveError> {
         let mut entry: Handle = std::ptr::null_mut();
         // SAFETY: the handle is open and `entry` is a writable pointer.
         let code = unsafe { (self.api.next)(self.handle, &mut entry) };
@@ -299,7 +295,7 @@ impl Reader {
         }
         self.status(code)?;
         if entry.is_null() {
-            return Err("the archive has an entry with no header".into());
+            return Err(ArchiveError::Corrupt("the archive has an entry with no header".into()));
         }
         let text = |p: *const c_char| -> Option<String> {
             // SAFETY: libarchive's entry strings live until the next header.
@@ -307,42 +303,48 @@ impl Reader {
         };
         // SAFETY: `entry` is the header libarchive just read.
         unsafe {
-            let path = text((self.api.pathname)(entry)).ok_or("the archive has an entry with no name")?;
+            let path = text((self.api.pathname)(entry))
+                .ok_or_else(|| ArchiveError::Corrupt("the archive has an entry with no name".into()))?;
             // `Mode` is u16 on Windows and macOS and u32 on Linux, where the conversion does nothing.
             #[allow(clippy::useless_conversion)]
             let kind = u32::from((self.api.filetype)(entry)) & AE_IFMT;
             let kind = if let Some(target) = text((self.api.hardlink)(entry)) {
-                Kind::HardLink(target.into())
+                EntryKind::HardLink(target.into())
             } else if let Some(target) = text((self.api.symlink)(entry)).filter(|_| kind == AE_IFLNK || kind == 0) {
-                Kind::Link(target.into())
+                EntryKind::Link(target.into())
             } else if kind == AE_IFDIR {
-                Kind::Folder
+                EntryKind::Folder
             } else if kind == AE_IFREG {
-                Kind::File
+                EntryKind::File
             } else {
-                Kind::Other
+                EntryKind::Other
             };
             let size = if (self.api.size_set)(entry) != 0 { (self.api.size)(entry).max(0) as u64 } else { 0 };
             let encrypted = (self.api.encrypted)(entry) > 0;
-            Ok(Some(Header { path, size, kind, encrypted }))
+            Ok(Some(ArchiveEntry { encrypted, ..ArchiveEntry::new(path, size, kind) }))
         }
     }
 
     /// Skips the data of the entry `next` returned.
-    pub fn skip(&mut self) -> Result<(), String> {
+    pub fn skip(&mut self) -> Result<(), ArchiveError> {
         // SAFETY: the handle is open, after a header.
         let code = unsafe { (self.api.skip)(self.handle) };
         self.status(code)
     }
 }
 
+/// Reading an entry's data. An error carries the [`ArchiveError`], so the adapter keeps its
+/// kind: an archive libarchive can't read goes to another reader.
 impl std::io::Read for Reader {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         // SAFETY: the handle is open, after a header, and `buf` is writable for its length.
         let n = unsafe { (self.api.data)(self.handle, buf.as_mut_ptr().cast(), buf.len()) };
         if n < 0 {
-            let message = self.status(n as c_int).err().unwrap_or_else(|| "the data couldn't be read".into());
-            return Err(std::io::Error::other(message));
+            let error = self
+                .status(n as c_int)
+                .err()
+                .unwrap_or_else(|| ArchiveError::Unsupported("the data couldn't be read".into()));
+            return Err(std::io::Error::other(error));
         }
         Ok(n as usize)
     }

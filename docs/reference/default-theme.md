@@ -12,6 +12,7 @@ installs are in [archives-and-pc-games.md](archives-and-pc-games.md).
 | Path | What it holds |
 |---|---|
 | `theme.toml` | The manifest: screens, input, breakpoints, fonts, images, sounds, tokens, options |
+| `commands.slint` | What the player asks of the core (`Commands`): one function each, over `Host.command` |
 | `shell.slint` | The window, the screens, the overlays, the key handler and the key hints |
 | `screens/*.slint` | `home`, `catalog`, `game-detail`, `downloads`, `settings`, `emulators`, `themes`, `plugin`, `game-settings`, `running` |
 | `components/nav.slint` | The keys on Home, the Library and the Catalog (`Nav`) |
@@ -49,8 +50,8 @@ checklist, a bar with a percentage, and a Start pill (`welcome-start`). The chec
 | "Covers & Home screen" | "Loading…", then "Ready" |
 
 The pill reads "Setting up…" until everything is ready, then "Start". Enter, Cross or a click
-is Start once ready. Every other key is ignored. Start calls `Host.finish-welcome`, and the
-Welcome never shows again.
+is Start once ready. Every other key is ignored. Start calls `Commands.finish-welcome` (the
+command `Pref` `["welcomed", true]`), and the Welcome never shows again.
 
 ### Home
 
@@ -98,7 +99,7 @@ filters, sorts and pages them.
   Hidden filter" setting turns it off. Labels `filter:<label>`.
 - **The eye** (`card-hide`, valued "Hide <title>" or "Show <title>"). On a Catalog card's cover,
   top left: on the focused or pointed card, and always on a hidden one, crossed out. It hides
-  the game from the Catalog, or shows it again (`Host.hide-game`). The Game Hub of a Catalog game
+  the game from the Catalog, or shows it again (`Library` `Hide`). The Game Hub of a Catalog game
   has the same as a "Hide" or "Show" button (`hub-hide`), and its menu has "Hide from the
   Catalog" or "Show in the Catalog", the pad's way.
 - **The card's button**, on the focused or pointed card, above its badges: the game's main
@@ -129,8 +130,8 @@ Sorts:
 The sort list opens under Sort ("SORT BY", options `sort-option`, a tick on `sort-current`).
 
 The search runs 300 ms after the last key in the box. A letter or digit typed in the grid starts
-a search with it at once. A grid asks for the next page (`Host.library-more`,
-`Host.catalog-more`) when it scrolls within two screens of the end, or the selection reaches
+a search with it at once. A grid asks for the next page (`LibraryMore`,
+`CatalogMore`) when it scrolls within two screens of the end, or the selection reaches
 the last two rows. Only the rows on screen and a screen around them build their cards; the
 others keep an empty place (`default-game`), so a long grid scrolls as fast as a short one.
 A thin bar under the header (`grid-progress`, valued "35%") shows how far down the grid the
@@ -212,7 +213,7 @@ game at once instead, and the menu doesn't open. Items, each `power-menu`:
 1. "Log out", when Nexus is the whole screen and not Nexus OS (`Host.log-out`)
 2. "Restart Nexus" when Nexus is the whole screen, else "Quit Nexus" (`Host.quit`)
 3. "Restart" and 4. "Shut down", when Nexus is the whole screen and the system can
-   (`Host.restart-pc`, `Host.shut-down-pc`)
+   (`System` `Restart`, `System` `ShutDown`)
 
 Restart and Shut down ask again: the first press turns the row red and says "Press again to
 restart" or "to shut down"; moving away cancels it. Up and down move, Enter picks, Escape closes.
@@ -344,7 +345,7 @@ handles a keyboard and a pad the same way.
 | R1 | Tab | The screen after |
 | L2, R2 | Page Up, Page Down | Page the grid, three rows at a time |
 | Create, Share or View | Delete | Close the newest notice |
-| PS, Xbox | (none) | With a game running, switch between the game and the launcher; otherwise Home |
+| PS, Xbox | (none) | A tap: Home; nothing while a game runs. Held: closes the running game, else the power menu |
 
 The pad acts only while the launcher's window has the focus and no game is in front. See
 [desktop.md](desktop.md#the-pad-acts-only-while-the-launchers-window-has-focus).
@@ -380,17 +381,21 @@ Catalog is skipped. Neither works while a text row is open for typing.
 
 The shell (`shell.slint`) offers each key in this order, and the first taker keeps it:
 
-1. the Welcome screen;
-2. the splash's game keys;
-3. Delete, while a notice shows;
-4. the trailer, the result prompt, the game's menu, the screenshot viewer, the sort list;
-5. Menu, for the game's menu;
-6. the emulator's install prompt;
-7. Ctrl+Q, Ctrl+D, `/`, Insert or T;
-8. Tab and Shift+Tab;
-9. the screen: `Nav` (Home, Library, Catalog), the sheet rows, the plugin list, the Game Hub,
-   Downloads;
-10. Escape or Backspace: back, with the `back` sound unless on Home.
+1. the on-screen keyboard, while it is open;
+2. the power menu, while it is open, and Ctrl+P;
+3. the Welcome screen;
+4. Nexus OS's USB stick (`Setup`);
+5. an open panel of the machine's settings (`Sys`);
+6. the splash's game keys;
+7. Delete, while a notice shows;
+8. the trailer, the result prompt, the game's menu, the screenshot viewer, the sort list;
+9. Menu, for the game's menu;
+10. the emulator's install prompt;
+11. Ctrl+Q, Ctrl+D, `/`, Insert or T;
+12. Tab and Shift+Tab;
+13. the screen: `Nav` (Home, Library, Catalog), the sheet rows, the plugin list, the Game Hub,
+    Downloads;
+14. Escape or Backspace: back, with the `back` sound unless on Home.
 
 So Ctrl+D and Ctrl+Q do nothing while a menu, the viewer, the sort list, the trailer or the
 result prompt is open.
@@ -494,7 +499,7 @@ link (`notice-open`): "Open Downloads", "Open the Catalog", "Open the Game Hub",
 or "Open Settings", with " ›" (" ‹" right to left). The link opens it and closes the notice.
 
 Each card slides in, stays 4 s (10 s with a link), slides out, and the core closes it
-(`Host.dismiss-notice`). "Dismiss" starts the slide out at once. Delete, or Create on a pad,
+(`Notice` `Dismiss`). "Dismiss" starts the slide out at once. Delete, or Create on a pad,
 closes the newest card that isn't closing yet; the others keep their own time. A new error
 notice plays the `error` sound once.
 
@@ -595,8 +600,8 @@ sounds" in Settings turns them off.
 | `start` | A game starts, or the Welcome closes |
 | `error` | A new error notice |
 
-`scripts/make-sounds.py` makes `select`, `back`, `error` and `start`: synthesized tones, mono,
-16 bit, 22050 Hz.
+`docs/reference/make-sounds.py` makes `select`, `back`, `error` and `start`: synthesized tones,
+mono, 16 bit, 22050 Hz.
 
 ## Motion
 
@@ -613,12 +618,16 @@ Durations are the `motion-*` tokens. Easings are written in the `.slint` files.
 
 Every element a test or a screen reader needs has an `accessible-label`, and some an
 `accessible-value`. The labels quoted on this page are those. The theme tests find elements by
-label (`ElementHandle::find_by_accessible_label`, in `tests/tests/seams/common/mod.rs`) and check what
-the player sees: a value, a count, whether a screen shows. They never check layout numbers.
+label through `ThemeDriver` (`crates/nexus-testkit/src/driver.rs`) and check what the player
+sees: a value, a count, whether a screen shows. Only a few named layout tests check layout
+numbers.
 
 The tests run on the composed core and theme host on Slint's testing backend:
 
-- `tests/tests/seams/default_theme.rs`: the screens, sheets, notices, keys and Downloads;
+- `tests/tests/seams/default_theme/`: one module per screen: Home, the Library, the Catalog, the
+  Game Hub and its releases, Downloads, installs, play, the trailer, notices, Settings, the
+  emulator pages, the keyboards and the theme's files;
+- `tests/tests/seams/system_theme.rs`: the machine's settings, when Nexus is the whole screen;
 - `tests/tests/seams/gamepad.rs`: the pad and its focus rule;
 - `tests/tests/seams/sounds.rs`: which sounds play;
 - `tests/tests/seams/screenshots.rs`: PNGs of the main screens on the fake library, for a person to

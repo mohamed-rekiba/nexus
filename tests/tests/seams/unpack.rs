@@ -62,7 +62,7 @@ async fn boot_with(host: FakeHost, archive: Vec<u8>, format: ArchiveFormat, proc
     let emu = ArchiveEmu { sha256: host.http().serve(URL, archive), format, got: Arc::default() };
     let e = emu.clone();
     let plugin = StubPlugin::from_toml(&format!(
-        "id = \"emu\"\nkind = \"emulator\"\nname = \"Emu\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"emu\"\nkind = \"emulator\"\nname = \"Emu\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          capabilities = [\"downloader\", \"installer\"]\n[permissions]\nnetwork = [\"builds.example\"]\nprocess = {process}"
     ))
     .provides(move |_| {
@@ -196,6 +196,29 @@ async fn an_appimage_in_a_zip_is_extracted_by_running_it_on_linux() {
 }
 
 #[tokio::test]
+async fn an_appimage_whose_extract_never_ends_is_killed_after_ten_minutes() {
+    let archive = zip(&[("Emu.AppImage", b"\x7fELF appimage")]);
+    let host = FakeHost::new().platform(Some(Platform::Linux));
+    let (t, _) = boot(host, archive, ArchiveFormat::AppImageInZip).await;
+    let core = t.core.clone();
+    let install = tokio::spawn(async move {
+        core.dispatch(Command::InstallEmulator { plugin: PluginId::new("emu").unwrap(), version: None }).await
+    });
+    let process = t.spawner.wait_for(1).await;
+
+    // The core's limit for an extract is ten minutes.
+    t.clock.advance(Duration::from_secs(599)).await;
+    assert!(!install.is_finished(), "a slow extract has ten minutes");
+    assert!(process.signals().is_empty());
+
+    t.clock.advance(Duration::from_secs(1)).await;
+    let err = install.await.unwrap().unwrap_err();
+    assert!(matches!(&err, CoreError::Download(m) if m.contains("took too long")), "{err}");
+    assert_eq!(process.signals(), [nexus_testkit::Signal::Kill]);
+    assert!(!plugin_dir(&t).join("builds/1.0").exists(), "nothing half unpacked stays");
+}
+
+#[tokio::test]
 async fn a_tampered_appimage_is_deleted_before_anything_runs_and_other_systems_refuse_it() {
     let archive = zip(&[("Emu.AppImage", b"\x7fELF")]);
     let host = FakeHost::new().platform(Some(Platform::Linux));
@@ -203,7 +226,7 @@ async fn a_tampered_appimage_is_deleted_before_anything_runs_and_other_systems_r
     host.http().serve(URL, archive.clone());
     let e = tampered.clone();
     let plugin = StubPlugin::from_toml(
-        "id = \"emu\"\nkind = \"emulator\"\nname = \"Emu\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"emu\"\nkind = \"emulator\"\nname = \"Emu\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          capabilities = [\"downloader\", \"installer\"]\n[permissions]\nnetwork = [\"builds.example\"]",
     )
     .provides(move |_| {

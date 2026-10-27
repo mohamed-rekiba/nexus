@@ -113,12 +113,12 @@ export component RunningScreen inherits Rectangle {
                     height: 30 * Look.px;
                     accessible-role: text;
                     accessible-label: root.on ? "launch-key" : "";
-                    accessible-value: key.label + " " + key.value;
+                    accessible-value: key.button + " " + key.keys;
                     Text {
                         x: Look.rtl ? parent.width - self.width : 0;
                         width: parent.width * 0.5;
                         height: parent.height;
-                        text: key.label;
+                        text: key.button;
                         font-size: 16 * Look.px;
                         color: Tokens.color-text-muted;
                         horizontal-alignment: Look.rtl ? right : left;
@@ -129,7 +129,7 @@ export component RunningScreen inherits Rectangle {
                         x: Look.rtl ? 0 : parent.width * 0.52;
                         width: parent.width * 0.48;
                         height: parent.height;
-                        text: key.value;
+                        text: key.keys;
                         font-size: 16 * Look.px;
                         font-weight: 600;
                         color: Tokens.color-text;

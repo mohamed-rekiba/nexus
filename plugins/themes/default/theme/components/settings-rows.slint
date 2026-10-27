@@ -1,4 +1,5 @@
 import { Vm, Host, Field, Folder } from "../types.slint";
+import { Commands } from "../commands.slint";
 import { Tokens } from "../tokens.slint";
 import { Look } from "look.slint";
 import { Icon } from "icon.slint";
@@ -52,11 +53,11 @@ export global Prefs {
         : root.page ? (root.on ? 3 + root.panels : 1)
         : 5 + (Vm.system.whole-screen ? 1 : 0);
     // The page's build rows: the build, then "Uninstall" when it is installed.
-    out property <int> builds: !root.page || root.theme-page || !root.on || !Vm.plugin-page.is-emulator || !Vm.plugin-page.emulator.has-builds ? 0
+    out property <int> builds: !root.page || root.theme-page || !root.on || !Vm.plugin-page.has-emulator || !Vm.plugin-page.emulator.has-builds ? 0
         : Vm.plugin-page.emulator.installed.length > 0 ? 2 : 1;
     // The page's action rows: an emulator's with builds, and a service's.
     out property <int> actions: !root.page || root.theme-page || !root.on
-        || (Vm.plugin-page.is-emulator && root.builds == 0) ? 0 : Vm.plugin-page.actions.length;
+        || (Vm.plugin-page.has-emulator && root.builds == 0) ? 0 : Vm.plugin-page.actions.length;
 
     // LAUNCHER's rows after the fixed four: the screen and quit move down when "Start at
     // login" shows.
@@ -375,7 +376,7 @@ export component FolderRow inherits Row {
     accessible-value: root.folder.text;
     clicked => { Prefs.section = root.section; Prefs.row = root.index; Prefs.act(0); }
     if !root.typing : Value { text: root.folder.shown != "" ? root.folder.shown : "—"; }
-    if root.typing : Editor { horizontal-stretch: 2; title: root.label; done(text) => { Host.set-folder(root.folder.name, text); } }
+    if root.typing : Editor { horizontal-stretch: 2; title: root.label; done(text) => { Commands.set-folder(root.folder.name, text); } }
     property <int> seen: Prefs.serial;
     changed seen => {
         if (root.focused && Prefs.pending == 0 && !Prefs.editing) {

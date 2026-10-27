@@ -1,9 +1,15 @@
 //! "This PC": whether an emulator's games run on this computer, from what its manifest
-//! requires (`[requires]`) and what the system says it has.
+//! requires (`[requires]`) and what the system says it has. The core reads this PC once at
+//! start ([`check_hardware`]), and posts a notice once for each PC when an emulator's games
+//! won't start on it.
 
-use nexus_api::Requirements;
-use nexus_ui_api::{HardwareVm, VerdictVm};
+use nexus_api::{Capability, PluginKind, Requirements};
+use nexus_ui_api::{HardwareVm, NoticeKind, VerdictVm};
+use serde_json::Value;
 
+use crate::app::{Core, Route};
+use crate::changes::Area;
+use crate::preferences::Pref;
 use crate::{Gpu, Specs};
 
 /// How well a plugin's games run here.
@@ -132,5 +138,42 @@ pub(crate) fn hardware_vm<'a>(
         memory: if specs.memory_gb > 0.0 { gb(specs.memory_gb) } else { String::new() },
         graphics,
         verdicts,
+    }
+}
+
+/// Reads this PC once, off the UI thread: the system's tools can take a moment.
+pub(crate) fn check_hardware(core: &Core) {
+    let core = core.clone();
+    tokio::spawn(async move {
+        let hardware = core.ports().hardware.clone();
+        let Ok(specs) = tokio::task::spawn_blocking(move || hardware.specs()).await else { return };
+        notice_blocked(&core, &specs);
+        core.state().hardware = Some(specs);
+        core.changed(Area::Hardware);
+    });
+}
+
+/// Once for each PC: a notice when an emulator's games won't start here, before the
+/// player downloads one. The config keeps the PC it was for.
+fn notice_blocked(core: &Core, specs: &crate::Specs) {
+    let kernel = core.kernel();
+    let summary = crate::hardware::summary(specs);
+    if core.preferences().get(Pref::PcNoticed).as_str() == Some(summary.as_str()) {
+        return;
+    }
+    let blocked: Vec<(String, String)> = kernel
+        .of_kind(PluginKind::Emulator)
+        .into_iter()
+        .filter_map(|id| kernel.manifest(&id).ok())
+        .filter(|m| m.capabilities.contains(&Capability::Launcher))
+        .filter_map(|m| match crate::hardware::verdict(specs, &m.requires) {
+            crate::hardware::Verdict::No(why) => Some((m.name.clone(), why)),
+            _ => None,
+        })
+        .collect();
+    let Some(message) = crate::hardware::blocked_notice(&blocked) else { return };
+    core.notices().opening(NoticeKind::Error, Route::Settings, message);
+    if let Err(e) = core.preferences().save(Pref::PcNoticed, Value::String(summary)) {
+        tracing::warn!(error = %e, "could not save the PC the notice was for");
     }
 }

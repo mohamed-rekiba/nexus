@@ -6,11 +6,17 @@ full screen and monitors, start at login, and how the app quits. The host and it
 [architecture.md](../architecture.md). The screens are in [default-theme.md](default-theme.md).
 The tools to install for each system are listed in the [README](../../README.md).
 
-## The Desktop port
+## The desktop's ports
 
-The core asks about windows only through the `Desktop` port (`crates/nexus-core/src/ports.rs`).
-The app plugs in `SystemDesktop` (`crates/nexus-app/src/desktop.rs`). Tests plug in a fake, and
-`NoDesktop` is the default until the app plugs in a real one.
+The core reaches the desktop through three ports (`crates/nexus-core/src/ports.rs`). The app
+plugs in an adapter for each from `crates/nexus-app/src/desktop.rs`. Tests plug in a fake for
+each, and a stand-in is the default until the app plugs in a real one.
+
+| Port | Does | App adapter | Test fake | Stand-in |
+|---|---|---|---|---|
+| `Windows` | Which window is in front, and bringing one to the front | `SystemWindows` | `FakeWindows` | `NoWindows` |
+| `LoginSession` | Start at login, and installing the launcher's own package | `SystemLoginSession` | `FakeLoginSession` | `NoLoginSession` |
+| `Opener` | Opening a link or a file with the system's opener | `SystemOpener` | `FakeOpener` | `NoOpener` |
 
 | Call | Answer |
 |---|---|
@@ -20,8 +26,13 @@ The app plugs in `SystemDesktop` (`crates/nexus-app/src/desktop.rs`). Tests plug
 | `has_window(ids)` | Whether one of the game's processes has a window: `Some(true)`, `Some(false)`, or `None` when the system doesn't say |
 | `window_close_ends_game()` | Whether a game whose windows closed is over while its processes run: true on macOS only |
 | `problem()` | A missing tool or permission, with the fix, or `None` |
-| `can_start_at_login()` | Whether this build can start at login |
-| `start_at_login(on)` | Writes or removes the system's entry; the error is the system's reason |
+| `LoginSession::can_start_at_login()` | Whether this build can start at login |
+| `LoginSession::start_at_login(on)` | Writes or removes the system's entry; the error is the system's reason |
+| `LoginSession::install_package(file, manager)` | Installs the launcher's own deb, rpm or Arch package through `pkexec` (Linux only). A dismissed prompt or a wrong password (exit 126 or 127) is `Cancelled`; any other failure carries the package manager's last line |
+| `Opener::open_link(link)` | Opens a link with `open`, `cmd /C start` or `xdg-open`, without waiting: a plugin's store link such as `steam://install/440`, or a page |
+| `Opener::open_path(path)` | Opens a folder or a file with `open`, `explorer` or `xdg-open`, without waiting |
+
+The other calls are `Windows`'.
 
 The game's processes (`ids`) come from the `ProcessTree` port, which the app plugs in as
 `SystemProcesses` (`crates/nexus-app/src/processes.rs`). On macOS and Linux they are the Unix
@@ -30,8 +41,8 @@ a sandbox such as Proton's pressure-vessel starts its programs in a session of t
 the group. Windows has no process groups: there they are the game's process and every process
 below it, from a process snapshot (`CreateToolhelp32Snapshot`).
 
-The adapters only answer. The rules live once, in the core's running-game module
-(`crates/nexus-core/src/running.rs`).
+The adapters only answer. The rules live once, in the sessions subsystem's watch
+(`crates/nexus-core/src/sessions/watch.rs`).
 
 ## How each system answers
 
@@ -97,7 +108,7 @@ taskbar.
 
 ## Bringing the launcher up
 
-`show_launcher()` first calls `raise_launcher` (`crates/nexus-app/src/main.rs`) on the UI
+`show_launcher()` first calls `raise_launcher` (`crates/nexus-app/src/platform.rs`) on the UI
 thread. It un-minimizes the window only when winit reports it minimized (`Some(true)`), then
 calls `focus_window`. Wayland can't report a minimize, and asking it to undo one only warns.
 The system path (System Events, `xdotool`, Gamescope ids, KWin or Win32) runs after it as the
@@ -120,8 +131,8 @@ fallback. On Gamescope it is what actually shows the launcher, since winit doesn
 
 ### The running game
 
-The running-game module runs while the game runs. The game ends when none of its processes is
-left, whatever its first process does.
+The sessions subsystem's watch (`sessions/watch.rs`) runs while the game runs. The game ends
+when none of its processes is left, whatever its first process does.
 
 1. Every 250 ms it tries `show_game`. It stops trying once a window came up, or after
    `show_timeout` (20 s, in `HostConfig`).
@@ -140,7 +151,8 @@ left, whatever its first process does.
    game this way. Elsewhere a closed window stops nothing: a launcher's own menu or setup
    window closes before the game's opens.
 
-`game_in_front` is app state. `Core::game_in_front()` reads it and never asks the desktop.
+`game_in_front` is the sessions subsystem's state. `Core::game_in_front()` reads it and never
+asks the desktop.
 
 ### A game another program starts
 
@@ -198,12 +210,12 @@ The Guide button (PS or Xbox) is not sent to the theme as a key. In
 
 - A tap while a game runs does nothing: the game keeps the screen.
 - A tap with no game running opens Home.
-- A hold (600 ms) while a game runs sends `Command::Stop` for each running game, at once,
+- A hold (600 ms) while a game runs sends `SessionCmd::Stop` for each running game, at once,
   with no question.
 - A hold with no game running opens the power menu (`Vm.power-menu`).
 
-The theme's Resume button calls `Host.show-game`, which shows the game again when the launcher
-is in front of it.
+The theme's Resume button sends `SessionCmd::ShowGame` through `Host.command`, which shows the
+game again when the launcher is in front of it.
 
 ## The pad acts only while the launcher has the focus
 
@@ -231,7 +243,8 @@ for one run. The UI host applies it at every render, and only changes it when it
 - Linux and Windows: Slint's full screen; on a monitor move, winit's borderless full screen on
   that monitor.
 
-`place_on_monitor` (`main.rs`) runs on the 250 ms UI timer:
+The app shell's tick (`AppShell::on_tick`, `crates/nexus-ui-host/src/shell.rs`) places the window
+every 250 ms, through the shell's `Platform` (`crates/nexus-app/src/platform.rs` asks winit):
 
 - It lists the monitors' names for the Settings row "Screen", which shows with two monitors or
   more.
@@ -300,7 +313,8 @@ opens Settings. The config keeps a summary of the PC the notice was for (`app.pc
 
 ## Downloads through a VPN
 
-"Download only through a VPN" (`app.vpn_only`) differs by system (`crates/nexus-app/src/vpn.rs`):
+"Download only through a VPN" (`app.vpn_only`) differs by system. The host system plugin's VPN
+adapter (`plugins/system/host/src/vpn.rs`) decides:
 
 - Linux: a VPN is a WireGuard or OpenVPN interface in `/sys/class/net`, or another layer-3
   tunnel, up and with an address. Tailscale, ZeroTier, Docker, libvirt, LXC and Waydroid
@@ -332,8 +346,13 @@ launcher again with the same arguments.
 
 ## Tests
 
-- The core's running-game rules are tested once, through a fake `Desktop`.
-- `crates/nexus-app/tests/desktop.rs` tests `SystemDesktop` against the real windowing system.
+- The core's running-game rules are tested once, through `FakeWindows`.
+- The pure parts of `desktop.rs` have unit tests: the autostart entry, the launch agent, the
+  package manager's command and what `pkexec`'s exit means.
+- The monitor placement and the session's lines (`window shown`, `log out`) are tested at the
+  app shell, on `FakePlatform` (`tests/tests/seams/shell.rs`).
+- `crates/nexus-app/tests/desktop.rs` tests `SystemWindows` and `SystemLoginSession` against the
+  real windowing system.
   It opens helper windows (the test binary itself, run with `NEXUS_DESKTOP_HELPER_HIDE_MS`),
   brings them to the front and hides one. It also turns start at login on and off for this
   user, then puts back what was there. It runs only with `NEXUS_DESKTOP_TESTS=1`. With

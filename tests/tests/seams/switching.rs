@@ -3,7 +3,7 @@
 use crate::common::*;
 use futures::StreamExt;
 use nexus_api::Event;
-use nexus_core::{Command, Route};
+use nexus_core::{Command, Route, SessionCmd};
 use nexus_ui_api::ThemeError;
 use nexus_ui_host::{UiRequest, vm_text};
 use slint_interpreter::{ComponentHandle, Value};
@@ -18,16 +18,27 @@ fn drain(stream: &mut futures::stream::BoxStream<'static, Event>) -> Vec<Event> 
 }
 
 fn with_examples(h: nexus_testkit::FakeHost) -> nexus_testkit::FakeHost {
-    h.discover(&fixture_themes()).plugin(playable_games("emu-a", vec!["Alpha", "Beta", "Gamma"]))
+    h.discover(&fixture_themes()).plugin(FakeCatalog::new("emu-a").playable().games(["Alpha", "Beta", "Gamma"]).build())
+}
+
+/// A `Vm` struct property's field, from the live instance. The switching tests read the `Vm`
+/// globals themselves, where every other seam test reads `core.view()`: what they check is
+/// that a new theme's tree is bound with the state the old one showed, and the core's view
+/// doesn't change when the theme does.
+pub fn vm_field(host: &Composed, property: &str, field: &str) -> slint_interpreter::Value {
+    match host.instance().get_global_property("Vm", property).unwrap() {
+        slint_interpreter::Value::Struct(s) => s.get_field(field).cloned().unwrap_or_default(),
+        other => panic!("Vm.{property} is {other:?}"),
+    }
 }
 
 #[test]
 fn switching_keeps_screen_selection_and_running_games() {
     let mut host = composed(with_examples);
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::Select("emu-a:G1".parse().unwrap()));
-    host.dispatch(Command::Launch("emu-a:G2".parse().unwrap()));
+    host.dispatch(Command::Session(SessionCmd::Launch("emu-a:G2".parse().unwrap())));
     host.dispatch(Command::OpenGame("emu-a:G1".parse().unwrap()));
 
     for theme in ["fixture-grid", "default"] {
@@ -147,7 +158,11 @@ fn a_theme_option_changes_tokens_live_without_rebuilding_the_view() {
     let before = host.instance().as_weak();
 
     host.instance()
-        .invoke_global("Host", "set-theme-option", &[Value::String("accent".into()), Value::String("#ff0000".into())])
+        .invoke_global(
+            "Host",
+            "command",
+            &[Value::String("SetThemeOption".into()), Value::String(r##"{"key":"accent","value":"#ff0000"}"##.into())],
+        )
         .unwrap();
     host.pump();
 
@@ -181,7 +196,6 @@ fn dev_reload_picks_up_an_edit_and_keeps_the_last_good_version_on_a_bad_one() {
     assert!(!host.ui.reload_if_changed().unwrap(), "nothing changed yet");
 
     let file = dir.path().join("live/screens/home.slint");
-    std::thread::sleep(std::time::Duration::from_millis(20));
     std::fs::write(&file, home("v2")).unwrap();
     bump_mtime(&file);
     assert!(host.ui.reload_if_changed().unwrap());

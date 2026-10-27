@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use nexus_api::{Files, Plugin, PluginByKind, PluginKind, PluginManifest, RelPath, Runtime, ThemePlugin};
+use nexus_api::{Files, Plugin, PluginBox, PluginKind, PluginManifest, RelPath, Runtime, ThemePlugin};
 
 use crate::Loader;
 
@@ -87,7 +87,7 @@ impl Loader for DataThemeLoader {
         manifest.kind == PluginKind::Theme && manifest.runtime == Runtime::Data
     }
 
-    fn load(&self, manifest: &PluginManifest, dir: &Path) -> Result<PluginByKind, String> {
-        Ok(PluginByKind::theme(DataTheme::new(manifest.clone(), Arc::new(DirFiles::new(dir.to_path_buf())))))
+    fn load(&self, manifest: &PluginManifest, dir: &Path) -> Result<PluginBox, String> {
+        Ok(PluginBox::theme(DataTheme::new(manifest.clone(), Arc::new(DirFiles::new(dir.to_path_buf())))))
     }
 }

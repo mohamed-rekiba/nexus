@@ -12,7 +12,7 @@ use nexus_api::*;
 
 use crate::manifest::{GAME_FILE, GameManifest, Start};
 use crate::probe::{self, Probe};
-use crate::{CONSOLE_FOLDER, GAMES, GOG_INFO, Pc, WRAPPER_INFO, WRAPPER_NAME_LINE, path};
+use crate::{CONSOLE_FOLDER, GAMES, GOG_INFO, Pc, WRAPPER_INFO, WRAPPER_NAME_LINE};
 
 /// The most files of a release whose first bytes are read: the nearest the game's folder, so a
 /// start script beside a bundled runtime's thousands of files is read.
@@ -240,7 +240,7 @@ impl GameInstaller for Pc {
         if folders.exists(&dest).await? {
             return Err(PluginError::Precondition(format!("{name} is already installed")));
         }
-        let work = HostPath::new(GAMES, dest.root, path(format!("{}.part", dest.path))?);
+        let work = HostPath::new(GAMES, dest.root, RelPath::new(format!("{}.part", dest.path))?);
         folders.remove(&work).await?;
         let manifest = GameManifest::new(name, ranked.into_iter().map(|(path, kind)| Start { path, kind }).collect());
         let runnable: Vec<String> = probed.iter().filter(|(_, p)| p.runnable()).map(|(rel, _)| rel.clone()).collect();

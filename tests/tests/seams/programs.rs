@@ -10,7 +10,7 @@ use crate::common::native;
 use nexus_api::*;
 use nexus_testkit::{FakeHost, StubPlugin, TestCore};
 
-const MANIFEST: &str = "id = \"prober\"\nkind = \"emulator\"\nname = \"P\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+const MANIFEST: &str = "id = \"prober\"\nkind = \"emulator\"\nname = \"P\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
     [permissions]\nprocess = [\"folder:builds\", \"system:emu\"]\n\
     [[permissions.filesystem]]\nfolder = \"builds\"\n\
     [[permissions.filesystem]]\nfolder = \"other\"\n";

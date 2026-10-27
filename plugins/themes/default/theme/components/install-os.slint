@@ -1,4 +1,5 @@
 import { Vm, Host, DiskItem, SystemJobItem } from "../types.slint";
+import { Commands } from "../commands.slint";
 import { Tokens } from "../tokens.slint";
 import { Look } from "look.slint";
 import { Icon } from "icon.slint";
@@ -28,7 +29,7 @@ export global Setup {
     public function go(step: string) {
         root.step = step;
         root.focus = 0;
-        if (step == "disks") { Host.refresh-system(); }
+        if (step == "disks") { Commands.refresh-system(); }
     }
     public function activate() {
         let f = root.focus;
@@ -39,21 +40,21 @@ export global Setup {
                 root.disk = f;
                 root.go("confirm");
             } else if (f == Vm.system.disks.length) {
-                Host.choose-partitions();
+                Commands.choose-partitions();
             } else {
                 root.go("welcome");
             }
             Host.play-sound("select");
         } else if (root.step == "confirm") {
             if (f == 0) {
-                Host.install-os(Vm.system.disks[root.disk].path);
+                Commands.install-os(Vm.system.disks[root.disk].path);
                 root.go("installing");
             } else {
                 root.go("disks");
             }
             Host.play-sound("select");
         } else if (root.step == "done") {
-            Host.restart-pc();
+            Commands.restart-pc();
         } else if (root.step == "failed") {
             root.go("disks");
         }

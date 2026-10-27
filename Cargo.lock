@@ -1560,7 +1560,7 @@ checksum = "0e9c71c2167ca323c882b99918929403426e2373ea17242ff5653e0d5e1058be"
 
 [[package]]
 name = "emu-kyty"
-version = "0.6.2"
+version = "0.7.0"
 dependencies = [
  "emulator-kit",
  "nexus-api",
@@ -1568,7 +1568,7 @@ dependencies = [
 
 [[package]]
 name = "emu-pc"
-version = "0.6.2"
+version = "0.7.0"
 dependencies = [
  "emulator-kit",
  "nexus-api",
@@ -1578,7 +1578,7 @@ dependencies = [
 
 [[package]]
 name = "emu-shadps4"
-version = "0.6.2"
+version = "0.7.0"
 dependencies = [
  "aes",
  "cbc",
@@ -1593,16 +1593,17 @@ dependencies = [
 
 [[package]]
 name = "emu-steam"
-version = "0.6.2"
+version = "0.7.0"
 dependencies = [
  "nexus-api",
 ]
 
 [[package]]
 name = "emulator-kit"
-version = "0.6.2"
+version = "0.7.0"
 dependencies = [
  "nexus-api",
+ "nexus-testkit",
  "oozextract",
  "tempfile",
  "tokio",
@@ -4104,7 +4105,7 @@ dependencies = [
 
 [[package]]
 name = "nexus-api"
-version = "0.6.2"
+version = "0.7.0"
 dependencies = [
  "async-trait",
  "futures",
@@ -4120,7 +4121,7 @@ dependencies = [
 
 [[package]]
 name = "nexus-app"
-version = "0.6.2"
+version = "0.7.0"
 dependencies = [
  "ash",
  "async-trait",
@@ -4136,6 +4137,7 @@ dependencies = [
  "librqbit",
  "nexus-api",
  "nexus-core",
+ "nexus-testkit",
  "nexus-ui-api",
  "nexus-ui-host",
  "playstation-store",
@@ -4159,7 +4161,7 @@ dependencies = [
 
 [[package]]
 name = "nexus-core"
-version = "0.6.2"
+version = "0.7.0"
 dependencies = [
  "async-trait",
  "ed25519-dalek",
@@ -4185,15 +4187,19 @@ dependencies = [
 
 [[package]]
 name = "nexus-testkit"
-version = "0.6.2"
+version = "0.7.0"
 dependencies = [
  "async-trait",
  "futures",
  "hex",
+ "i-slint-backend-testing",
  "nexus-api",
  "nexus-core",
+ "nexus-ui-host",
  "serde_json",
  "sha2",
+ "slint",
+ "slint-interpreter",
  "tempfile",
  "tokio",
  "tracing",
@@ -4202,7 +4208,7 @@ dependencies = [
 
 [[package]]
 name = "nexus-tests"
-version = "0.6.2"
+version = "0.7.0"
 dependencies = [
  "emu-kyty",
  "emu-pc",
@@ -4232,7 +4238,7 @@ dependencies = [
 
 [[package]]
 name = "nexus-ui-api"
-version = "0.6.2"
+version = "0.7.0"
 dependencies = [
  "nexus-api",
  "semver",
@@ -4245,8 +4251,10 @@ dependencies = [
 
 [[package]]
 name = "nexus-ui-host"
-version = "0.6.2"
+version = "0.7.0"
 dependencies = [
+ "futures",
+ "i-slint-backend-testing",
  "image",
  "nexus-api",
  "nexus-core",
@@ -4256,6 +4264,8 @@ dependencies = [
  "slint",
  "slint-interpreter",
  "spin_on",
+ "tempfile",
+ "tokio",
  "tracing",
 ]
 
@@ -5093,7 +5103,7 @@ checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 
 [[package]]
 name = "playstation-store"
-version = "0.6.2"
+version = "0.7.0"
 dependencies = [
  "nexus-api",
 ]
@@ -5581,9 +5591,10 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "release-catalog"
-version = "0.6.2"
+version = "0.7.0"
 dependencies = [
  "nexus-api",
+ "nexus-testkit",
  "tokio",
 ]
 
@@ -6743,7 +6754,7 @@ dependencies = [
 
 [[package]]
 name = "system-host"
-version = "0.6.2"
+version = "0.7.0"
 dependencies = [
  "libc",
  "nexus-api",
@@ -6801,7 +6812,7 @@ checksum = "f18aa187839b2bdb1ad2fa35ead8c4c2976b64e4363c386d45ac0f7ee85c9233"
 
 [[package]]
 name = "theme-default"
-version = "0.6.2"
+version = "0.7.0"
 dependencies = [
  "nexus-api",
 ]

@@ -1,15 +1,16 @@
 //! Seam 3, composed host: a gamepad drives the default theme through the keys it already handles.
 
 use crate::common::*;
-use nexus_core::{Command, Route};
+use nexus_core::{Command, Route, SessionCmd};
 use nexus_ui_api::ScreenId;
-use nexus_ui_host::{PadButton, vm_text};
+use nexus_ui_host::PadButton;
 
 fn tv() -> Composed {
-    let mut host = composed(|h| h.plugin(games("emu-a", vec!["Alpha", "Beta", "Gamma"])));
+    let mut host =
+        composed(|h| h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha", "Beta", "Gamma"]).build()));
     host.ui.start().unwrap();
     host.resize(1920.0, 1080.0);
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::Select("emu-a:G0".parse().unwrap()));
     host
 }
@@ -31,7 +32,7 @@ fn the_d_pad_moves_the_selection_and_the_buttons_open_and_go_back() {
     press(&mut host, PadButton::Left);
     rest(&mut host);
     assert_eq!(host.core().view().home.selected, Some(1));
-    assert_eq!(vm_text(host.instance(), "input-mode").as_deref(), Some("gamepad"));
+    assert_eq!(host.ui.input_mode().as_deref(), Some("gamepad"));
 
     // A opens the Game Hub; B goes back to the row.
     press(&mut host, PadButton::South);
@@ -39,17 +40,17 @@ fn the_d_pad_moves_the_selection_and_the_buttons_open_and_go_back() {
     assert_eq!(host.core().view().game.as_deref(), Some("emu-a:G1"));
     press(&mut host, PadButton::East);
     assert_eq!(host.core().view().screen, ScreenId::Home);
-    settle(&mut host);
+    host.settle();
     assert!(host.count("default-tile") > 0, "back on the row");
 
     // Up to the top bar, right to Library, A opens it; B leaves it.
     press(&mut host, PadButton::Up);
     press(&mut host, PadButton::Right);
     press(&mut host, PadButton::South);
-    settle(&mut host);
+    host.settle();
     assert_eq!(host.count("default-game"), 3, "the Library grid");
     press(&mut host, PadButton::East);
-    settle(&mut host);
+    host.settle();
     assert_eq!(host.count("default-game"), 0, "B leaves the Library for the row");
     assert!(host.count("default-tile") > 0);
 }
@@ -57,11 +58,11 @@ fn the_d_pad_moves_the_selection_and_the_buttons_open_and_go_back() {
 #[test]
 fn the_shoulder_button_goes_to_the_next_section_and_the_guide_button_home() {
     let mut host = composed(|h| {
-        h.plugin(games("emu-a", vec!["Alpha", "Beta", "Gamma"]))
-            .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha", "Beta", "Gamma"]).build())
+            .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
 
     press(&mut host, PadButton::RightShoulder);
     assert_eq!(host.core().view().screen, ScreenId::Catalog);
@@ -70,30 +71,13 @@ fn the_shoulder_button_goes_to_the_next_section_and_the_guide_button_home() {
     assert_eq!(host.core().view().screen, ScreenId::Home);
 }
 
-/// Runs the core's runtime until `done` is true, for at most five seconds.
-fn until(host: &mut Composed, what: &str, done: impl Fn(&nexus_core::Core) -> bool) {
-    let core = host.core().clone();
-    host.rt
-        .block_on(async {
-            tokio::time::timeout(std::time::Duration::from_secs(5), async {
-                while !done(&core) {
-                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-                }
-            })
-            .await
-        })
-        .unwrap_or_else(|_| panic!("timed out waiting until {what}"));
-    host.ui.render().unwrap();
-    settle(host);
-}
-
 #[test]
 fn while_a_game_is_in_front_the_pad_is_the_game_s_and_a_ps_button_tap_too() {
-    let mut host = composed(|h| h.plugin(playable_games("emu-a", vec!["Alpha"])));
+    let mut host = composed(|h| h.plugin(FakeCatalog::new("emu-a").playable().games(["Alpha"]).build()));
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
-    host.dispatch(Command::Launch("emu-a:G0".parse().unwrap()));
-    until(&mut host, "the game is in front", |core| core.game_in_front());
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
+    host.dispatch(Command::Session(SessionCmd::Launch("emu-a:G0".parse().unwrap())));
+    watch_until(&mut host, "the game is in front", |core| core.game_in_front());
     assert_eq!(host.core().view().screen, ScreenId::Running);
     let process = host.test.spawner.spawned()[0].clone();
     // What the theme asked for as the game started (it selects the running game).
@@ -112,16 +96,16 @@ fn while_a_game_is_in_front_the_pad_is_the_game_s_and_a_ps_button_tap_too() {
 #[test]
 fn holding_the_ps_button_closes_a_running_game_at_once_and_opens_no_power_menu() {
     use nexus_testkit::Signal;
-    let mut host = composed(|h| h.plugin(playable_games("emu-a", vec!["Alpha"])));
+    let mut host = composed(|h| h.plugin(FakeCatalog::new("emu-a").playable().games(["Alpha"]).build()));
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
-    host.dispatch(Command::Launch("emu-a:G0".parse().unwrap()));
-    until(&mut host, "the game is in front", |core| core.game_in_front());
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
+    host.dispatch(Command::Session(SessionCmd::Launch("emu-a:G0".parse().unwrap())));
+    watch_until(&mut host, "the game is in front", |core| core.game_in_front());
     let process = host.test.spawner.spawned()[0].clone();
     host.pump();
 
     press(&mut host, PadButton::GuideHeld);
-    until(&mut host, "the game was asked to close", |_| process.signals().contains(&Signal::Terminate));
+    watch_until(&mut host, "the game was asked to close", |_| process.signals().contains(&Signal::Terminate));
     assert_eq!(host.count("power-menu"), 0, "no power menu while a game runs");
 }
 
@@ -149,14 +133,14 @@ fn while_the_launcher_s_window_is_not_focused_the_pad_is_the_other_window_s() {
 
 #[test]
 fn after_a_game_closes_the_launcher_asks_how_far_it_got() {
-    let mut host = composed(|h| h.plugin(playable_games("emu-a", vec!["Alpha"])));
+    let mut host = composed(|h| h.plugin(FakeCatalog::new("emu-a").playable().games(["Alpha"]).build()));
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
-    host.dispatch(Command::Launch("emu-a:G0".parse().unwrap()));
-    until(&mut host, "the game is in front", |core| core.game_in_front());
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
+    host.dispatch(Command::Session(SessionCmd::Launch("emu-a:G0".parse().unwrap())));
+    watch_until(&mut host, "the game is in front", |core| core.game_in_front());
     host.pump();
     host.test.spawner.spawned()[0].exit(0);
-    until(&mut host, "the game closed", |core| !core.game_running());
+    watch_until(&mut host, "the game closed", |core| !core.game_running());
     let asked = i_slint_backend_testing::ElementHandle::find_by_accessible_label(host.instance(), "result-prompt")
         .map(|e| e.accessible_value().unwrap_or_default().to_string())
         .collect::<Vec<_>>();

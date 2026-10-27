@@ -7,10 +7,10 @@ use std::sync::{Arc, Mutex};
 
 use crate::common::{full_path, native};
 use nexus_api::*;
-use nexus_core::{Command, CoreError};
+use nexus_core::{Command, CoreError, SessionCmd};
 use nexus_testkit::{FakeHost, StubPlugin, TestCore};
 
-const MANIFEST: &str = "id = \"reader\"\nkind = \"emulator\"\nname = \"R\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+const MANIFEST: &str = "id = \"reader\"\nkind = \"emulator\"\nname = \"R\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
     [[permissions.filesystem]]\nfolder = \"games\"\n\
     [[permissions.filesystem]]\nfolder = \"saves\"\nwrite = true\ndefault = \"~/Saves\"\n";
 
@@ -134,7 +134,7 @@ impl Launcher for SpecLauncher {
 /// A PC-style plugin: games in `pc-games`, which it may run, and `wine` from the system.
 async fn launcher_host(spec: LaunchSpec, process: &str) -> TestCore {
     let manifest = format!(
-        "id = \"pc\"\nkind = \"emulator\"\nname = \"PC\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"pc\"\nkind = \"emulator\"\nname = \"PC\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          capabilities = [\"launcher\"]\n[permissions]\nprocess = {process}\n\
          [[permissions.filesystem]]\nfolder = \"pc-games\"\n"
     );
@@ -164,7 +164,7 @@ async fn a_program_in_a_granted_folder_runs_from_its_real_path() {
     let t = launcher_host(spec, "[\"folder:pc-games\"]").await;
     map(&t, "pc-games", &[games.path()]);
 
-    t.core.dispatch(Command::Launch(game_key())).await.unwrap();
+    t.core.dispatch(Command::Session(SessionCmd::Launch(game_key()))).await.unwrap();
 
     let process = t.spawner.wait_for(1).await;
     assert_eq!(process.command.program, games.path().join("Game/start.sh"));
@@ -186,7 +186,7 @@ async fn a_folder_program_without_its_folder_rule_is_not_spawned() {
     let t = launcher_host(spec, "[\"system:wine\"]").await;
     map(&t, "pc-games", &[games.path()]);
 
-    let err = t.core.dispatch(Command::Launch(game_key())).await.unwrap_err();
+    let err = t.core.dispatch(Command::Session(SessionCmd::Launch(game_key()))).await.unwrap_err();
 
     assert!(matches!(err, CoreError::PermissionDenied { .. }), "{err}");
     assert!(t.spawner.spawned().is_empty());
@@ -207,18 +207,18 @@ async fn a_system_program_runs_by_name_only_with_its_rule_and_a_cwd() {
 
     let t = launcher_host(wine(in_game.clone()), "[\"system:wine\"]").await;
     map(&t, "pc-games", &[games.path()]);
-    t.core.dispatch(Command::Launch(game_key())).await.unwrap();
+    t.core.dispatch(Command::Session(SessionCmd::Launch(game_key()))).await.unwrap();
     let process = t.spawner.wait_for(1).await;
     assert_eq!(process.command.program, Path::new("wine"), "the spawner looks it up on PATH");
     assert_eq!(process.command.cwd, games.path().join("Game"));
     assert_eq!(process.command.args, [nexus_testkit::native(games.path(), "Game/game.exe")]);
 
     let t = launcher_host(wine(in_game), "[\"system:umu-run\"]").await;
-    let err = t.core.dispatch(Command::Launch(game_key())).await.unwrap_err();
+    let err = t.core.dispatch(Command::Session(SessionCmd::Launch(game_key()))).await.unwrap_err();
     assert!(matches!(err, CoreError::PermissionDenied { .. }), "{err}");
 
     let t = launcher_host(wine(None), "[\"system:wine\"]").await;
-    let err = t.core.dispatch(Command::Launch(game_key())).await.unwrap_err();
+    let err = t.core.dispatch(Command::Session(SessionCmd::Launch(game_key()))).await.unwrap_err();
     assert!(matches!(&err, CoreError::Invalid(m) if m.contains("cwd")), "{err}");
 }
 
@@ -313,7 +313,7 @@ async fn an_environment_value_can_be_a_path_the_host_resolves() {
     let t = launcher_host(spec, "[\"system:wine\"]").await;
     map(&t, "pc-games", &[games.path()]);
 
-    t.core.dispatch(Command::Launch(game_key())).await.unwrap();
+    t.core.dispatch(Command::Session(SessionCmd::Launch(game_key()))).await.unwrap();
 
     let process = t.spawner.wait_for(1).await;
     let prefix = nexus_testkit::native(t.data_dir(), "plugins/pc/prefixes/game");
@@ -365,7 +365,7 @@ async fn the_packages_folder_is_downloads_until_the_player_maps_it_and_settings_
     let home = tempfile::tempdir().unwrap();
     let asks = |id: &str| {
         StubPlugin::from_toml(&format!(
-            "id = \"{id}\"\nkind = \"emulator\"\nname = \"{id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+            "id = \"{id}\"\nkind = \"emulator\"\nname = \"{id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
              [[permissions.filesystem]]\nfolder = \"packages\"\ntitle = \"Its own title\"\n"
         ))
     };
@@ -382,7 +382,7 @@ async fn the_packages_folder_is_downloads_until_the_player_maps_it_and_settings_
 #[tokio::test]
 async fn a_folder_can_have_another_default_on_one_system() {
     let home = tempfile::tempdir().unwrap();
-    let manifest = "id = \"data\"\nkind = \"emulator\"\nname = \"D\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+    let manifest = "id = \"data\"\nkind = \"emulator\"\nname = \"D\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
         [[permissions.filesystem]]\nfolder = \"emu-data\"\ndefault = \"~/.local/share/Emu\"\n\
         [permissions.filesystem.default_on]\nmacos = \"~/Library/Application Support/Emu\"\n";
     let folders: Arc<Mutex<Option<Arc<dyn Folders>>>> = Arc::default();

@@ -1,4 +1,5 @@
 import { Host, Slot } from "../types.slint";
+import { Commands } from "../commands.slint";
 import { Look } from "look.slint";
 import { Pill } from "widgets.slint";
 
@@ -19,6 +20,6 @@ export component SlotActions inherits HorizontalLayout {
         focused: root.focused == i;
         dim: root.focused >= 0 && root.focused != i;
         accessible-label: item.label;
-        clicked => { Host.run-action(item.plugin, item.action, root.game, item.args); }
+        clicked => { Commands.run-action(item.plugin, item.action, root.game, item.args); }
     }
 }

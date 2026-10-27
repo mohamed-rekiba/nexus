@@ -7,16 +7,39 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use crate::common::*;
-use nexus_core::{Command, Route};
+use nexus_core::{Area, Command, Pref, Route, SessionCmd};
 use slint::platform::software_renderer::{MinimalSoftwareWindow, PremultipliedRgbaColor, RepaintBufferType};
 use slint::platform::{Platform, WindowAdapter};
 use slint_interpreter::ComponentHandle;
 
 struct Offscreen(Rc<MinimalSoftwareWindow>);
 
+thread_local! {
+    /// Slint's time on this thread: it moves only when [`pass`] moves it.
+    static ELAPSED: std::cell::Cell<Duration> = const { std::cell::Cell::new(Duration::ZERO) };
+}
+
+/// Moves Slint's time on by `by`, for its timers and animations.
+fn pass(by: Duration) {
+    ELAPSED.with(|e| e.set(e.get() + by));
+}
+
+/// Runs the core on its clock until `done`, for at most `ms` milliseconds of it.
+fn run_until(host: &Composed, ms: u64, done: impl Fn(&nexus_core::Core) -> bool) {
+    for _ in 0..ms / 10 {
+        if done(host.core()) {
+            return;
+        }
+        host.advance(Duration::from_millis(10));
+    }
+}
+
 impl Platform for Offscreen {
     fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
         Ok(self.0.clone())
+    }
+    fn duration_since_start(&self) -> Duration {
+        ELAPSED.with(|e| e.get())
     }
     fn debug_log(&self, arguments: std::fmt::Arguments) {
         if keeps_log_line(&arguments) {
@@ -42,7 +65,7 @@ fn shoot(window: &MinimalSoftwareWindow, path: &Path) {
     // A timer that a change handler starts runs from the next pass: the hero's and the
     // art's wait for details takes three, as the event loop would make them.
     for _ in 0..2 {
-        std::thread::sleep(Duration::from_millis(500));
+        pass(Duration::from_millis(500));
         slint::platform::update_timers_and_animations();
     }
     window.request_redraw();
@@ -143,17 +166,12 @@ fn shoot_default(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path
                 &[("Sample/game.rar", b"archive"), ("Sample/readme.txt", b"hi")],
             );
             host.test.archives.holds("game.rar", &[("game.pkg", b"package")]);
-            host.test.archives.hold(true);
+            let held = host.test.archives.hold();
             key(host, Key::DownArrow);
             key(host, Key::Return);
             shoot(window, &out.join(format!("{prefix}-download-sheet.png")));
             key(host, Key::Return);
-            for _ in 0..50 {
-                host.rt.block_on(async { tokio::time::sleep(Duration::from_millis(10)).await });
-                if host.core().view().downloads.torrents.first().is_some_and(|t| t.state == "ready") {
-                    break;
-                }
-            }
+            run_until(host, 500, |core| core.view().downloads.torrents.first().is_some_and(|t| t.state == "ready"));
             follow(host);
             shoot(window, &out.join(format!("{prefix}-downloads-torrent.png")));
             // The keys on the download's first button.
@@ -166,21 +184,15 @@ fn shoot_default(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path
                 // Bytes arrive: the card says the time left, and Open folder follows its buttons.
                 host.test.torrents.progress(&release.id, 4);
                 host.test.torrents.rate(&release.id, 1);
-                for _ in 0..100 {
-                    host.rt.block_on(async { tokio::time::sleep(Duration::from_millis(10)).await });
-                    if host.core().view().downloads.torrents.first().is_some_and(|t| t.seconds_left > 0) {
-                        break;
-                    }
-                }
+                run_until(host, 1000, |core| {
+                    core.view().downloads.torrents.first().is_some_and(|t| t.seconds_left > 0)
+                });
                 host.ui.render().unwrap();
                 shoot(window, &out.join(format!("{prefix}-downloads-downloading.png")));
                 host.test.torrents.complete(&release.id);
-                for _ in 0..100 {
-                    host.rt.block_on(async { tokio::time::sleep(Duration::from_millis(10)).await });
-                    if host.core().view().downloads.torrents.first().is_some_and(|t| t.unpack == "unpacking") {
-                        break;
-                    }
-                }
+                run_until(host, 1000, |core| {
+                    core.view().downloads.torrents.first().is_some_and(|t| t.unpack == "unpacking")
+                });
                 host.pump();
                 host.ui.render().unwrap();
                 // The card's buttons follow its actions on a drawn window, not only on the
@@ -188,13 +200,10 @@ fn shoot_default(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path
                 let shown = ["pause", "stop-seeding", "cancel"].map(|a| host.count(&format!("torrent-action:{a}")));
                 assert_eq!(shown, [0, 1, 1]);
                 shoot(window, &out.join(format!("{prefix}-downloads-unpacking.png")));
-                host.test.archives.hold(false);
-                for _ in 0..100 {
-                    host.rt.block_on(async { tokio::time::sleep(Duration::from_millis(10)).await });
-                    if host.core().view().downloads.torrents.first().is_some_and(|t| t.unpack == "unpacked") {
-                        break;
-                    }
-                }
+                held.release();
+                run_until(host, 1000, |core| {
+                    core.view().downloads.torrents.first().is_some_and(|t| t.unpack == "unpacked")
+                });
                 host.ui.render().unwrap();
                 shoot(window, &out.join(format!("{prefix}-downloads-unpacked.png")));
             }
@@ -243,7 +252,10 @@ fn shoot_install_sheet(host: &mut Composed, window: &MinimalSoftwareWindow, out:
     install.invoke_accessible_default_action();
     host.pump();
     shoot(window, &out.join(format!("{prefix}-install-sheet.png")));
-    let outside = Command::InstallDownload { id: t.id.clone(), folder: Some("/elsewhere".into()) };
+    let outside = Command::GameInstall(nexus_core::GameInstallCmd::Download {
+        id: t.id.clone(),
+        folder: Some("/elsewhere".into()),
+    });
     assert!(host.rt.block_on(host.test.core.dispatch(outside)).is_err(), "a folder outside the game folders");
     host.ui.render().unwrap();
     shoot(window, &out.join(format!("{prefix}-install-sheet-error.png")));
@@ -259,23 +271,23 @@ fn shoot_resolving(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Pa
     host.dispatch(Command::OpenGame(offer.key.parse().unwrap()));
     let Some(release) = host.core().view().detail.and_then(|d| d.releases.first().cloned()) else { return };
     host.test.torrents.has(&release.id, "Sample", &[("Sample/game.pkg", b"package")]);
-    host.test.torrents.hold(true);
-    host.dispatch(Command::DownloadRelease {
+    let held = host.test.torrents.hold();
+    host.dispatch(Command::Torrent(nexus_core::TorrentCmd::Download {
         offer: offer.key.parse().unwrap(),
         release: release.id.clone(),
         folder: None,
-    });
+    }));
     host.dispatch(Command::Navigate(Route::Downloads));
     host.load_images();
     shoot(window, &out.join(format!("{prefix}-downloads-resolving.png")));
-    host.test.torrents.hold(false);
-    for _ in 0..100 {
-        host.rt.block_on(async { tokio::time::sleep(Duration::from_millis(10)).await });
-        if host.core().view().downloads.torrents.iter().any(|t| t.id == release.id && t.state == "ready") {
-            break;
-        }
-    }
-    host.dispatch(Command::Torrent { id: release.id, action: nexus_core::TorrentAction::Remove });
+    held.release();
+    run_until(host, 1000, |core| {
+        core.view().downloads.torrents.iter().any(|t| t.id == release.id && t.state == "ready")
+    });
+    host.dispatch(Command::Torrent(nexus_core::TorrentCmd::Act {
+        id: release.id,
+        action: nexus_core::TorrentAction::Remove,
+    }));
 }
 
 /// Three notices on Home, one of each kind, as `<prefix>-notices.png`. The core makes a
@@ -313,7 +325,7 @@ fn shoot_vpn(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path, pr
     use slint::platform::Key;
     host.test.network.up("wg-se");
     host.test.network.down("work");
-    host.dispatch(Command::SetVpnOnly(true));
+    host.dispatch(Command::Vpn(nexus_core::VpnCmd::SetOnly(true)));
     host.dispatch(Command::Navigate(Route::Settings));
     host.load_images();
     // Down past GAMES, UPDATES' two rows and LAUNCHER's six to the VPN switch.
@@ -362,7 +374,7 @@ fn shoot_vpn(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path, pr
     // The VPN drops: the setting reads it again. The keys are still on the release.
     key(host, Key::Escape);
     host.test.network.down("wg-se");
-    host.dispatch(Command::SetVpnOnly(true));
+    host.dispatch(Command::Vpn(nexus_core::VpnCmd::SetOnly(true)));
     key(host, Key::Return);
     shoot(window, &out.join(format!("{prefix}-download-sheet-no-vpn.png")));
     key(host, Key::Return);
@@ -370,15 +382,15 @@ fn shoot_vpn(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path, pr
     shoot(window, &out.join(format!("{prefix}-downloads-waiting.png")));
 
     // Off: the download reads its files, then goes.
-    host.dispatch(Command::SetVpnOnly(false));
-    for _ in 0..100 {
-        host.rt.block_on(async { tokio::time::sleep(Duration::from_millis(10)).await });
-        if host.core().view().downloads.torrents.iter().any(|t| t.id == release.id && t.state == "ready") {
-            break;
-        }
-    }
+    host.dispatch(Command::Vpn(nexus_core::VpnCmd::SetOnly(false)));
+    run_until(host, 1000, |core| {
+        core.view().downloads.torrents.iter().any(|t| t.id == release.id && t.state == "ready")
+    });
     if host.core().view().downloads.torrents.iter().any(|t| t.id == release.id) {
-        host.dispatch(Command::Torrent { id: release.id, action: nexus_core::TorrentAction::Remove });
+        host.dispatch(Command::Torrent(nexus_core::TorrentCmd::Act {
+            id: release.id,
+            action: nexus_core::TorrentAction::Remove,
+        }));
     }
     key(host, Key::Escape);
     key(host, Key::Escape);
@@ -403,12 +415,12 @@ fn shoot_sizes(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path) 
     shoot(window, &out.join("default-settings-login.png"));
     key(host, Key::Escape);
     for (size, name) in [(0.8, "80"), (1.4, "140")] {
-        host.dispatch(Command::SetScale(size));
+        host.dispatch(Command::Pref(Pref::Scale, size.into()));
         host.dispatch(Command::Navigate(Route::Home));
         host.load_images();
         shoot(window, &out.join(format!("default-home-{name}.png")));
     }
-    host.dispatch(Command::SetScale(1.0));
+    host.dispatch(Command::Pref(Pref::Scale, 1.0.into()));
 }
 
 /// A picture `width` by `height` that fades from `from` to `to`, as PNG bytes.
@@ -489,8 +501,8 @@ fn shoot_this_pc(window: &MinimalSoftwareWindow, out: &Path) {
             h.home(home.path())
                 .hardware(this_pc(vulkan))
                 .free_space(10_000_000_000)
-                .plugin(offering_emulator("vulkan = \"1.3\""))
-                .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+                .plugin(FakeCatalog::kyty().playable().requires("vulkan = \"1.3\"").build())
+                .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         });
         host.ui.start().unwrap();
         let catalog = serde_json::json!({ "complete": true, "translation": { "language": "en" }, "topic_count": 1,
@@ -504,7 +516,7 @@ fn shoot_this_pc(window: &MinimalSoftwareWindow, out: &Path) {
             value: serde_json::json!({ "catalog_url": "https://xyz.dev/c" }),
         });
         host.catalogs_fetched();
-        host.dispatch(Command::RefreshLibrary);
+        host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
         host.dispatch(Command::Navigate(Route::Home));
         host.load_images();
         shoot(window, &out.join(format!("default-this-pc-{name}-start.png")));
@@ -526,8 +538,8 @@ fn shoot_releases(window: &MinimalSoftwareWindow, out: &Path) {
         let home = tempfile::tempdir().unwrap();
         let mut host = composed_on_current_platform(|h| {
             h.home(home.path())
-                .plugin(offering_emulator("vulkan = \"1.3\""))
-                .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+                .plugin(FakeCatalog::kyty().playable().requires("vulkan = \"1.3\"").build())
+                .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         });
         host.ui.start().unwrap();
         host.dispatch(Command::SetThemeOption { key: "direction".into(), value: direction.into() });
@@ -553,7 +565,7 @@ fn shoot_releases(window: &MinimalSoftwareWindow, out: &Path) {
             value: serde_json::json!({ "catalog_url": "https://xyz.dev/c" }),
         });
         host.catalogs_fetched();
-        host.dispatch(Command::RefreshLibrary);
+        host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
         host.dispatch(Command::OpenGame("release-catalog:emu-kyty/PPSA01234".parse().unwrap()));
         host.load_images();
         key(&mut host, Key::DownArrow);
@@ -567,9 +579,11 @@ fn shoot_releases(window: &MinimalSoftwareWindow, out: &Path) {
 /// ⮝  ⮟, are the same size.
 fn shoot_pad_hints(window: &MinimalSoftwareWindow, out: &Path) {
     use nexus_ui_host::PadButton;
-    let mut host = composed_on_current_platform(|h| h.plugin(games("emu-a", vec!["Alpha", "Beta"])));
+    let mut host = composed_on_current_platform(|h| {
+        h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha", "Beta"]).build())
+    });
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.load_images();
     let pad = |host: &mut Composed, button: PadButton| {
         host.ui.pad(button).unwrap();
@@ -598,23 +612,14 @@ fn shoot_genres(window: &MinimalSoftwareWindow, out: &Path) {
     window.set_size(slint::PhysicalSize::new(640, 900));
     for (direction, prefix) in [("ltr", "default"), ("rtl", "default-rtl")] {
         let mut host = composed_on_current_platform(|h| {
-            h.plugin(games("emu-a", vec!["Alpha"])).plugin(store(
-                "store",
-                vec![("CUSA00000", 4.5, "")],
-                None,
-                Duration::ZERO,
-            ))
+            h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha"]).build())
+                .plugin(FakeStore::new("store").knows("CUSA00000", 4.5, "").build())
         });
         host.ui.start().unwrap();
-        host.dispatch(Command::SetScale(1.4));
+        host.dispatch(Command::Pref(Pref::Scale, 1.4.into()));
         host.dispatch(Command::SetThemeOption { key: "direction".into(), value: direction.into() });
-        host.dispatch(Command::RefreshLibrary);
-        let core = host.core().clone();
-        host.rt.block_on(async {
-            while core.view().home.library.genres.len() < 3 {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        });
+        host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
+        host.until(Area::Library, |core| core.view().home.library.genres.len() >= 3);
         host.load_images();
         // Up to the Library tab, in, then up to the genres and on to the last one.
         key(&mut host, Key::UpArrow);
@@ -637,23 +642,14 @@ fn shoot_trailer(window: &MinimalSoftwareWindow, out: &Path) {
     use nexus_ui_host::TrailerStatus;
     for (direction, prefix) in [("ltr", "default"), ("rtl", "default-rtl")] {
         let mut host = composed_on_current_platform(|h| {
-            h.plugin(games("emu-a", vec!["Alpha"])).plugin(store(
-                "store",
-                vec![("CUSA00000", 4.5, "")],
-                None,
-                Duration::ZERO,
-            ))
+            h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha"]).build())
+                .plugin(FakeStore::new("store").knows("CUSA00000", 4.5, "").build())
         });
         host.ui.set_trailers_available(true);
         host.ui.start().unwrap();
         host.dispatch(Command::SetThemeOption { key: "direction".into(), value: direction.into() });
-        host.dispatch(Command::RefreshLibrary);
-        let core = host.core().clone();
-        host.rt.block_on(async {
-            while core.view().detail.is_none_or(|d| d.trailer_url.is_empty()) {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        });
+        host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
+        host.until(Area::Library, |core| core.view().detail.is_some_and(|d| !d.trailer_url.is_empty()));
         host.load_images();
         let text: slint::SharedString = "t".into();
         host.instance().window().dispatch_event(slint::platform::WindowEvent::KeyPressed { text });
@@ -663,7 +659,7 @@ fn shoot_trailer(window: &MinimalSoftwareWindow, out: &Path) {
         shoot(window, &out.join(format!("{prefix}-trailer.png")));
         // The controls hide 3 s after the last key.
         for _ in 0..7 {
-            std::thread::sleep(Duration::from_millis(500));
+            pass(Duration::from_millis(500));
             slint::platform::update_timers_and_animations();
         }
         shoot(window, &out.join(format!("{prefix}-trailer-hidden.png")));
@@ -680,9 +676,11 @@ fn shoot_trailer(window: &MinimalSoftwareWindow, out: &Path) {
 /// `default-rtl-keyboard.png`. The keys are drawn on whole pixels at every one of them.
 fn shoot_keyboard(window: &MinimalSoftwareWindow, out: &Path) {
     use nexus_ui_host::PadButton;
-    let mut host = composed_on_current_platform(|h| h.plugin(games_on("emu-a", "PS5", vec!["Astro Drift"])));
+    let mut host = composed_on_current_platform(|h| {
+        h.plugin(FakeCatalog::new("emu-a").system("PS5").games(["Astro Drift"]).build())
+    });
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     let pad = |host: &mut Composed, button: PadButton| {
         host.ui.pad(button).unwrap();
         follow(host);
@@ -697,10 +695,10 @@ fn shoot_keyboard(window: &MinimalSoftwareWindow, out: &Path) {
     shoot(window, &out.join("default-keyboard-symbols.png"));
     pad(&mut host, PadButton::RightShoulder);
     for (size, name) in [(0.8, "80"), (1.4, "140")] {
-        host.dispatch(Command::SetScale(size));
+        host.dispatch(Command::Pref(Pref::Scale, size.into()));
         shoot(window, &out.join(format!("default-keyboard-{name}.png")));
     }
-    host.dispatch(Command::SetScale(1.0));
+    host.dispatch(Command::Pref(Pref::Scale, 1.0.into()));
     // The same window on a screen with 1.5 pixels to the point.
     window.dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: 1.5 });
     window.set_size(slint::PhysicalSize::new(WIDTH * 3 / 2, HEIGHT * 3 / 2));
@@ -754,10 +752,10 @@ fn shoot_system(window: &MinimalSoftwareWindow, out: &Path) {
     let place = Place { whole_screen: true, nexus_os: true, stick: false };
     let plugin = system.plugin();
     let mut host = composed_on_current_platform(|h| {
-        h.place(place).plugin(plugin).plugin(games_on("emu-a", "PS5", vec!["Astro Drift"]))
+        h.place(place).plugin(plugin).plugin(FakeCatalog::new("emu-a").system("PS5").games(["Astro Drift"]).build())
     });
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::System(SystemCommand::Refresh));
     let open = |host: &mut Composed, label: &str| {
         let found = i_slint_backend_testing::ElementHandle::find_by_accessible_label(host.instance(), label);
@@ -773,10 +771,10 @@ fn shoot_system(window: &MinimalSoftwareWindow, out: &Path) {
     shoot(window, &out.join("default-system-bluetooth.png"));
     open(&mut host, "status:network");
     for (size, name) in [(0.8, "80"), (1.4, "140")] {
-        host.dispatch(Command::SetScale(size));
+        host.dispatch(Command::Pref(Pref::Scale, size.into()));
         shoot(window, &out.join(format!("default-system-{name}.png")));
     }
-    host.dispatch(Command::SetScale(1.0));
+    host.dispatch(Command::Pref(Pref::Scale, 1.0.into()));
     window.dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: 1.5 });
     window.set_size(slint::PhysicalSize::new(WIDTH * 3 / 2, HEIGHT * 3 / 2));
     host.ui.render().unwrap();
@@ -789,7 +787,7 @@ fn shoot_system(window: &MinimalSoftwareWindow, out: &Path) {
     let plugin = system.plugin();
     let mut host = composed_on_current_platform(|h| h.place(place).plugin(plugin));
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::System(SystemCommand::Refresh));
     follow(&mut host);
     for key in [slint::platform::Key::DownArrow, slint::platform::Key::Return, slint::platform::Key::Return] {
@@ -804,20 +802,19 @@ fn shoot_system(window: &MinimalSoftwareWindow, out: &Path) {
 /// The launch splash of an emulator that lists its keyboard keys, left to right and right to
 /// left, as `default[-rtl]-splash-keys.png`.
 fn shoot_splash(window: &MinimalSoftwareWindow, out: &Path) {
-    let keymap: String = emu_kyty::KEYS
+    let emulator = emu_kyty::KEYS
         .iter()
-        .map(|(button, keys)| format!("[[keymap]]\nbutton = \"{button}\"\nkeys = \"{keys}\"\n"))
-        .collect();
+        .fold(FakeCatalog::new("emu-a").playable(), |emulator, (button, keys)| emulator.key(button, keys))
+        .games(["Alpha"]);
     for (direction, prefix) in [("ltr", "default"), ("rtl", "default-rtl")] {
-        let keymap = keymap.clone();
-        let mut host =
-            composed_on_current_platform(move |h| h.plugin(playable_games_with("emu-a", vec!["Alpha"], &keymap)));
+        let emulator = emulator.clone();
+        let mut host = composed_on_current_platform(move |h| h.plugin(emulator.build()));
         host.ui.start().unwrap();
         host.dispatch(Command::SetThemeOption { key: "direction".into(), value: direction.into() });
-        host.dispatch(Command::RefreshLibrary);
+        host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
         // No window yet: the game stays "starting", behind the splash.
-        host.test.desktop.no_windows();
-        host.dispatch(Command::Launch("emu-a:G0".parse().unwrap()));
+        host.test.windows.no_windows();
+        host.dispatch(Command::Session(SessionCmd::Launch("emu-a:G0".parse().unwrap())));
         host.load_images();
         shoot(window, &out.join(format!("{prefix}-splash-keys.png")));
     }
@@ -831,27 +828,57 @@ fn shoot_console_names(window: &MinimalSoftwareWindow, out: &Path) {
     for (direction, prefix) in [("ltr", "default"), ("rtl", "default-rtl")] {
         let mut host = composed_on_current_platform(|h| {
             h.first_run()
-                .plugin(console_emulator("emu-k", "PS5", "KytyPS5", "KytyPS5-2026-10-21-e2dd48a", vec!["Astro Drift"]))
-                .plugin(console_emulator("emu-s", "PS4", "shadPS4", "v.0.20.0", vec![]))
+                .plugin(
+                    FakeCatalog::new("emu-k")
+                        .named("PS5")
+                        .emulator("KytyPS5")
+                        .platform("PS5")
+                        .without_slots()
+                        .playable()
+                        .installed("KytyPS5-2026-10-21-e2dd48a")
+                        .games(["Astro Drift"])
+                        .build(),
+                )
+                .plugin(
+                    FakeCatalog::new("emu-s")
+                        .named("PS4")
+                        .emulator("shadPS4")
+                        .platform("PS5")
+                        .without_slots()
+                        .playable()
+                        .installed("v.0.20.0")
+                        .games([])
+                        .build(),
+                )
         });
         host.ui.start().unwrap();
         host.dispatch(Command::SetThemeOption { key: "direction".into(), value: direction.into() });
-        host.dispatch(Command::RefreshLibrary);
+        host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
         host.load_images();
         shoot(window, &out.join(format!("{prefix}-names-welcome.png")));
-        host.dispatch(Command::FinishWelcome);
+        host.dispatch(Command::Pref(Pref::Welcomed, true.into()));
         host.dispatch(Command::Navigate(Route::Emulators));
         host.load_images();
         shoot(window, &out.join(format!("{prefix}-names-emulators.png")));
         drop(host);
         // KytyPS5 not installed yet: a first play asks to install it.
         let mut host = composed_on_current_platform(|h| {
-            h.plugin(console_emulator("emu-k", "PS5", "KytyPS5", "", vec!["Astro Drift"]))
+            h.plugin(
+                FakeCatalog::new("emu-k")
+                    .named("PS5")
+                    .emulator("KytyPS5")
+                    .platform("PS5")
+                    .without_slots()
+                    .playable()
+                    .installed("")
+                    .games(["Astro Drift"])
+                    .build(),
+            )
         });
         host.ui.start().unwrap();
         host.dispatch(Command::SetThemeOption { key: "direction".into(), value: direction.into() });
-        host.dispatch(Command::RefreshLibrary);
-        host.dispatch(Command::Launch("emu-k:G0".parse().unwrap()));
+        host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
+        host.dispatch(Command::Session(SessionCmd::Launch("emu-k:G0".parse().unwrap())));
         host.load_images();
         shoot(window, &out.join(format!("{prefix}-names-install-prompt.png")));
     }
@@ -874,16 +901,12 @@ fn ps4_box_art() -> Vec<u8> {
 fn shoot_ps4_cover(window: &MinimalSoftwareWindow, out: &Path) {
     use slint::platform::Key;
     let mut host = composed_on_current_platform(|h| {
-        h.plugin(tested_games("emu-b", vec!["Paper Knights", "Quiet Orbit"])).plugin(store(
-            "store",
-            vec![("CUSA00000", 4.5, "")],
-            Some("https://art.example/ps4.png".into()),
-            Duration::ZERO,
-        ))
+        h.plugin(FakeCatalog::new("emu-b").tested().games(["Paper Knights", "Quiet Orbit"]).build())
+            .plugin(FakeStore::new("store").knows("CUSA00000", 4.5, "").icon("https://art.example/ps4.png").build())
     });
     host.test.http.serve("https://art.example/ps4.png", ps4_box_art());
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::Navigate(Route::Home));
     host.load_images();
     shoot(window, &out.join("default-ps4-home.png"));
@@ -949,15 +972,22 @@ fn library(home: &Path) -> Composed {
         h.home(home)
             .hardware(this_pc((1, 3)))
             .discover(&fixture_themes())
-            .plugin(games_on("emu-a", "PS5", vec!["Astro Drift", "Deep Lantern", "Ember Peaks", "Neon Harbor"]))
-            .plugin(games_on("emu-b", "PS4", vec!["Paper Knights", "Quiet Orbit"]))
+            .plugin(
+                FakeCatalog::new("emu-a")
+                    .system("PS5")
+                    .games(["Astro Drift", "Deep Lantern", "Ember Peaks", "Neon Harbor"])
+                    .build(),
+            )
+            .plugin(FakeCatalog::new("emu-b").system("PS4").games(["Paper Knights", "Quiet Orbit"]).build())
             // The real KytyPS5 plugin, for its Settings section and Emulators block.
-            .built_in(nexus_api::PluginByKind::emulator(emu_kyty::KytyPlugin))
-            .plugin(games_needing_an_emulator("emu-x", vec!["Starfall"]))
-            .plugin(playable_games("emu-p", vec!["Lumen Gate"]))
-            .plugin(games_on("emu-pc", "PC", vec![]).console("PC"))
+            .built_in(nexus_api::PluginBox::code(emu_kyty::KytyPlugin))
+            .plugin(
+                FakeCatalog::new("emu-x").named("Emu").playable().needing_its_emulator().games(["Starfall"]).build(),
+            )
+            .plugin(FakeCatalog::new("emu-p").playable().games(["Lumen Gate"]).build())
+            .plugin(FakeCatalog::new("emu-pc").system("PC").games([]).build().console("PC"))
             // The game catalog, for the games it offers.
-            .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+            .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
     // The sample catalogs, fetched from the catalog address.
@@ -977,7 +1007,7 @@ fn library(home: &Path) -> Composed {
         value: serde_json::json!({ "catalog_url": "https://xyz.dev/catalog" }),
     });
     host.catalogs_fetched();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::Select("emu-a:G1".parse().unwrap()));
     host.dispatch(Command::Search("a".into()));
     host
@@ -1001,18 +1031,14 @@ fn every_default_screen_renders_the_library() {
     shoot_sizes(&mut host, &window, &out);
     shoot_steam_offers(&mut host, &window, &out);
     // A first play asks before the emulator downloads.
-    host.dispatch(Command::Launch("emu-x:G0".parse().unwrap()));
+    host.dispatch(Command::Session(SessionCmd::Launch("emu-x:G0".parse().unwrap())));
     shoot(&window, &out.join("default-install-prompt.png"));
     host.dispatch(Command::CancelInstall);
     // A game runs; the PS button brought the launcher back in front of it.
-    host.dispatch(Command::Launch("emu-p:G0".parse().unwrap()));
-    let core = host.core().clone();
-    host.rt.block_on(async {
-        while !core.game_in_front() {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    });
-    host.dispatch(Command::ToggleFocus);
+    host.dispatch(Command::Session(SessionCmd::Launch("emu-p:G0".parse().unwrap())));
+    // The game watcher's rounds bring the game to the front.
+    run_until(&host, 5000, |core| core.game_in_front());
+    host.dispatch(Command::Session(SessionCmd::ToggleFocus));
     // The theme selects the running game: carry that out, as the app does.
     slint::platform::update_timers_and_animations();
     host.pump();

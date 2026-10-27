@@ -3,7 +3,7 @@
 
 use crate::common::*;
 use nexus_api::{ConfigScope, ReleaseList};
-use nexus_core::Command;
+use nexus_core::{Area, Command, Core};
 
 use nexus_testkit::{FakeHost, TestCore};
 
@@ -53,7 +53,7 @@ fn base() -> String {
 /// on or off.
 async fn boot_with(refresh: bool, pvc: String) -> TestCore {
     let t = FakeHost::new()
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .boot_core()
         .await;
     serve(&t, refresh, pvc).await;
@@ -89,25 +89,31 @@ async fn list(t: &TestCore) -> ReleaseList {
     provided.releases.unwrap().releases(&nexus_api::Console::new("PS5").unwrap()).await.unwrap().expect("a PS5 catalog")
 }
 
-/// The PS5 catalog once the copy fetched from the catalog address is in, or after a second:
-/// the first ask gets the bundled copy, and the fetch runs in the background.
+/// The PS5 catalog once the copy fetched from the catalog address is in, or after a second of
+/// the clock: the first ask gets the bundled copy, and the fetch runs in the background.
 async fn fetched(t: &TestCore) -> ReleaseList {
     for _ in 0..100 {
         if list(t).await.source == nexus_api::ReleaseSource::Fetched {
             break;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        t.clock.advance(TICK).await;
     }
     list(t).await
 }
 
-/// Waits until `done`, or a second passes. `true` when it is done.
-async fn until(mut done: impl FnMut() -> bool) -> bool {
+/// How far the clock moves between two looks at what the Game Catalog did: its fetches and
+/// refreshes run in its own task, which says only that the catalogs changed.
+const TICK: std::time::Duration = std::time::Duration::from_millis(10);
+
+/// Waits until `done`, or a second of the clock passes. `true` when it is done. For what the
+/// Game Catalog does outside the core, its files and its HTTP requests, which no core change
+/// announces; [`TestCore::until`] waits on the core's own state.
+async fn until(t: &TestCore, mut done: impl FnMut() -> bool) -> bool {
     for _ in 0..100 {
         if done() {
             return true;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        t.clock.advance(TICK).await;
     }
     false
 }
@@ -130,7 +136,7 @@ async fn changed(events: &mut futures::stream::BoxStream<'static, nexus_api::Eve
 /// The PS5 catalog once the refresh its first ask starts has kept its copy, or after a second.
 async fn refreshed(t: &TestCore) -> ReleaseList {
     list(t).await;
-    until(|| t.data_dir().join(format!("{KEPT}.meta.json")).exists()).await;
+    until(t, || t.data_dir().join(format!("{KEPT}.meta.json")).exists()).await;
     list(t).await
 }
 
@@ -260,9 +266,9 @@ async fn a_failed_refresh_tries_again_after_a_back_off_not_every_second() {
     t.http.serve(&pvc_url(), b"{ not json".to_vec());
     list(&t).await;
     assert!(changed(&mut events).await, "the second refresh fails");
-    tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
+    t.clock.advance(std::time::Duration::from_millis(2500)).await;
     list(&t).await;
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    t.clock.advance(std::time::Duration::from_millis(100)).await;
     let asked = t.http.sent().iter().filter(|u| **u == pvc_url()).count();
     assert_eq!(asked, 2, "no new try before the back-off ends, also on an ask: {:?}", t.http.sent());
 }
@@ -271,8 +277,8 @@ async fn a_failed_refresh_tries_again_after_a_back_off_not_every_second() {
 async fn a_refresh_that_can_t_keep_its_copy_is_no_change_and_backs_off() {
     // KytyPS5, so the core itself reads the catalogs again on each change.
     let t = FakeHost::new()
-        .plugin(offering_emulator(""))
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .plugin(FakeCatalog::kyty().playable().build())
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .boot_core()
         .await;
     // A folder where the meta file goes: the copy is written, its meta file is not.
@@ -281,7 +287,7 @@ async fn a_refresh_that_can_t_keep_its_copy_is_no_change_and_backs_off() {
     assert!(feed_asked(&t).await, "the refresh runs");
     let row = refresh_row(&t, "PS5: Failed").await;
     assert!(row.starts_with("PS5: Failed: could not keep the refreshed ps5 catalog"), "{row}");
-    tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+    t.clock.advance(std::time::Duration::from_millis(1000)).await;
     let asked = t.http.sent().iter().filter(|u| **u == feed_url()).count();
     assert_eq!(asked, 1, "no new refresh before the back-off ends: {:?}", t.http.sent());
 }
@@ -290,7 +296,7 @@ async fn a_refresh_that_can_t_keep_its_copy_is_no_change_and_backs_off() {
 async fn a_new_base_copy_keeps_the_refreshed_releases_until_its_own_refresh_works() {
     // A failed refresh tries again after a second here, not five minutes.
     let plugin = release_catalog::ReleaseCatalog::default().retry_after(std::time::Duration::from_secs(1));
-    let t = FakeHost::new().built_in(nexus_api::PluginByKind::service(plugin)).boot_core().await;
+    let t = FakeHost::new().built_in(nexus_api::PluginBox::code(plugin)).boot_core().await;
     serve(&t, true, PVC_ANSWER.to_owned()).await;
     let mut events = t.core.events();
     list(&t).await;
@@ -350,7 +356,7 @@ async fn a_console_named_like_the_kept_catalog_sources_keeps_its_own_copy() {
         if list.is_some() {
             break;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        t.clock.advance(TICK).await;
     }
     assert_eq!(list.expect("its catalog").releases.len(), 5);
     let (sections, _) = page(&t).await;
@@ -377,7 +383,7 @@ async fn one_refresh_runs_at_a_time() {
     assert!(feed_asked(&t).await, "the first refresh runs");
     // Refresh now while the first refresh waits for the forum list.
     t.core.dispatch(refresh_now()).await.unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    t.clock.advance(std::time::Duration::from_millis(100)).await;
     assert_eq!(t.http.sent().iter().filter(|u| **u == feed_url()).count(), 1, "no second refresh while one runs");
     gate.release();
     assert!(changed(&mut events).await, "the fetch of the catalog address ended before");
@@ -411,12 +417,18 @@ async fn the_meta_file_names_the_refreshed_copy_it_goes_with_and_older_copies_go
 async fn in_a_long_session_the_refresh_runs_again_once_the_copy_is_old_with_no_ask() {
     // A copy is fresh for a second here, not six hours.
     let plugin = release_catalog::ReleaseCatalog::fresh_for(std::time::Duration::from_secs(1));
-    let t = FakeHost::new().built_in(nexus_api::PluginByKind::service(plugin)).boot_core().await;
+    let t = FakeHost::new().built_in(nexus_api::PluginBox::code(plugin)).boot_core().await;
     serve(&t, true, PVC_ANSWER.to_owned()).await;
     let mut events = t.core.events();
     list(&t).await;
     assert!(changed(&mut events).await, "the fetch of the catalog address ends");
     assert!(changed(&mut events).await, "the first refresh ends");
+    // The refreshed copy is old now: its meta file says it was made long ago. The copies'
+    // ages go by the calendar, which the fake clock doesn't move.
+    let path = t.data_dir().join(format!("{KEPT}.meta.json"));
+    let mut meta = kept(&t, ".meta");
+    meta["refreshed"] = 0.into();
+    std::fs::write(&path, meta.to_string()).unwrap();
     // The fetched copy also gets old each second, and its fetch publishes a change of its own:
     // wait for the second feed ask, not for a change.
     let mut again = false;
@@ -425,7 +437,7 @@ async fn in_a_long_session_the_refresh_runs_again_once_the_copy_is_old_with_no_a
         if again {
             break;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        t.clock.advance(TICK).await;
     }
     assert!(again, "the refresh ran again: {:?}", t.http.sent());
     assert_eq!(t.http.sent().iter().filter(|u| **u == feed_url()).count(), 2);
@@ -435,7 +447,7 @@ async fn in_a_long_session_the_refresh_runs_again_once_the_copy_is_old_with_no_a
 async fn the_refresh_task_ends_when_the_plugin_is_turned_off() {
     // A copy is fresh for a second here, so the task would refresh each second.
     let plugin = release_catalog::ReleaseCatalog::fresh_for(std::time::Duration::from_secs(1));
-    let t = FakeHost::new().built_in(nexus_api::PluginByKind::service(plugin)).boot_core().await;
+    let t = FakeHost::new().built_in(nexus_api::PluginBox::code(plugin)).boot_core().await;
     serve(&t, true, PVC_ANSWER.to_owned()).await;
     // A reference to the catalogs that outlives the plugin.
     let provided = t.core.kernel().provided(&id("release-catalog")).await.unwrap();
@@ -445,7 +457,7 @@ async fn the_refresh_task_ends_when_the_plugin_is_turned_off() {
 
     t.core.kernel().deactivate(&id("release-catalog")).await.unwrap();
     let asked = t.http.sent().len();
-    tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
+    t.clock.advance(std::time::Duration::from_millis(2500)).await;
     assert_eq!(t.http.sent().len(), asked, "nothing is fetched once the plugin is off: {:?}", t.http.sent());
     drop(releases);
 }
@@ -506,7 +518,7 @@ async fn refresh_now_asks_the_forums_again_while_the_copy_is_fresh() {
     };
     t.core.dispatch(action).await.unwrap();
     let twice = || t.http.sent().iter().filter(|u| **u == feed_url()).count() == 2;
-    assert!(until(twice).await, "the feed was asked again: {:?}", t.http.sent());
+    assert!(until(&t, twice).await, "the feed was asked again: {:?}", t.http.sent());
 }
 
 #[tokio::test]
@@ -522,7 +534,7 @@ async fn a_failed_refresh_shows_its_reason() {
 async fn with_downloads_only_through_a_vpn_the_refresh_waits_for_the_vpn() {
     let t = boot(true).await;
     t.network.down("wg-se");
-    t.core.dispatch(Command::SetVpnOnly(true)).await.unwrap();
+    t.core.dispatch(Command::Vpn(nexus_core::VpnCmd::SetOnly(true))).await.unwrap();
     assert_eq!(fetched(&t).await.releases.len(), 5, "the copy with no refresh");
     let row = refresh_row(&t, "PS5: Waiting for the VPN").await;
     assert!(row.starts_with("PS5: Waiting for the VPN"), "{row}");
@@ -545,7 +557,7 @@ async fn with_downloads_only_through_a_vpn_the_refresh_waits_for_the_vpn() {
 #[tokio::test]
 async fn with_downloads_only_through_a_vpn_and_no_vpn_at_all_the_refresh_is_skipped() {
     let t = boot(true).await;
-    t.core.dispatch(Command::SetVpnOnly(true)).await.unwrap();
+    t.core.dispatch(Command::Vpn(nexus_core::VpnCmd::SetOnly(true))).await.unwrap();
     list(&t).await;
     let row = refresh_row(&t, "PS5: Skipped").await;
     assert!(row.starts_with("PS5: Skipped: there is no VPN"), "{row}");
@@ -555,7 +567,7 @@ async fn with_downloads_only_through_a_vpn_and_no_vpn_at_all_the_refresh_is_skip
 #[tokio::test]
 async fn where_downloads_can_t_be_bound_to_a_vpn_the_page_says_why_the_refresh_ran_without_one() {
     let t = boot(true).await;
-    t.core.dispatch(Command::SetVpnOnly(true)).await.unwrap();
+    t.core.dispatch(Command::Vpn(nexus_core::VpnCmd::SetOnly(true))).await.unwrap();
     // The setting is on, and then this computer can't bind traffic to the VPN.
     t.network.unavailable("Not available on Windows");
     list(&t).await;
@@ -568,12 +580,12 @@ async fn where_downloads_can_t_be_bound_to_a_vpn_the_page_says_why_the_refresh_r
 /// a VPN" on while the VPN `wg-se` is down. Then the catalog is served with the refresh on or off.
 async fn boot_waiting_for_the_vpn(refresh: bool) -> TestCore {
     let t = FakeHost::new()
-        .plugin(offering_emulator(""))
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .plugin(FakeCatalog::kyty().playable().build())
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .boot_core()
         .await;
     t.network.down("wg-se");
-    t.core.dispatch(Command::SetVpnOnly(true)).await.unwrap();
+    t.core.dispatch(Command::Vpn(nexus_core::VpnCmd::SetOnly(true))).await.unwrap();
     serve(&t, refresh, PVC_ANSWER.to_owned()).await;
     t
 }
@@ -584,7 +596,7 @@ async fn feed_asked(t: &TestCore) -> bool {
         if t.http.sent().iter().any(|u| **u == feed_url()) {
             return true;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        t.clock.advance(TICK).await;
     }
     false
 }
@@ -598,7 +610,7 @@ async fn refresh_row(t: &TestCore, start: &str) -> String {
         if row.starts_with(start) {
             break;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        t.clock.advance(TICK).await;
     }
     row
 }
@@ -631,22 +643,17 @@ fn offers(t: &TestCore) -> Vec<String> {
     titles
 }
 
-/// The Catalog's games once there are `count`, or after a second.
+/// The Catalog's games once there are `count`.
 async fn offers_once(t: &TestCore, count: usize) -> Vec<String> {
-    for _ in 0..100 {
-        if offers(t).len() == count {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
+    t.until(Area::Catalogs, |_| offers(t).len() == count).await;
     offers(t)
 }
 
 #[tokio::test]
 async fn a_slow_forum_still_gives_the_catalog_at_once_and_the_refresh_comes_after() {
     let t = FakeHost::new()
-        .plugin(offering_emulator(""))
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .plugin(FakeCatalog::kyty().playable().build())
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .boot_core()
         .await;
     // The grid is current while the Catalog is the screen.
@@ -658,7 +665,7 @@ async fn a_slow_forum_still_gives_the_catalog_at_once_and_the_refresh_comes_afte
     assert_eq!(fetched.len(), 5, "the catalog with no refresh, while the forum list is held: {fetched:?}");
 
     // Past the call timeout, the held refresh is no error.
-    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    t.clock.advance(std::time::Duration::from_millis(600)).await;
     assert!(t.core.view().notices.is_empty(), "{:?}", t.core.view().notices);
     assert_eq!(offers(&t).len(), 5);
 
@@ -694,7 +701,7 @@ fn pc_list(rows: &[(&str, u32, char)]) -> String {
 /// and each forum's feed and forum list. The Wine forum list is served only with `wine`.
 async fn boot_pc(wine: bool) -> TestCore {
     let t = FakeHost::new()
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .boot_core()
         .await;
     let sources = serde_json::json!({ "pc": { "platform": "PC", "forums": [
@@ -723,7 +730,7 @@ async fn boot_pc(wine: bool) -> TestCore {
         .unwrap();
     let provided = t.core.kernel().provided(&id("release-catalog")).await.unwrap();
     provided.releases.unwrap().releases(&nexus_api::Console::new("PC").unwrap()).await.unwrap();
-    until(|| t.data_dir().join(format!("{PC_KEPT}.meta.json")).exists()).await;
+    until(&t, || t.data_dir().join(format!("{PC_KEPT}.meta.json")).exists()).await;
     t
 }
 
@@ -769,8 +776,8 @@ fn notices(t: &TestCore) -> Vec<(String, String)> {
 #[tokio::test]
 async fn a_refresh_that_adds_releases_says_how_many_and_the_first_copy_says_nothing() {
     let t = FakeHost::new()
-        .plugin(offering_emulator(""))
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .plugin(FakeCatalog::kyty().playable().build())
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .boot_core()
         .await;
     // The grid is current while the Catalog is the screen.
@@ -783,7 +790,7 @@ async fn a_refresh_that_adds_releases_says_how_many_and_the_first_copy_says_noth
     // The refresh adds Astro's new release, drops Echo's and puts Bolt's torrent uploaded again
     // in place of its old one: one new release.
     gate.release();
-    assert!(until(|| !notices(&t).is_empty()).await, "a notice");
+    t.until(Area::Notices, |_| !notices(&t).is_empty()).await;
     assert_eq!(notices(&t), [("1 new release in the Catalog".to_owned(), "Open the Catalog".to_owned())]);
     let kind = t.core.view().notice_cards[0].kind;
     assert_eq!(kind, nexus_ui_api::NoticeKind::Info);
@@ -793,8 +800,8 @@ async fn a_refresh_that_adds_releases_says_how_many_and_the_first_copy_says_noth
 /// refresh on or off.
 async fn on_the_catalog(refresh: bool) -> TestCore {
     let t = FakeHost::new()
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
-        .plugin(games_on("emu-kyty", "PS5", vec![]).console("PS5"))
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
+        .plugin(FakeCatalog::new("emu-kyty").system("PS5").games([]).build().console("PS5"))
         .boot_core()
         .await;
     serve(&t, refresh, PVC_ANSWER.to_owned()).await;
@@ -834,27 +841,25 @@ async fn with_the_refresh_off_the_catalog_s_button_says_to_turn_it_on_in_setting
 #[tokio::test]
 async fn the_catalog_s_refresh_button_runs_refresh_now_and_says_refreshing_then_when_it_ran() {
     let t = on_the_catalog(true).await;
-    let refreshed = || catalog_status(&t).first().is_some_and(|s| s.starts_with("Refreshed "));
-    assert!(until(refreshed).await, "the first refresh ran: {:?}", catalog_status(&t));
+    let refreshed = |_: &Core| catalog_status(&t).first().is_some_and(|s| s.starts_with("Refreshed "));
+    t.until(Area::Catalogs, refreshed).await;
     assert_eq!(catalog_buttons(&t), [("Refresh".to_owned(), "refresh-now".to_owned())]);
 
     let gate = t.http.hold_next(&pvc_url());
     t.core.dispatch(refresh_now()).await.unwrap();
     assert_eq!(catalog_status(&t), ["Refreshing…"]);
     gate.release();
-    let refreshed = || catalog_status(&t).first().is_some_and(|s| s.starts_with("Refreshed "));
-    assert!(until(refreshed).await, "it says when it ran: {:?}", catalog_status(&t));
+    t.until(Area::Catalogs, refreshed).await;
 }
 
 #[tokio::test]
 async fn the_catalog_says_why_its_refresh_did_not_run() {
     let t = FakeHost::new()
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
-        .plugin(games_on("emu-kyty", "PS5", vec![]).console("PS5"))
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
+        .plugin(FakeCatalog::new("emu-kyty").system("PS5").games([]).build().console("PS5"))
         .boot_core()
         .await;
     serve(&t, true, "{ not json".to_owned()).await;
     t.core.dispatch(Command::Navigate(nexus_core::Route::Catalog)).await.unwrap();
-    let failed = || catalog_status(&t).first().is_some_and(|s| s.starts_with("PS5: Failed: "));
-    assert!(until(failed).await, "{:?}", catalog_status(&t));
+    t.until(Area::Catalogs, |_| catalog_status(&t).first().is_some_and(|s| s.starts_with("PS5: Failed: "))).await;
 }

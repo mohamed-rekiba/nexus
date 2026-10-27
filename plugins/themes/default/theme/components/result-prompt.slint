@@ -1,4 +1,5 @@
 import { Vm, Host } from "../types.slint";
+import { Commands } from "../commands.slint";
 import { Tokens } from "../tokens.slint";
 import { Look } from "look.slint";
 import { Icon } from "icon.slint";
@@ -26,7 +27,7 @@ export global Ask {
         true
     }
     public function answer(index: int) {
-        Host.report-result(root.items[index].result);
+        Commands.report-result(root.items[index].result);
         root.focus = 0;
     }
 }

@@ -3,7 +3,7 @@ id = "system"
 kind = "system"
 name = "This PC"
 version = "0.1.0"
-host_api = "^0.1"
+host_api = "^0.2"
 platforms = ["linux", "macos", "windows"]
 # Linux's. On macOS and Windows the plugin provides vpn and power only (see src/lib.rs).
 capabilities = ["network", "vpn", "bluetooth", "audio", "power", "os_updates", "os_install"]

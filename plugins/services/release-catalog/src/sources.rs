@@ -16,8 +16,11 @@
 //!
 //! A file reads only when all of it does: every forum's `url` starts with `https://`, because
 //! it goes into the `source` of each topic the refresh adds.
+//!
+//! The catalog sources are the one place that says what a forum's topics are for (see
+//! [`Forums`]): a catalog file names its forum, and [`crate::format`] looks it up here.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use nexus_api::Console;
 use nexus_api::serde::Deserialize;
@@ -95,6 +98,55 @@ impl Sources {
     }
 }
 
+/// What a forum's topics are for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ForumFacts {
+    /// The console of the forum's catalog (`PS5`).
+    pub console: Console,
+    /// For a PC forum, the system its games are for (`linux`).
+    pub system: Option<String>,
+    /// Its games are packed with Wine.
+    pub wine: bool,
+}
+
+/// Each forum of the catalog sources, by its `f=` number and by its key, with what its topics
+/// are for.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Forums {
+    by_number: HashMap<String, ForumFacts>,
+    by_key: HashMap<String, ForumFacts>,
+}
+
+impl Forums {
+    /// The forum a catalog file or a topic names: the one of the `f=` number in its `source`,
+    /// else, with no number there, the one whose key is its `platform` (`ps5`, `wine`), as the
+    /// collector's listing of one forum names it. `None` for a forum the sources don't have.
+    pub fn named(&self, source: Option<&str>, platform: Option<&str>) -> Option<&ForumFacts> {
+        match source.and_then(forum_number) {
+            Some(number) => self.by_number.get(&number),
+            None => self.by_key.get(&platform?.trim().to_ascii_lowercase()),
+        }
+    }
+}
+
+impl Sources {
+    /// What each forum's topics are for.
+    pub fn forums(&self) -> Forums {
+        let mut forums = Forums::default();
+        for catalog in self.catalogs.values() {
+            for forum in &catalog.forums {
+                let facts =
+                    ForumFacts { console: catalog.console.clone(), system: forum.system.clone(), wine: forum.wine };
+                if let Some(number) = forum_number(&forum.url) {
+                    forums.by_number.insert(number, facts.clone());
+                }
+                forums.by_key.insert(forum.key.to_ascii_lowercase(), facts);
+            }
+        }
+        forums
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,5 +181,17 @@ mod tests {
         let keys: Vec<&str> = kept.catalogs["pc"].forums.iter().map(|f| f.key.as_str()).collect();
         assert_eq!(keys, ["linux"]);
         assert_eq!(kept.catalogs["ps5"].forums.len(), 1);
+    }
+
+    #[test]
+    fn a_forum_is_found_by_its_number_else_by_its_key() {
+        let forums = read(SOURCES.as_bytes()).unwrap().forums();
+        let linux = forums.named(Some("https://xyz.net/f?f=2"), Some("ps5")).unwrap();
+        assert_eq!((linux.console.as_str(), linux.system.as_deref(), linux.wine), ("PC", Some("linux"), false));
+        let wine = forums.named(None, Some("Wine")).unwrap();
+        assert_eq!((wine.console.as_str(), wine.wine), ("PC", true), "a forum with no f= number has its key");
+        assert_eq!(forums.named(Some("https://xyz.dev/catalog"), Some("ps5")).unwrap().console.as_str(), "PS5");
+        assert_eq!(forums.named(Some("https://xyz.net/f?f=9"), Some("ps5")), None, "a number the sources don't have");
+        assert_eq!(forums.named(None, None), None);
     }
 }

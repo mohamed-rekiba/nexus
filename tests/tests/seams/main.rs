@@ -26,6 +26,7 @@ mod release_archives;
 mod releases;
 mod screenshots;
 mod shadps4;
+mod shell;
 mod slots;
 mod sounds;
 mod steam;

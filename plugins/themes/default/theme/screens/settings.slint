@@ -1,4 +1,5 @@
 import { Vm, Host } from "../types.slint";
+import { Commands } from "../commands.slint";
 import { Assets } from "../assets.slint";
 import { Tokens } from "../tokens.slint";
 import { Look } from "../components/look.slint";
@@ -27,7 +28,7 @@ export component SettingsScreen inherits Rectangle {
     property <bool> in-view: root.entered && root.open;
     background: root.in-view ? #03050ccc : #03050c00;
     animate background { duration: Tokens.motion-normal; }
-    TouchArea { enabled: root.open; clicked => { Host.back(); } }
+    TouchArea { enabled: root.open; clicked => { Commands.back(); } }
 
     sheet-panel := Rectangle {
         // Sized by the text scale, so on a small window the panel keeps its text readable.
@@ -62,7 +63,7 @@ export component SettingsScreen inherits Rectangle {
                 HorizontalLayout {
                     alignment: Look.rtl ? end : start;
                     padding-bottom: 20 * Look.px;
-                    BackButton { pad: Vm.input-mode == "gamepad"; clicked => { Host.back(); } }
+                    BackButton { pad: Vm.input-mode == "gamepad"; clicked => { Commands.back(); } }
                 }
                 Text { text: "Settings"; font-size: 44 * Look.px; font-weight: 600; color: Tokens.color-text; horizontal-alignment: Look.rtl ? right : left; }
                 Text { text: "Changes are saved automatically"; font-size: 18 * Look.tpx; color: Look.text3; horizontal-alignment: Look.rtl ? right : left; }
@@ -84,11 +85,11 @@ export component SettingsScreen inherits Rectangle {
                     last: true;
                     accessible-role: button;
                     accessible-label: "rescan";
-                    accessible-action-default => { Host.refresh-library(); }
+                    accessible-action-default => { Commands.refresh-library(); }
                     reveal(y, h) => { root.reveal(y, h); }
-                    clicked => { Prefs.section = 0; Prefs.row = Vm.folders.length; Host.refresh-library(); }
+                    clicked => { Prefs.section = 0; Prefs.row = Vm.folders.length; Commands.refresh-library(); }
                     property <int> seen: Prefs.serial;
-                    changed seen => { if (self.focused && Prefs.pending == 0) { Host.refresh-library(); } }
+                    changed seen => { if (self.focused && Prefs.pending == 0) { Commands.refresh-library(); } }
                     Value { text: Vm.home.loading ? "Scanning…" : ""; }
                 }
 
@@ -104,12 +105,12 @@ export component SettingsScreen inherits Rectangle {
                     accessible-role: button;
                     accessible-label: "auto-update";
                     accessible-value: Vm.auto-update ? "on" : "off";
-                    accessible-action-default => { Host.set-auto-update(!Vm.auto-update); }
+                    accessible-action-default => { Commands.set-auto-update(!Vm.auto-update); }
                     reveal(y, h) => { root.reveal(y, h); }
-                    clicked => { Prefs.section = 1; Prefs.row = 0; Host.set-auto-update(!Vm.auto-update); }
+                    clicked => { Prefs.section = 1; Prefs.row = 0; Commands.set-auto-update(!Vm.auto-update); }
                     property <int> seen: Prefs.serial;
                     changed seen => {
-                        if (self.focused && (Prefs.pending == 0 || (Prefs.pending > 0) != Vm.auto-update)) { Host.set-auto-update(!Vm.auto-update); }
+                        if (self.focused && (Prefs.pending == 0 || (Prefs.pending > 0) != Vm.auto-update)) { Commands.set-auto-update(!Vm.auto-update); }
                     }
                     Value { kind: "toggle"; on: Vm.auto-update; }
                 }
@@ -131,9 +132,9 @@ export component SettingsScreen inherits Rectangle {
                     property <int> seen: Prefs.serial;
                     changed seen => { if (self.focused && Prefs.pending == 0) { self.act(); } }
                     function act() {
-                        if (self.state == "available") { Host.download-launcher-update(); }
+                        if (self.state == "available") { Commands.download-launcher-update(); }
                         else if (self.state == "ready" || self.state == "installed") { Host.restart(); }
-                        else if (self.state != "off" && self.state != "checking" && self.state != "downloading") { Host.check-launcher-update(); }
+                        else if (self.state != "off" && self.state != "checking" && self.state != "downloading") { Commands.check-launcher-update(); }
                     }
                     Value {
                         text: update.state == "available" ? (Vm.launcher-update.method == "package" ? "Update" : "Download")
@@ -154,12 +155,12 @@ export component SettingsScreen inherits Rectangle {
                     accessible-role: button;
                     accessible-label: "fullscreen";
                     accessible-value: Vm.fullscreen ? "on" : "off";
-                    accessible-action-default => { Host.set-fullscreen(!Vm.fullscreen); }
+                    accessible-action-default => { Commands.set-fullscreen(!Vm.fullscreen); }
                     reveal(y, h) => { root.reveal(y, h); }
-                    clicked => { Prefs.section = 2; Prefs.row = 0; Host.set-fullscreen(!Vm.fullscreen); }
+                    clicked => { Prefs.section = 2; Prefs.row = 0; Commands.set-fullscreen(!Vm.fullscreen); }
                     property <int> seen: Prefs.serial;
                     changed seen => {
-                        if (self.focused && (Prefs.pending == 0 || (Prefs.pending > 0) != Vm.fullscreen)) { Host.set-fullscreen(!Vm.fullscreen); }
+                        if (self.focused && (Prefs.pending == 0 || (Prefs.pending > 0) != Vm.fullscreen)) { Commands.set-fullscreen(!Vm.fullscreen); }
                     }
                     Value { kind: "toggle"; on: Vm.fullscreen; }
                 }
@@ -183,7 +184,7 @@ export component SettingsScreen inherits Rectangle {
                     changed seen => { if (self.focused) { self.step(Prefs.pending == 0 ? 1 : Prefs.pending, Prefs.pending == 0); } }
                     function step(delta: int, round: bool) {
                         let next = round && self.tenths + delta > 14 ? 8 : Math.clamp(self.tenths + delta, 8, 14);
-                        Host.set-scale(next / 10);
+                        Commands.set-scale(next / 10);
                     }
                     Value { kind: "choice"; text: (size.tenths * 10) + "%"; focused: parent.focused; }
                 }
@@ -194,12 +195,12 @@ export component SettingsScreen inherits Rectangle {
                     accessible-role: button;
                     accessible-label: "return-on-exit";
                     accessible-value: Vm.return-on-exit ? "on" : "off";
-                    accessible-action-default => { Host.set-return-on-exit(!Vm.return-on-exit); }
+                    accessible-action-default => { Commands.set-return-on-exit(!Vm.return-on-exit); }
                     reveal(y, h) => { root.reveal(y, h); }
-                    clicked => { Prefs.section = 2; Prefs.row = 2; Host.set-return-on-exit(!Vm.return-on-exit); }
+                    clicked => { Prefs.section = 2; Prefs.row = 2; Commands.set-return-on-exit(!Vm.return-on-exit); }
                     property <int> seen: Prefs.serial;
                     changed seen => {
-                        if (self.focused && (Prefs.pending == 0 || (Prefs.pending > 0) != Vm.return-on-exit)) { Host.set-return-on-exit(!Vm.return-on-exit); }
+                        if (self.focused && (Prefs.pending == 0 || (Prefs.pending > 0) != Vm.return-on-exit)) { Commands.set-return-on-exit(!Vm.return-on-exit); }
                     }
                     Value { kind: "toggle"; on: Vm.return-on-exit; }
                 }
@@ -209,13 +210,13 @@ export component SettingsScreen inherits Rectangle {
                     accessible-role: button;
                     accessible-label: "sounds";
                     accessible-value: Vm.sounds ? "on" : "off";
-                    accessible-action-default => { Host.set-sounds(!Vm.sounds); }
+                    accessible-action-default => { Commands.set-sounds(!Vm.sounds); }
                     last: false;
                     reveal(y, h) => { root.reveal(y, h); }
-                    clicked => { Prefs.section = 2; Prefs.row = 3; Host.set-sounds(!Vm.sounds); }
+                    clicked => { Prefs.section = 2; Prefs.row = 3; Commands.set-sounds(!Vm.sounds); }
                     property <int> seen: Prefs.serial;
                     changed seen => {
-                        if (self.focused && (Prefs.pending == 0 || (Prefs.pending > 0) != Vm.sounds)) { Host.set-sounds(!Vm.sounds); }
+                        if (self.focused && (Prefs.pending == 0 || (Prefs.pending > 0) != Vm.sounds)) { Commands.set-sounds(!Vm.sounds); }
                     }
                     Value { kind: "toggle"; on: Vm.sounds; }
                 }
@@ -229,12 +230,12 @@ export component SettingsScreen inherits Rectangle {
                     accessible-label: "start-at-login";
                     accessible-value: Vm.start-at-login ? "on" : "off";
                     accessible-description: Vm.start-at-login-error;
-                    accessible-action-default => { Host.set-start-at-login(!Vm.start-at-login); }
+                    accessible-action-default => { Commands.set-start-at-login(!Vm.start-at-login); }
                     reveal(y, h) => { root.reveal(y, h); }
-                    clicked => { Prefs.section = 2; Prefs.row = 4; Host.set-start-at-login(!Vm.start-at-login); }
+                    clicked => { Prefs.section = 2; Prefs.row = 4; Commands.set-start-at-login(!Vm.start-at-login); }
                     property <int> seen: Prefs.serial;
                     changed seen => {
-                        if (self.focused && (Prefs.pending == 0 || (Prefs.pending > 0) != Vm.start-at-login)) { Host.set-start-at-login(!Vm.start-at-login); }
+                        if (self.focused && (Prefs.pending == 0 || (Prefs.pending > 0) != Vm.start-at-login)) { Commands.set-start-at-login(!Vm.start-at-login); }
                     }
                     Value { kind: "toggle"; on: Vm.start-at-login; }
                 }
@@ -259,7 +260,7 @@ export component SettingsScreen inherits Rectangle {
                     }
                     function step(delta: int) {
                         let next = Math.mod(Math.max(self.at, 0) + delta + Vm.monitors.length, Vm.monitors.length);
-                        Host.set-monitor(Vm.monitors[next]);
+                        Commands.set-monitor(Vm.monitors[next]);
                     }
                     Value { kind: "choice"; text: Vm.monitor != "" ? Vm.monitor : "The one it is on"; focused: parent.focused; }
                 }
@@ -305,7 +306,7 @@ export component SettingsScreen inherits Rectangle {
                         if (self.focused && (Prefs.pending == 0 || (Prefs.pending > 0) != Vm.vpn.only)) { self.flip(); }
                     }
                     function flip() {
-                        if (Vm.vpn.problem == "") { Host.set-vpn-only(!Vm.vpn.only); }
+                        if (Vm.vpn.problem == "") { Commands.set-vpn-only(!Vm.vpn.only); }
                     }
                     Value { kind: "toggle"; on: Vm.vpn.only; }
                 }
@@ -331,11 +332,11 @@ export component SettingsScreen inherits Rectangle {
                     changed seen => { if (self.focused && Prefs.pending == 0) { self.act(); } }
                     function act() {
                         if (!Vm.vpn.finds) {
-                            Host.set-vpn(self.picked ? "" : vpn.name);
+                            Commands.set-vpn(self.picked ? "" : vpn.name);
                         } else if (vpn.switchable && vpn.connected) {
-                            Host.disconnect-vpn(vpn.name);
+                            Commands.disconnect-vpn(vpn.name);
                         } else if (vpn.switchable) {
-                            Host.connect-vpn(vpn.name);
+                            Commands.connect-vpn(vpn.name);
                         }
                     }
                     Value {
@@ -376,7 +377,7 @@ export component SettingsScreen inherits Rectangle {
                         Prefs.editing = true;
                     }
                     if !import.typing : Value { text: "Add"; tone: 3; }
-                    if import.typing : Editor { horizontal-stretch: 2; done(text) => { Host.import-vpn(text); } }
+                    if import.typing : Editor { horizontal-stretch: 2; done(text) => { Commands.import-vpn(text); } }
                 }
                 Row {
                     label: "Keep sharing finished downloads";
@@ -386,12 +387,12 @@ export component SettingsScreen inherits Rectangle {
                     accessible-role: button;
                     accessible-label: "seed-downloads";
                     accessible-value: Vm.seed-downloads ? "on" : "off";
-                    accessible-action-default => { Host.set-seed-downloads(!Vm.seed-downloads); }
+                    accessible-action-default => { Commands.set-seed-downloads(!Vm.seed-downloads); }
                     reveal(y, h) => { root.reveal(y, h); }
-                    clicked => { Prefs.section = 3; Prefs.row = Prefs.share-row; Host.set-seed-downloads(!Vm.seed-downloads); }
+                    clicked => { Prefs.section = 3; Prefs.row = Prefs.share-row; Commands.set-seed-downloads(!Vm.seed-downloads); }
                     property <int> seen: Prefs.serial;
                     changed seen => {
-                        if (self.focused && (Prefs.pending == 0 || (Prefs.pending > 0) != Vm.seed-downloads)) { Host.set-seed-downloads(!Vm.seed-downloads); }
+                        if (self.focused && (Prefs.pending == 0 || (Prefs.pending > 0) != Vm.seed-downloads)) { Commands.set-seed-downloads(!Vm.seed-downloads); }
                     }
                     Value { kind: "toggle"; on: Vm.seed-downloads; }
                 }
@@ -526,7 +527,7 @@ export component SettingsScreen inherits Rectangle {
                     property <int> seen: Prefs.serial;
                     changed seen => { if (self.focused && Prefs.pending == 0) { self.act(); } }
                     function act() {
-                        if (Vm.system.os-update == "staged") { Host.restart-pc(); } else { Host.check-os-update(); }
+                        if (Vm.system.os-update == "staged") { Commands.restart-pc(); } else { Commands.check-os-update(); }
                     }
                     Value {
                         text: Vm.system.os-update == "staged" ? "Restart" : Vm.system.os-update == "checking" ? "" : "Check now";
@@ -590,7 +591,7 @@ export component SettingsScreen inherits Rectangle {
                     function act() {
                         if (!self.armed) { self.armed = true; return; }
                         self.armed = false;
-                        if (i == 0) { Host.restart-pc(); } else { Host.shut-down-pc(); }
+                        if (i == 0) { Commands.restart-pc(); } else { Commands.shut-down-pc(); }
                     }
                     Value { text: parent.armed ? "Press again to " + (i == 0 ? "restart" : "shut down") : ""; tone: 2; }
                 }

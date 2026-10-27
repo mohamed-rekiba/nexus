@@ -1,4 +1,5 @@
 import { Vm, Host, Release } from "../types.slint";
+import { Commands } from "../commands.slint";
 import { Tokens } from "../tokens.slint";
 import { Look } from "../components/look.slint";
 import { GameMenu } from "../components/game-menu.slint";
@@ -51,14 +52,14 @@ export global Hub {
     public function pick-release(index: int) {
         // Its store installs it: no sheet, the store asks its own questions.
         if (Vm.detail.releases[index].store != "") {
-            Host.download-release(Vm.detail.key, Vm.detail.releases[index].id, "");
+            Commands.download-release(Vm.detail.key, Vm.detail.releases[index].id, "");
         } else if (Vm.detail.releases[index].download == "") {
             root.consent = index;
             root.consent-focus = 0;
             root.folder = "";
             root.asked = false;
         } else {
-            Host.navigate("downloads");
+            Commands.navigate("downloads");
         }
         Host.play-sound("select");
     }
@@ -72,12 +73,12 @@ export global Hub {
     // download is there; when the core refuses, the sheet stays open and says why.
     public function agree() {
         root.asked = true;
-        Host.download-release(Vm.detail.key, Vm.detail.releases[root.consent].id, root.folder);
+        Commands.download-release(Vm.detail.key, Vm.detail.releases[root.consent].id, root.folder);
     }
     public function started() {
         root.consent = -1;
         Prefs.editing = false;
-        Host.navigate("downloads");
+        Commands.navigate("downloads");
     }
 
     public function key(text: string) -> bool {
@@ -156,13 +157,13 @@ export global Hub {
             } else if (root.store && root.focus == root.buttons) {
                 Host.open-url(Vm.detail.store-url);
             } else if (root.play > 0 && root.focus == 0) {
-                if (Vm.detail.running) { Host.show-game(Vm.running.session); } else { Host.launch(Vm.detail.key); }
+                if (Vm.detail.running) { Commands.show-game(Vm.running.session); } else { Commands.launch(Vm.detail.key); }
             } else if (root.play == 2 && root.focus == 1) {
                 Host.play-sound("back");
-                Host.stop(Vm.running.session);
+                Commands.stop(Vm.running.session);
             } else if (root.focus - root.play < Vm.detail.actions.length) {
                 let action = Vm.detail.actions[root.focus - root.play];
-                Host.run-action(action.plugin, action.action, Vm.detail.key, action.args);
+                Commands.run-action(action.plugin, action.action, Vm.detail.key, action.args);
             }
             return true;
         }
@@ -800,7 +801,7 @@ export component GameDetailScreen inherits Rectangle {
                     dim: Hub.focus != 0;
                     clicked => {
                         Hub.focus = 0;
-                        if (Vm.detail.running) { Host.show-game(Vm.running.session); } else { Host.launch(Vm.detail.key); }
+                        if (Vm.detail.running) { Commands.show-game(Vm.running.session); } else { Commands.launch(Vm.detail.key); }
                     }
                 }
                 if Vm.detail.can.play && Vm.detail.running : Pill {
@@ -811,7 +812,7 @@ export component GameDetailScreen inherits Rectangle {
                     accessible-role: button;
                     accessible-label: "hub-stop";
                     accessible-value: self.text;
-                    clicked => { Hub.focus = 1; Host.stop(Vm.running.session); }
+                    clicked => { Hub.focus = 1; Commands.stop(Vm.running.session); }
                 }
                 SlotActions {
                     items: Vm.detail.actions;
@@ -848,8 +849,8 @@ export component GameDetailScreen inherits Rectangle {
                     accessible-role: button;
                     accessible-label: "hub-hide";
                     accessible-value: self.text;
-                    accessible-action-default => { Host.hide-game(Vm.detail.key, !Vm.detail.hidden); }
-                    clicked => { Host.hide-game(Vm.detail.key, !Vm.detail.hidden); }
+                    accessible-action-default => { Commands.hide-game(Vm.detail.key, !Vm.detail.hidden); }
+                    clicked => { Commands.hide-game(Vm.detail.key, !Vm.detail.hidden); }
                 }
                 Pill {
                     text: "Options";
@@ -1044,21 +1045,6 @@ export component GameDetailScreen inherits Rectangle {
                 wrap: word-wrap;
                 horizontal-alignment: root.align;
             }
-            if Vm.detail.has-shader-cache : HorizontalLayout {
-                spacing: 16 * Look.px;
-                padding-top: 8 * Look.px;
-                alignment: Look.rtl ? end : start;
-                Text {
-                    text: "Shader cache: " + Vm.detail.shader-cache;
-                    font-size: 18 * Look.px;
-                    color: Tokens.color-text-muted;
-                    vertical-alignment: center;
-                    accessible-role: text;
-                    accessible-label: "shader-cache";
-                    accessible-value: self.text;
-                }
-                Button { text: "Clear"; clicked => { Host.clear-shader-cache(Vm.detail.key); } }
-            }
             // The store's screenshots, in a row, as the old Game Hub.
             if Vm.detail.screenshots.length > 0 : VerticalLayout {
                 padding-top: 30 * Look.px;
@@ -1156,7 +1142,7 @@ export component GameDetailScreen inherits Rectangle {
         x: Look.rtl ? root.width - self.width - 96 * Look.px : 96 * Look.px;
         y: 44 * Look.px;
         pad: Vm.input-mode == "gamepad";
-        clicked => { Host.back(); }
+        clicked => { Commands.back(); }
     }
 
     if Hub.consent >= 0 && Hub.consent < Vm.detail.releases.length : DownloadSheet {

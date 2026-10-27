@@ -76,6 +76,8 @@ windows-sys = { version = "0.61", features = [
 [dev-dependencies]
 # Builds 7z archives for the archives adapter's tests.
 sevenz-rust2 = { version = "=0.24.1", default-features = false, features = ["compress"] }
+# The archives contract the adapter's tests run, the same one the test kit's fake keeps.
+nexus-testkit.workspace = true
 
 # The desktop adapter against the real windowing system. Its own main: a helper window must
 # run on a process's main thread. Opt in with NEXUS_DESKTOP_TESTS=1.

@@ -1,4 +1,5 @@
 import { Vm, Host } from "../types.slint";
+import { Commands } from "../commands.slint";
 import { Tokens } from "../tokens.slint";
 import { Assets } from "../assets.slint";
 import { Look } from "look.slint";
@@ -31,7 +32,7 @@ export component BootScreen inherits Rectangle {
     // It takes the pointer while it shows; a click on Welcome is Start.
     TouchArea {
         enabled: root.shown;
-        clicked => { if (root.welcome && root.ready) { Host.finish-welcome(); } }
+        clicked => { if (root.welcome && root.ready) { Commands.finish-welcome(); } }
     }
 
     // A slowly drifting wall of the library's covers.
@@ -245,7 +246,7 @@ export component BootScreen inherits Rectangle {
                 animate transform-scale { duration: Look.timed(500ms); easing: ease-out-back; }
                 accessible-role: button;
                 accessible-label: "welcome-start";
-                accessible-action-default => { if (root.ready) { Host.finish-welcome(); } }
+                accessible-action-default => { if (root.ready) { Commands.finish-welcome(); } }
                 prompt := HorizontalLayout {
                     alignment: center;
                     spacing: 12 * Look.px;

@@ -60,11 +60,11 @@ async fn a_newer_release_is_found_downloaded_checked_and_kept_for_the_next_start
     let t = host.boot_core().await;
     t.core.kernel().config().set(&["app", "update_repo"], "owner/nexus".into()).unwrap();
 
-    t.core.dispatch(Command::CheckLauncherUpdate).await.unwrap();
+    t.core.dispatch(Command::LauncherUpdate(nexus_core::LauncherUpdateCmd::Check)).await.unwrap();
     let update = t.core.view().settings.launcher_update;
     assert_eq!((update.state.as_str(), update.version.as_str()), ("available", "9.9.9"));
 
-    t.core.dispatch(Command::DownloadLauncherUpdate).await.unwrap();
+    t.core.dispatch(Command::LauncherUpdate(nexus_core::LauncherUpdateCmd::Download)).await.unwrap();
     let update = t.core.view().settings.launcher_update;
     assert_eq!(update.state, "ready", "{}", update.text);
     let kept = staged(t.data_dir()).expect("kept for the next start");
@@ -96,8 +96,8 @@ async fn a_download_that_doesn_t_match_its_sha256_is_refused() {
     let t = host.boot_core().await;
     t.core.kernel().config().set(&["app", "update_repo"], "owner/nexus".into()).unwrap();
 
-    t.core.dispatch(Command::CheckLauncherUpdate).await.unwrap();
-    t.core.dispatch(Command::DownloadLauncherUpdate).await.unwrap();
+    t.core.dispatch(Command::LauncherUpdate(nexus_core::LauncherUpdateCmd::Check)).await.unwrap();
+    t.core.dispatch(Command::LauncherUpdate(nexus_core::LauncherUpdateCmd::Download)).await.unwrap();
     let update = t.core.view().settings.launcher_update;
     assert_eq!(update.state, "failed");
     assert!(update.text.contains("SHA-256"), "{}", update.text);
@@ -110,11 +110,11 @@ async fn an_empty_release_repo_turns_checks_off_and_an_older_release_is_no_updat
     host.http().serve(LATEST, manifest("0.0.1", "https://github.com/owner/nexus/x.tar.gz", &"0".repeat(64)));
     let t = host.boot_core().await;
     t.core.kernel().config().set(&["app", "update_repo"], "".into()).unwrap();
-    t.core.dispatch(Command::CheckLauncherUpdate).await.unwrap();
+    t.core.dispatch(Command::LauncherUpdate(nexus_core::LauncherUpdateCmd::Check)).await.unwrap();
     assert_eq!(t.core.view().settings.launcher_update.state, "off");
 
     t.core.kernel().config().set(&["app", "update_repo"], "owner/nexus".into()).unwrap();
-    t.core.dispatch(Command::CheckLauncherUpdate).await.unwrap();
+    t.core.dispatch(Command::LauncherUpdate(nexus_core::LauncherUpdateCmd::Check)).await.unwrap();
     assert_eq!(t.core.view().settings.launcher_update.state, "current");
 }
 
@@ -127,7 +127,7 @@ async fn without_a_setting_the_launcher_reads_nexus_s_own_releases() {
     );
     host.http().serve(&own, manifest("0.0.1", "https://github.com/mohamed-rekiba/nexus/x.tar.gz", &"0".repeat(64)));
     let t = host.boot_core().await;
-    t.core.dispatch(Command::CheckLauncherUpdate).await.unwrap();
+    t.core.dispatch(Command::LauncherUpdate(nexus_core::LauncherUpdateCmd::Check)).await.unwrap();
     assert_eq!(t.core.view().settings.launcher_update.state, "current", "read from {own}");
 }
 
@@ -166,19 +166,19 @@ async fn a_packaged_install_hands_the_checked_package_to_its_package_manager_the
         (Install::Arch, "nexus-9.9.9-1-x86_64.pkg.tar.zst", PackageManager::Pacman),
     ] {
         let (host, _) = packaged(install, file).await;
-        let desktop = host.desktop().clone();
+        let login_session = host.login_session().clone();
         let t = host.boot_core().await;
         t.core.kernel().config().set(&["app", "update_repo"], "owner/nexus".into()).unwrap();
 
-        t.core.dispatch(Command::CheckLauncherUpdate).await.unwrap();
+        t.core.dispatch(Command::LauncherUpdate(nexus_core::LauncherUpdateCmd::Check)).await.unwrap();
         let update = t.core.view().settings.launcher_update;
         assert_eq!((update.state.as_str(), update.method.as_str()), ("available", "package"));
 
-        t.core.dispatch(Command::DownloadLauncherUpdate).await.unwrap();
+        t.core.dispatch(Command::LauncherUpdate(nexus_core::LauncherUpdateCmd::Download)).await.unwrap();
         let update = t.core.view().settings.launcher_update;
         assert_eq!(update.state, "installed", "{}", update.text);
         assert!(update.text.contains("restart"), "{}", update.text);
-        let handed = desktop.packages();
+        let handed = login_session.packages();
         assert_eq!(handed.len(), 1, "{install:?}");
         assert_eq!(handed[0].1, manager);
         assert_eq!(handed[0].0.file_name().unwrap(), file);
@@ -193,12 +193,12 @@ async fn a_closed_password_prompt_or_a_package_manager_error_leaves_this_version
         (PackageError::Failed("nothing provides libmpv".into()), "nothing provides libmpv"),
     ] {
         let (host, _) = packaged(Install::Rpm, "nexus-9.9.9.x86_64.rpm").await;
-        host.desktop().refuse_packages(refusal);
+        host.login_session().refuse_packages(refusal);
         let t = host.boot_core().await;
         t.core.kernel().config().set(&["app", "update_repo"], "owner/nexus".into()).unwrap();
 
-        t.core.dispatch(Command::CheckLauncherUpdate).await.unwrap();
-        t.core.dispatch(Command::DownloadLauncherUpdate).await.unwrap();
+        t.core.dispatch(Command::LauncherUpdate(nexus_core::LauncherUpdateCmd::Check)).await.unwrap();
+        t.core.dispatch(Command::LauncherUpdate(nexus_core::LauncherUpdateCmd::Download)).await.unwrap();
         let update = t.core.view().settings.launcher_update;
         assert_eq!(update.state, "failed");
         assert!(update.text.contains(says), "{}", update.text);
@@ -212,14 +212,14 @@ async fn a_package_that_doesn_t_match_its_sha256_never_reaches_the_package_manag
     let url = "https://github.com/owner/nexus/releases/download/v9.9.9/nexus_9.9.9_amd64.deb";
     host.http().serve(url, b"altered".to_vec());
     host.http().serve(LATEST, manifest_for(Install::Deb, "9.9.9", url, &"0".repeat(64)));
-    let desktop = host.desktop().clone();
+    let login_session = host.login_session().clone();
     let t = host.boot_core().await;
     t.core.kernel().config().set(&["app", "update_repo"], "owner/nexus".into()).unwrap();
 
-    t.core.dispatch(Command::CheckLauncherUpdate).await.unwrap();
-    t.core.dispatch(Command::DownloadLauncherUpdate).await.unwrap();
+    t.core.dispatch(Command::LauncherUpdate(nexus_core::LauncherUpdateCmd::Check)).await.unwrap();
+    t.core.dispatch(Command::LauncherUpdate(nexus_core::LauncherUpdateCmd::Download)).await.unwrap();
     assert_eq!(t.core.view().settings.launcher_update.state, "failed");
-    assert!(desktop.packages().is_empty());
+    assert!(login_session.packages().is_empty());
 }
 
 #[tokio::test]
@@ -228,17 +228,17 @@ async fn an_installer_install_keeps_the_new_installer_for_the_next_start() {
     let url = "https://github.com/owner/nexus/releases/download/v9.9.9/nexus-windows-x86_64-setup.exe";
     let sha = host.http().serve(url, b"an installer".to_vec());
     host.http().serve(LATEST, manifest_for(Install::WindowsSetup, "9.9.9", url, &sha));
-    let desktop = host.desktop().clone();
+    let login_session = host.login_session().clone();
     let t = host.boot_core().await;
     t.core.kernel().config().set(&["app", "update_repo"], "owner/nexus".into()).unwrap();
 
-    t.core.dispatch(Command::CheckLauncherUpdate).await.unwrap();
+    t.core.dispatch(Command::LauncherUpdate(nexus_core::LauncherUpdateCmd::Check)).await.unwrap();
     assert_eq!(t.core.view().settings.launcher_update.method, "installer");
-    t.core.dispatch(Command::DownloadLauncherUpdate).await.unwrap();
+    t.core.dispatch(Command::LauncherUpdate(nexus_core::LauncherUpdateCmd::Download)).await.unwrap();
     assert_eq!(t.core.view().settings.launcher_update.state, "ready");
     let kept = staged(t.data_dir()).expect("kept for the next start");
     assert_eq!(kept.file.file_name().unwrap(), "nexus-windows-x86_64-setup.exe");
-    assert!(desktop.packages().is_empty());
+    assert!(login_session.packages().is_empty());
 }
 
 #[tokio::test]
@@ -248,11 +248,14 @@ async fn on_nexus_os_a_newer_release_comes_with_the_next_system_update() {
     let t = host.boot_core().await;
     t.core.kernel().config().set(&["app", "update_repo"], "owner/nexus".into()).unwrap();
 
-    t.core.dispatch(Command::CheckLauncherUpdate).await.unwrap();
+    t.core.dispatch(Command::LauncherUpdate(nexus_core::LauncherUpdateCmd::Check)).await.unwrap();
     let update = t.core.view().settings.launcher_update;
     assert_eq!((update.state.as_str(), update.method.as_str(), update.version.as_str()), ("system", "system", "9.9.9"));
     assert!(update.text.contains("system update"), "{}", update.text);
-    assert!(t.core.dispatch(Command::DownloadLauncherUpdate).await.is_err(), "nothing for the launcher to download");
+    assert!(
+        t.core.dispatch(Command::LauncherUpdate(nexus_core::LauncherUpdateCmd::Download)).await.is_err(),
+        "nothing for the launcher to download"
+    );
 }
 
 #[tokio::test]

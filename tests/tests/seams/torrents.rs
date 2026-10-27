@@ -5,8 +5,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use nexus_api::*;
-use nexus_core::{Command, TorrentAction};
-use nexus_testkit::{FakeHost, StubPlugin, TestCore};
+use nexus_core::{Area, Command, GameInstallCmd, TorrentAction};
+use nexus_testkit::{FakeCatalog, FakeHost, StubPlugin, TestCore, until as until_in};
 
 use crate::common::{catalogs_fetched, native};
 
@@ -48,7 +48,7 @@ fn emulator(sources: Arc<Mutex<Vec<HostPath>>>) -> StubPlugin {
         }
     }
     StubPlugin::from_toml(
-        "id = \"emu-kyty\"\nkind = \"emulator\"\nname = \"KytyPS5\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"emu-kyty\"\nkind = \"emulator\"\nname = \"KytyPS5\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          console = \"PS5\"\n\
          install_note = \"Installs from a folder.\"\n\
          capabilities = [\"catalog\", \"game_installer\"]\n\
@@ -100,7 +100,7 @@ async fn setup_plugin(
     let t = build(FakeHost::new())
         .home(home.path())
         .plugin(plugin)
-        .built_in(PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .boot_core()
         .await;
     t.http.serve(URL, catalog(&format!("magnet:?xt=urn:btih:{hash}")));
@@ -127,26 +127,31 @@ fn row(t: &TestCore) -> nexus_ui_api::TorrentVm {
 
 /// Waits until the download's row says `state`.
 async fn until(t: &TestCore, state: &str) -> nexus_ui_api::TorrentVm {
-    for _ in 0..300 {
-        if let Some(r) = t.core.view().downloads.torrents.into_iter().next()
-            && r.state == state
-        {
-            return r;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("never {state}: {:?}", t.core.view().downloads.torrents);
+    t.until(Area::Torrents, |core| core.view().downloads.torrents.first().is_some_and(|r| r.state == state)).await;
+    row(t)
 }
 
 async fn act(t: &TestCore, action: TorrentAction) {
-    t.core.dispatch(Command::Torrent { id: HASH.into(), action }).await.unwrap();
+    t.core.dispatch(Command::Torrent(nexus_core::TorrentCmd::Act { id: HASH.into(), action })).await.unwrap();
+}
+
+/// Installs the download into the game folder the install sheet shows.
+async fn install(t: &TestCore) {
+    t.core.dispatch(Command::GameInstall(GameInstallCmd::Download { id: HASH.into(), folder: None })).await.unwrap();
 }
 
 #[tokio::test]
 async fn a_release_lists_its_files_and_downloads_only_when_the_player_starts_it() {
     let s = setup().await;
     let t = &s.t;
-    t.core.dispatch(Command::DownloadRelease { offer: offer(), release: HASH.into(), folder: None }).await.unwrap();
+    t.core
+        .dispatch(Command::Torrent(nexus_core::TorrentCmd::Download {
+            offer: offer(),
+            release: HASH.into(),
+            folder: None,
+        }))
+        .await
+        .unwrap();
 
     let ready = until(t, "ready").await;
     assert_eq!(ready.files, ["Astro/astro.pkg · 0 MB"]);
@@ -177,7 +182,14 @@ async fn a_release_lists_its_files_and_downloads_only_when_the_player_starts_it(
 async fn a_download_says_what_its_emulator_installs_from_and_that_archives_unpack_first() {
     let s = setup().await;
     let t = &s.t;
-    t.core.dispatch(Command::DownloadRelease { offer: offer(), release: HASH.into(), folder: None }).await.unwrap();
+    t.core
+        .dispatch(Command::Torrent(nexus_core::TorrentCmd::Download {
+            offer: offer(),
+            release: HASH.into(),
+            folder: None,
+        }))
+        .await
+        .unwrap();
     let ready = until(t, "ready").await;
     assert_eq!(
         ready.install_note,
@@ -190,7 +202,14 @@ async fn a_download_says_what_its_emulator_installs_from_and_that_archives_unpac
 async fn shutting_down_stops_the_torrents_and_a_download_stays_one_to_resume() {
     let s = setup().await;
     let t = &s.t;
-    t.core.dispatch(Command::DownloadRelease { offer: offer(), release: HASH.into(), folder: None }).await.unwrap();
+    t.core
+        .dispatch(Command::Torrent(nexus_core::TorrentCmd::Download {
+            offer: offer(),
+            release: HASH.into(),
+            folder: None,
+        }))
+        .await
+        .unwrap();
     until(t, "ready").await;
     act(t, TorrentAction::Start).await;
     t.torrents.progress(HASH, 4);
@@ -207,7 +226,14 @@ async fn shutting_down_stops_the_torrents_and_a_download_stays_one_to_resume() {
 async fn pause_cancel_and_remove_keep_the_files_and_stop_the_torrent() {
     let s = setup().await;
     let t = &s.t;
-    t.core.dispatch(Command::DownloadRelease { offer: offer(), release: HASH.into(), folder: None }).await.unwrap();
+    t.core
+        .dispatch(Command::Torrent(nexus_core::TorrentCmd::Download {
+            offer: offer(),
+            release: HASH.into(),
+            folder: None,
+        }))
+        .await
+        .unwrap();
     until(t, "ready").await;
     act(t, TorrentAction::Start).await;
     t.torrents.progress(HASH, 4);
@@ -229,21 +255,23 @@ async fn pause_cancel_and_remove_keep_the_files_and_stop_the_torrent() {
 async fn a_finished_download_installs_through_the_emulator_s_game_installer() {
     let s = setup().await;
     let t = &s.t;
-    t.core.dispatch(Command::DownloadRelease { offer: offer(), release: HASH.into(), folder: None }).await.unwrap();
+    t.core
+        .dispatch(Command::Torrent(nexus_core::TorrentCmd::Download {
+            offer: offer(),
+            release: HASH.into(),
+            folder: None,
+        }))
+        .await
+        .unwrap();
     until(t, "ready").await;
     act(t, TorrentAction::Start).await;
     t.torrents.complete(HASH);
     until(t, "complete").await;
 
-    act(t, TorrentAction::Install).await;
+    install(t).await;
     let sources = s.sources.lock().unwrap().clone();
     assert_eq!(sources, [HostPath::new("packages", 0, RelPath::new(format!("PS5/torrent-{HASH}")).unwrap())]);
-    for _ in 0..100 {
-        if row(t).install == "done" {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    t.until(Area::Installs, |_| row(t).install == "done").await;
     assert_eq!(row(t).install, "done");
 }
 
@@ -251,35 +279,44 @@ async fn a_finished_download_installs_through_the_emulator_s_game_installer() {
 async fn sharing_turned_off_stops_seeding_and_a_restart_brings_downloads_back() {
     let s = setup().await;
     let t = &s.t;
-    t.core.dispatch(Command::DownloadRelease { offer: offer(), release: HASH.into(), folder: None }).await.unwrap();
+    t.core
+        .dispatch(Command::Torrent(nexus_core::TorrentCmd::Download {
+            offer: offer(),
+            release: HASH.into(),
+            folder: None,
+        }))
+        .await
+        .unwrap();
     until(t, "ready").await;
     act(t, TorrentAction::Start).await;
     t.torrents.complete(HASH);
     until(t, "complete").await;
 
-    t.core.dispatch(Command::SetSeedDownloads(false)).await.unwrap();
+    t.core.dispatch(Command::Torrent(nexus_core::TorrentCmd::SeedDownloads(false))).await.unwrap();
     assert!(!row(t).seeding && !t.core.view().downloads.seeding);
     assert!(t.torrents.running().is_empty());
 
     // The next start: with sharing on, the finished download checks its files and seeds.
-    t.core.dispatch(Command::SetSeedDownloads(true)).await.unwrap();
+    t.core.dispatch(Command::Torrent(nexus_core::TorrentCmd::SeedDownloads(true))).await.unwrap();
     let again = nexus_core::Core::start(t.kernel.clone()).await;
-    for _ in 0..100 {
-        if again.view().downloads.torrents.first().is_some_and(|r| r.seeding) {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    until_in(&again, Area::Torrents, |core| core.view().downloads.torrents.first().is_some_and(|r| r.seeding)).await;
     let restored = again.view().downloads.torrents.into_iter().next().unwrap();
     assert!(restored.seeding, "seeding again after its check: {restored:?}");
-    assert_eq!(t.torrents.started().last().unwrap().1, nexus_core::TorrentStart::SeedOnly);
+    assert!(t.torrents.started().last().unwrap().1, "it starts paused, to check its files without downloading");
 }
 
 #[tokio::test]
 async fn a_download_cut_by_a_restart_comes_back_paused() {
     let s = setup().await;
     let t = &s.t;
-    t.core.dispatch(Command::DownloadRelease { offer: offer(), release: HASH.into(), folder: None }).await.unwrap();
+    t.core
+        .dispatch(Command::Torrent(nexus_core::TorrentCmd::Download {
+            offer: offer(),
+            release: HASH.into(),
+            folder: None,
+        }))
+        .await
+        .unwrap();
     until(t, "ready").await;
     act(t, TorrentAction::Start).await;
     t.torrents.progress(HASH, 4);
@@ -296,7 +333,14 @@ async fn a_torrent_no_peer_has_fails_with_why() {
     let other = "aa".repeat(20);
     let s = setup_with(&other).await;
     let t = &s.t;
-    t.core.dispatch(Command::DownloadRelease { offer: offer(), release: other.clone(), folder: None }).await.unwrap();
+    t.core
+        .dispatch(Command::Torrent(nexus_core::TorrentCmd::Download {
+            offer: offer(),
+            release: other.clone(),
+            folder: None,
+        }))
+        .await
+        .unwrap();
     let failed = until(t, "failed").await;
     assert!(failed.error.contains("no peers"), "{}", failed.error);
     assert_eq!(failed.actions, ["start", "cancel"]);
@@ -306,7 +350,14 @@ async fn a_torrent_no_peer_has_fails_with_why() {
 async fn a_finished_download_whose_files_moved_does_not_seed_after_a_restart() {
     let s = setup().await;
     let t = &s.t;
-    t.core.dispatch(Command::DownloadRelease { offer: offer(), release: HASH.into(), folder: None }).await.unwrap();
+    t.core
+        .dispatch(Command::Torrent(nexus_core::TorrentCmd::Download {
+            offer: offer(),
+            release: HASH.into(),
+            folder: None,
+        }))
+        .await
+        .unwrap();
     until(t, "ready").await;
     act(t, TorrentAction::Start).await;
     t.torrents.complete(HASH);
@@ -314,12 +365,8 @@ async fn a_finished_download_whose_files_moved_does_not_seed_after_a_restart() {
     std::fs::remove_dir_all(s.home.path().join(format!("Downloads/PS5/torrent-{HASH}"))).unwrap();
 
     let again = nexus_core::Core::start(t.kernel.clone()).await;
-    for _ in 0..100 {
-        if again.view().downloads.torrents.first().is_some_and(|r| !r.error.is_empty()) {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    let failed = |core: &nexus_core::Core| core.view().downloads.torrents.first().is_some_and(|r| !r.error.is_empty());
+    until_in(&again, Area::Torrents, failed).await;
     let restored = again.view().downloads.torrents.into_iter().next().unwrap();
     assert!(!restored.seeding, "{restored:?}");
     assert!(restored.error.contains("moved, changed or deleted"), "{}", restored.error);
@@ -330,7 +377,14 @@ async fn a_finished_download_whose_files_moved_does_not_seed_after_a_restart() {
 async fn a_download_that_does_not_fit_in_the_free_space_does_not_start() {
     let s = setup_on(HASH, |h| h.free_space(4)).await;
     let t = &s.t;
-    t.core.dispatch(Command::DownloadRelease { offer: offer(), release: HASH.into(), folder: None }).await.unwrap();
+    t.core
+        .dispatch(Command::Torrent(nexus_core::TorrentCmd::Download {
+            offer: offer(),
+            release: HASH.into(),
+            folder: None,
+        }))
+        .await
+        .unwrap();
     until(t, "ready").await;
 
     act(t, TorrentAction::Start).await;
@@ -343,7 +397,14 @@ async fn a_download_that_does_not_fit_in_the_free_space_does_not_start() {
 async fn a_download_that_fits_in_the_free_space_starts() {
     let s = setup_on(HASH, |h| h.free_space(PACKAGE.len() as u64)).await;
     let t = &s.t;
-    t.core.dispatch(Command::DownloadRelease { offer: offer(), release: HASH.into(), folder: None }).await.unwrap();
+    t.core
+        .dispatch(Command::Torrent(nexus_core::TorrentCmd::Download {
+            offer: offer(),
+            release: HASH.into(),
+            folder: None,
+        }))
+        .await
+        .unwrap();
     until(t, "ready").await;
 
     act(t, TorrentAction::Start).await;
@@ -354,26 +415,23 @@ async fn a_download_that_fits_in_the_free_space_starts() {
 async fn a_download_shows_its_time_left_while_bytes_arrive() {
     let s = setup().await;
     let t = &s.t;
-    t.core.dispatch(Command::DownloadRelease { offer: offer(), release: HASH.into(), folder: None }).await.unwrap();
+    t.core
+        .dispatch(Command::Torrent(nexus_core::TorrentCmd::Download {
+            offer: offer(),
+            release: HASH.into(),
+            folder: None,
+        }))
+        .await
+        .unwrap();
     until(t, "ready").await;
     act(t, TorrentAction::Start).await;
     t.torrents.progress(HASH, 4);
     t.torrents.rate(HASH, 2);
-    for _ in 0..100 {
-        if row(t).seconds_left == 5 {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    t.until(Area::Torrents, |_| row(t).seconds_left == 5).await;
     assert_eq!(row(t).seconds_left, 5, "10 bytes left at 2 bytes a second");
 
     t.torrents.rate(HASH, 0);
-    for _ in 0..100 {
-        if row(t).download_rate == 0 {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    t.until(Area::Torrents, |_| row(t).download_rate == 0).await;
     assert_eq!(row(t).seconds_left, 0, "no time left with no bytes arriving");
 }
 
@@ -381,7 +439,14 @@ async fn a_download_shows_its_time_left_while_bytes_arrive() {
 async fn a_download_that_stops_with_an_error_sends_one_notice() {
     let s = setup().await;
     let t = &s.t;
-    t.core.dispatch(Command::DownloadRelease { offer: offer(), release: HASH.into(), folder: None }).await.unwrap();
+    t.core
+        .dispatch(Command::Torrent(nexus_core::TorrentCmd::Download {
+            offer: offer(),
+            release: HASH.into(),
+            folder: None,
+        }))
+        .await
+        .unwrap();
     until(t, "ready").await;
     act(t, TorrentAction::Start).await;
     t.torrents.progress(HASH, 4);
@@ -391,7 +456,7 @@ async fn a_download_that_stops_with_an_error_sends_one_notice() {
     let failed = until(t, "failed").await;
     assert_eq!(failed.error, "the disk is full");
     // A few more polls see the same state.
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    t.clock.advance(Duration::from_millis(50)).await;
     let stopped: Vec<String> =
         t.core.view().notices.into_iter().filter(|n| n.starts_with("Download stopped")).collect();
     assert_eq!(stopped, ["Download stopped: Astro. Open Downloads to see why"]);
@@ -403,7 +468,14 @@ async fn a_download_that_stops_with_an_error_sends_one_notice() {
 async fn a_download_s_folder_opens_once_it_is_on_disk() {
     let s = setup().await;
     let t = &s.t;
-    t.core.dispatch(Command::DownloadRelease { offer: offer(), release: HASH.into(), folder: None }).await.unwrap();
+    t.core
+        .dispatch(Command::Torrent(nexus_core::TorrentCmd::Download {
+            offer: offer(),
+            release: HASH.into(),
+            folder: None,
+        }))
+        .await
+        .unwrap();
     until(t, "ready").await;
     assert_eq!(t.core.download_folder(HASH), None, "no folder before it starts");
 
@@ -422,14 +494,21 @@ async fn a_download_goes_to_the_folder_the_player_picks_inside_a_packages_folder
     t.core.dispatch(Command::SetFolders { name: "packages".into(), paths }).await.unwrap();
 
     // A folder outside every packages folder is refused, and the player hears why.
-    let outside =
-        Command::DownloadRelease { offer: offer(), release: HASH.into(), folder: Some(home.join("Elsewhere")) };
+    let outside = Command::Torrent(nexus_core::TorrentCmd::Download {
+        offer: offer(),
+        release: HASH.into(),
+        folder: Some(home.join("Elsewhere")),
+    });
     let refused = t.core.dispatch(outside).await.unwrap_err().to_string();
     assert!(refused.contains("Pick a folder inside a packages folder"), "{refused}");
     assert!(t.core.view().notices.iter().any(|n| n.contains("Pick a folder inside a packages folder")));
     assert!(t.core.view().downloads.torrents.is_empty());
 
-    let picked = Command::DownloadRelease { offer: offer(), release: HASH.into(), folder: Some("~/Other/PS5".into()) };
+    let picked = Command::Torrent(nexus_core::TorrentCmd::Download {
+        offer: offer(),
+        release: HASH.into(),
+        folder: Some("~/Other/PS5".into()),
+    });
     t.core.dispatch(picked).await.unwrap();
     let ready = until(t, "ready").await;
     assert_eq!(ready.folder, native(&format!("~/Other/PS5/torrent-{HASH}")));
@@ -444,7 +523,7 @@ async fn a_download_goes_to_the_folder_the_player_picks_inside_a_packages_folder
     t.torrents.complete(HASH);
     until(t, "complete").await;
     assert!(home.join(format!("Other/PS5/torrent-{HASH}/Astro/astro.pkg")).is_file());
-    act(t, TorrentAction::Install).await;
+    install(t).await;
     let sources = s.sources.lock().unwrap().clone();
     assert_eq!(sources, [HostPath::new("packages", 1, RelPath::new(format!("PS5/torrent-{HASH}")).unwrap())]);
 }
@@ -462,10 +541,10 @@ async fn downloaded(
     let t = build(FakeHost::new(), home.path())
         .home(home.path())
         .platform(Some(Platform::Linux))
-        .built_in(PluginByKind::emulator(emu_shadps4::ShadPlugin))
-        .built_in(PluginByKind::emulator(emu_kyty::KytyPlugin))
-        .built_in(PluginByKind::emulator(emu_pc::PcPlugin))
-        .built_in(PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(PluginBox::code(emu_shadps4::ShadPlugin))
+        .built_in(PluginBox::code(emu_kyty::KytyPlugin))
+        .built_in(PluginBox::code(emu_pc::PcPlugin))
+        .built_in(PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .boot_core()
         .await;
     let catalog = serde_json::json!({ "complete": true, "translation": { "language": "en" }, "topic_count": 1,
@@ -494,23 +573,23 @@ async fn downloaded(
         offers.iter().find(|o| o.platform == console).unwrap_or_else(|| panic!("a {console} offer: {offers:?}"));
     let offer: GameKey = offer.key.parse().unwrap();
 
-    t.core.dispatch(Command::DownloadRelease { offer, release: HASH.into(), folder: None }).await.unwrap();
+    t.core
+        .dispatch(Command::Torrent(nexus_core::TorrentCmd::Download { offer, release: HASH.into(), folder: None }))
+        .await
+        .unwrap();
     let ready = until(&t, "ready").await;
     assert!(ready.install_note.starts_with(&format!("Installs a {console} game from")), "{}", ready.install_note);
     act(&t, TorrentAction::Start).await;
     t.torrents.complete(HASH);
     until(&t, "complete").await;
+    // A finished download unpacks first; its card offers Install once that is done.
+    t.until(Area::Torrents, |_| row(&t).actions.contains(&"install".to_owned())).await;
     (t, home)
 }
 
 /// Waits until the download's install ends, and gives its row.
 async fn installed(t: &TestCore) -> nexus_ui_api::TorrentVm {
-    for _ in 0..500 {
-        if !matches!(row(t).install.as_str(), "" | "installing") {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    t.until(Area::Installs, |_| !matches!(row(t).install.as_str(), "" | "installing")).await;
     row(t)
 }
 
@@ -518,7 +597,7 @@ async fn installed(t: &TestCore) -> nexus_ui_api::TorrentVm {
 /// once the install ends.
 async fn download_and_install(console: &str, topic: serde_json::Value, files: &[(&str, &[u8])]) -> Vec<String> {
     let (t, _home) = downloaded(console, topic, files, |h, _| h).await;
-    act(&t, TorrentAction::Install).await;
+    install(&t).await;
     let ended = installed(&t).await;
     assert_eq!(ended.install, "done", "the {console} install: {ended:?}");
     // The download's card plays the game it installed, found by title id or else by the
@@ -596,7 +675,7 @@ async fn an_unpacked_pc_game_moves_into_the_games_folder_with_its_links_and_empt
         },
     )
     .await;
-    act(&t, TorrentAction::Install).await;
+    install(&t).await;
     let ended = installed(&t).await;
     assert_eq!(ended.install, "done", "{ended:?}");
 
@@ -626,21 +705,16 @@ async fn an_unpacked_pc_game_moves_into_the_games_folder_with_its_links_and_empt
 async fn after_a_restart_a_pc_download_s_card_still_plays_the_game_it_installed() {
     let (topic, elf) = penguins();
     let (t, _home) = downloaded("PC", topic, &[("Penguins/penguins.x86_64", &elf)], |h, _| h).await;
-    act(&t, TorrentAction::Install).await;
+    install(&t).await;
     assert_eq!(installed(&t).await.install, "done");
 
     // The next start: the install's record is gone, and a PC game has no title id.
     let again = nexus_core::Core::start(t.kernel.clone()).await;
-    again.dispatch(Command::RefreshLibrary).await.unwrap();
+    again.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     catalogs_fetched(&again).await;
-    let card = || again.view().downloads.torrents.into_iter().next().unwrap();
-    for _ in 0..200 {
-        if !card().game.is_empty() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    let card = card();
+    let card = |core: &nexus_core::Core| core.view().downloads.torrents.into_iter().next().unwrap();
+    until_in(&again, Area::Library, |core| !card(core).game.is_empty()).await;
+    let card = card(&again);
     assert!(!card.game.is_empty(), "the installed game: {card:?}");
     assert!(card.actions.contains(&"play".to_owned()), "Play, not Install: {:?}", card.actions);
 }
@@ -665,13 +739,15 @@ async fn a_download_installs_into_the_game_folder_the_player_picks_and_the_next_
     assert_eq!(row(&t).install_folder, native("~/Games/PC"), "the console's folder in the first game folder");
 
     // A folder outside every game folder is refused, and the sheet hears why.
-    let outside = Command::InstallDownload { id: HASH.into(), folder: Some(home.join("Elsewhere")) };
+    let outside =
+        Command::GameInstall(GameInstallCmd::Download { id: HASH.into(), folder: Some(home.join("Elsewhere")) });
     let refused = t.core.dispatch(outside).await.unwrap_err().to_string();
     assert!(refused.contains("Pick a folder inside a game folder"), "{refused}");
     assert!(row(&t).install_error.contains("Pick a folder inside a game folder"), "{:?}", row(&t));
     assert_eq!(row(&t).install, "", "nothing installs");
 
-    let picked = Command::InstallDownload { id: HASH.into(), folder: Some("~/Other/Mine".into()) };
+    let picked =
+        Command::GameInstall(GameInstallCmd::Download { id: HASH.into(), folder: Some("~/Other/Mine".into()) });
     t.core.dispatch(picked).await.unwrap();
     assert_eq!(row(&t).install_error, "", "the error goes once an install starts");
     assert_eq!(installed(&t).await.install, "done");
@@ -689,7 +765,7 @@ async fn an_install_checks_the_free_space_in_the_game_folder_the_player_picks() 
     let paths = vec![home.join("Games"), home.join("Small")];
     t.core.dispatch(Command::SetFolders { name: "games".into(), paths }).await.unwrap();
 
-    let small = Command::InstallDownload { id: HASH.into(), folder: Some("~/Small/PC".into()) };
+    let small = Command::GameInstall(GameInstallCmd::Download { id: HASH.into(), folder: Some("~/Small/PC".into()) });
     let refused = t.core.dispatch(small).await.unwrap_err();
     let why = "Not enough free space in the game folder: 0.0 GB needed, 0.0 GB free";
     assert_eq!(refused.to_string(), why);
@@ -697,7 +773,7 @@ async fn an_install_checks_the_free_space_in_the_game_folder_the_player_picks() 
     assert_eq!(row(&t).install, "", "nothing installs");
 
     // The folder the sheet offers is on another disk, with room.
-    t.core.dispatch(Command::InstallDownload { id: HASH.into(), folder: None }).await.unwrap();
+    t.core.dispatch(Command::GameInstall(GameInstallCmd::Download { id: HASH.into(), folder: None })).await.unwrap();
     assert_eq!(installed(&t).await.install, "done");
     assert!(home.join("Games/PC/Penguins").is_dir());
 }
@@ -711,13 +787,20 @@ async fn a_refused_download_says_why_on_its_game_hub_until_the_next_try() {
     t.core.dispatch(Command::SetFolders { name: "packages".into(), paths }).await.unwrap();
     t.core.dispatch(Command::OpenGame(offer())).await.unwrap();
 
-    let outside =
-        Command::DownloadRelease { offer: offer(), release: HASH.into(), folder: Some(home.join("Elsewhere")) };
+    let outside = Command::Torrent(nexus_core::TorrentCmd::Download {
+        offer: offer(),
+        release: HASH.into(),
+        folder: Some(home.join("Elsewhere")),
+    });
     assert!(t.core.dispatch(outside).await.is_err());
     let why = t.core.view().detail.expect("the Game Hub").download_error;
     assert!(why.contains("Pick a folder inside a packages folder"), "{why}");
 
-    let picked = Command::DownloadRelease { offer: offer(), release: HASH.into(), folder: Some("~/Other/PS5".into()) };
+    let picked = Command::Torrent(nexus_core::TorrentCmd::Download {
+        offer: offer(),
+        release: HASH.into(),
+        folder: Some("~/Other/PS5".into()),
+    });
     t.core.dispatch(picked).await.unwrap();
     assert_eq!(t.core.view().detail.unwrap().download_error, "", "gone once a download starts");
 }
@@ -733,7 +816,11 @@ async fn a_download_checks_the_free_space_in_the_folder_the_player_picks() {
     t.core.dispatch(Command::SetFolders { name: "packages".into(), paths }).await.unwrap();
     t.core.dispatch(Command::OpenGame(offer())).await.unwrap();
 
-    let there = Command::DownloadRelease { offer: offer(), release: HASH.into(), folder: Some(small.join("PS5")) };
+    let there = Command::Torrent(nexus_core::TorrentCmd::Download {
+        offer: offer(),
+        release: HASH.into(),
+        folder: Some(small.join("PS5")),
+    });
     let refused = t.core.dispatch(there).await.unwrap_err().to_string();
     assert!(refused.starts_with("Not enough free space in the download folder: "), "{refused}");
     assert_eq!(t.core.view().detail.unwrap().download_error, refused, "the sheet says why");
@@ -744,7 +831,14 @@ async fn a_download_checks_the_free_space_in_the_folder_the_player_picks() {
 async fn downloads_count_what_downloads_and_what_shares() {
     let s = setup().await;
     let t = &s.t;
-    t.core.dispatch(Command::DownloadRelease { offer: offer(), release: HASH.into(), folder: None }).await.unwrap();
+    t.core
+        .dispatch(Command::Torrent(nexus_core::TorrentCmd::Download {
+            offer: offer(),
+            release: HASH.into(),
+            folder: None,
+        }))
+        .await
+        .unwrap();
     until(t, "ready").await;
     let counts = |t: &TestCore| (t.core.view().downloads.downloading, t.core.view().downloads.sharing);
     assert_eq!(counts(t), (0, 0), "a download that waits for Start doesn't download");
@@ -759,32 +853,29 @@ async fn downloads_count_what_downloads_and_what_shares() {
 
 #[tokio::test]
 async fn an_install_shows_on_its_download_s_card_which_cancels_it() {
-    let s = setup_plugin(HASH, crate::common::slow_installer(), Default::default(), |h| h).await;
+    let s = setup_plugin(HASH, FakeCatalog::kyty().waiting_installer().build(), Default::default(), |h| h).await;
     let t = &s.t;
-    t.core.dispatch(Command::DownloadRelease { offer: offer(), release: HASH.into(), folder: None }).await.unwrap();
+    t.core
+        .dispatch(Command::Torrent(nexus_core::TorrentCmd::Download {
+            offer: offer(),
+            release: HASH.into(),
+            folder: None,
+        }))
+        .await
+        .unwrap();
     until(t, "ready").await;
     act(t, TorrentAction::Start).await;
     t.torrents.complete(HASH);
     until(t, "complete").await;
 
-    act(t, TorrentAction::Install).await;
+    install(t).await;
     // The install's progress reaches the card a moment later: the plugin never waits for it.
-    for _ in 0..100 {
-        if row(t).install_progress > 0.0 {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    t.until(Area::Installs, |_| row(t).install_progress > 0.0).await;
     let installing = row(t);
     assert_eq!((installing.install.as_str(), installing.install_progress), ("installing", 0.25));
     assert_eq!(installing.actions, ["stop-seeding", "cancel-install"], "no Remove while it installs");
-    act(t, TorrentAction::CancelInstall).await;
-    for _ in 0..100 {
-        if row(t).install == "cancelled" {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    t.core.dispatch(Command::GameInstall(GameInstallCmd::Cancel { id: HASH.into() })).await.unwrap();
+    t.until(Area::Installs, |_| row(t).install == "cancelled").await;
     assert_eq!(row(t).install, "cancelled");
     assert!(row(t).actions.contains(&"install".to_owned()), "it installs again: {:?}", row(t).actions);
 }
@@ -795,7 +886,7 @@ async fn once_installed_a_download_s_folder_is_the_game_s() {
     let (t, home) = downloaded("PC", topic, &[("Penguins/penguins.x86_64", &elf)], |h, _| h).await;
     let download = home.path().join(format!("Downloads/PC/torrent-{HASH}"));
     assert_eq!(t.core.download_folder(HASH), Some(download), "the download's files, before the install");
-    act(&t, TorrentAction::Install).await;
+    install(&t).await;
     assert_eq!(installed(&t).await.install, "done");
     assert_eq!(t.core.download_folder(HASH), Some(home.path().join("Games/PC/Penguins")), "the installed game");
 }
@@ -807,10 +898,42 @@ async fn a_download_reads_up_to_100_of_its_files_and_counts_them_all() {
     let names: Vec<String> = (0..120).map(|i| format!("Astro/part{i:03}.bin")).collect();
     let files: Vec<(&str, &[u8])> = names.iter().map(|n| (n.as_str(), &b"x"[..])).collect();
     t.torrents.has(HASH, "Astro", &files);
-    t.torrents.hold(true);
-    t.core.dispatch(Command::DownloadRelease { offer: offer(), release: HASH.into(), folder: None }).await.unwrap();
+    let held = t.torrents.hold();
+    t.core
+        .dispatch(Command::Torrent(nexus_core::TorrentCmd::Download {
+            offer: offer(),
+            release: HASH.into(),
+            folder: None,
+        }))
+        .await
+        .unwrap();
     assert_eq!(row(t).state, "resolving", "the lookup waits");
-    t.torrents.hold(false);
+    held.release();
     let ready = until(t, "ready").await;
     assert_eq!((ready.files.len(), ready.file_count), (100, 120));
+}
+
+#[tokio::test]
+async fn a_running_download_is_read_every_poll_on_the_clock_and_not_between() {
+    let s = setup().await;
+    let t = &s.t;
+    t.core
+        .dispatch(Command::Torrent(nexus_core::TorrentCmd::Download {
+            offer: offer(),
+            release: HASH.into(),
+            folder: None,
+        }))
+        .await
+        .unwrap();
+    until(t, "ready").await;
+    act(t, TorrentAction::Start).await;
+    t.torrents.progress(HASH, 4);
+    until(t, "downloading").await;
+
+    // A poll just read 4 bytes: the next is `torrent_poll` (10 ms on the fake host) away.
+    t.torrents.progress(HASH, 8);
+    t.clock.advance(Duration::from_millis(5)).await;
+    assert_eq!(row(t).done, 4, "not read between two polls");
+    t.clock.advance(Duration::from_millis(7)).await;
+    assert_eq!(row(t).done, 8);
 }

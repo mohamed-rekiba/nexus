@@ -3,7 +3,7 @@ id = "release-catalog"
 kind = "service"
 name = "Game Catalog"
 version = "0.1.0"
-host_api = "^0.1"
+host_api = "^0.2"
 platforms = ["linux", "macos", "windows"]
 capabilities = ["releases", "configurator", "slots"]
 

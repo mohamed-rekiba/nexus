@@ -8,8 +8,10 @@ name: Package
 #
 # On a Nexus tag (v<version>) it attaches the files to the tag's draft release, with a SHA-256
 # file and signed build provenance for each and latest.json for the launcher's updater, and
-# publishes the release as the latest. Then it starts os.yml: the Nexus OS release made in the
-# same push, if any (os-release), or else new images with this Nexus. release.yml starts it on
+# publishes the release as the latest. Then it names the release in os/nexus.txt on main, so
+# Release Please opens the Nexus OS release pull request, and starts os.yml: the Nexus OS
+# release made in the same push, if any (os-release), or else new images with this Nexus for
+# the PCs already installed. release.yml starts it on
 # the tag Release Please made; to build a release again, run it by hand on the tag ("Use
 # workflow from"). On a branch it only builds, and the files stay as the run's artifacts: run
 # it so to try a packaging change.
@@ -332,16 +334,46 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
-      # To start os.yml.
+      # To write os/nexus.txt on main.
+      contents: write
+      # To start os.yml and release.yml.
       actions: write
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       OS_RELEASE: ${{ inputs.os-release }}
     steps:
+      # The OS bundles Nexus, so a new Nexus is a change to the OS: os/nexus.txt names the
+      # Nexus release, and its commit makes Release Please open the OS release pull request,
+      # whose stick then bundles this Nexus. A new major or minor Nexus is a feature of the OS,
+      # a patch a fix. An OS release made with this one already bundles it: the commit is a
+      # chore then, which releases nothing.
+      - name: Name this Nexus in os/nexus.txt
+        run: |
+          file=$(gh api "repos/$GH_REPO/contents/os/nexus.txt?ref=main")
+          named=$(jq -r .content <<<"$file" | base64 -d | tr -d '[:space:]')
+          if [ "$named" = "$TAG" ]; then
+            echo "os/nexus.txt already names $TAG"
+            exit 0
+          fi
+          if [ -n "$OS_RELEASE" ]; then
+            type=chore
+          elif [ "${named%.*}" != "${TAG%.*}" ]; then
+            type=feat
+          else
+            type=fix
+          fi
+          gh api -X PUT "repos/$GH_REPO/contents/os/nexus.txt" -f branch=main \
+            -f sha="$(jq -r .sha <<<"$file")" -f content="$(printf '%s\n' "$TAG" | base64)" \
+            -f message="$type(os): bundle Nexus $TAG" >/dev/null
+          # GitHub doesn't start workflows on a push made with a workflow's own token.
+          if [ -z "$OS_RELEASE" ]; then
+            gh workflow run release.yml --ref main
+          fi
       # The OS release made with this one, on its tag; or new images with this Nexus for the
       # PCs already installed.
-      - run: |
+      - name: Start os.yml
+        run: |
           if [ -n "$OS_RELEASE" ]; then
             gh workflow run os.yml --ref "$OS_RELEASE"
           else

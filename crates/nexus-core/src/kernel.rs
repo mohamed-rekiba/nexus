@@ -5,26 +5,26 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use futures::future::BoxFuture;
 use nexus_api::{
-    Activation, Capability, ContextParts, EmulatorPlugin, Event, Files, HostInfo, Logger, Platform, PluginByKind,
-    PluginContext, PluginId, PluginKind, PluginManifest, PluginResult, Provided, Runtime, ServicePlugin,
-    ServiceRegistry, SystemPlugin, ThemePlugin, VpnGate,
+    Activation, Capability, CodePlugin, ContextParts, Event, Files, HostInfo, Logger, Platform, PluginBox,
+    PluginContext, PluginId, PluginKind, PluginManifest, PluginResult, Provided, Runtime, ServiceRegistry, ThemePlugin,
+    VpnGate,
 };
 use tokio::sync::Mutex;
 
 use crate::config::{ConfigService, ScopedConfig};
 use crate::facades::{AllowlistHttp, PluginEvents, TracingLog};
 use crate::guard::guarded;
+use crate::ports::Ports;
 use crate::resolve::{dependency_ids, resolve};
 use crate::themes::DataThemeLoader;
 use crate::{
-    Archives, CoreError, CoreResult, Desktop, DirStorage, EventBus, GroupTree, Hardware, HttpTransport, LoadError,
-    Network, NoArchives, NoDesktop, NoHardware, NoNetwork, NoTorrents, NoVpn, ProcessSpawner, ProcessTree,
-    TokioSpawner, Torrents,
+    Archives, Clock, CoreError, CoreResult, DirStorage, EventBus, GroupTree, Hardware, HttpTransport, LoadError,
+    LoginSession, Network, NoArchives, NoHardware, NoLoginSession, NoNetwork, NoOpener, NoTorrents, NoVpn, NoWindows,
+    Opener, ProcessSpawner, ProcessTree, TokioClock, TokioSpawner, Torrents, Windows,
 };
 
 /// Settings for one run of the host.
@@ -111,11 +111,11 @@ pub trait Loader: Send + Sync {
     fn accepts(&self, manifest: &PluginManifest) -> bool;
 
     /// `dir` is the folder holding the manifest.
-    fn load(&self, manifest: &PluginManifest, dir: &Path) -> Result<PluginByKind, String>;
+    fn load(&self, manifest: &PluginManifest, dir: &Path) -> Result<PluginBox, String>;
 }
 
 enum Source {
-    Code(PluginByKind),
+    Code(PluginBox),
     Dir(PathBuf),
 }
 
@@ -155,11 +155,14 @@ pub struct KernelBuilder {
     http: Arc<dyn HttpTransport>,
     spawner: Arc<dyn ProcessSpawner>,
     processes: Arc<dyn ProcessTree>,
-    desktop: Arc<dyn Desktop>,
+    windows: Arc<dyn Windows>,
+    login_session: Arc<dyn LoginSession>,
+    opener: Arc<dyn Opener>,
     hardware: Arc<dyn Hardware>,
     torrents: Arc<dyn Torrents>,
     network: Arc<dyn Network>,
     archives: Arc<dyn Archives>,
+    clock: Arc<dyn Clock>,
     config: Option<Arc<ConfigService>>,
 }
 
@@ -172,26 +175,29 @@ impl KernelBuilder {
             http: Arc::new(NoNetwork),
             spawner: Arc::new(TokioSpawner),
             processes: Arc::new(GroupTree),
-            desktop: Arc::new(NoDesktop),
+            windows: Arc::new(NoWindows),
+            login_session: Arc::new(NoLoginSession),
+            opener: Arc::new(NoOpener),
             hardware: Arc::new(NoHardware),
             torrents: Arc::new(NoTorrents),
             network: Arc::new(NoVpn),
             archives: Arc::new(NoArchives),
+            clock: Arc::new(TokioClock),
             config: None,
         }
     }
 
     /// A built-in, in-process plugin.
-    pub fn plugin(self, plugin: PluginByKind) -> Self {
+    pub fn plugin(self, plugin: PluginBox) -> Self {
         self.code(plugin, Origin::BuiltIn)
     }
 
     /// An in-process plugin treated as third-party: for tests.
-    pub fn third_party(self, plugin: PluginByKind) -> Self {
+    pub fn third_party(self, plugin: PluginBox) -> Self {
         self.code(plugin, Origin::ThirdParty)
     }
 
-    fn code(mut self, plugin: PluginByKind, origin: Origin) -> Self {
+    fn code(mut self, plugin: PluginBox, origin: Origin) -> Self {
         let manifest = plugin.manifest();
         self.candidates.push(Candidate {
             name: manifest.id.to_string(),
@@ -253,8 +259,20 @@ impl KernelBuilder {
     }
 
     /// The desktop's windows, to bring a game or the launcher to the front.
-    pub fn desktop(mut self, desktop: Arc<dyn Desktop>) -> Self {
-        self.desktop = desktop;
+    pub fn windows(mut self, windows: Arc<dyn Windows>) -> Self {
+        self.windows = windows;
+        self
+    }
+
+    /// The player's login session: start at login, and installing the launcher's package.
+    pub fn login_session(mut self, login_session: Arc<dyn LoginSession>) -> Self {
+        self.login_session = login_session;
+        self
+    }
+
+    /// The system's opener, for the links a plugin opens.
+    pub fn opener(mut self, opener: Arc<dyn Opener>) -> Self {
+        self.opener = opener;
         self
     }
 
@@ -279,6 +297,13 @@ impl KernelBuilder {
     /// Unpacking the archives a download holds. Without it an archive can't install.
     pub fn archives(mut self, archives: Arc<dyn Archives>) -> Self {
         self.archives = archives;
+        self
+    }
+
+    /// The time every timer of the core and every plugin call's timeout runs on. Real time
+    /// by default.
+    pub fn clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
         self
     }
 
@@ -307,25 +332,17 @@ struct Record {
     state: Mutex<State>,
 }
 
-/// What a service may provide: it adds to games, and runs none.
-const SERVICE_CAPABILITIES: [Capability; 4] =
-    [Capability::Metadata, Capability::Releases, Capability::Slots, Capability::Configurator];
-
-/// A loaded plugin's code, by kind.
+/// A loaded plugin's code: a plugin with an init, or a theme.
 enum Code {
-    Emulator(Arc<dyn EmulatorPlugin>),
-    Service(Arc<dyn ServicePlugin>),
+    Init(Arc<dyn CodePlugin>),
     Theme(Arc<dyn ThemePlugin>),
-    System(Arc<dyn SystemPlugin>),
 }
 
-impl From<PluginByKind> for Code {
-    fn from(plugin: PluginByKind) -> Self {
+impl From<PluginBox> for Code {
+    fn from(plugin: PluginBox) -> Self {
         match plugin {
-            PluginByKind::Emulator(p) => Self::Emulator(Arc::from(p)),
-            PluginByKind::Service(p) => Self::Service(Arc::from(p)),
-            PluginByKind::Theme(p) => Self::Theme(Arc::from(p)),
-            PluginByKind::System(p) => Self::System(Arc::from(p)),
+            PluginBox::Code(p) => Self::Init(Arc::from(p)),
+            PluginBox::Theme(p) => Self::Theme(Arc::from(p)),
         }
     }
 }
@@ -333,10 +350,8 @@ impl From<PluginByKind> for Code {
 impl Code {
     fn as_plugin(&self) -> &dyn nexus_api::Plugin {
         match self {
-            Self::Emulator(p) => p.as_ref(),
-            Self::Service(p) => p.as_ref(),
+            Self::Init(p) => p.as_ref(),
             Self::Theme(p) => p.as_ref(),
-            Self::System(p) => p.as_ref(),
         }
     }
 
@@ -366,17 +381,9 @@ struct Inner {
     host: HostConfig,
     bus: EventBus,
     config: Arc<ConfigService>,
-    http: Arc<dyn HttpTransport>,
-    spawner: Arc<dyn ProcessSpawner>,
-    processes: Arc<dyn ProcessTree>,
-    desktop: Arc<dyn Desktop>,
-    hardware: Arc<dyn Hardware>,
-    torrents: Arc<dyn Torrents>,
-    /// The VPNs: the port the app plugged in, until a system plugin provides them.
-    network: crate::vpn::NetworkSource,
-    /// A plugin's [`VpnGate`] said "wait for the VPN", and the VPN check hasn't seen it back.
-    vpn_waited: Arc<AtomicBool>,
-    archives: Arc<dyn Archives>,
+    /// The kernel uses the HTTP, process, clock and VPN ports, and hands the bundle on to the
+    /// core.
+    ports: Ports,
     order: Vec<PluginId>,
     records: BTreeMap<PluginId, Record>,
 }
@@ -400,11 +407,14 @@ impl Kernel {
             http,
             spawner,
             processes,
-            desktop,
+            windows,
+            login_session,
+            opener,
             hardware,
             torrents,
             network,
             archives,
+            clock,
             config,
         } = builder;
         let mut report = BootReport::default();
@@ -453,7 +463,7 @@ impl Kernel {
         for id in resolution.order {
             let Some(candidate) = valid.remove(&id) else { continue };
             let manifest = candidate.manifest.clone().expect("validated above");
-            let (plugin, dir): (PluginByKind, Option<PathBuf>) = match candidate.source {
+            let (plugin, dir): (PluginBox, Option<PathBuf>) = match candidate.source {
                 Source::Code(plugin) => (plugin, None),
                 Source::Dir(dir) => match loaders.iter().find(|l| l.accepts(&manifest)) {
                     Some(loader) => match loader.load(&manifest, &dir) {
@@ -470,12 +480,10 @@ impl Kernel {
                     }
                 },
             };
-            if plugin.kind() != manifest.kind {
-                let error = LoadError::Invalid(format!(
-                    "the manifest says {:?}, but the code is of kind {:?}",
-                    manifest.kind,
-                    plugin.kind()
-                ));
+            if plugin.is_theme() != (manifest.kind == PluginKind::Theme) {
+                let code = if plugin.is_theme() { "a theme" } else { "code with an init" };
+                let error =
+                    LoadError::Invalid(format!("the manifest says {:?}, but the plugin is {code}", manifest.kind));
                 reject(&mut report, Some(id), candidate.name, error);
                 continue;
             }
@@ -500,23 +508,21 @@ impl Kernel {
         }
 
         let config = config.unwrap_or_else(|| Arc::new(ConfigService::open(host.data_dir.join("config.json"))));
+        let ports = Ports {
+            http,
+            spawner,
+            processes,
+            windows,
+            login_session,
+            opener,
+            hardware,
+            torrents,
+            archives,
+            clock,
+            vpn: crate::vpn::VpnRule::new(config.clone(), network),
+        };
         let kernel = Kernel {
-            inner: Arc::new(Inner {
-                host,
-                bus: EventBus::default(),
-                config,
-                http,
-                spawner,
-                processes,
-                desktop,
-                hardware,
-                torrents,
-                network: crate::vpn::NetworkSource::new(network),
-                vpn_waited: Arc::default(),
-                archives,
-                order: order.clone(),
-                records,
-            }),
+            inner: Arc::new(Inner { host, bus: EventBus::default(), config, ports, order: order.clone(), records }),
         };
 
         // Init the eager ones.
@@ -543,47 +549,10 @@ impl Kernel {
         &self.inner.config
     }
 
-    pub(crate) fn spawner(&self) -> &Arc<dyn ProcessSpawner> {
-        &self.inner.spawner
-    }
-
-    pub(crate) fn processes(&self) -> &Arc<dyn ProcessTree> {
-        &self.inner.processes
-    }
-
-    pub(crate) fn desktop(&self) -> &Arc<dyn Desktop> {
-        &self.inner.desktop
-    }
-
-    pub(crate) fn hardware(&self) -> &Arc<dyn Hardware> {
-        &self.inner.hardware
-    }
-
-    pub(crate) fn torrents(&self) -> &Arc<dyn Torrents> {
-        &self.inner.torrents
-    }
-
-    /// The VPNs, from the system plugin that provides them, or else from the app's port.
-    pub(crate) fn network(&self) -> Arc<dyn Network> {
-        self.inner.network.get()
-    }
-
-    /// From now on the VPNs come from `network` (a system plugin's).
-    pub(crate) fn use_network(&self, network: Arc<dyn Network>) {
-        self.inner.network.set(network);
-    }
-
-    /// Set while a plugin waits for the VPN: see [`crate::vpn::HostVpnGate`].
-    pub(crate) fn vpn_waited(&self) -> &AtomicBool {
-        &self.inner.vpn_waited
-    }
-
-    pub(crate) fn archives(&self) -> &Arc<dyn Archives> {
-        &self.inner.archives
-    }
-
-    pub(crate) fn http(&self) -> &Arc<dyn HttpTransport> {
-        &self.inner.http
+    /// Every port the app plugged in. The core takes the bundle once, when it starts, and
+    /// splits it per subsystem.
+    pub(crate) fn ports(&self) -> &Ports {
+        &self.inner.ports
     }
 
     /// Loaded plugins, dependencies first.
@@ -593,6 +562,12 @@ impl Kernel {
 
     pub fn manifest(&self, plugin: &PluginId) -> CoreResult<&PluginManifest> {
         self.record(plugin).map(|r| &r.manifest)
+    }
+
+    /// The player's folders as `plugin` may use them. `None` for a plugin that isn't loaded.
+    pub(crate) fn host_folders(&self, plugin: &PluginId) -> Option<crate::folders::HostFolders> {
+        let record = self.record(plugin).ok()?;
+        Some(crate::folders::HostFolders::new(&record.manifest, &self.inner.config, &self.inner.host))
     }
 
     pub fn plugin_dir(&self, plugin: &PluginId) -> CoreResult<Option<&Path>> {
@@ -714,18 +689,13 @@ impl Kernel {
                 State::Loaded => {}
             }
 
-            let host = &self.inner.host;
+            let (host, clock) = (&self.inner.host, self.inner.ports.clock.as_ref());
             let result = match &record.plugin {
                 // A theme has no init: its files are read on demand.
                 Code::Theme(_) => Ok(Provided::default()),
-                Code::Emulator(code) => {
-                    Self::init_code(plugin, record, code.init(self.context_for(record)), code.as_ref(), host).await
-                }
-                Code::Service(code) => {
-                    Self::init_code(plugin, record, code.init(self.context_for(record)), code.as_ref(), host).await
-                }
-                Code::System(code) => {
-                    Self::init_code(plugin, record, code.init(self.context_for(record)), code.as_ref(), host).await
+                Code::Init(code) => {
+                    Self::init_code(plugin, record, code.init(self.context_for(record)), code.as_ref(), host, clock)
+                        .await
                 }
             };
             match result {
@@ -753,14 +723,17 @@ impl Kernel {
         init: BoxFuture<'_, PluginResult<Provided>>,
         code: &dyn nexus_api::Plugin,
         host: &HostConfig,
+        clock: &dyn Clock,
     ) -> Result<Provided, LoadError> {
-        let provided = guarded(plugin, "init", host.call_timeout, init).await.map_err(LoadError::Init)?;
+        let provided = guarded(clock, plugin, "init", host.call_timeout, init).await.map_err(LoadError::Init)?;
         let declared: BTreeSet<Capability> = record.manifest.capabilities.clone();
         let got = provided.capabilities();
         if declared == got {
             return Ok(provided);
         }
-        let _ = guarded(plugin, "shutdown", host.shutdown_timeout, code.shutdown()).await;
+        if let Err(error) = guarded(clock, plugin, "shutdown", host.shutdown_timeout, code.shutdown()).await {
+            tracing::warn!(plugin_id = %plugin, %error, "shutdown failed");
+        }
         Err(LoadError::CapabilityMismatch {
             declared: declared.into_iter().collect(),
             provided: got.into_iter().collect(),
@@ -771,7 +744,7 @@ impl Kernel {
     pub fn theme_files(&self, plugin: &PluginId) -> CoreResult<Arc<dyn Files>> {
         match &self.record(plugin)?.plugin {
             Code::Theme(theme) => Ok(theme.files()),
-            Code::Emulator(_) | Code::Service(_) | Code::System(_) => {
+            Code::Init(_) => {
                 Err(CoreError::PluginUnavailable { plugin: plugin.clone(), reason: "it is not a theme".into() })
             }
         }
@@ -787,23 +760,13 @@ impl Kernel {
                 safe_mode: host.safe_mode,
                 runs_32bit: host.runs_32bit,
             }))
-            .insert(Arc::new(VpnGate::new(Arc::new(crate::vpn::HostVpnGate {
-                config: self.inner.config.clone(),
-                network: self.inner.network.clone(),
-                waited: self.inner.vpn_waited.clone(),
-            }))))
+            .insert(Arc::new(VpnGate::new(Arc::new(self.inner.ports.vpn.clone()))))
             .build();
         PluginContext::new(ContextParts {
             plugin: id.clone(),
             config: Arc::new(ScopedConfig { plugin: id.clone(), service: self.inner.config.clone() }),
             storage: Arc::new(DirStorage::new(host.plugin_dir(&id))),
-            folders: Arc::new(crate::folders::HostFolders {
-                plugin: id.clone(),
-                permissions: record.manifest.permissions.clone(),
-                config: self.inner.config.clone(),
-                home: host.home.clone(),
-                platform: host.platform,
-            }),
+            folders: Arc::new(crate::folders::HostFolders::new(&record.manifest, &self.inner.config, host)),
             programs: Arc::new(crate::programs::HostPrograms {
                 plugin: id.clone(),
                 permissions: record.manifest.permissions.clone(),
@@ -811,12 +774,12 @@ impl Kernel {
                 home: host.home.clone(),
                 platform: host.platform,
                 data_dir: host.plugin_dir(&id),
-                spawner: self.inner.spawner.clone(),
+                spawner: self.inner.ports.spawner.clone(),
             }),
             http: Arc::new(AllowlistHttp {
                 plugin: id.clone(),
                 permissions: record.manifest.permissions.clone(),
-                transport: self.inner.http.clone(),
+                transport: self.inner.ports.http.clone(),
             }),
             log: Logger::new(Arc::new(TracingLog { plugin: id.clone() })),
             events: Arc::new(PluginEvents { plugin: id, bus: self.inner.bus.clone() }),
@@ -839,7 +802,9 @@ impl Kernel {
             *state = State::Loaded;
             drop(state);
             let timeout = self.inner.host.shutdown_timeout;
-            if let Err(error) = guarded(plugin, "shutdown", timeout, record.plugin.shutdown()).await {
+            if let Err(error) =
+                guarded(self.inner.ports.clock.as_ref(), plugin, "shutdown", timeout, record.plugin.shutdown()).await
+            {
                 tracing::warn!(plugin_id = %plugin, %error, "shutdown failed");
             }
             self.inner.bus.publish(Event::PluginDeactivated { plugin: plugin.clone() });
@@ -870,7 +835,7 @@ impl Kernel {
         method: &'static str,
         call: impl Future<Output = PluginResult<T>>,
     ) -> CoreResult<T> {
-        guarded(plugin, method, self.inner.host.call_timeout, call)
+        guarded(self.inner.ports.clock.as_ref(), plugin, method, self.inner.host.call_timeout, call)
             .await
             .map_err(|error| CoreError::Plugin { plugin: plugin.clone(), error })
     }
@@ -921,15 +886,10 @@ fn validate(host: &HostConfig, manifest: &PluginManifest, origin: Origin) -> Res
     if origin == Origin::ThirdParty && manifest.runtime == Runtime::Native {
         return Err(LoadError::Invalid("third-party plugins must be data-only".into()));
     }
+    // The kind governs privileges only: any plugin with code may provide the data capabilities.
     let system = manifest.kind == PluginKind::System;
-    for c in &manifest.capabilities {
-        let systems = Capability::SYSTEM.contains(c);
-        if system && !systems && *c != Capability::Configurator {
-            return Err(LoadError::Invalid(format!("a system plugin can't provide {c:?}: it runs no games")));
-        }
-        if !system && systems {
-            return Err(LoadError::Invalid(format!("only a system plugin can provide {c:?}")));
-        }
+    if let Some(c) = manifest.capabilities.iter().find(|c| !system && Capability::SYSTEM.contains(c)) {
+        return Err(LoadError::Invalid(format!("only a system plugin can provide {c:?}")));
     }
     let process = &manifest.permissions;
     if !system && !(process.long_running.is_empty() && process.polkit.is_empty()) {
@@ -938,20 +898,24 @@ fn validate(host: &HostConfig, manifest: &PluginManifest, origin: Origin) -> Res
     if let Some(rule) = process.long_running.iter().chain(&process.polkit).find(|r| !process.process.contains(r)) {
         return Err(LoadError::Invalid(format!("{rule} must also be in permissions.process")));
     }
-    match (manifest.kind, &manifest.runtime) {
-        (PluginKind::Emulator, Runtime::Data) => Err(LoadError::Invalid("an emulator plugin needs code".into())),
-        (PluginKind::Theme, _) if !manifest.capabilities.contains(&Capability::Theme) => {
-            Err(LoadError::Invalid("a theme plugin must declare the `theme` capability".into()))
-        }
-        (PluginKind::Emulator, _) if manifest.capabilities.contains(&Capability::Theme) => {
-            Err(LoadError::Invalid("an emulator plugin can't provide a theme".into()))
-        }
-        (PluginKind::Service, Runtime::Data) => Err(LoadError::Invalid("a service plugin needs code".into())),
-        (PluginKind::System, Runtime::Data) => Err(LoadError::Invalid("a system plugin needs code".into())),
-        (PluginKind::Service, _) => match manifest.capabilities.iter().find(|c| !SERVICE_CAPABILITIES.contains(c)) {
-            Some(c) => Err(LoadError::Invalid(format!("a service plugin can't provide {c:?}: it runs no games"))),
-            None => Ok(()),
-        },
-        _ => Ok(()),
+    let theme = manifest.kind == PluginKind::Theme;
+    let a_kind = match manifest.kind {
+        PluginKind::Emulator => "an emulator",
+        PluginKind::Service => "a service",
+        PluginKind::Theme => "a theme",
+        PluginKind::System => "a system",
+    };
+    if theme && manifest.capabilities.iter().any(|c| *c != Capability::Theme) {
+        return Err(LoadError::Invalid("a theme plugin provides only the `theme` capability: it has no init".into()));
     }
+    if theme && !manifest.capabilities.contains(&Capability::Theme) {
+        return Err(LoadError::Invalid("a theme plugin must declare the `theme` capability".into()));
+    }
+    if !theme && manifest.capabilities.contains(&Capability::Theme) {
+        return Err(LoadError::Invalid(format!("{a_kind} plugin can't provide a theme")));
+    }
+    if !theme && manifest.runtime == Runtime::Data {
+        return Err(LoadError::Invalid(format!("{a_kind} plugin needs code")));
+    }
+    Ok(())
 }

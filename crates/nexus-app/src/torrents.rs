@@ -13,9 +13,9 @@
 //! SO_BINDTODEVICE, on macOS IP_BOUND_IF. A new route, and [`Torrents::stop_all`], stop the
 //! session; the next start makes a new one.
 //!
-//! `SeedOnly` adds the torrent paused, which checks the pieces on disk without downloading;
-//! once the check is done it seeds when every piece is there, and fails when one is missing.
-//! A download that finishes with seeding off is paused at once.
+//! A paused start adds the torrent paused, which checks the pieces on disk without
+//! downloading. The adapter only reports what librqbit says ([`Torrents::stats`]): the core
+//! decides what a finished or a paused torrent means, and unpauses or stops it.
 
 use std::collections::HashMap;
 use std::num::NonZeroU32;
@@ -28,7 +28,7 @@ use librqbit::{
     AddTorrent, AddTorrentOptions, AddTorrentResponse, ManagedTorrent, Session, SessionOptions, TorrentStatsState,
 };
 use nexus_api::{PluginError, PluginResult};
-use nexus_core::{SEED_UPLOAD_LIMIT, TorrentFile, TorrentInfo, TorrentPhase, TorrentStart, TorrentStatus, Torrents};
+use nexus_core::{SEED_UPLOAD_LIMIT, TorrentFile, TorrentInfo, TorrentStats, Torrents, TransferState};
 
 type ManagedTorrentHandle = Arc<ManagedTorrent>;
 
@@ -39,9 +39,6 @@ const FLUSH_TIME: Duration = Duration::from_millis(200);
 
 struct Running {
     handle: ManagedTorrentHandle,
-    how: TorrentStart,
-    /// A pause or unpause it asked for is under way.
-    changing: bool,
 }
 
 pub struct RqbitTorrents {
@@ -53,8 +50,7 @@ pub struct RqbitTorrents {
     making: tokio::sync::Mutex<()>,
     /// The interface every socket binds to; `None` for any.
     bind: Mutex<Option<String>>,
-    running: Arc<Mutex<HashMap<String, Running>>>,
-    runtime: tokio::runtime::Handle,
+    running: Mutex<HashMap<String, Running>>,
 }
 
 /// A session that only talks to `peers` on this computer, for tests.
@@ -68,7 +64,7 @@ fn error(e: impl std::fmt::Display) -> PluginError {
 }
 
 impl RqbitTorrents {
-    pub fn new(dir: PathBuf, runtime: tokio::runtime::Handle) -> Self {
+    pub fn new(dir: PathBuf) -> Self {
         Self {
             dir,
             local: None,
@@ -76,13 +72,12 @@ impl RqbitTorrents {
             making: Default::default(),
             bind: Default::default(),
             running: Default::default(),
-            runtime,
         }
     }
 
     #[cfg(test)]
-    pub fn local(dir: PathBuf, peers: Vec<std::net::SocketAddr>, runtime: tokio::runtime::Handle) -> Self {
-        Self { local: Some(Local { peers }), ..Self::new(dir, runtime) }
+    pub fn local(dir: PathBuf, peers: Vec<std::net::SocketAddr>) -> Self {
+        Self { local: Some(Local { peers }), ..Self::new(dir) }
     }
 
     /// The session now, if there is one.
@@ -140,32 +135,8 @@ impl RqbitTorrents {
         self.local.as_ref().map(|l| l.peers.clone())
     }
 
-    /// Pauses or unpauses a torrent in the background; `status` reads it again after.
-    fn change(&self, id: &str, handle: &ManagedTorrentHandle, unpause: bool) {
-        let Some(session) = self.current() else { return };
-        if let Some(r) = self.running.lock().unwrap_or_else(|p| p.into_inner()).get_mut(id) {
-            if r.changing {
-                return;
-            }
-            r.changing = true;
-        }
-        let (handle, running, id) = (handle.clone(), self.running.clone(), id.to_owned());
-        self.runtime.spawn(async move {
-            // Already as wanted: librqbit can start a torrent on its own between the status read
-            // and this, and then says "already live", which is no fault.
-            let wanted = |handle: &ManagedTorrentHandle| handle.is_paused() != unpause;
-            if !wanted(&handle) {
-                let done = if unpause { session.unpause(&handle).await } else { session.pause(&handle).await };
-                match done {
-                    Err(e) if wanted(&handle) => tracing::debug!(error = %e, "a torrent was already as wanted"),
-                    Err(e) => tracing::warn!(error = %e, "a torrent didn't change state"),
-                    Ok(()) => {}
-                }
-            }
-            if let Some(r) = running.lock().unwrap_or_else(|p| p.into_inner()).get_mut(&id) {
-                r.changing = false;
-            }
-        });
+    fn handle(&self, id: &str) -> Option<ManagedTorrentHandle> {
+        self.running.lock().unwrap_or_else(|p| p.into_inner()).get(id).map(|r| r.handle.clone())
     }
 }
 
@@ -198,7 +169,7 @@ impl Torrents for RqbitTorrents {
         Ok(TorrentInfo { name: name.unwrap_or_default(), files })
     }
 
-    async fn start(&self, id: &str, magnet: &str, folder: &Path, how: TorrentStart) -> PluginResult<()> {
+    async fn start(&self, id: &str, magnet: &str, folder: &Path, paused: bool) -> PluginResult<()> {
         let session = self.session().await?;
         let add = match tokio::fs::read(self.metadata_path(id)).await {
             Ok(bytes) => AddTorrent::from_bytes(bytes),
@@ -206,7 +177,7 @@ impl Torrents for RqbitTorrents {
         };
         let trackers = librqbit::Magnet::parse(magnet).map(|m| m.trackers).unwrap_or_default();
         let options = AddTorrentOptions {
-            paused: how == TorrentStart::SeedOnly,
+            paused,
             overwrite: true,
             output_folder: Some(folder.to_string_lossy().into_owned()),
             trackers: Some(trackers),
@@ -220,14 +191,27 @@ impl Torrents for RqbitTorrents {
             .into_handle()
             .ok_or_else(|| PluginError::Other("the torrent engine gave no handle".into()))?;
         // A torrent the session already has: a resume.
-        if how != TorrentStart::SeedOnly && matches!(handle.stats().state, TorrentStatsState::Paused) {
+        if !paused && matches!(handle.stats().state, TorrentStatsState::Paused) {
             session.unpause(&handle).await.map_err(error)?;
         }
-        self.running
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .insert(id.to_owned(), Running { handle, how, changing: false });
+        self.running.lock().unwrap_or_else(|p| p.into_inner()).insert(id.to_owned(), Running { handle });
         Ok(())
+    }
+
+    async fn unpause(&self, id: &str) -> PluginResult<()> {
+        let (Some(handle), Some(session)) = (self.handle(id), self.current()) else { return Ok(()) };
+        // Already live: librqbit can start a torrent on its own between the stats read and
+        // this, and then says "already live", which is no fault.
+        if !handle.is_paused() {
+            return Ok(());
+        }
+        match session.unpause(&handle).await {
+            Err(e) if !handle.is_paused() => {
+                tracing::debug!(error = %e, "a torrent was already live");
+                Ok(())
+            }
+            done => done.map_err(error),
+        }
     }
 
     async fn stop(&self, id: &str) -> PluginResult<()> {
@@ -240,47 +224,25 @@ impl Torrents for RqbitTorrents {
         session.delete(running.handle.id().into(), false).await.map_err(error)
     }
 
-    fn status(&self, id: &str) -> Option<TorrentStatus> {
-        let (handle, how, changing) = {
-            let running = self.running.lock().unwrap_or_else(|p| p.into_inner());
-            let r = running.get(id)?;
-            (r.handle.clone(), r.how, r.changing)
-        };
-        let stats = handle.stats();
+    fn stats(&self, id: &str) -> Option<TorrentStats> {
+        let stats = self.handle(id)?.stats();
         let live = stats.live.as_ref();
         let rate = |mbps: f64| (mbps * 1024.0 * 1024.0) as u64;
-        let mut status = TorrentStatus {
-            phase: TorrentPhase::Checking,
+        Some(TorrentStats {
+            state: match stats.state {
+                TorrentStatsState::Initializing { .. } => TransferState::Checking,
+                TorrentStatsState::Live => TransferState::Live,
+                TorrentStatsState::Paused => TransferState::Paused,
+                TorrentStatsState::Error => TransferState::Error,
+            },
+            finished: stats.finished,
             done: stats.progress_bytes,
             total: stats.total_bytes,
             download_rate: live.map(|l| rate(l.download_speed.mbps)).unwrap_or(0),
             upload_rate: live.map(|l| rate(l.upload_speed.mbps)).unwrap_or(0),
             peers: live.map(|l| l.snapshot.peer_stats.live).unwrap_or(0),
             error: stats.error.clone().unwrap_or_default(),
-        };
-        status.phase = match (stats.state, stats.finished, how) {
-            (TorrentStatsState::Error, ..) => TorrentPhase::Failed,
-            (TorrentStatsState::Initializing { .. }, ..) => TorrentPhase::Checking,
-            _ if changing => TorrentPhase::Checking,
-            // Checked and whole: seed.
-            (TorrentStatsState::Paused, true, TorrentStart::SeedOnly) => {
-                self.change(id, &handle, true);
-                TorrentPhase::Checking
-            }
-            (TorrentStatsState::Paused, false, TorrentStart::SeedOnly) => {
-                status.error = "pieces are missing".into();
-                TorrentPhase::Failed
-            }
-            (TorrentStatsState::Live, true, TorrentStart::Download { seed: false }) => {
-                self.change(id, &handle, false);
-                TorrentPhase::Finished
-            }
-            (TorrentStatsState::Paused, true, TorrentStart::Download { seed: false }) => TorrentPhase::Finished,
-            (TorrentStatsState::Live, true, _) => TorrentPhase::Seeding,
-            (TorrentStatsState::Live, false, _) => TorrentPhase::Downloading,
-            (TorrentStatsState::Paused, ..) => TorrentPhase::Downloading,
-        };
-        Some(status)
+        })
     }
 
     async fn route(&self, interface: Option<String>) -> PluginResult<()> {
@@ -368,71 +330,65 @@ mod tests {
                 .unwrap();
             let magnet = made.as_magnet().to_string();
             let id = made.info_hash().as_string();
-            let torrents = RqbitTorrents::local(
-                root.join("leech/torrents"),
-                vec![seeder.listen_addr().unwrap()],
-                tokio::runtime::Handle::current(),
-            );
+            let torrents = RqbitTorrents::local(root.join("leech/torrents"), vec![seeder.listen_addr().unwrap()]);
 
             let info = torrents.resolve(&magnet).await.unwrap();
             assert_eq!(info.files, [TorrentFile { path: "fixture.bin".into(), size: payload.len() as u64 }]);
 
             let out = root.join("leech/out");
-            let until = |phase: TorrentPhase| {
-                let torrents = &torrents;
-                let id = id.clone();
-                async move {
-                    for _ in 0..600 {
-                        if torrents.status(&id).is_some_and(|s| s.phase == phase) {
-                            return;
-                        }
-                        tokio::time::sleep(Duration::from_millis(100)).await;
+            async fn until(
+                torrents: &RqbitTorrents,
+                id: &str,
+                what: &str,
+                done: fn(&TorrentStats) -> bool,
+            ) -> TorrentStats {
+                for _ in 0..600 {
+                    if let Some(stats) = torrents.stats(id).filter(done) {
+                        return stats;
                     }
-                    panic!("never {phase:?}: {:?}", torrents.status(&id));
+                    tokio::time::sleep(Duration::from_millis(100)).await;
                 }
-            };
-            torrents.start(&id, &magnet, &out, TorrentStart::Download { seed: false }).await.unwrap();
-            until(TorrentPhase::Finished).await;
+                panic!("never {what}: {:?}", torrents.stats(id));
+            }
+            let checked = |s: &TorrentStats| s.state != TransferState::Checking;
+            torrents.start(&id, &magnet, &out, false).await.unwrap();
+            until(&torrents, &id, "finished", |s| s.finished && s.state == TransferState::Live).await;
             assert_eq!(std::fs::read(out.join("fixture.bin")).unwrap(), payload);
             torrents.stop(&id).await.unwrap();
 
-            // Again, to seed: the files are whole, so it checks them and seeds.
-            torrents.start(&id, &magnet, &out, TorrentStart::SeedOnly).await.unwrap();
-            until(TorrentPhase::Seeding).await;
+            // Again, paused: the files are whole, so its check finishes it, and it connects
+            // only when the core unpauses it.
+            torrents.start(&id, &magnet, &out, true).await.unwrap();
+            let whole = until(&torrents, &id, "checked", checked).await;
+            assert_eq!((whole.state, whole.finished), (TransferState::Paused, true));
+            torrents.unpause(&id).await.unwrap();
+            until(&torrents, &id, "live", |s| s.state == TransferState::Live).await;
             torrents.stop(&id).await.unwrap();
 
-            // A file changed: it fails, and downloads nothing.
+            // A file changed: the check finds a piece missing, and nothing downloads.
             let mut broken = payload.clone();
             broken[1000] ^= 0xff;
             std::fs::write(out.join("fixture.bin"), &broken).unwrap();
-            torrents.start(&id, &magnet, &out, TorrentStart::SeedOnly).await.unwrap();
-            until(TorrentPhase::Failed).await;
+            torrents.start(&id, &magnet, &out, true).await.unwrap();
+            let missing = until(&torrents, &id, "checked", checked).await;
+            assert_eq!((missing.state, missing.finished), (TransferState::Paused, false));
             torrents.stop(&id).await.unwrap();
             assert_eq!(std::fs::read(out.join("fixture.bin")).unwrap(), broken, "nothing was downloaded");
 
             // Whole again, and the launcher closed: the next launch trusts the pieces it checked
             // before instead of reading every file again. It reads one piece of each file, so a
-            // change in another piece shows only here, as a seed that keeps going.
+            // change in another piece shows only here, as a check that finds it whole.
             std::fs::write(out.join("fixture.bin"), &payload).unwrap();
-            torrents.start(&id, &magnet, &out, TorrentStart::SeedOnly).await.unwrap();
-            until(TorrentPhase::Seeding).await;
+            torrents.start(&id, &magnet, &out, true).await.unwrap();
+            until(&torrents, &id, "checked", checked).await;
             torrents.stop_all().await.unwrap();
             let mut last_piece_changed = payload.clone();
             last_piece_changed[payload.len() - 1000] ^= 0xff;
             std::fs::write(out.join("fixture.bin"), &last_piece_changed).unwrap();
-            let relaunched = RqbitTorrents::local(
-                root.join("leech/torrents"),
-                vec![seeder.listen_addr().unwrap()],
-                tokio::runtime::Handle::current(),
-            );
-            relaunched.start(&id, &magnet, &out, TorrentStart::SeedOnly).await.unwrap();
-            for _ in 0..600 {
-                if relaunched.status(&id).is_some_and(|s| s.phase != TorrentPhase::Checking) {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(100)).await;
-            }
-            assert_eq!(relaunched.status(&id).map(|s| s.phase), Some(TorrentPhase::Seeding), "not checked again");
+            let relaunched = RqbitTorrents::local(root.join("leech/torrents"), vec![seeder.listen_addr().unwrap()]);
+            relaunched.start(&id, &magnet, &out, true).await.unwrap();
+            let trusted = until(&relaunched, &id, "checked", checked).await;
+            assert_eq!((trusted.state, trusted.finished), (TransferState::Paused, true), "not checked again");
             relaunched.stop_all().await.unwrap();
             let _ = std::fs::remove_dir_all(&root);
         });

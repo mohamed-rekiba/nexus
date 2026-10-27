@@ -1,4 +1,5 @@
 import { Vm, Host, GameCard, Library } from "../types.slint";
+import { Commands } from "../commands.slint";
 import { Look } from "look.slint";
 import { GameMenu } from "game-menu.slint";
 import { Sys } from "system-panel.slint";
@@ -128,7 +129,7 @@ export global Nav {
         entry < 0 || entry >= Vm.home.groups.length ? "" : Vm.home.groups[entry].platform
     }
     public pure function count(entry: int) -> int {
-        entry < 0 || entry >= Vm.home.groups.length ? Vm.home.games.length : Vm.home.groups[entry].count
+        entry < 0 || entry >= Vm.home.groups.length ? Vm.home.games.length : Vm.home.groups[entry].games.length
     }
 
     // Opens the Library.
@@ -155,7 +156,7 @@ export global Nav {
             root.open-library();
         } else {
             Host.play-sound("select");
-            Host.navigate(index == 2 ? "catalog"
+            Commands.navigate(index == 2 ? "catalog"
                 : index == 3 ? "downloads"
                 : index == 4 ? "emulators"
                 : index == 5 ? "themes"
@@ -165,16 +166,16 @@ export global Nav {
     // The search, filters, sort and next page of the view on screen: the Catalog's or the
     // Library's.
     public function search(text: string) {
-        if (root.catalog) { Host.catalog-search(text); } else { Host.library-search(text); }
+        if (root.catalog) { Commands.catalog-search(text); } else { Commands.library-search(text); }
     }
     public function system(id: string) {
-        if (root.catalog) { Host.catalog-system(id); } else { Host.library-system(id); }
+        if (root.catalog) { Commands.catalog-system(id); } else { Commands.library-system(id); }
     }
     public function genre-filter(id: string) {
-        if (root.catalog) { Host.catalog-genre(id); } else { Host.library-genre(id); }
+        if (root.catalog) { Commands.catalog-genre(id); } else { Commands.library-genre(id); }
     }
     public function more() {
-        if (root.catalog) { Host.catalog-more(); } else { Host.library-more(); }
+        if (root.catalog) { Commands.catalog-more(); } else { Commands.library-more(); }
     }
     // The Catalog's bar has the catalog plugin's first button (`Vm.catalog-actions`), such as
     // Refresh, after the card sizes.
@@ -190,7 +191,7 @@ export global Nav {
         } else if (index == 4) {
             if (root.bar-button) {
                 let button = Vm.catalog-actions[0];
-                Host.run-action(button.plugin, button.action, "", button.args);
+                Commands.run-action(button.plugin, button.action, "", button.args);
             }
         } else {
             root.compact = index == 3;
@@ -206,7 +207,7 @@ export global Nav {
     // The sort at `index` of `sorts`: the core sorts by it, and the list closes.
     public function pick-sort(index: int) {
         root.sort-open = false;
-        if (root.catalog) { Host.catalog-sort(root.sorts[index]); } else { Host.library-sort(root.sorts[index]); }
+        if (root.catalog) { Commands.catalog-sort(root.sorts[index]); } else { Commands.library-sort(root.sorts[index]); }
         Host.play-sound("select");
     }
     // The keys while the list of sorts is open: Up and Down move round it, Enter picks, Back
@@ -244,13 +245,13 @@ export global Nav {
         }
         root.sent = true;
         root.sent-from = root.core-key;
-        Host.select(root.cursor-key);
+        Commands.select(root.cursor-key);
     }
     // A click or the app selects `key`: at once, and a waiting key move is dropped.
     public function select-now(key: string) {
         root.moving = false;
         root.sent = false;
-        Host.select(key);
+        Commands.select(key);
     }
     // The core's selection changed. It has the cursor's game, or it chose another after it
     // heard of the cursor (a refresh, a new list): either way the cursor follows the core. A
@@ -291,17 +292,17 @@ export global Nav {
         } else if (root.action == root.hub-action) {
             Host.play-sound("select");
             Origin.from = "row";
-            Host.open-game(key);
+            Commands.open-game(key);
         } else if (root.playing) {
             if (root.action == 0) {
                 Host.play-sound("select");
-                Host.show-game(Vm.running.session);
+                Commands.show-game(Vm.running.session);
             } else {
                 Host.play-sound("back");
-                Host.stop(Vm.running.session);
+                Commands.stop(Vm.running.session);
             }
         } else if (root.has-detail && Vm.detail.can.play) {
-            Host.launch(Vm.detail.key);
+            Commands.launch(Vm.detail.key);
         }
     }
 
@@ -330,7 +331,7 @@ export global Nav {
                 } else if (root.has-game) {
                     Host.play-sound("select");
                     Origin.from = "row";
-                    Host.open-game(root.games[root.shown].key);
+                    Commands.open-game(root.games[root.shown].key);
                 }
                 return true;
             }
@@ -340,7 +341,7 @@ export global Nav {
         } else if (root.catalog && (text == Key.Escape || text == Key.Backspace)) {
             // The Catalog is a screen of its own: back to where it opened from.
             Host.play-sound("back");
-            Host.back();
+            Commands.back();
             return true;
         } else if (root.zone == "bar") {
             if (text == Key.UpArrow) { if (!root.catalog) { root.go("tabs"); root.tab = 1; } return true; }
@@ -370,7 +371,7 @@ export global Nav {
                 if (root.has-game) {
                     Host.play-sound("select");
                     Origin.from-grid();
-                    Host.open-game(root.games[root.shown].key);
+                    Commands.open-game(root.games[root.shown].key);
                 }
                 return true;
             }

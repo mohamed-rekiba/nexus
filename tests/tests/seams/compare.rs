@@ -9,16 +9,24 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use crate::common::*;
-use nexus_core::{Command, Route};
+use nexus_core::{Area, Command, Route, SessionCmd};
 use slint::platform::software_renderer::{MinimalSoftwareWindow, PremultipliedRgbaColor, RepaintBufferType};
 use slint::platform::{Platform, WindowAdapter};
 use slint_interpreter::ComponentHandle;
 
 struct Offscreen(Rc<MinimalSoftwareWindow>);
 
+thread_local! {
+    /// Slint's time on this thread: it moves only when `shoot` moves it.
+    static ELAPSED: std::cell::Cell<Duration> = const { std::cell::Cell::new(Duration::ZERO) };
+}
+
 impl Platform for Offscreen {
     fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
         Ok(self.0.clone())
+    }
+    fn duration_since_start(&self) -> Duration {
+        ELAPSED.with(|e| e.get())
     }
     fn debug_log(&self, arguments: std::fmt::Arguments) {
         if keeps_log_line(&arguments) {
@@ -40,7 +48,9 @@ fn shoot(host: &mut Composed, window: &MinimalSoftwareWindow, path: &Path) {
         window.draw_if_needed(|r| {
             r.render(&mut pixels, WIDTH as usize);
         });
-        std::thread::sleep(Duration::from_millis(400));
+        // Slint's time, and the core's: the store's art and the game watcher move on too.
+        ELAPSED.with(|e| e.set(e.get() + Duration::from_millis(400)));
+        host.advance(Duration::from_millis(400));
     }
     let bytes: Vec<u8> = pixels.iter().flat_map(|p| [p.red, p.green, p.blue, p.alpha]).collect();
     image::save_buffer(path, &bytes, WIDTH, HEIGHT, image::ColorType::Rgba8).unwrap();
@@ -90,25 +100,17 @@ fn the_default_theme_on_a_real_library() {
         }
         h.first_run()
             .home(&home)
-            .built_in(nexus_api::PluginByKind::emulator(emu_kyty::KytyPlugin))
-            .built_in(nexus_api::PluginByKind::service(playstation_store::PlayStationStore))
+            .built_in(nexus_api::PluginBox::code(emu_kyty::KytyPlugin))
+            .built_in(nexus_api::PluginBox::code(playstation_store::PlayStationStore))
     });
     host.dispatch(Command::SetFolders { name: "games".into(), paths: vec![games] });
     host.ui.set_clock("9:38 PM".into());
     host.ui.start().unwrap();
     use slint::platform::Key;
     shoot(&mut host, &window, &out.join("new-boot.png"));
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     // The store's descriptions come in the background.
-    let core = host.core().clone();
-    host.rt.block_on(async {
-        for _ in 0..200 {
-            if core.view().task.is_none() && core.view().boot.ready {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-    });
+    host.until(Area::Library, |core| core.view().task.is_none() && core.view().boot.ready);
     shoot(&mut host, &window, &out.join("new-welcome.png"));
     key(&mut host, Key::Return);
     let first = host.core().view().home.games.first().map(|g| g.key.clone()).expect("a game in the folder");
@@ -117,7 +119,7 @@ fn the_default_theme_on_a_real_library() {
     let stats = serde_json::json!({ "secs": 4 * 3600 + 6 * 60, "count": 2, "last": now });
     host.core().kernel().config().set(&["app", "playtime", &first], stats).unwrap();
     host.dispatch(Command::Select(first.parse().unwrap()));
-    host.dispatch(Command::DismissNotices);
+    host.dispatch(Command::Notice(nexus_core::NoticeCmd::DismissAll));
 
     shoot(&mut host, &window, &out.join("new-home.png"));
     key(&mut host, Key::DownArrow);
@@ -138,27 +140,23 @@ fn the_default_theme_on_a_real_library() {
     shoot(&mut host, &window, &out.join("new-downloads.png"));
     host.dispatch(Command::Navigate(Route::Home));
     // A game that starts: the fake spawner starts nothing.
-    host.test.desktop.no_windows();
-    host.dispatch(Command::Launch(first.parse().unwrap()));
+    host.test.windows.no_windows();
+    host.dispatch(Command::Session(SessionCmd::Launch(first.parse().unwrap())));
     shoot(&mut host, &window, &out.join("new-launch.png"));
-    host.test.desktop.windows_open();
+    host.test.windows.windows_open();
     if host.core().view().install_prompt.is_some() {
         eprintln!("SKIPPED the running game: no KytyPS5 build in NEXUS_COMPARE_BUILDS, so Play asks to install it");
         return;
     }
-    host.rt.block_on(async {
-        while core.view().running.is_some_and(|r| r.state == "starting") {
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-    });
+    while host.core().view().running.is_some_and(|r| r.state == "starting") {
+        host.advance(Duration::from_millis(20));
+    }
     shoot(&mut host, &window, &out.join("new-home-playing.png"));
     let session = nexus_api::SessionId(host.core().view().running.unwrap().session);
     host.test.spawner.spawned()[0].exit(1);
-    host.rt.block_on(async {
-        while core.game_running() {
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-    });
+    while host.core().game_running() {
+        host.advance(Duration::from_millis(20));
+    }
     let _ = session;
     shoot(&mut host, &window, &out.join("new-toast.png"));
 }

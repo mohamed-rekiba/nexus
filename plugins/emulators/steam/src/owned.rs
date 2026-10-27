@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use nexus_api::serde_json::{self, Value};
 use nexus_api::*;
 
-use crate::{ART, COVER, HEADER, PLATFORM, STEAM, Steam, appinfo, path, vdf};
+use crate::{ART, COVER, HEADER, PLATFORM, STEAM, Steam, appinfo, vdf};
 
 /// The most bytes of a collections or users file read.
 const MAX_FILE: u64 = 8 * 1024 * 1024;
@@ -69,7 +69,7 @@ impl Steam {
     /// Steam's own folder, among the `steam` folders: the one with a `userdata` folder.
     async fn steam_root(&self) -> Option<u32> {
         for library in self.libraries().await.ok()? {
-            let userdata = HostPath::new(STEAM, library.root, path("userdata").ok()?);
+            let userdata = HostPath::new(STEAM, library.root, RelPath::new("userdata").ok()?);
             if !self.ctx.folders().list(&userdata).await.unwrap_or_default().is_empty() {
                 return Some(library.root);
             }
@@ -81,7 +81,7 @@ impl Steam {
     /// `config/loginusers.vdf` marks most recent.
     async fn account(&self, root: u32) -> Option<String> {
         let folders = self.ctx.folders();
-        let userdata = HostPath::new(STEAM, root, path("userdata").ok()?);
+        let userdata = HostPath::new(STEAM, root, RelPath::new("userdata").ok()?);
         let accounts: Vec<String> = folders
             .list(&userdata)
             .await
@@ -93,7 +93,7 @@ impl Steam {
         if accounts.len() <= 1 {
             return accounts.into_iter().next();
         }
-        let users = HostPath::new(STEAM, root, path("config/loginusers.vdf").ok()?);
+        let users = HostPath::new(STEAM, root, RelPath::new("config/loginusers.vdf").ok()?);
         let bytes = folders.read_range(&users, 0, MAX_FILE).await.ok()?;
         let file = vdf::parse(&String::from_utf8_lossy(&bytes))?;
         let recent = file.block("users")?.0.iter().find_map(|(id, user)| {
@@ -108,7 +108,7 @@ impl Steam {
     pub(crate) async fn owned(&self) -> BTreeMap<u32, Owned> {
         let Some(root) = self.steam_root().await else { return BTreeMap::new() };
         let Some(account) = self.account(root).await else { return BTreeMap::new() };
-        let Ok(dir) = path(format!("userdata/{account}/config/cloudstorage")) else { return BTreeMap::new() };
+        let Ok(dir) = RelPath::new(format!("userdata/{account}/config/cloudstorage")) else { return BTreeMap::new() };
         let dir = HostPath::new(STEAM, root, dir);
         let folders = self.ctx.folders();
         let mut names: Vec<String> = folders
@@ -140,14 +140,14 @@ impl Steam {
         let owned = self.owned().await;
         let mut names = BTreeMap::new();
         if let Some(root) = self.steam_root().await {
-            let cache = HostPath::new(STEAM, root, path("appcache/appinfo.vdf")?);
+            let cache = HostPath::new(STEAM, root, RelPath::new("appcache/appinfo.vdf")?);
             let wanted: BTreeSet<u32> = owned.keys().copied().collect();
             names = appinfo::names(self.ctx.folders().as_ref(), &cache, &wanted).await;
         }
         let releases = owned
             .into_iter()
             .map(|(app, game)| {
-                let art = |file: &str| format!("{ART}/{app}/{file}");
+                let art = |file: &str| Some(ImageSource::Url(format!("{ART}/{app}/{file}")));
                 Release {
                     id: format!("steam-{app}"),
                     title_id: app.to_string(),
@@ -158,12 +158,12 @@ impl Steam {
                     hidden: game.hidden,
                     favorite: game.favorite,
                     // Only what Steam's server has for every game: a guessed hero or logo is
-                    // missing for an older game (the Game Hub falls back to the header).
-                    steam: Some(SteamInfo {
-                        app_id: app.into(),
-                        portrait: art(COVER),
-                        header: art(HEADER),
-                        ..SteamInfo::default()
+                    // missing for an older game, so the header is the background.
+                    metadata: Some(GameMetadata {
+                        cover: art(COVER),
+                        background: art(HEADER),
+                        store_url: format!("https://store.steampowered.com/app/{app}/"),
+                        ..GameMetadata::default()
                     }),
                     ..Release::default()
                 }

@@ -159,6 +159,12 @@ pub fn ps4_band(art: &impl GenericImageView<Pixel = image::Rgba<u8>>) -> f32 {
 pub struct StillWanted(Arc<Mutex<HashSet<ImageKey>>>);
 
 impl StillWanted {
+    /// A set of `keys`, as a render would leave it.
+    #[cfg(test)]
+    pub fn with(keys: impl IntoIterator<Item = ImageKey>) -> Self {
+        Self(Arc::new(Mutex::new(keys.into_iter().collect())))
+    }
+
     pub fn contains(&self, key: &ImageKey) -> bool {
         self.0.lock().unwrap_or_else(|p| p.into_inner()).contains(key)
     }
@@ -292,6 +298,8 @@ impl ImageCache {
         }
     }
 
+    /// An image's bytes, decoded on this thread: for tests.
+    #[cfg(test)]
     pub fn insert(&mut self, key: ImageKey, bytes: Result<Vec<u8>, String>) {
         let (size, crop) = (key.1, key.2);
         self.pending.remove(&key);
@@ -304,6 +312,11 @@ impl ImageCache {
                 self.failed.insert(key);
             }
         }
+    }
+
+    /// The images asked for that it still keeps track of: in memory, failed or loading.
+    pub fn asked(&self) -> Vec<ImageKey> {
+        self.loaded.keys().chain(&self.failed).chain(&self.pending).cloned().collect()
     }
 
     /// How many images are in memory.

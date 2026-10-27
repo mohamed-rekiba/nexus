@@ -3,9 +3,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use nexus_api::{
-    EmulatorPlugin, Plugin, PluginByKind, PluginContext, PluginError, PluginManifest, PluginResult, Provided,
-};
+use nexus_api::{CodePlugin, Plugin, PluginBox, PluginContext, PluginError, PluginManifest, PluginResult, Provided};
 
 type InitFn = Arc<dyn Fn(PluginContext) -> PluginResult<Provided> + Send + Sync>;
 
@@ -81,13 +79,9 @@ impl StubPlugin {
         self.shutdowns.load(Ordering::SeqCst)
     }
 
-    /// As the kind its manifest says: an emulator, a service or a system plugin.
-    pub fn boxed(&self) -> PluginByKind {
-        match self.manifest.kind {
-            nexus_api::PluginKind::Service => PluginByKind::service(self.clone()),
-            nexus_api::PluginKind::System => PluginByKind::system(self.clone()),
-            _ => PluginByKind::emulator(self.clone()),
-        }
+    /// As a plugin with code, of the kind its manifest says.
+    pub fn boxed(&self) -> PluginBox {
+        PluginBox::code(self.clone())
     }
 }
 
@@ -107,7 +101,7 @@ impl Plugin for StubPlugin {
 }
 
 #[async_trait]
-impl EmulatorPlugin for StubPlugin {
+impl CodePlugin for StubPlugin {
     async fn init(&self, ctx: PluginContext) -> PluginResult<Provided> {
         self.inits.fetch_add(1, Ordering::SeqCst);
         match &self.behaviour {
@@ -119,19 +113,5 @@ impl EmulatorPlugin for StubPlugin {
             }
             Behaviour::Fail(e) => Err(e.clone()),
         }
-    }
-}
-
-#[async_trait]
-impl nexus_api::ServicePlugin for StubPlugin {
-    async fn init(&self, ctx: PluginContext) -> PluginResult<Provided> {
-        EmulatorPlugin::init(self, ctx).await
-    }
-}
-
-#[async_trait]
-impl nexus_api::SystemPlugin for StubPlugin {
-    async fn init(&self, ctx: PluginContext) -> PluginResult<Provided> {
-        EmulatorPlugin::init(self, ctx).await
     }
 }

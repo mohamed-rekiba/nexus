@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use emu_steam::SteamPlugin;
 use nexus_api::*;
-use nexus_core::Command;
+use nexus_core::{Area, Command, SessionCmd};
 use nexus_testkit::{FakeHost, TestCore, contract};
 use nexus_ui_api::ImageRef;
 
@@ -39,8 +39,7 @@ struct Steam {
 /// Steam with Dota 2 (art in its cache) and Proton in its own folder, Portal 2 in a library on
 /// another drive, and a game still downloading.
 async fn boot() -> Steam {
-    let test =
-        FakeHost::new().platform(Some(Platform::Linux)).built_in(PluginByKind::emulator(SteamPlugin)).boot_core().await;
+    let test = FakeHost::new().platform(Some(Platform::Linux)).built_in(PluginBox::code(SteamPlugin)).boot_core().await;
     let (root, library) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let apps = root.path().join("steamapps");
     write(apps.join("appmanifest_570.acf"), acf(570, "Dota 2", 4, "dota 2 beta").as_bytes());
@@ -67,7 +66,7 @@ async fn boot() -> Steam {
     write(root.path().join("steamapps/libraryfolders.vdf"), folders.as_bytes());
     let paths = vec![root.path().into(), library.path().into()];
     test.core.dispatch(Command::SetFolders { name: "steam".into(), paths }).await.unwrap();
-    test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     Steam { test, root, library }
 }
 
@@ -121,7 +120,7 @@ async fn the_old_cache_layout_still_gives_a_game_its_cover() {
     std::fs::remove_dir_all(s.root.path().join("appcache/librarycache/570")).unwrap();
     // Before 2024 Steam kept each file flat, named after the game.
     write(s.root.path().join("appcache/librarycache/570_library_600x900.jpg"), b"jpg");
-    s.test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    s.test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
 
     let flat = HostPath::new("steam", 0, RelPath::new("appcache/librarycache/570_library_600x900.jpg").unwrap());
     assert_eq!(s.cover("Dota 2"), Some(ImageRef::Folder { plugin: steam(), path: flat }));
@@ -132,7 +131,7 @@ async fn play_asks_steam_to_start_the_game_and_follows_the_game_steam_started() 
     let s = boot().await;
     s.test.spawner.on_path("steam", Path::new("/usr/bin/steam"));
     let mut events = s.test.core.events();
-    s.test.core.dispatch(Command::Launch("emu-steam:570".parse().unwrap())).await.unwrap();
+    s.test.core.dispatch(Command::Session(SessionCmd::Launch("emu-steam:570".parse().unwrap()))).await.unwrap();
     let steam_command = s.test.spawner.wait_for(1).await;
     let run = &steam_command.command;
     assert_eq!(run.program, Path::new("steam"));
@@ -143,7 +142,7 @@ async fn play_asks_steam_to_start_the_game_and_follows_the_game_steam_started() 
     // Steam hands the game to its reaper and the command exits.
     steam_command.exit(0);
     s.test.processes.start(7001, "/home/p/.local/share/Steam/ubuntu12_32/reaper SteamLaunch AppId=570 -- dota");
-    tokio::time::sleep(Duration::from_millis(700)).await;
+    s.test.clock.advance(Duration::from_millis(700)).await;
     assert!(s.test.core.view().running.is_some(), "Dota 2 runs");
     s.test.processes.exit(7001);
     let exit = loop {
@@ -157,7 +156,8 @@ async fn play_asks_steam_to_start_the_game_and_follows_the_game_steam_started() 
 #[tokio::test]
 async fn without_steam_play_says_to_install_it() {
     let s = boot().await;
-    let refused = s.test.core.dispatch(Command::Launch("emu-steam:570".parse().unwrap())).await.unwrap_err();
+    let refused =
+        s.test.core.dispatch(Command::Session(SessionCmd::Launch("emu-steam:570".parse().unwrap()))).await.unwrap_err();
     assert!(refused.to_string().contains("Install Steam"), "{refused}");
 }
 
@@ -196,8 +196,7 @@ async fn a_game_s_details_have_its_size_folder_and_steam_s_hero_art() {
 
 #[tokio::test]
 async fn a_flatpak_steam_s_game_starts_through_the_flatpak() {
-    let test =
-        FakeHost::new().platform(Some(Platform::Linux)).built_in(PluginByKind::emulator(SteamPlugin)).boot_core().await;
+    let test = FakeHost::new().platform(Some(Platform::Linux)).built_in(PluginBox::code(SteamPlugin)).boot_core().await;
     let home = tempfile::tempdir().unwrap();
     let root = home.path().join(".var/app/com.valvesoftware.Steam/.local/share/Steam");
     write(root.join("steamapps/appmanifest_570.acf"), acf(570, "Dota 2", 4, "dota 2 beta").as_bytes());
@@ -205,7 +204,7 @@ async fn a_flatpak_steam_s_game_starts_through_the_flatpak() {
     test.core.dispatch(Command::SetFolders { name: "steam".into(), paths: vec![root.clone()] }).await.unwrap();
     test.spawner.on_path("flatpak", Path::new("/usr/bin/flatpak"));
 
-    test.core.dispatch(Command::Launch("emu-steam:570".parse().unwrap())).await.unwrap();
+    test.core.dispatch(Command::Session(SessionCmd::Launch("emu-steam:570".parse().unwrap()))).await.unwrap();
     let run = test.spawner.wait_for(1).await.command;
     assert_eq!(run.program, Path::new("flatpak"));
     assert_eq!(run.args, ["run", "com.valvesoftware.Steam", "steam://rungameid/570"]);
@@ -213,8 +212,7 @@ async fn a_flatpak_steam_s_game_starts_through_the_flatpak() {
 
 #[tokio::test]
 async fn a_flatpak_steam_s_library_on_another_drive_starts_through_the_flatpak_too() {
-    let test =
-        FakeHost::new().platform(Some(Platform::Linux)).built_in(PluginByKind::emulator(SteamPlugin)).boot_core().await;
+    let test = FakeHost::new().platform(Some(Platform::Linux)).built_in(PluginBox::code(SteamPlugin)).boot_core().await;
     let home = tempfile::tempdir().unwrap();
     let root = home.path().join(".var/app/com.valvesoftware.Steam/.local/share/Steam");
     std::fs::create_dir_all(root.join("steamapps")).unwrap();
@@ -225,7 +223,7 @@ async fn a_flatpak_steam_s_library_on_another_drive_starts_through_the_flatpak_t
     test.core.dispatch(Command::SetFolders { name: "steam".into(), paths }).await.unwrap();
     test.spawner.on_path("flatpak", Path::new("/usr/bin/flatpak"));
 
-    test.core.dispatch(Command::Launch("emu-steam:620".parse().unwrap())).await.unwrap();
+    test.core.dispatch(Command::Session(SessionCmd::Launch("emu-steam:620".parse().unwrap()))).await.unwrap();
     let run = test.spawner.wait_for(1).await.command;
     assert_eq!(run.program, Path::new("flatpak"), "{:?}", run.args);
 }
@@ -259,10 +257,10 @@ async fn the_libraries_steam_lists_are_read_with_nothing_set() {
     let test = FakeHost::new()
         .platform(Some(Platform::Linux))
         .home(home.path())
-        .built_in(PluginByKind::emulator(SteamPlugin))
+        .built_in(PluginBox::code(SteamPlugin))
         .boot_core()
         .await;
-    test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
 
     let titles: Vec<_> = test.core.view().home.games.into_iter().map(|g| g.title).collect();
     assert_eq!(titles, ["Dota 2", "Team Fortress 2"], "Steam's folder and the library on another drive");
@@ -281,11 +279,11 @@ async fn the_player_s_own_steam_libraries_setting_replaces_steam_s_list() {
     let test = FakeHost::new()
         .platform(Some(Platform::Linux))
         .home(home.path())
-        .built_in(PluginByKind::emulator(SteamPlugin))
+        .built_in(PluginBox::code(SteamPlugin))
         .boot_core()
         .await;
     test.core.dispatch(Command::SetFolders { name: "steam".into(), paths: vec![root] }).await.unwrap();
-    test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
 
     let titles: Vec<_> = test.core.view().home.games.into_iter().map(|g| g.title).collect();
     assert_eq!(titles, ["Dota 2"], "only the folders the player set");
@@ -345,13 +343,7 @@ fn catalog(s: &Steam) -> Vec<(String, Vec<String>)> {
 /// The Catalog open, once it shows `n` games.
 async fn open_catalog(s: &Steam, n: usize) {
     s.test.core.dispatch(Command::Navigate(nexus_core::Route::Catalog)).await.unwrap();
-    for _ in 0..200 {
-        if s.test.core.view().catalog.games.games.len() >= n {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("the Catalog never showed {n} games: {:?}", catalog(s));
+    s.test.until(Area::Catalogs, |core| core.view().catalog.games.games.len() >= n).await;
 }
 
 #[tokio::test]
@@ -378,7 +370,11 @@ async fn the_catalog_shows_the_player_s_steam_library_with_hidden_games_under_hi
     let chips: Vec<_> = s.test.core.view().catalog.games.systems.into_iter().map(|f| f.label).collect();
     assert!(chips.contains(&"Steam".to_owned()), "{chips:?}");
 
-    s.test.core.dispatch(Command::CatalogSystem(Some("hidden".into()))).await.unwrap();
+    s.test
+        .core
+        .dispatch(Command::CatalogSystem(Some(nexus_core::SystemChoice::Filter(nexus_core::GridFilter::Hidden))))
+        .await
+        .unwrap();
     assert_eq!(catalog(&s), [("Steam app 2500".to_owned(), vec![])], "Hidden shows it, by its number");
 }
 
@@ -393,8 +389,12 @@ async fn install_asks_steam_to_install_the_game_and_downloads_nothing() {
     let release = s.test.core.view().detail.unwrap().releases.remove(0);
     assert_eq!(release.store, "Steam", "its Game Hub says Steam installs it");
 
-    s.test.core.dispatch(Command::DownloadRelease { offer: key, release: release.id, folder: None }).await.unwrap();
-    assert_eq!(s.test.desktop.links(), ["steam://install/440"]);
+    s.test
+        .core
+        .dispatch(Command::Torrent(nexus_core::TorrentCmd::Download { offer: key, release: release.id, folder: None }))
+        .await
+        .unwrap();
+    assert_eq!(s.test.opener.links(), ["steam://install/440"]);
     assert!(s.test.core.view().downloads.jobs.is_empty(), "nothing downloads");
     let notices = s.test.core.view().notices;
     assert!(notices.iter().any(|n| n.contains("Steam is installing Team Fortress 2")), "{notices:?}");
@@ -423,7 +423,7 @@ async fn a_steam_game_s_hub_installs_it_until_it_is_installed_and_then_plays_it(
     let hub = s.test.core.view().detail.unwrap();
     assert!(hub.can.play, "installed: Play");
     assert!(hub.releases.is_empty(), "nothing to install: {:?}", hub.releases);
-    s.test.core.dispatch(Command::Launch(dota)).await.unwrap();
+    s.test.core.dispatch(Command::Session(SessionCmd::Launch(dota))).await.unwrap();
     let run = s.test.spawner.wait_for(1).await.command;
     assert_eq!(run.args, ["-silent", "steam://rungameid/570"], "Play starts the installed game");
 }
@@ -477,7 +477,7 @@ async fn uninstall_asks_steam_to_uninstall_its_game() {
     let dota: GameKey = "emu-steam:570".parse().unwrap();
     s.test.core.dispatch(Command::OpenGame(dota.clone())).await.unwrap();
     s.test.core.dispatch(Command::UninstallGame(dota)).await.unwrap();
-    assert_eq!(s.test.desktop.links(), ["steam://uninstall/570"]);
+    assert_eq!(s.test.opener.links(), ["steam://uninstall/570"]);
     assert!(s.root.path().join("steamapps/common/dota 2 beta").is_dir(), "Steam removes it, not Nexus");
     let notices = s.test.core.view().notices;
     assert!(notices.iter().any(|n| n.contains("Steam is uninstalling Dota 2")), "{notices:?}");
@@ -499,8 +499,12 @@ async fn a_game_steam_has_no_art_cached_for_gets_only_art_steam_s_server_has() {
     collections(s.root.path(), "[620]", "[]", "[]");
     let releases = provided.releases.unwrap();
     let list = releases.releases(&Console::new("Steam").unwrap()).await.unwrap().unwrap();
-    let steam = list.releases[0].steam.clone().unwrap();
-    assert_eq!((steam.hero.as_str(), steam.logo.as_str(), steam.header.as_str()), ("", "", header));
+    let art = list.releases[0].metadata.clone().unwrap();
+    assert_eq!(
+        (art.background, art.logo),
+        (Some(ImageSource::Url(header.into())), None),
+        "the header, no hero or logo"
+    );
 }
 
 /// Team Fortress 2's app file in `root`, as Steam writes it while it installs: `flags`, and
@@ -516,16 +520,11 @@ fn installing_tf2(root: &Path, flags: u32, downloaded: u32, staged: u32) {
 
 /// The Downloads card of Steam's install of Team Fortress 2, once `done` says it is the one.
 async fn steam_card(s: &Steam, done: impl Fn(&nexus_ui_api::TorrentVm) -> bool) -> nexus_ui_api::TorrentVm {
-    for _ in 0..300 {
-        let cards = s.test.core.view().downloads.torrents;
-        if let Some(card) = cards.into_iter().find(|t| t.id == "store:emu-steam:steam-440")
-            && done(&card)
-        {
-            return card;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("no such card: {:?}", s.test.core.view().downloads.torrents);
+    let card = |core: &nexus_core::Core| {
+        core.view().downloads.torrents.into_iter().find(|t| t.id == "store:emu-steam:steam-440").filter(|c| done(c))
+    };
+    s.test.until(Area::Downloads, |core| card(core).is_some()).await;
+    card(&s.test.core).unwrap()
 }
 
 #[tokio::test]
@@ -541,10 +540,13 @@ async fn steam_s_install_shows_in_downloads_until_the_game_is_installed() {
     assert_eq!(card.actions, ["open-store"], "Steam pauses and cancels its own");
     s.test
         .core
-        .dispatch(Command::Torrent { id: card.id.clone(), action: nexus_core::TorrentAction::OpenStore })
+        .dispatch(Command::Torrent(nexus_core::TorrentCmd::Act {
+            id: card.id.clone(),
+            action: nexus_core::TorrentAction::OpenStore,
+        }))
         .await
         .unwrap();
-    assert_eq!(s.test.desktop.links(), ["steam://open/downloads"]);
+    assert_eq!(s.test.opener.links(), ["steam://open/downloads"]);
 
     // Downloaded: Steam writes it into place.
     installing_tf2(s.library.path(), 1026 | (1 << 21), 1000, 500);
@@ -555,12 +557,7 @@ async fn steam_s_install_shows_in_downloads_until_the_game_is_installed() {
     installing_tf2(s.library.path(), 4, 1000, 1000);
     std::fs::create_dir_all(s.library.path().join("steamapps/common/Team Fortress 2")).unwrap();
     let tf2_card = |s: &Steam| s.test.core.view().downloads.torrents.into_iter().any(|t| t.id.ends_with("steam-440"));
-    for _ in 0..300 {
-        if !tf2_card(&s) {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    s.test.until(Area::Downloads, |_| !tf2_card(&s)).await;
     assert!(!tf2_card(&s), "{:?}", s.test.core.view().downloads.torrents);
     let titles: Vec<_> = s.test.core.view().home.games.into_iter().map(|g| g.title).collect();
     assert!(titles.contains(&"Team Fortress 2".to_owned()), "{titles:?}");
@@ -581,7 +578,7 @@ async fn a_steam_game_s_hub_has_steam_s_screenshots_words_and_trailer_kept_a_wee
     let url = "https://store.steampowered.com/api/appdetails?appids=570&l=english";
     s.test.http.serve(url, details.to_string());
     // Booting asked before Steam answered: nothing was kept, and the next look asks again.
-    s.test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    s.test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     let dota: GameKey = "emu-steam:570".parse().unwrap();
 
     let mut hub = None;
@@ -591,7 +588,8 @@ async fn a_steam_game_s_hub_has_steam_s_screenshots_words_and_trailer_kept_a_wee
         if hub.is_some() {
             break;
         }
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        // The plugin reads the store in the background.
+        s.test.clock.advance(Duration::from_millis(10)).await;
     }
     let hub = hub.unwrap_or_else(|| panic!("no details; sent {:?}", s.test.http.sent()));
     assert_eq!(hub.screenshots.len(), 2);
@@ -601,7 +599,7 @@ async fn a_steam_game_s_hub_has_steam_s_screenshots_words_and_trailer_kept_a_wee
 
     // Kept: once it answered, Steam isn't asked again.
     let asked = s.test.http.sent().iter().filter(|u| *u == url).count();
-    s.test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    s.test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     s.test.core.dispatch(Command::OpenGame(dota)).await.unwrap();
     assert_eq!(s.test.http.sent().iter().filter(|u| *u == url).count(), asked, "{:?}", s.test.http.sent());
 }

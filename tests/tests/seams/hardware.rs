@@ -1,17 +1,16 @@
 //! Seam 1, core app API: "This PC". Each emulator's manifest says what its games need; the
 //! core compares it with what the computer has.
 
-use std::time::Duration;
-
-use crate::common::{catalogs_fetched, games_needing, offering_emulator};
-use nexus_core::{Command, Core, Gpu, Specs};
+use crate::common::catalogs_fetched;
+use nexus_core::{Area, Command, Core, Gpu, Specs};
+use nexus_testkit::FakeCatalog;
 use nexus_testkit::{FakeHost, StubPlugin, TestCore};
 use nexus_ui_api::VerdictVm;
 
 /// An emulator whose games need `requires` (TOML for its `[requires]` section).
 fn emulator(id: &str, requires: &str) -> StubPlugin {
     StubPlugin::from_toml(&format!(
-        "id = \"{id}\"\nkind = \"emulator\"\nname = \"{id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"{id}\"\nkind = \"emulator\"\nname = \"{id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          capabilities = [\"launcher\"]\n[requires]\n{requires}"
     ))
 }
@@ -40,13 +39,7 @@ async fn verdict(specs: Specs, requires: &str) -> VerdictVm {
 }
 
 async fn wait_for_check(core: &Core) {
-    for _ in 0..100 {
-        if core.view().settings.hardware.known {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("the check never ran");
+    nexus_testkit::until(core, Area::Hardware, |core| core.view().settings.hardware.known).await;
 }
 
 #[tokio::test]
@@ -121,8 +114,8 @@ async fn astro_offer(build: impl FnOnce(FakeHost) -> FakeHost) -> (TestCore, tem
     let home = tempfile::tempdir().unwrap();
     let t = build(FakeHost::new())
         .home(home.path())
-        .plugin(offering_emulator(PS5))
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .plugin(FakeCatalog::kyty().playable().requires(PS5).build())
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .boot_core()
         .await;
     let catalog = serde_json::json!({ "complete": true, "translation": { "language": "en" }, "topic_count": 1,
@@ -151,7 +144,11 @@ fn on_this_pc(t: &TestCore) -> Option<(String, String, String)> {
 
 #[tokio::test]
 async fn an_installed_game_says_how_it_runs_on_this_pc() {
-    let t = FakeHost::new().hardware(old_driver()).plugin(games_needing("emu-a", PS5, vec!["Astro"])).boot_core().await;
+    let t = FakeHost::new()
+        .hardware(old_driver())
+        .plugin(FakeCatalog::new("emu-a").system("PS5").requires(PS5).games(["Astro"]).build())
+        .boot_core()
+        .await;
     wait_for_check(&t.core).await;
     t.core.dispatch(Command::OpenGame("emu-a:G0".parse().unwrap())).await.unwrap();
     assert_eq!(on_this_pc(&t), Some(("no".into(), "Won't start".into(), "No Vulkan 1.3".into())));
@@ -198,8 +195,8 @@ async fn pc_offer_on_a_mac(topics: serde_json::Value) -> (TestCore, tempfile::Te
         .home(home.path())
         .platform(Some(nexus_api::Platform::Macos))
         .hardware(strong())
-        .built_in(nexus_api::PluginByKind::emulator(emu_pc::PcPlugin))
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(nexus_api::PluginBox::code(emu_pc::PcPlugin))
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .boot_core()
         .await;
     let count = topics.as_array().unwrap().len();
@@ -285,8 +282,8 @@ async fn an_offer_says_not_enough_space_from_its_best_release_not_its_newest_upl
         .hardware(strong())
         .free_space(10_000_000_000)
         .home(home.path())
-        .plugin(offering_emulator(PS5))
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .plugin(FakeCatalog::kyty().playable().requires(PS5).build())
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .boot_core()
         .await;
     // The newest upload fits; the best release, the highest version, doesn't.

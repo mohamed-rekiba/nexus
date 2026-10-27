@@ -1,0 +1,166 @@
+// What the player asks of the core, as commands: one function each, named for what the
+// player does. Each builds a command's name and its JSON args for `Host.command` (the commands
+// are in docs/themes.md).
+import { Host, Json } from "types.slint";
+
+export global Commands {
+    // A screen id as its route's name: game-detail is GameDetail.
+    pure function route(screen: string) -> string {
+        screen == "home" ? "Home" : screen == "catalog" ? "Catalog" : screen == "downloads" ? "Downloads"
+            : screen == "settings" ? "Settings" : screen == "emulators" ? "Emulators" : screen == "themes" ? "Themes" : screen
+    }
+    // A download's action as its command's name: stop-seeding is StopSeeding.
+    pure function pascal(action: string) -> string {
+        action == "start" ? "Start" : action == "pause" ? "Pause" : action == "cancel" ? "Cancel"
+            : action == "remove" ? "Remove" : action == "delete-files" ? "DeleteFiles"
+            : action == "stop-seeding" ? "StopSeeding" : action == "open-store" ? "OpenStore" : action
+    }
+
+    // Navigation and the games.
+    // A screen id from `Vm.screen` that needs nothing more: home, catalog, downloads,
+    // settings, emulators or themes.
+    public function navigate(screen: string) { Host.command("Navigate", Json.text(Commands.route(screen))); }
+    public function back() { Host.command("Back", ""); }
+    public function open-plugin(id: string) { Host.command("Navigate", "{\"Plugin\":" + Json.text(id) + "}"); }
+    public function open-game-settings(key: string) {
+        Host.command("Navigate", "{\"GameSettings\":" + Json.text(key) + "}");
+    }
+    public function set-plugin-enabled(id: string, on: bool) {
+        Host.command("SetPluginEnabled", "{\"plugin\":" + Json.text(id) + ",\"enabled\":" + Json.flag(on) + "}");
+    }
+    public function select(key: string) { Host.command("Select", Json.text(key)); }
+    public function open-game(key: string) { Host.command("OpenGame", Json.text(key)); }
+    public function uninstall-game(key: string) { Host.command("UninstallGame", Json.text(key)); }
+    public function hide-game(key: string, hidden: bool) {
+        Host.command("Library", "{\"Hide\":{\"game\":" + Json.text(key) + ",\"hidden\":" + Json.flag(hidden) + "}}");
+    }
+    public function refresh-library() { Host.command("Library", "\"Refresh\""); }
+    // A grid's name, "library" or "catalog", and how many columns it shows.
+    public function grid-columns(grid: string, columns: int) {
+        Host.command("GridColumns", "{\"grid\":" + (grid == "catalog" ? "\"Catalog\"" : "\"Library\"") + ",\"columns\":" + Math.max(1, columns) + "}");
+    }
+    public function ask-result(key: string) { Host.command("AskResult", Json.text(key)); }
+    // ingame, menus, boots or nothing; "" for Not now.
+    public function report-result(answer: string) { Host.command("ReportResult", Json.text-or-null(answer)); }
+
+    // The Library's and the Catalog's search, filters, sort and pages. A filter's id "" is
+    // every system or genre.
+    public function library-search(text: string) { Host.command("LibrarySearch", Json.text(text)); }
+    public function library-system(id: string) { Host.command("LibrarySystem", Json.text-or-null(id)); }
+    public function library-genre(id: string) { Host.command("LibraryGenre", Json.text-or-null(id)); }
+    public function library-sort(sort: string) { Host.command("LibrarySort", Json.text(sort)); }
+    public function library-more() { Host.command("LibraryMore", ""); }
+    public function catalog-search(text: string) { Host.command("CatalogSearch", Json.text(text)); }
+    public function catalog-system(id: string) { Host.command("CatalogSystem", Json.text-or-null(id)); }
+    public function catalog-genre(id: string) { Host.command("CatalogGenre", Json.text-or-null(id)); }
+    public function catalog-sort(sort: string) { Host.command("CatalogSort", Json.text(sort)); }
+    public function catalog-more() { Host.command("CatalogMore", ""); }
+
+    // Running games.
+    public function launch(key: string) { Host.command("Session", "{\"Launch\":" + Json.text(key) + "}"); }
+    public function stop(session: int) { Host.command("Session", "{\"Stop\":" + session + "}"); }
+    public function show-game(session: int) { Host.command("Session", "{\"ShowGame\":" + session + "}"); }
+    public function confirm-install() { Host.command("ConfirmInstall", ""); }
+    public function cancel-install() { Host.command("CancelInstall", ""); }
+
+    // Downloads. A folder "" is the one the sheet offers.
+    public function pause-download(id: int) { Host.command("PauseDownload", "" + id); }
+    public function resume-download(id: int) { Host.command("ResumeDownload", "" + id); }
+    public function cancel-download(id: int) { Host.command("CancelDownload", "" + id); }
+    public function download-release(key: string, release: string, folder: string) {
+        Host.command("Torrent", "{\"Download\":{\"offer\":" + Json.text(key) + ",\"release\":" + Json.text(release)
+            + ",\"folder\":" + Json.text(folder) + "}}");
+    }
+    public function install-download(id: string, folder: string) {
+        Host.command("GameInstall", "{\"Download\":{\"id\":" + Json.text(id) + ",\"folder\":" + Json.text(folder) + "}}");
+    }
+    // An action from a download's `actions`, or delete-files. Installing is a game install's.
+    public function torrent-action(id: string, action: string) {
+        if (action == "install") {
+            Host.command("GameInstall", "{\"Download\":{\"id\":" + Json.text(id) + "}}");
+        } else if (action == "remove-unpacked") {
+            Host.command("GameInstall", "{\"RemoveUnpacked\":{\"id\":" + Json.text(id) + "}}");
+        } else if (action == "cancel-install") {
+            Host.command("GameInstall", "{\"Cancel\":{\"id\":" + Json.text(id) + "}}");
+        } else {
+            Host.command("Torrent", "{\"Act\":{\"id\":" + Json.text(id) + ",\"action\":" + Json.text(Commands.pascal(action)) + "}}");
+        }
+    }
+    public function set-seed-downloads(on: bool) { Host.command("Torrent", "{\"SeedDownloads\":" + Json.flag(on) + "}"); }
+    public function set-vpn-only(on: bool) { Host.command("Vpn", "{\"SetOnly\":" + Json.flag(on) + "}"); }
+    public function set-vpn(name: string) { Host.command("Vpn", "{\"Choose\":" + Json.text(name) + "}"); }
+    public function connect-vpn(name: string) { Host.command("Vpn", "{\"Connect\":" + Json.text(name) + "}"); }
+    public function disconnect-vpn(name: string) { Host.command("Vpn", "{\"Disconnect\":" + Json.text(name) + "}"); }
+    public function import-vpn(path: string) { Host.command("Vpn", "{\"Import\":" + Json.text(path) + "}"); }
+
+    // Plugins, emulators and settings.
+    // A plugin and a version, "" for the newest.
+    public function install(plugin: string, version: string) {
+        Host.command("InstallEmulator", "{\"plugin\":" + Json.text(plugin) + ",\"version\":" + Json.text-or-null(version) + "}");
+    }
+    public function update(plugin: string) { Host.command("UpdateEmulator", "{\"plugin\":" + Json.text(plugin) + "}"); }
+    public function uninstall(plugin: string, version: string) {
+        Host.command("UninstallEmulator", "{\"plugin\":" + Json.text(plugin) + ",\"version\":" + Json.text(version) + "}");
+    }
+    // A slot's plugin, action and args, and the game it is for ("" for none).
+    public function run-action(plugin: string, action: string, game: string, args: string) {
+        Host.command("RunAction", "{\"plugin\":" + Json.text(plugin) + ",\"action\":" + Json.text(action)
+            + ",\"game\":" + Json.text-or-null(game) + ",\"args\":" + (args == "" ? "null" : args) + "}");
+    }
+    // A settings panel's plugin and scope, a field's key, and its value as text.
+    public function set-setting(plugin: string, scope: string, key: string, value: string) {
+        Host.command("SetConfigField", "{\"plugin\":" + Json.text(plugin)
+            + ",\"scope\":" + (scope == "" ? "{\"type\":\"emulator\"}" : scope)
+            + ",\"key\":" + Json.text(key) + ",\"value\":" + Json.text(value) + "}");
+    }
+    public function set-theme-option(key: string, value: string) {
+        Host.command("SetThemeOption", "{\"key\":" + Json.text(key) + ",\"value\":" + Json.text(value) + "}");
+    }
+    // A folder's name, and its folders as the player typed them, separated by ";".
+    public function set-folder(name: string, folders: string) {
+        Host.command("SetFolders", "{\"name\":" + Json.text(name) + ",\"paths\":" + Json.text(folders) + "}");
+    }
+    public function dismiss-notices() { Host.command("Notice", "\"DismissAll\""); }
+    public function dismiss-notice(id: int) { Host.command("Notice", "{\"Dismiss\":" + id + "}"); }
+    public function open-notice(id: int) { Host.command("Notice", "{\"Open\":" + id + "}"); }
+    public function check-launcher-update() { Host.command("LauncherUpdate", "\"Check\""); }
+    public function download-launcher-update() { Host.command("LauncherUpdate", "\"Download\""); }
+
+    // The player's preferences.
+    public function set-sounds(on: bool) { Host.command("Pref", "[\"sounds\"," + Json.flag(on) + "]"); }
+    public function set-fullscreen(on: bool) { Host.command("Pref", "[\"fullscreen\"," + Json.flag(on) + "]"); }
+    public function set-return-on-exit(on: bool) { Host.command("Pref", "[\"return_on_exit\"," + Json.flag(on) + "]"); }
+    public function set-auto-update(on: bool) { Host.command("Pref", "[\"auto_update\"," + Json.flag(on) + "]"); }
+    public function set-start-at-login(on: bool) { Host.command("Pref", "[\"start_at_login\"," + Json.flag(on) + "]"); }
+    public function set-scale(size: float) { Host.command("Pref", "[\"scale\"," + size + "]"); }
+    // A monitor's name, "" for the one the launcher is on.
+    public function set-monitor(name: string) { Host.command("Pref", "[\"monitor\"," + Json.text(name) + "]"); }
+    public function finish-welcome() { Host.command("Pref", "[\"welcomed\",true]"); }
+
+    // The machine: network, Bluetooth, sound, power and Nexus OS.
+    public function refresh-system() { Host.command("System", "\"Refresh\""); }
+    public function scan-wifi() { Host.command("System", "\"ScanWifi\""); }
+    // A network's name, and its password or "".
+    public function join-wifi(ssid: string, password: string) {
+        Host.command("System", "{\"JoinWifi\":{\"ssid\":" + Json.text(ssid) + ",\"password\":" + Json.text-or-null(password) + "}}");
+    }
+    public function forget-wifi(ssid: string) { Host.command("System", "{\"ForgetWifi\":" + Json.text(ssid) + "}"); }
+    public function set-bluetooth(on: bool) { Host.command("System", "{\"SetBluetooth\":" + Json.flag(on) + "}"); }
+    public function scan-bluetooth() { Host.command("System", "\"ScanBluetooth\""); }
+    public function pair-device(address: string) { Host.command("System", "{\"Pair\":" + Json.text(address) + "}"); }
+    public function connect-device(address: string) { Host.command("System", "{\"ConnectDevice\":" + Json.text(address) + "}"); }
+    public function disconnect-device(address: string) {
+        Host.command("System", "{\"DisconnectDevice\":" + Json.text(address) + "}");
+    }
+    public function remove-device(address: string) { Host.command("System", "{\"RemoveDevice\":" + Json.text(address) + "}"); }
+    public function set-audio-output(name: string) { Host.command("System", "{\"SetOutput\":" + Json.text(name) + "}"); }
+    public function set-volume(volume: int) { Host.command("System", "{\"SetVolume\":" + Math.clamp(volume, 0, 100) + "}"); }
+    public function set-muted(on: bool) { Host.command("System", "{\"SetMuted\":" + Json.flag(on) + "}"); }
+    public function restart-pc() { Host.command("System", "\"Restart\""); }
+    public function shut-down-pc() { Host.command("System", "\"ShutDown\""); }
+    public function check-os-update() { Host.command("System", "\"CheckOsUpdate\""); }
+    // A disk's path: erase it and install Nexus OS.
+    public function install-os(path: string) { Host.command("System", "{\"InstallOs\":" + Json.text(path) + "}"); }
+    public function choose-partitions() { Host.command("System", "\"ChoosePartitions\""); }
+    public function cancel-system-job(id: int) { Host.command("System", "{\"CancelJob\":" + Math.max(0, id) + "}"); }
+}

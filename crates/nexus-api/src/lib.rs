@@ -15,7 +15,6 @@ mod extras;
 mod games;
 mod id;
 mod manifest;
-mod middleware;
 mod order;
 mod path;
 mod plans;
@@ -44,7 +43,6 @@ pub use extras::*;
 pub use games::*;
 pub use id::*;
 pub use manifest::*;
-pub use middleware::*;
 pub use order::*;
 pub use path::*;
 pub use plans::*;
@@ -58,7 +56,7 @@ pub use theme::*;
 /// that is Nexus's, which every release raises. This one changes by hand, with the API: a new
 /// minor for an addition before 1.0 breaks no plugin only if their ranges allow it, so raise it
 /// together with the built-in plugins' `host_api`.
-pub const API_VERSION: &str = "0.1.0";
+pub const API_VERSION: &str = "0.2.0";
 
 pub fn api_version() -> semver::Version {
     semver::Version::parse(API_VERSION).expect("API_VERSION is valid semver")

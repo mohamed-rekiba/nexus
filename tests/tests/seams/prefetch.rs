@@ -1,5 +1,7 @@
 //! Seam 3, composed host: the core fetches the art the player is likely to see next. The fake
 //! network records each address asked for; it serves none of them, so each fetch is a 404.
+//! With no image cached, the shell's own loads ask for the same addresses again: a test that
+//! counts the core's fetches selects on the core, and leaves the shell out.
 
 use std::time::Duration;
 
@@ -29,7 +31,7 @@ fn art_store() -> nexus_testkit::StubPlugin {
         }
     }
     nexus_testkit::StubPlugin::from_toml(
-        "id = \"store\"\nkind = \"service\"\nname = \"store\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"store\"\nkind = \"service\"\nname = \"store\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          capabilities = [\"metadata\"]\n[permissions]\nnetwork = [\"art.example\"]",
     )
     .provides(|_| Ok(nexus_api::Provided { metadata: Some(std::sync::Arc::new(Art)), ..Default::default() }))
@@ -39,10 +41,18 @@ fn art_store() -> nexus_testkit::StubPlugin {
 /// their number's.
 fn twelve() -> Composed {
     let titles = vec!["G00", "G01", "G02", "G03", "G04", "G05", "G06", "G07", "G08", "G09", "G10", "G11"];
-    let mut host = composed(|h| h.plugin(games("emu-a", titles)).plugin(art_store()));
+    let mut host =
+        composed(|h| h.plugin(FakeCatalog::new("emu-a").system("PS4").games(titles).build()).plugin(art_store()));
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
+    // The first screen's art, as the app loads it.
+    host.load_images();
     host
+}
+
+/// Selects `game` on the core alone: the shell doesn't render the selection or load its art.
+fn select(host: &Composed, game: &str) {
+    host.rt.block_on(host.core().dispatch(Command::Select(game.parse().unwrap()))).unwrap();
 }
 
 /// The art addresses asked for so far.
@@ -54,12 +64,12 @@ fn art(i: usize, kind: &str) -> String {
     format!("https://art.example/CUSA0000{i}-{kind}.png")
 }
 
-/// Runs the core for `ms` milliseconds.
+/// Runs the core for `ms` milliseconds of its clock.
 fn run(host: &mut Composed, ms: u64) {
-    host.rt.block_on(async { tokio::time::sleep(Duration::from_millis(ms)).await });
+    host.advance(Duration::from_millis(ms));
 }
 
-/// Runs the core until `art` was asked for, for at most five seconds.
+/// Runs the core until `art` was asked for, for at most five seconds of its clock.
 fn until_asked(host: &mut Composed, art: &[String]) {
     for _ in 0..500 {
         if art.iter().all(|a| asked(host).contains(a)) {
@@ -76,7 +86,7 @@ fn the_games_beside_the_selection_are_fetched_then_its_screenshots_once_it_rests
     run(&mut host, 700);
     let before = asked(&host).len();
 
-    host.dispatch(Command::Select("emu-a:G5".parse().unwrap()));
+    select(&host, "emu-a:G5");
     until_asked(&mut host, &[art(4, "bg"), art(4, "logo"), art(6, "bg"), art(6, "logo")]);
     assert!(!asked(&host).contains(&art(5, "shot1")), "the screenshots wait for the selection to rest");
     assert!(!asked(&host).contains(&art(3, "bg")), "one game each side");
@@ -94,12 +104,12 @@ fn a_fast_scroll_fetches_only_around_where_it_stops() {
     let before = asked(&host).len();
 
     // A select every 20 ms, as a held key does.
-    let core = host.core().clone();
+    let (core, clock) = (host.core().clone(), host.test.clock.clone());
     host.rt.block_on(async {
         for i in 1..11 {
             let core = core.clone();
             tokio::spawn(async move { core.dispatch(Command::Select(format!("emu-a:G{i}").parse().unwrap())).await });
-            tokio::time::sleep(Duration::from_millis(20)).await;
+            clock.advance(Duration::from_millis(20)).await;
         }
     });
     run(&mut host, 1000);
@@ -124,7 +134,7 @@ fn the_library_grid_tells_the_core_its_columns() {
     use slint::platform::Key;
     let mut host = twelve();
     host.resize(1600.0, 900.0);
-    settle(&mut host);
+    host.settle();
     host.requests.borrow_mut().clear();
     // Up to the top bar, right to Library, Enter opens it.
     for key in [Key::UpArrow, Key::RightArrow, Key::Return] {
@@ -132,7 +142,7 @@ fn the_library_grid_tells_the_core_its_columns() {
         host.instance().window().dispatch_event(slint::platform::WindowEvent::KeyPressed { text: text.clone() });
         host.instance().window().dispatch_event(slint::platform::WindowEvent::KeyReleased { text });
     }
-    settle(&mut host);
+    host.settle();
     let told =
         host.requests.borrow().iter().any(
             |r| matches!(r, UiRequest::Core(Command::GridColumns { grid: Grid::Library, columns }) if *columns > 1),

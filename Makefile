@@ -67,7 +67,7 @@ deny: ## Advisories, licences and sources of every dependency (needs cargo-deny)
 	cargo deny check
 
 hooks-install: ## Install the git hooks from .pre-commit-config.yaml (needs pre-commit)
-	pre-commit install --hook-type pre-commit
+	pre-commit install --hook-type pre-commit --hook-type pre-push
 
 hooks-run: ## Run the git hooks from .pre-commit-config.yaml (needs pre-commit)
 	pre-commit run --all-files

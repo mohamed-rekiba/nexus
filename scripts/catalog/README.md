@@ -45,6 +45,11 @@ forum has:
 | `linux` | f=1992, native Linux games | `pc.json` |
 | `wine` | f=2059, Linux games with Wine | `pc.json` |
 
+The plugin also reads the bundled file to learn what a listing's topics are for. It finds the
+forum by the `f=` number in the listing's `source`, else by the listing's `platform` key, and
+takes the forum's console, `system` and `wine` from there. For a forum missing from this file,
+the plugin falls back to each title's tags.
+
 Each script's `--platform` takes one of these keys; the default is the first one, `ps5`. The
 browser step opens each forum's `url`, and reads pages only on that host. Nexus never opens a
 forum's `url`: it takes only the `f=` number. A listing keeps the address it came from in

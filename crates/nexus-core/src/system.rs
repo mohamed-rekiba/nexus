@@ -15,6 +15,7 @@ use nexus_api::{
     PluginKind, PluginResult, Provided, SystemJob, WifiNetwork,
 };
 
+use crate::changes::Area;
 use crate::guard::guarded;
 use crate::{Core, CoreError, CoreResult};
 
@@ -141,7 +142,7 @@ async fn call<T>(
     method: &'static str,
     future: impl Future<Output = PluginResult<T>>,
 ) -> CoreResult<T> {
-    guarded(plugin, method, core.kernel().host().call_timeout, future)
+    guarded(core.ports().clock.as_ref(), plugin, method, core.kernel().host().call_timeout, future)
         .await
         .map_err(|error| CoreError::Plugin { plugin: plugin.clone(), error })
 }
@@ -168,14 +169,14 @@ impl HostJob {
             change(job);
             job.phase != JobPhase::Running
         };
-        core.changed();
+        core.changed(Area::System);
         if ended {
             let id = self.id;
             self.runtime.spawn(async move {
                 refresh(&core).await;
-                tokio::time::sleep(JOB_KEPT).await;
+                core.ports().clock.sleep(JOB_KEPT).await;
                 core.state().system.jobs.retain(|j| j.id != id || j.phase == JobPhase::Running);
-                core.changed();
+                core.changed(Area::System);
             });
         }
     }
@@ -227,7 +228,7 @@ fn start_job(core: &Core, kind: JobKind, target: &str) -> (u64, Arc<dyn SystemJo
         });
         id
     };
-    core.changed();
+    core.changed(Area::System);
     let job = HostJob { core: Arc::downgrade(&core.inner), id, runtime: tokio::runtime::Handle::current(), cancel };
     (id, Arc::new(job))
 }
@@ -241,7 +242,7 @@ fn failed_to_start(job: &Arc<dyn SystemJob>, error: &CoreError) {
 /// otherwise. Called at boot, before downloads resume, and at each read.
 pub(crate) async fn adopt_vpn(core: &Core) {
     if let Some((_, vpn)) = provider(core, |p| p.vpn.clone()).await {
-        core.kernel().use_network(Arc::new(crate::ports::PluginVpn(vpn)));
+        core.vpn().use_network(Arc::new(crate::ports::PluginVpn(vpn)));
     }
 }
 
@@ -303,7 +304,7 @@ pub(crate) async fn refresh(core: &Core) {
         found.next_job = system.next_job;
         *system = found;
     }
-    core.changed();
+    core.changed(Area::System);
 }
 
 /// Reads the state again every [`REFRESH_EVERY`], while some system plugin is on.
@@ -316,14 +317,15 @@ pub(crate) fn schedule_refresh(core: &Core) {
             if !core.kernel().of_kind(PluginKind::System).is_empty() {
                 refresh(&core).await;
             }
+            let wait = core.ports().clock.sleep(REFRESH_EVERY);
             drop(core);
-            tokio::time::sleep(REFRESH_EVERY).await;
+            wait.await;
         }
     });
 }
 
 /// What the player asks of the machine.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum SystemCommand {
     /// Reads everything again now.
     Refresh,
@@ -370,7 +372,7 @@ pub(crate) async fn run(core: &Core, command: SystemCommand) -> CoreResult<()> {
             let (plugin, network) = provider(core, |p| p.network.clone()).await.ok_or(missing(Capability::Network))?;
             let wifi = call(core, &plugin, "wifi", network.wifi(true)).await?;
             core.state().system.wifi = wifi;
-            core.changed();
+            core.changed(Area::System);
             return Ok(());
         }
         C::JoinWifi { ssid, password } => {
@@ -430,7 +432,7 @@ pub(crate) async fn run(core: &Core, command: SystemCommand) -> CoreResult<()> {
                 level.volume = volume;
                 level.muted = false;
             }
-            core.changed();
+            core.changed(Area::System);
         }
         C::SetMuted(muted) => {
             let (plugin, audio) = provider(core, |p| p.audio.clone()).await.ok_or(missing(Capability::Audio))?;
@@ -438,7 +440,7 @@ pub(crate) async fn run(core: &Core, command: SystemCommand) -> CoreResult<()> {
             if let Some(level) = core.state().system.level.as_mut() {
                 level.muted = muted;
             }
-            core.changed();
+            core.changed(Area::System);
         }
         C::Restart => {
             let (plugin, power) = provider(core, |p| p.power.clone()).await.ok_or(missing(Capability::Power))?;
@@ -479,5 +481,20 @@ pub(crate) async fn run(core: &Core, command: SystemCommand) -> CoreResult<()> {
         }
     }
     refresh(core).await;
+    Ok(())
+}
+
+/// Looks for the launcher's update. Nexus OS brings the new launcher with its next update:
+/// then it looks for that too.
+pub(crate) async fn check_launcher_update(core: &Core) -> CoreResult<()> {
+    let found = core.launcher_update().check().await;
+    if matches!(found, crate::launcher_update::UpdateState::WithSystem { .. }) {
+        let core = core.clone();
+        tokio::spawn(async move {
+            if let Err(e) = run(&core, SystemCommand::CheckOsUpdate).await {
+                tracing::warn!(error = %e, "could not look for the Nexus OS update");
+            }
+        });
+    }
     Ok(())
 }

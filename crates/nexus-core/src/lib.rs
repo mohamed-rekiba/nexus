@@ -5,51 +5,85 @@
 //! reads headless view models and sends commands.
 
 mod app;
+mod app_state;
+mod archive_plan;
 mod archives;
 mod bus;
+mod catalog_reads;
+mod changes;
 mod config;
+mod disks;
+mod display;
 mod downloads;
+mod emulator_builds;
 mod error;
 mod facades;
 mod folders;
 mod game_installs;
+mod game_words;
+mod grid_query;
 mod guard;
 mod hardware;
 mod kernel;
 mod launch;
 pub mod launcher_update;
+mod library;
+mod library_reads;
+mod navigation;
+mod notices;
 mod order;
+mod ownership;
+mod plugin_downloads;
+mod plugin_settings;
 mod ports;
+mod preferences;
 mod prefetch;
+mod process;
 mod programs;
+mod release_downloads;
 mod releases;
 mod resolve;
 mod running;
+mod sessions;
+mod settings_schema;
+mod snapshot;
 mod storage;
 pub mod system;
 mod themes;
 mod torrents;
+mod typed_text;
+mod uninstall;
 mod unpack;
 mod view;
 mod vpn;
 
-pub use app::{
-    Command, Core, GRID_PAGE, Grid, HIDDEN_FILTER, INGAME_FILTER, INSTALLED_FILTER, MAX_SCALE, MIN_SCALE, Route,
-};
+pub use app::{Command, Core, Grid, Route};
+pub use archive_plan::{ArchiveEntry, EntryKind, Plan, Planned, UNPACK_SPARE, plan_unpack, room};
 pub use archives::embedded_archive;
 pub use bus::EventBus;
+pub use changes::{Area, Change};
 pub use config::ConfigService;
 pub use downloads::{Job, JobPhase};
 pub use error::{CoreError, CoreResult, LoadError};
+pub use game_installs::GameInstallCmd;
+pub use grid_query::{GRID_PAGE, GridFilter, Sort, SystemChoice};
 pub use kernel::{BootReport, HostConfig, Kernel, KernelBuilder, Loader, Origin, PluginInfo, PluginStatus, Rejection};
+pub use launcher_update::LauncherUpdateCmd;
+pub use library::LibraryCmd;
+pub use notices::NoticeCmd;
+pub use ports::{ArchiveError, Escape};
 pub use ports::{
-    ArchiveKind, Archives, Body, Desktop, Front, Gpu, GroupTree, Hardware, HttpTransport, Network, NoArchives,
-    NoDesktop, NoHardware, NoNetwork, NoTorrents, NoVpn, Opened, PackageError, PackageManager, ProcessExit,
-    ProcessHandle, ProcessSpawner, ProcessTree, SEED_UPLOAD_LIMIT, SpawnCommand, Specs, TokioSpawner, TorrentFile,
-    TorrentInfo, TorrentPhase, TorrentStart, TorrentStatus, Torrents, UnpackProgress, Vpn,
+    ArchiveKind, Archives, Body, Clock, Front, Gpu, GroupTree, Hardware, HttpTransport, LoginSession, Network,
+    NoArchives, NoHardware, NoLoginSession, NoNetwork, NoOpener, NoTorrents, NoVpn, NoWindows, Opened, Opener,
+    PackageError, PackageManager, ProcessExit, ProcessHandle, ProcessSpawner, ProcessTree, SEED_UPLOAD_LIMIT,
+    SpawnCommand, Specs, TokioClock, TokioSpawner, TorrentFile, TorrentInfo, TorrentStats, Torrents, TransferState,
+    UnpackProgress, Vpn, Windows,
 };
+pub use preferences::{MAX_SCALE, MIN_SCALE, Pref, PrefKind, PrefSpec, PreferencesSnapshot};
+pub use sessions::SessionCmd;
 pub use storage::DirStorage;
 pub use themes::{DataTheme, DirFiles};
-pub use torrents::TorrentAction;
+pub use torrents::{TorrentAction, TorrentCmd};
 /// The path checks every unpacker runs before it writes.
 pub use unpack::{inside, link_stays_inside, stays_inside};
+pub use vpn::VpnCmd;

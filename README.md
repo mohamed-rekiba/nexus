@@ -275,42 +275,42 @@ boot menu. On a PC with an NVIDIA card it gets NVIDIA's driver by itself. It nee
 that starts with UEFI.
 
 <!-- x-release-please-start-version -->
-The current version is Nexus OS 0.3.0:
-[its release](https://github.com/mohamed-rekiba/nexus/releases/tag/nexus-os-v0.3.0).
+The current version is Nexus OS 0.4.0:
+[its release](https://github.com/mohamed-rekiba/nexus/releases/tag/nexus-os-v0.4.0).
 All Nexus OS releases are tagged `nexus-os-v…` on the
 [releases page](https://github.com/mohamed-rekiba/nexus/releases?q=nexus-os).
 
-The release has one ISO, named with its version (`nexus-os-x86_64-0.3.0.iso`), to write to a USB
+The release has one ISO, named with its version (`nexus-os-x86_64-0.4.0.iso`), to write to a USB
 stick of 8 GB or more. When the ISO is over 2 GiB it comes in parts
-(`nexus-os-x86_64-0.3.0.iso.part-aa`, `-ab`, …): download them all and join them into the ISO.
+(`nexus-os-x86_64-0.4.0.iso.part-aa`, `-ab`, …): download them all and join them into the ISO.
 
 - Linux and macOS:
 
   ```sh
-  v=0.3.0
+  v=0.4.0
   cat nexus-os-x86_64-$v.iso.part-* > nexus-os-x86_64-$v.iso
   ```
 
 - Windows (Command Prompt), naming every part in order:
 
   ```bat
-  set v=0.3.0
+  set v=0.4.0
   copy /b nexus-os-x86_64-%v%.iso.part-aa + nexus-os-x86_64-%v%.iso.part-ab nexus-os-x86_64-%v%.iso
   ```
 
-Then check the ISO against `nexus-os-x86_64-0.3.0.iso.sha256` (each part also has its own
+Then check the ISO against `nexus-os-x86_64-0.4.0.iso.sha256` (each part also has its own
 `.sha256`):
 
-- Linux: `sha256sum -c nexus-os-x86_64-0.3.0.iso.sha256`
-- macOS: `shasum -a 256 -c nexus-os-x86_64-0.3.0.iso.sha256`
-- Windows (PowerShell): `Get-FileHash nexus-os-x86_64-0.3.0.iso`, and compare it with the file's
+- Linux: `sha256sum -c nexus-os-x86_64-0.4.0.iso.sha256`
+- macOS: `shasum -a 256 -c nexus-os-x86_64-0.4.0.iso.sha256`
+- Windows (PowerShell): `Get-FileHash nexus-os-x86_64-0.4.0.iso`, and compare it with the file's
   first word.
 
 To try the ISO in a virtual machine first, on Fedora, from a clone of this repository:
 
 ```sh
 sudo dnf install qemu-kvm qemu-img edk2-ovmf
-os/run-vm.sh path/to/nexus-os-x86_64-0.3.0.iso
+os/run-vm.sh path/to/nexus-os-x86_64-0.4.0.iso
 ```
 
 <!-- x-release-please-end -->
@@ -572,7 +572,7 @@ transitions cuts). Third-party plugins are themes only: they are data, and run n
 - Retail packages don't install: their keys are on the console. Only unsigned PS5 packages,
   exFAT images and PS4 fake packages do.
 - Nexus doesn't notice a game it didn't start.
-- KytyPS5 and shadPS4 don't provide the shader cache screen.
+- No emulator reports its shader cache: the plugin API has no seam for one.
 - shadPS4's own build shows no version on its page.
 - The PC library shows the games in `PC/` of a game folder, not games installed elsewhere by
   other launchers (Heroic, Lutris). Steam's games show through the Steam plugin.
@@ -594,10 +594,15 @@ transitions cuts). Third-party plugins are themes only: they are data, and run n
 
 ## For contributors
 
-Nexus is a Rust workspace with a Slint UI. A small core runs plugins: emulator and service
-plugins are compiled in and talk to the host only through `nexus-api`; themes are data
+Nexus is a Rust workspace with a Slint UI. A small core runs plugins: emulator, service and
+system plugins are compiled in and talk to the host only through `nexus-api`; themes are data
 (`theme.toml` and Slint markup) that the UI host loads, swaps and rolls back. `make check` runs
 what CI runs: the format check, clippy with warnings as errors, and every test.
+
+Besides [Rust](https://rustup.rs) and the [system packages](#system-packages), you need
+[cargo-nextest](https://nexte.st) for the tests (`cargo install --locked cargo-nextest`) and
+[pre-commit](https://pre-commit.com) for the git hooks (`make hooks-install`). The full list,
+with the optional tools, is in [docs/development.md](docs/development.md#toolchain).
 
 | Document | What it covers |
 |---|---|
@@ -621,16 +626,17 @@ what CI runs: the format check, clippy with warnings as errors, and every test.
 | `crates/nexus-api` | The plugin contract. The only crate a plugin depends on. |
 | `crates/nexus-ui-api` | The theme contract: view models, screens, slots, tokens, `theme.toml`. No toolkit code. |
 | `crates/nexus-core` | The core: plugin lifecycle, settings, downloads, torrents, installs, launches, updates. No UI code. |
-| `crates/nexus-ui-host` | Shows themes with Slint: inheritance, assets, input, switching with rollback. |
-| `crates/nexus-app` | The `nexus` binary: the desktop, controllers, sounds, trailers, archives, torrents and VPNs of each system. |
-| `crates/nexus-testkit` | The fake host, fakes for HTTP and processes, and the plugin contract suites. |
+| `crates/nexus-ui-host` | Shows themes with Slint: inheritance, assets, input, switching with rollback. The app shell: the theme's requests, renders, image loads and the tick. |
+| `crates/nexus-app` | The `nexus` binary: the desktop, controllers, sounds, trailers, archives and torrents of each system. |
+| `crates/nexus-testkit` | The fake host and its fake clock, fakes for HTTP, processes and storage, plugins built for tests, the theme driver, and the plugin contract suites. |
 | `plugins/emulators/kytyps5` | PS5, with KytyPS5: its builds, PS5 games, installs, community compatibility. |
 | `plugins/emulators/shadps4` | PS4, with shadPS4: its builds, PS4 games, installs with updates and DLC, community compatibility. |
 | `plugins/emulators/pc` | PC games: installs a release, finds what starts it, and runs it. |
 | `plugins/emulators/steam` | Steam games on Linux: the games Steam installed, with Steam's art, played through Steam. |
 | `plugins/services/release-catalog` | The Game Catalog: each console's catalog, fetched or refreshed from its forums. |
 | `plugins/services/playstation-store` | Official art and details for PS4 and PS5 games. |
-| `plugins/shared/emulator-kit` | Code the emulator plugins share (not a plugin): GitHub releases, build folders, the game folder scan, compatibility lists, the PS5 package and exFAT readers. |
+| `plugins/shared/emulator-kit` | Code the emulator plugins share (not a plugin): the build manager that installs, updates and rolls back an emulator's builds, GitHub releases, the game folder scan, compatibility lists, the PS5 package and exFAT readers. |
+| `plugins/system/host` | The built-in system plugin, This PC: the network, VPNs, Bluetooth, sound, power, and Nexus OS's updates and install. |
 | `plugins/themes/default` | The built-in theme, `default`. It has every screen, component and token. |
 | `tests/` | Tests across the crates: the core, the contracts, and the core with the theme host. `tests/fixtures/themes` holds the test theme `fixture-grid`. |
 | `third_party/oozextract` | The Kraken decompressor, vendored. |

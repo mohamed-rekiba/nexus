@@ -8,7 +8,7 @@ use std::time::Duration;
 use crate::common::native;
 use emu_pc::{GAME_FILE, GameManifest, PcPlugin};
 use nexus_api::*;
-use nexus_core::Command;
+use nexus_core::{Area, Command, SessionCmd};
 use nexus_testkit::{FakeHost, TestCore, contract};
 
 fn pc() -> PluginId {
@@ -42,7 +42,7 @@ struct Pc {
 }
 
 async fn boot(platform: Platform) -> Pc {
-    let test = FakeHost::new().platform(Some(platform)).built_in(PluginByKind::emulator(PcPlugin)).boot_core().await;
+    let test = FakeHost::new().platform(Some(platform)).built_in(PluginBox::code(PcPlugin)).boot_core().await;
     with_folders(test).await
 }
 
@@ -74,18 +74,14 @@ impl Pc {
         if let Err(e) = self.test.core.dispatch(start).await {
             return format!("failed {e}");
         }
-        for _ in 0..500 {
-            let jobs = self.test.core.view().downloads.jobs;
+        let ended = |core: &nexus_core::Core| {
+            let jobs = core.view().downloads.jobs;
             // The newest job is first.
-            if jobs.len() > before
-                && let Some(job) = jobs.first()
-                && job.state != "installing"
-            {
-                return format!("{} {}", job.state, job.error).trim().to_owned();
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        panic!("the install never ended");
+            jobs.len() > before && jobs.first().is_some_and(|j| j.state != "installing")
+        };
+        self.test.until(Area::Installs, ended).await;
+        let job = self.test.core.view().downloads.jobs.into_iter().next().unwrap();
+        format!("{} {}", job.state, job.error).trim().to_owned()
     }
 
     fn manifest(&self, folder: &str) -> GameManifest {
@@ -171,7 +167,7 @@ async fn play_starts_the_script_in_its_folder_and_the_starts_setting_picks_anoth
     assert_eq!(field.value, "start.sh");
     assert_eq!(field.help, "Play starts start.sh, from the game's folder.");
 
-    p.test.core.dispatch(Command::Launch(key.clone())).await.unwrap();
+    p.test.core.dispatch(Command::Session(SessionCmd::Launch(key.clone()))).await.unwrap();
     let first = p.test.spawner.wait_for(1).await;
     assert_eq!(first.command.program, game.join("start.sh"));
     assert_eq!(first.command.cwd, game);
@@ -182,8 +178,8 @@ async fn play_starts_the_script_in_its_folder_and_the_starts_setting_picks_anoth
     assert_eq!(field.value, "bin/game.x86_64");
     assert_eq!(field.choices, ["start.sh", "bin/game.x86_64"], "the list keeps its order");
     assert_eq!(field.help, "Play starts bin/game.x86_64, from the game's folder.", "the whole path");
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    p.test.core.dispatch(Command::Launch(key)).await.unwrap();
+    p.test.clock.advance(Duration::from_millis(50)).await;
+    p.test.core.dispatch(Command::Session(SessionCmd::Launch(key))).await.unwrap();
     let second = p.test.spawner.wait_for(2).await;
     assert_eq!(second.command.program, game.join("bin/game.x86_64"));
     assert_eq!(second.command.cwd, game.join("bin"));
@@ -204,14 +200,14 @@ async fn a_game_an_older_nexus_installed_starts_its_start_script_by_default() {
         "alternatives": [{ "launch": "ENG/start.sh", "kind": "script" }, { "launch": "RUS/start.sh", "kind": "script" },
             { "launch": "RUS/game.exe", "kind": "windows" }] });
     std::fs::write(game.join(GAME_FILE), manifest.to_string()).unwrap();
-    p.test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    p.test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
 
     let key: nexus_api::GameKey = "emu-pc:Game".parse().unwrap();
     let field = p.starts_field("Game").await;
     assert_eq!(field.value, "ENG/start.sh");
     assert_eq!(field.choices, ["ENG/game.exe", "ENG/start.sh", "RUS/start.sh", "RUS/game.exe"], "in its order");
     assert_eq!(field.choice_labels, ["ENG/game.exe", "ENG/start.sh", "RUS/start.sh", "RUS/game.exe"]);
-    p.test.core.dispatch(Command::Launch(key)).await.unwrap();
+    p.test.core.dispatch(Command::Session(SessionCmd::Launch(key))).await.unwrap();
     let run = p.test.spawner.wait_for(1).await.command;
     assert_eq!(run.program, game.join(native("ENG/start.sh")));
 }
@@ -227,7 +223,7 @@ async fn every_file_that_starts_a_game_can_be_picked_however_many_there_are() {
     assert_eq!(p.install().await, "done");
     assert_eq!(p.starts("Game").len(), 13, "the start script and all 12 programs");
     p.set("Game", "starts", "tools/tool12.x86_64").await.unwrap();
-    p.test.core.dispatch(Command::Launch("emu-pc:Game".parse().unwrap())).await.unwrap();
+    p.test.core.dispatch(Command::Session(SessionCmd::Launch("emu-pc:Game".parse().unwrap()))).await.unwrap();
     let run = p.test.spawner.wait_for(1).await.command;
     assert_eq!(run.program, p.games.path().join(native("PC/Game/tools/tool12.x86_64")));
 }
@@ -237,7 +233,7 @@ async fn a_windows_game_runs_through_proton_on_linux_and_says_what_to_install_wi
     let p = boot(Platform::Linux).await;
     p.download(&[("Hollow Knight/hollow_knight.exe", &exe())]);
     assert_eq!(p.install().await, "done");
-    let launch = Command::Launch("emu-pc:Hollow-Knight".parse().unwrap());
+    let launch = Command::Session(SessionCmd::Launch("emu-pc:Hollow-Knight".parse().unwrap()));
 
     let refused = p.test.core.dispatch(launch.clone()).await.unwrap_err();
     assert!(refused.to_string().contains("install umu-launcher"), "{refused}");
@@ -311,7 +307,7 @@ async fn umu_launcher_installs_from_its_latest_release_and_runs_windows_games_wi
     // A Windows game starts through it, with nothing on the PATH.
     p.download(&[("Hollow Knight/hollow_knight.exe", &exe())]);
     assert_eq!(p.install().await, "done");
-    p.test.core.dispatch(Command::Launch("emu-pc:Hollow-Knight".parse().unwrap())).await.unwrap();
+    p.test.core.dispatch(Command::Session(SessionCmd::Launch("emu-pc:Hollow-Knight".parse().unwrap()))).await.unwrap();
     let run = p.test.spawner.wait_for(1).await.command;
     assert_eq!(run.program, program);
     assert_eq!(run.env.get("PROTONPATH").map(String::as_str), Some("GE-Proton"));
@@ -334,8 +330,8 @@ async fn a_game_a_catalog_download_installed_has_the_offer_s_art_and_the_repack_
     const ART: &str = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1";
     let test = FakeHost::new()
         .platform(Some(Platform::Linux))
-        .built_in(PluginByKind::emulator(PcPlugin))
-        .built_in(PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(PluginBox::code(PcPlugin))
+        .built_in(PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .boot_core()
         .await;
     let p = with_folders(test).await;
@@ -367,37 +363,34 @@ async fn a_game_a_catalog_download_installed_has_the_offer_s_art_and_the_repack_
     t.core.dispatch(set).await.unwrap();
     t.core.dispatch(Command::Navigate(nexus_core::Route::Catalog)).await.unwrap();
     // The Catalog shows the bundled copy first: wait for the one fetched from the address.
-    for _ in 0..500 {
-        let catalog = t.core.view().catalog;
+    t.until(Area::Catalogs, |core| {
+        let catalog = core.view().catalog;
         let fetched = !catalog.sources.is_empty() && catalog.sources.iter().all(|s| s.contains(": fetched from "));
-        if fetched && !catalog.games.games.is_empty() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+        fetched && !catalog.games.games.is_empty()
+    })
+    .await;
     let offer: GameKey = t.core.view().catalog.games.games[0].key.parse().unwrap();
-    t.core.dispatch(Command::DownloadRelease { offer, release: HASH.into(), folder: None }).await.unwrap();
+    t.core
+        .dispatch(Command::Torrent(nexus_core::TorrentCmd::Download { offer, release: HASH.into(), folder: None }))
+        .await
+        .unwrap();
     let row = |t: &TestCore| t.core.view().downloads.torrents.into_iter().next();
     for (step, state) in [("ready", "ready"), ("complete", "complete")] {
-        for _ in 0..300 {
-            if row(t).is_some_and(|r| r.state == state) {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
+        t.until(Area::Torrents, |_| row(t).is_some_and(|r| r.state == state)).await;
         if step == "ready" {
-            let start = Command::Torrent { id: HASH.into(), action: nexus_core::TorrentAction::Start };
+            let start = Command::Torrent(nexus_core::TorrentCmd::Act {
+                id: HASH.into(),
+                action: nexus_core::TorrentAction::Start,
+            });
             t.core.dispatch(start).await.unwrap();
             t.torrents.complete(HASH);
         }
     }
-    t.core.dispatch(Command::Torrent { id: HASH.into(), action: nexus_core::TorrentAction::Install }).await.unwrap();
-    for _ in 0..300 {
-        if row(t).is_some_and(|r| r.install == "done") {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    t.core
+        .dispatch(Command::GameInstall(nexus_core::GameInstallCmd::Download { id: HASH.into(), folder: None }))
+        .await
+        .unwrap();
+    t.until(Area::Installs, |_| row(t).is_some_and(|r| r.install == "done")).await;
     assert_eq!(p.titles(), [("Pocket Tanks Deluxe".to_owned(), "PC".to_owned())], "the repack's name for it");
     let portrait = nexus_ui_api::ImageRef::Url {
         plugin: PluginId::new("release-catalog").unwrap(),
@@ -422,7 +415,7 @@ async fn play_runs_the_start_script_as_it_is_even_beside_a_wine_this_system_can_
     let test = FakeHost::new()
         .platform(Some(Platform::Linux))
         .runs_32bit(false)
-        .built_in(PluginByKind::emulator(PcPlugin))
+        .built_in(PluginBox::code(PcPlugin))
         .boot_core()
         .await;
     let p = with_folders(test).await;
@@ -435,7 +428,7 @@ async fn play_runs_the_start_script_as_it_is_even_beside_a_wine_this_system_can_
     ]);
     assert_eq!(p.install().await, "done");
     assert_eq!(p.starts("Pocket-Tanks"), ["start.sh", "game_info/data/pockettanks.exe"], "not its Wine");
-    let launch = Command::Launch("emu-pc:Pocket-Tanks".parse().unwrap());
+    let launch = Command::Session(SessionCmd::Launch("emu-pc:Pocket-Tanks".parse().unwrap()));
     let game = p.games.path().join("PC/Pocket-Tanks");
 
     // What Starts says, and nothing else: when it fails, the player picks another file.
@@ -443,7 +436,7 @@ async fn play_runs_the_start_script_as_it_is_even_beside_a_wine_this_system_can_
     let first = p.test.spawner.wait_for(1).await;
     assert_eq!(first.command.program, game.join("start.sh"));
     first.exit(1);
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    p.test.clock.advance(Duration::from_millis(50)).await;
 
     p.set("Pocket-Tanks", "starts", "game_info/data/pockettanks.exe").await.unwrap();
     p.test.core.dispatch(launch).await.unwrap();
@@ -477,7 +470,7 @@ async fn a_windows_game_at_a_resolution_of_its_own_fills_the_screen_through_game
         value: value.into(),
     };
     p.test.core.dispatch(set("800x600")).await.unwrap();
-    let launch = Command::Launch(game.clone());
+    let launch = Command::Session(SessionCmd::Launch(game.clone()));
     let refused = p.test.core.dispatch(launch.clone()).await.unwrap_err().to_string();
     assert!(refused.contains("install gamescope"), "{refused}");
 
@@ -498,7 +491,7 @@ async fn a_linux_game_at_a_resolution_of_its_own_runs_inside_gamescope_too() {
     p.download(&[("Tux/start", b"./tux\n"), ("Tux/tux.x86_64", &elf())]);
     assert_eq!(p.install().await, "done");
     p.set("Tux", "resolution", "1280x720").await.unwrap();
-    p.test.core.dispatch(Command::Launch("emu-pc:Tux".parse().unwrap())).await.unwrap();
+    p.test.core.dispatch(Command::Session(SessionCmd::Launch("emu-pc:Tux".parse().unwrap()))).await.unwrap();
     let run = p.test.spawner.wait_for(1).await.command;
     assert_eq!(run.program, Path::new("gamescope"));
     let script = p.games.path().join(native("PC/Tux/start")).display().to_string();
@@ -514,16 +507,21 @@ async fn on_windows_the_exe_runs_as_it_is_and_a_linux_game_says_it_can_t_run_her
     assert_eq!(p.starts("Game"), ["start.sh", "Game.exe"]);
     assert!(p.set("Game", "resolution", "800x600").await.is_err(), "gamescope is Linux's");
     // Play starts the one Windows can start.
-    p.test.core.dispatch(Command::Launch("emu-pc:Game".parse().unwrap())).await.unwrap();
+    p.test.core.dispatch(Command::Session(SessionCmd::Launch("emu-pc:Game".parse().unwrap()))).await.unwrap();
     let run = p.test.spawner.wait_for(1).await;
     assert_eq!(run.command.program, p.games.path().join("PC/Game/Game.exe"));
     run.exit(0);
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    p.test.clock.advance(Duration::from_millis(50)).await;
 
     std::fs::remove_dir_all(p.packages.path().join("PC/torrent-abc")).unwrap();
     p.download(&[("Penguins/penguins.x86_64", &elf())]);
     assert_eq!(p.install().await, "done", "it installs anyway");
-    let refused = p.test.core.dispatch(Command::Launch("emu-pc:Penguins".parse().unwrap())).await.unwrap_err();
+    let refused = p
+        .test
+        .core
+        .dispatch(Command::Session(SessionCmd::Launch("emu-pc:Penguins".parse().unwrap())))
+        .await
+        .unwrap_err();
     assert!(refused.to_string().contains("This is a Linux game: it can't run on Windows"), "{refused}");
 }
 
@@ -533,7 +531,7 @@ async fn on_a_mac_a_release_with_a_script_and_an_exe_runs_the_exe_through_wine()
     p.download(&[("Game/start.sh", b"#!/bin/sh\n"), ("Game/Game.exe", &exe())]);
     assert_eq!(p.install().await, "done");
     p.test.spawner.on_path("wine", Path::new("/opt/homebrew/bin/wine"));
-    p.test.core.dispatch(Command::Launch("emu-pc:Game".parse().unwrap())).await.unwrap();
+    p.test.core.dispatch(Command::Session(SessionCmd::Launch("emu-pc:Game".parse().unwrap()))).await.unwrap();
     let run = p.test.spawner.wait_for(1).await.command;
     assert_eq!(run.program, Path::new("wine"));
     assert!(!run.env.contains_key("PROTONPATH"), "Proton is Linux's");
@@ -618,7 +616,7 @@ async fn a_start_script_beside_thousands_of_files_is_still_found_and_can_run() {
     let test = FakeHost::new()
         .platform(Some(Platform::Linux))
         .call_timeout(Duration::from_secs(30))
-        .built_in(PluginByKind::emulator(PcPlugin))
+        .built_in(PluginBox::code(PcPlugin))
         .boot_core()
         .await;
     let p = with_folders(test).await;
@@ -648,7 +646,7 @@ async fn a_gog_game_installed_before_shows_the_name_gog_gives_it() {
     let manifest = serde_json::json!({ "version": 1, "name": "world of goo 2 1 0 13120 81588",
         "launch": "data/noarch/start.sh", "kind": "script" });
     std::fs::write(game.join(GAME_FILE), manifest.to_string()).unwrap();
-    p.test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    p.test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     assert_eq!(p.titles(), [("World of Goo 2".to_owned(), "PC".to_owned())]);
 }
 
@@ -674,7 +672,7 @@ async fn an_appimage_runs_without_fuse_and_a_mac_app_runs_its_program() {
     appimage[8..11].copy_from_slice(b"AI\x02");
     p.download(&[("Tux/Tux.AppImage", &appimage)]);
     assert_eq!(p.install().await, "done");
-    p.test.core.dispatch(Command::Launch("emu-pc:Tux".parse().unwrap())).await.unwrap();
+    p.test.core.dispatch(Command::Session(SessionCmd::Launch("emu-pc:Tux".parse().unwrap()))).await.unwrap();
     let run = p.test.spawner.wait_for(1).await.command;
     assert_eq!(run.program, p.games.path().join("PC/Tux/Tux.AppImage"));
     assert_eq!(run.env.get("APPIMAGE_EXTRACT_AND_RUN").map(String::as_str), Some("1"));
@@ -682,7 +680,7 @@ async fn an_appimage_runs_without_fuse_and_a_mac_app_runs_its_program() {
     let mac = boot(Platform::Macos).await;
     mac.download(&[("Tux/Tux.app/Contents/MacOS/Tux", &[0xcf, 0xfa, 0xed, 0xfe, 7, 0, 0, 1])]);
     assert_eq!(mac.install().await, "done");
-    mac.test.core.dispatch(Command::Launch("emu-pc:Tux".parse().unwrap())).await.unwrap();
+    mac.test.core.dispatch(Command::Session(SessionCmd::Launch("emu-pc:Tux".parse().unwrap()))).await.unwrap();
     let run = mac.test.spawner.wait_for(1).await.command;
     let program = mac.games.path().join("PC/Tux/Tux.app/Contents/MacOS/Tux");
     assert_eq!((run.program, run.cwd), (program.clone(), program.parent().unwrap().to_path_buf()));
@@ -711,11 +709,11 @@ impl Pc {
 async fn a_game_copied_into_pc_by_hand_shows_and_plays_as_an_installed_one() {
     let p = boot(Platform::Linux).await;
     p.copy_in(&[("my_game/start.sh", b"#!/bin/sh\n"), ("my_game/bin/game.x86_64", &elf())]);
-    p.test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    p.test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
 
     assert_eq!(p.titles(), [("My Game".to_owned(), "PC".to_owned())], "named after its folder");
     assert_eq!(p.starts("my_game"), ["start.sh", "bin/game.x86_64"], "found as an install finds them");
-    p.test.core.dispatch(Command::Launch("emu-pc:my_game".parse().unwrap())).await.unwrap();
+    p.test.core.dispatch(Command::Session(SessionCmd::Launch("emu-pc:my_game".parse().unwrap()))).await.unwrap();
     let run = p.test.spawner.wait_for(1).await.command;
     assert_eq!(run.program, p.games.path().join(native("PC/my_game/start.sh")));
     assert!(!run.keep_running, "a game Nexus started stops with Nexus");
@@ -725,7 +723,7 @@ async fn a_game_copied_into_pc_by_hand_shows_and_plays_as_an_installed_one() {
 async fn a_folder_with_nothing_to_start_or_still_installing_isn_t_a_game() {
     let p = boot(Platform::Linux).await;
     p.copy_in(&[("Notes/readme.txt", b"hello"), ("Game.part/start.sh", b"#!/bin/sh\n")]);
-    p.test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    p.test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
 
     assert_eq!(p.titles(), []);
     for folder in ["Notes", "Game.part"] {
@@ -737,7 +735,7 @@ async fn a_folder_with_nothing_to_start_or_still_installing_isn_t_a_game() {
 async fn a_cover_image_in_a_game_s_folder_is_its_cover() {
     let p = boot(Platform::Linux).await;
     p.copy_in(&[("Game/start.sh", b"#!/bin/sh\n"), ("Game/cover.png", b"png")]);
-    p.test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    p.test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
 
     let card = p.test.core.view().home.games.first().cloned().expect("the game");
     let cover = HostPath::new("games", 0, RelPath::new("PC/Game/cover.png").unwrap());
@@ -750,7 +748,7 @@ async fn with_gamemode_installed_a_linux_game_runs_through_it() {
     p.copy_in(&[("Game/start.sh", b"#!/bin/sh\n")]);
     p.test.spawner.on_path("gamemoderun", Path::new("/usr/bin/gamemoderun"));
 
-    p.test.core.dispatch(Command::Launch("emu-pc:Game".parse().unwrap())).await.unwrap();
+    p.test.core.dispatch(Command::Session(SessionCmd::Launch("emu-pc:Game".parse().unwrap()))).await.unwrap();
     let run = p.test.spawner.wait_for(1).await.command;
     assert_eq!(run.program, Path::new("gamemoderun"));
     assert_eq!(run.args, [p.games.path().join(native("PC/Game/start.sh")).to_string_lossy()]);

@@ -2,7 +2,7 @@ id = "emu-steam"
 kind = "emulator"
 name = "Steam"
 version = "0.1.0"
-host_api = "^0.1"
+host_api = "^0.2"
 # Nexus finds a game Steam started by its command line, which only Linux's process list has.
 platforms = ["linux"]
 # Steam's console: its Catalog list is the player's Steam library (releases), which Steam installs.

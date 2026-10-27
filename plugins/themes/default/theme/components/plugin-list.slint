@@ -1,4 +1,5 @@
 import { Vm, Host, PluginRow } from "../types.slint";
+import { Commands } from "../commands.slint";
 import { Tokens } from "../tokens.slint";
 import { Look } from "look.slint";
 import { BackButton } from "widgets.slint";
@@ -20,7 +21,7 @@ export global PluginList {
         if (root.rows.length == 0) { return false; }
         if (text == Key.DownArrow) { root.focus = Math.min(root.focus + 1, root.rows.length - 1); Host.play-sound("move"); return true; }
         if (text == Key.UpArrow) { root.focus = Math.max(root.focus - 1, 0); Host.play-sound("move"); return true; }
-        if (text == Key.Return || text == " ") { Host.open-plugin(root.rows[Math.min(root.focus, root.rows.length - 1)].id); return true; }
+        if (text == Key.Return || text == " ") { Commands.open-plugin(root.rows[Math.min(root.focus, root.rows.length - 1)].id); return true; }
         false
     }
 }
@@ -51,7 +52,7 @@ export component PluginListSheet inherits Rectangle {
     background: root.in-view ? #03050ccc : #03050c00;
     animate background { duration: Tokens.motion-normal; }
     // Outside the sheets: back, which closes the plugin's sheet first.
-    TouchArea { enabled: root.open; clicked => { Host.back(); } }
+    TouchArea { enabled: root.open; clicked => { Commands.back(); } }
 
     sheet-panel := Rectangle {
         property <length> panel-width: Math.min(root.width, PluginList.list-width);
@@ -87,7 +88,7 @@ export component PluginListSheet inherits Rectangle {
                 HorizontalLayout {
                     alignment: Look.rtl ? end : start;
                     padding-bottom: 20 * Look.px;
-                    BackButton { pad: Vm.input-mode == "gamepad"; clicked => { Host.back(); } }
+                    BackButton { pad: Vm.input-mode == "gamepad"; clicked => { Commands.back(); } }
                 }
                 Text { text: root.title; font-size: 44 * Look.px; font-weight: 600; color: Tokens.color-text; horizontal-alignment: Look.rtl ? right : left; }
                 Text {
@@ -121,7 +122,7 @@ export component PluginListSheet inherits Rectangle {
                     clicked => { self.open(); }
                     function open() {
                         PluginList.focus = i;
-                        Host.open-plugin(plugin.id);
+                        Commands.open-plugin(plugin.id);
                     }
                     Value {
                         text: plugin.enabled ? plugin.status : "Off";

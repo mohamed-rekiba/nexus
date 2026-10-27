@@ -8,7 +8,7 @@ use nexus_api::serde_json::Value;
 use nexus_api::*;
 use sha2::{Digest, Sha256};
 
-use crate::{Pc, path};
+use crate::Pc;
 
 /// umu-launcher's latest release, on GitHub's API.
 const LATEST: &str = "https://api.github.com/repos/Open-Wine-Components/umu-launcher/releases/latest";
@@ -53,7 +53,7 @@ impl Pc {
     /// on the system, then Wine. `None` when there is none.
     pub(crate) async fn runner(&self) -> Option<Runner> {
         if self.platform == Platform::Linux && self.umu_version().await.is_some() {
-            return Some(Runner { program: Location::Data(path(PROGRAM).ok()?), umu: true });
+            return Some(Runner { program: Location::Data(RelPath::new(PROGRAM).ok()?), umu: true });
         }
         let candidates: &[&'static str] =
             if self.platform == Platform::Linux { &["umu-run", "wine", "wine64"] } else { &["wine", "wine64"] };
@@ -68,10 +68,10 @@ impl Pc {
     /// The version of the umu-launcher this plugin installed, if it did.
     async fn umu_version(&self) -> Option<String> {
         let storage = self.ctx.storage();
-        if !storage.exists(&path(PROGRAM).ok()?).await.unwrap_or(false) {
+        if !storage.exists(&RelPath::new(PROGRAM).ok()?).await.unwrap_or(false) {
             return None;
         }
-        let version = storage.read(&path(VERSION).ok()?).await.ok()?;
+        let version = storage.read(&RelPath::new(VERSION).ok()?).await.ok()?;
         Some(String::from_utf8_lossy(&version).trim().to_owned()).filter(|v| !v.is_empty())
     }
 
@@ -101,11 +101,11 @@ impl Pc {
         let program = program(&tar).map_err(fail)?;
         // Beside the one in use, then in its place: a failed install leaves it as it was.
         let storage = self.ctx.storage();
-        let part = path(format!("{}.part", PROGRAM))?;
+        let part = RelPath::new(format!("{}.part", PROGRAM))?;
         storage.write(&part, &program).await?;
         storage.set_executable(&part).await?;
-        storage.rename(&part, &path(PROGRAM)?).await?;
-        storage.write(&path(VERSION)?, release.tag.as_bytes()).await?;
+        storage.rename(&part, &RelPath::new(PROGRAM)?).await?;
+        storage.write(&RelPath::new(VERSION)?, release.tag.as_bytes()).await?;
         self.ctx.log().info(&format!("installed umu-launcher {}", release.tag));
         Ok(())
     }

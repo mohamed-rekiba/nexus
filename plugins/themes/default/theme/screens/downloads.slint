@@ -1,4 +1,5 @@
 import { Vm, Host, Torrent } from "../types.slint";
+import { Commands } from "../commands.slint";
 import { Tokens } from "../tokens.slint";
 import { Look } from "../components/look.slint";
 import { Button } from "../components/button.slint";
@@ -74,7 +75,7 @@ export global Dl {
 
     // The player's answer on the remove sheet: 0 keeps the files, 1 deletes them, 2 is Not now.
     public function answer-remove(choice: int) {
-        if (choice < 2) { Host.torrent-action(root.remove-id, choice == 0 ? "remove" : "delete-files"); }
+        if (choice < 2) { Commands.torrent-action(root.remove-id, choice == 0 ? "remove" : "delete-files"); }
         root.remove = -1;
         Host.play-sound(choice < 2 ? "select" : "back");
     }
@@ -87,7 +88,7 @@ export global Dl {
             root.remove-focus = 0;
             Host.play-sound("select");
         } else if (action == "play") {
-            Host.launch(Vm.torrents[t].game);
+            Commands.launch(Vm.torrents[t].game);
         } else if (action == "install") {
             root.install = t;
             root.install-id = Vm.torrents[t].id;
@@ -95,7 +96,7 @@ export global Dl {
             root.install-folder = "";
             Host.play-sound("select");
         } else {
-            Host.torrent-action(Vm.torrents[t].id, action);
+            Commands.torrent-action(Vm.torrents[t].id, action);
         }
     }
     // Opens the sheet's folder row for typing.
@@ -107,7 +108,7 @@ export global Dl {
     // The player agreed: the install starts. The sheet closes once it runs, and stays open
     // with the core's reason when it doesn't.
     public function agree-install() {
-        Host.install-download(root.install-id, root.install-folder);
+        Commands.install-download(root.install-id, root.install-folder);
     }
     public function close-install() {
         root.install = -1;
@@ -174,9 +175,9 @@ export global Dl {
                 Host.open-download-folder(Vm.torrents[t].id);
             } else if (j >= 0 && root.job-actions(j) > 0) {
                 let action = root.job-action(j, root.at);
-                if (action == "resume") { Host.resume-download(Vm.downloads[j].id); }
-                else if (action == "pause") { Host.pause-download(Vm.downloads[j].id); }
-                else { Host.cancel-download(Vm.downloads[j].id); }
+                if (action == "resume") { Commands.resume-download(Vm.downloads[j].id); }
+                else if (action == "pause") { Commands.pause-download(Vm.downloads[j].id); }
+                else { Commands.cancel-download(Vm.downloads[j].id); }
             }
             return true;
         }
@@ -705,7 +706,7 @@ export component DownloadsScreen inherits Rectangle {
                             text: "Resume";
                             primary: true;
                             focused: job-card.focused && Dl.job-action(i, Dl.at) == "resume";
-                            clicked => { Dl.row = Vm.torrents.length + i; Dl.button = 0; Host.resume-download(job.id); }
+                            clicked => { Dl.row = Vm.torrents.length + i; Dl.button = 0; Commands.resume-download(job.id); }
                         }
                         if job.can-pause : Button {
                             text: "Pause";
@@ -713,7 +714,7 @@ export component DownloadsScreen inherits Rectangle {
                             clicked => {
                                 Dl.row = Vm.torrents.length + i;
                                 Dl.button = job.can-resume ? 1 : 0;
-                                Host.pause-download(job.id);
+                                Commands.pause-download(job.id);
                             }
                         }
                         if job.can-cancel : Button {
@@ -722,7 +723,7 @@ export component DownloadsScreen inherits Rectangle {
                             clicked => {
                                 Dl.row = Vm.torrents.length + i;
                                 Dl.button = Dl.job-actions(i) - 1;
-                                Host.cancel-download(job.id);
+                                Commands.cancel-download(job.id);
                             }
                         }
                     }

@@ -32,7 +32,7 @@ impl Plugin for PlayStationStore {
 }
 
 #[async_trait]
-impl ServicePlugin for PlayStationStore {
+impl CodePlugin for PlayStationStore {
     async fn init(&self, ctx: PluginContext) -> PluginResult<Provided> {
         let cache = match ctx.storage().read(&RelPath::new(CACHE)?).await {
             Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
@@ -42,7 +42,7 @@ impl ServicePlugin for PlayStationStore {
     }
 }
 
-inventory::submit! { PluginFactory::service(|| Box::new(PlayStationStore)) }
+inventory::submit! { PluginFactory::code(|| Box::new(PlayStationStore)) }
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(crate = "nexus_api::serde")]

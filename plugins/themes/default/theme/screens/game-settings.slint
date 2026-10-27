@@ -1,4 +1,5 @@
 import { Vm, Host } from "../types.slint";
+import { Commands } from "../commands.slint";
 import { Tokens } from "../tokens.slint";
 import { Look } from "../components/look.slint";
 import { BackButton } from "../components/widgets.slint";
@@ -22,7 +23,7 @@ export component GameSettingsScreen inherits Rectangle {
     property <bool> in-view: root.entered && root.open;
     background: root.in-view ? #03050ccc : #03050c00;
     animate background { duration: Tokens.motion-normal; }
-    TouchArea { enabled: root.open; clicked => { Host.back(); } }
+    TouchArea { enabled: root.open; clicked => { Commands.back(); } }
 
     // Keeps the focused row in view, as Settings does.
     function reveal(y: length, h: length) {
@@ -65,7 +66,7 @@ export component GameSettingsScreen inherits Rectangle {
                 HorizontalLayout {
                     alignment: Look.rtl ? end : start;
                     padding-bottom: 20 * Look.px;
-                    BackButton { pad: Vm.input-mode == "gamepad"; clicked => { Host.back(); } }
+                    BackButton { pad: Vm.input-mode == "gamepad"; clicked => { Commands.back(); } }
                 }
                 Text {
                     text: Vm.detail.title;
@@ -93,7 +94,7 @@ export component GameSettingsScreen inherits Rectangle {
                         first: i == 0;
                         last: i == panel.fields.length - 1;
                         reveal(y, h) => { root.reveal(y, h); }
-                        set(value) => { Host.set-setting(panel.slot.plugin, panel.slot.scope, field.key, value); }
+                        set(value) => { Commands.set-setting(panel.slot.plugin, panel.slot.scope, field.key, value); }
                     }
                 }
             }

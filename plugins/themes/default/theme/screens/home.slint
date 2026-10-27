@@ -1,4 +1,5 @@
 import { Vm, Host, Slot } from "../types.slint";
+import { Commands } from "../commands.slint";
 import { Tokens } from "../tokens.slint";
 import { Look } from "../components/look.slint";
 import { Nav, Origin } from "../components/nav.slint";
@@ -376,7 +377,7 @@ component HomeView inherits Rectangle {
             TouchArea {
                 mouse-cursor: pointer;
                 clicked => {
-                    if (i == Nav.selected && !Nav.extra) { Origin.from = "row"; Host.open-game(game.key); } else { Nav.extra = false; Nav.select-now(game.key); }
+                    if (i == Nav.selected && !Nav.extra) { Origin.from = "row"; Commands.open-game(game.key); } else { Nav.extra = false; Nav.select-now(game.key); }
                     Nav.zone = "row";
                 }
             }

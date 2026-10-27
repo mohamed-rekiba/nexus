@@ -1,15 +1,19 @@
 //! Capability contract suites: the behaviour the host relies on, checked against any emulator
-//! plugin. Each check panics with `contract <capability>: ...` when the plugin breaks a rule.
+//! plugin or port adapter. Each check panics with `contract <capability>: ...` when the plugin
+//! or adapter breaks a rule.
 //!
-//! Run [`emulator`] on a started core with the plugin loaded.
+//! - Run [`emulator`] on a started core with the plugin loaded.
+//! - Run [`archives`] on an [`Archives`] adapter, with a fixture that makes its archives.
 
 use std::collections::BTreeSet;
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures::StreamExt;
 use nexus_api::*;
-use nexus_core::Command;
+use nexus_core::{ArchiveError, ArchiveKind, Archives, Command, Escape, SessionCmd, UNPACK_SPARE};
 
 use crate::TestCore;
 
@@ -39,22 +43,12 @@ pub async fn emulator(test: &TestCore, plugin: &PluginId) {
             "contract compatibility: unknown game must fail"
         );
     }
-    if let Some(saves) = &provided.saves {
-        let game = first_game.as_deref().expect("contract saves: needs a catalog game");
-        saves.list(game).await.unwrap_or_else(|e| panic!("contract saves: list({game}): {e}"));
-    }
-    if let Some(controllers) = &provided.controllers {
-        let profiles = controllers.profiles().await.unwrap_or_else(|e| panic!("contract controllers: profiles: {e}"));
-        let ids: BTreeSet<&str> = profiles.iter().map(|p| p.id.as_str()).collect();
-        assert_eq!(ids.len(), profiles.len(), "contract controllers: profile ids are unique");
-        assert!(
-            profiles.iter().all(|p| !p.id.is_empty() && !p.name.is_empty()),
-            "contract controllers: empty id or name"
-        );
-    }
-    if let Some(shaders) = &provided.shaders {
-        shaders_contract(shaders.as_ref(), first_game.as_deref()).await;
-    }
+    let buttons: BTreeSet<&str> = manifest.keymap.iter().map(|k| k.button.as_str()).collect();
+    assert_eq!(buttons.len(), manifest.keymap.len(), "contract keymap: each button once");
+    assert!(
+        manifest.keymap.iter().all(|k| !k.button.is_empty() && !k.keys.is_empty()),
+        "contract keymap: empty button or keys"
+    );
     if let Some(slots) = &provided.slots {
         slots_contract(slots.as_ref(), first_game.as_deref()).await;
     }
@@ -127,16 +121,6 @@ async fn configurator_contract(configurator: &dyn Configurator, game: Option<&st
     }
 }
 
-async fn shaders_contract(shaders: &dyn Shaders, game: Option<&str>) {
-    let game = game.expect("contract shaders: needs a catalog game");
-    shaders.cache(game).await.unwrap_or_else(|e| panic!("contract shaders: cache({game}): {e}"));
-    assert!(shaders.cache("__no_such_game__").await.is_err(), "contract shaders: an unknown game must fail");
-    shaders.clear_cache(game).await.unwrap_or_else(|e| panic!("contract shaders: clear_cache({game}): {e}"));
-    let after = shaders.cache(game).await.expect("cache");
-    assert_eq!((after.entries, after.size_bytes), (0, 0), "contract shaders: a clear empties the cache");
-    shaders.clear_cache(game).await.expect("contract shaders: clearing an empty cache is fine");
-}
-
 async fn slots_contract(slots: &dyn Slots, game: Option<&str>) {
     for slot in SlotId::ALL {
         let request = SlotRequest { slot, game: slot.is_per_game().then(|| game.map(str::to_owned)).flatten() };
@@ -176,7 +160,7 @@ async fn launch_contract(test: &TestCore, plugin: &PluginId, game: &str) {
     // Installs may have run programs (an AppImage's extract); the game is the next one.
     let before = test.spawner.spawned().len();
     test.core
-        .dispatch(Command::Launch(key.clone()))
+        .dispatch(Command::Session(SessionCmd::Launch(key.clone())))
         .await
         .unwrap_or_else(|e| panic!("contract launcher: launch through the host: {e}"));
     let process =
@@ -210,4 +194,113 @@ async fn launch_contract(test: &TestCore, plugin: &PluginId, game: &str) {
     .await
     .expect("contract launcher: the host reports the exit");
     assert_eq!(exited, key);
+}
+
+/// One entry of an archive the [`archives`] contract asks a fixture for.
+#[derive(Clone, Debug)]
+pub enum Sample {
+    /// A file: its path in the archive and its bytes.
+    File(String, Vec<u8>),
+    /// A link: its path in the archive and its target.
+    Link(String, String),
+}
+
+/// Makes archives for an [`Archives`] adapter under the [`archives`] contract, in the
+/// adapter's own terms: real archive files for the app's adapter, declared contents for a fake.
+pub trait ArchiveFixture {
+    /// An archive in `dir` that holds `entries`, in order: its kind and its parts.
+    fn archive(&self, dir: &Path, entries: &[Sample]) -> (ArchiveKind, Vec<PathBuf>);
+    /// An archive in `dir` whose entries need a password, or `None` when the adapter can't
+    /// read one on this computer. That check is then skipped, and says so.
+    fn locked(&self, dir: &Path) -> Option<(ArchiveKind, Vec<PathBuf>)>;
+}
+
+/// The refusals every [`Archives`] adapter makes before it writes anything: a path that climbs
+/// out with `..`, an absolute path, a link that points out, an entry that needs a password, and
+/// an archive bigger than the free space. A plain archive unpacks, so an adapter that refuses
+/// everything fails too.
+pub async fn archives(adapter: &dyn Archives, fixture: &dyn ArchiveFixture) {
+    let file = |path: &str, bytes: &[u8]| Sample::File(path.into(), bytes.to_vec());
+    let plain = || vec![file("Game/eboot.bin", b"elf"), file("readme.txt", b"hi")];
+
+    let (dir, into) = folders();
+    let (kind, parts) = fixture.archive(dir.path(), &plain());
+    let last = unpack(adapter, kind, &parts, &into, None).await.unwrap_or_else(|e| panic!("contract archives: {e}"));
+    assert_eq!(std::fs::read(into.join("Game/eboot.bin")).ok(), Some(b"elf".to_vec()), "contract archives: unpacks");
+    assert_eq!(std::fs::read(into.join("readme.txt")).ok(), Some(b"hi".to_vec()), "contract archives: unpacks");
+    assert_eq!(last, (5, 5), "contract archives: progress ends at the files' bytes");
+
+    let leaves = |entry: &str| ArchiveError::Escapes { entry: entry.into(), how: Escape::Leaves };
+    let (dir, into) = folders();
+    let (kind, parts) = fixture.archive(dir.path(), &[file("good.txt", b"ok"), file("../evil.txt", b"no")]);
+    let refused = unpack(adapter, kind, &parts, &into, None).await;
+    assert_eq!(refused, Err(leaves("../evil.txt")), "contract archives: `..` leaves the folder");
+    refused_before_writing(&into, "`..`");
+    assert!(!dir.path().join("evil.txt").exists(), "contract archives: nothing written beside the folder");
+
+    let (dir, into) = folders();
+    let absolute = dir.path().join("absolute.txt").to_string_lossy().replace('\\', "/");
+    let (kind, parts) = fixture.archive(dir.path(), &[file("good.txt", b"ok"), file(&absolute, b"no")]);
+    let refused = unpack(adapter, kind, &parts, &into, None).await;
+    assert_eq!(refused, Err(leaves(&absolute)), "contract archives: an absolute path leaves the folder");
+    refused_before_writing(&into, "an absolute path");
+    assert!(!dir.path().join("absolute.txt").exists(), "contract archives: nothing written at the absolute path");
+
+    for target in ["../../../etc/passwd", "/etc/passwd"] {
+        let (dir, into) = folders();
+        let link = Sample::Link("Game/passwd".into(), target.into());
+        let (kind, parts) = fixture.archive(dir.path(), &[file("good.txt", b"ok"), link]);
+        let refused = unpack(adapter, kind, &parts, &into, None).await;
+        let out = ArchiveError::Escapes { entry: "Game/passwd".into(), how: Escape::LinksOut };
+        assert_eq!(refused, Err(out), "contract archives: a link to {target} points out");
+        refused_before_writing(&into, "a link out");
+    }
+
+    let (dir, into) = folders();
+    match fixture.locked(dir.path()) {
+        Some((kind, parts)) => {
+            let refused = unpack(adapter, kind, &parts, &into, None).await;
+            assert_eq!(refused, Err(ArchiveError::Password), "contract archives: a password is refused");
+            refused_before_writing(&into, "a password");
+        }
+        None => eprintln!("SKIPPED: contract archives: this adapter can't read a locked archive here"),
+    }
+
+    let (dir, into) = folders();
+    let (kind, parts) = fixture.archive(dir.path(), &plain());
+    let refused = unpack(adapter, kind, &parts, &into, Some(UNPACK_SPARE)).await;
+    let no_room = ArchiveError::NoRoom { needed: 5 + UNPACK_SPARE, free: UNPACK_SPARE };
+    assert_eq!(refused, Err(no_room), "contract archives: an archive bigger than the free space is refused");
+    refused_before_writing(&into, "no room");
+}
+
+/// A new folder for one check's archive, and the empty folder it unpacks into.
+fn folders() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().expect("a temporary folder");
+    let into = dir.path().join("out");
+    std::fs::create_dir_all(&into).expect("the unpack folder");
+    (dir, into)
+}
+
+/// Unpacks, and returns the last progress the adapter reported.
+async fn unpack(
+    adapter: &dyn Archives,
+    kind: ArchiveKind,
+    parts: &[PathBuf],
+    into: &Path,
+    free: Option<u64>,
+) -> Result<(u64, u64), ArchiveError> {
+    let last = Arc::new(Mutex::new((0, 0)));
+    let progress: nexus_core::UnpackProgress = {
+        let last = last.clone();
+        Arc::new(move |done, total| *last.lock().unwrap() = (done, total))
+    };
+    adapter.unpack(kind, parts, into, free, progress, Arc::new(AtomicBool::new(false))).await?;
+    let last = *last.lock().unwrap();
+    Ok(last)
+}
+
+fn refused_before_writing(into: &Path, case: &str) {
+    let left: Vec<_> = std::fs::read_dir(into).expect("the unpack folder").flatten().map(|e| e.path()).collect();
+    assert!(left.is_empty(), "contract archives: {case}: nothing written, found {left:?}");
 }

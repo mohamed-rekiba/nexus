@@ -18,7 +18,7 @@ the reasons behind it are in [specs/nexus-os.md](specs/nexus-os.md).
 
 Tests and screenshots pretend either with environment variables, which Nexus defines.
 
-Other files Nexus may read:
+Other files the image writes. The OS's own scripts read them; Nexus doesn't read them today:
 
 | File | Holds |
 |---|---|
@@ -34,7 +34,7 @@ Other files Nexus may read:
 | Sound output | `pactl` | PipeWire with its PulseAudio server |
 | System updates: state | `rpm-ostree status --json` (a staged deployment means "Restart to update"), `systemctl is-active nexus-os-update.service` (checking) | `nexus-os-update.timer` runs `nexus-os-update.service` (`/usr/libexec/nexus-os/update`) daily, from 3 minutes after start, and again every 15 minutes while it fails. It stages the next image (and moves an NVIDIA PC to `:minimal-nvidia`), and never restarts the PC. |
 | System updates: check now | `systemctl start --no-block nexus-os-update.service` | A polkit rule letting `player` start that unit, and only start it |
-| Nexus's own updates | nothing: "Comes with the next system update" | The image installs the nexus rpm from the latest Nexus release, and is rebuilt after each Nexus release |
+| Nexus's own updates | nothing: "Nexus <version> is out · it comes with the next system update" | The image installs the nexus rpm from the latest Nexus release, and is rebuilt after each Nexus release |
 | Restart, shut down | `systemctl reboot` / `poweroff` | logind (the active local session may) |
 | This PC | `lspci` | pciutils |
 | The session | Prints `window shown` on standard output as soon as its window is up | greetd logs `player` in and runs `/usr/bin/nexus-session`, from the nexus package. It sets `NEXUS_SESSION=1` (nothing is behind Nexus: it shows the system's settings, Restart and Shut down), starts Nexus in gamescope, or in cage when gamescope can't run, and appends all output to `~/.cache/nexus-session.log`. Before each start, a log over 10 MB (`NEXUS_LOG_MAX_MB`) becomes `nexus-session.previous.log`, so the log never fills the disk; no logrotate is needed. If no `window shown` line comes within the watchdog time (90 s by default, `NEXUS_WATCHDOG`), it starts Nexus again. When Nexus ends after writing `log out` (Settings → System → Log out, shown on a desktop only), the session ends instead, back to the login screen; on Nexus OS greetd would only start it again, so Log out doesn't show there. |

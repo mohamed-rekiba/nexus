@@ -25,18 +25,30 @@ fn the_default_theme_is_complete_and_compiles() {
 #[test]
 fn every_default_screen_renders() {
     let mut host = composed(|h| {
-        h.plugin(games("emu-a", vec!["Alpha", "Beta"]))
-            .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha", "Beta"]).build())
+            .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
-    for screen in ["home", "catalog", "downloads", "settings", "emulators", "themes"] {
-        host.instance().invoke_global("Host", "navigate", &[slint_interpreter::Value::String(screen.into())]).unwrap();
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
+    let routes = [
+        (ScreenId::Home, "Home"),
+        (ScreenId::Catalog, "Catalog"),
+        (ScreenId::Downloads, "Downloads"),
+        (ScreenId::Settings, "Settings"),
+        (ScreenId::Emulators, "Emulators"),
+        (ScreenId::Themes, "Themes"),
+    ];
+    for (screen, route) in routes {
+        let args = [
+            slint_interpreter::Value::String("Navigate".into()),
+            slint_interpreter::Value::String(format!("{route:?}").into()),
+        ];
+        host.instance().invoke_global("Host", "command", &args).unwrap();
         host.pump();
-        assert_eq!(nexus_ui_host::vm_text(host.instance(), "screen").as_deref(), Some(screen));
+        assert_eq!(host.core().view().screen, screen);
     }
     host.dispatch(Command::OpenGame("emu-a:G0".parse().unwrap()));
-    assert_eq!(nexus_ui_host::vm_text(host.instance(), "screen").as_deref(), Some("game-detail"));
+    assert_eq!(host.core().view().screen, ScreenId::GameDetail);
 }
 
 #[test]
@@ -66,8 +78,8 @@ export component Card inherits Rectangle {
     );
     let mut host = composed(|h| {
         h.discover(dir.path())
-            .plugin(games("emu-kyty", vec!["Alpha", "Beta", "Gamma"]).console("PS5"))
-            .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+            .plugin(FakeCatalog::new("emu-kyty").system("PS4").games(["Alpha", "Beta", "Gamma"]).build().console("PS5"))
+            .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.switch(&id("child")).expect("the child theme loads");
     // A catalog with three games.
@@ -88,7 +100,7 @@ export component Card inherits Rectangle {
         value: serde_json::json!({ "catalog_url": "https://xyz.dev/c" }),
     });
     host.catalogs_fetched();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
 
     let resolved = host.ui.resolved().unwrap();
     assert_eq!(resolved.inherited_screens().len(), ScreenId::ALL.len(), "every screen comes from default");
@@ -97,7 +109,7 @@ export component Card inherits Rectangle {
     // The default Catalog screen draws the child's Card for each game.
     host.dispatch(Command::Navigate(nexus_core::Route::Catalog));
     host.dispatch(Command::Search("a".into()));
-    settle(&mut host);
+    host.settle();
     assert_eq!(host.count("child-card"), 3);
 }
 
@@ -117,7 +129,7 @@ fn a_theme_built_for_another_ui_api_is_refused() {
     let dir = tempfile::tempdir().unwrap();
     write_theme(dir.path(), "future", "extends = \"default\"", &[]);
     let toml = dir.path().join("future/theme.toml");
-    let text = std::fs::read_to_string(&toml).unwrap().replace("ui_api = \"^0.1\"", "ui_api = \"^9\"");
+    let text = std::fs::read_to_string(&toml).unwrap().replace("ui_api = \"^0.2\"", "ui_api = \"^9\"");
     std::fs::write(&toml, text).unwrap();
     let mut host = composed(|h| h.discover(dir.path()));
 
@@ -190,19 +202,27 @@ fn a_screen_that_exports_the_wrong_name_is_refused_with_the_file_named() {
 #[test]
 fn the_default_settings_screen_maps_a_folder_through_the_host() {
     let plugin = nexus_testkit::StubPlugin::from_toml(
-        "id = \"pc\"\nkind = \"emulator\"\nname = \"PC games\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"pc\"\nkind = \"emulator\"\nname = \"PC games\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          [[permissions.filesystem]]\nfolder = \"games\"",
     );
     let mut host = composed(|h| h.plugin(plugin));
     host.ui.start().unwrap();
     let games = tempfile::tempdir().unwrap();
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
-    settle(&mut host);
+    host.settle();
 
     assert_eq!(host.count("folder:games"), 1, "a row for the folder");
-    let value = slint_interpreter::Value::String(games.path().display().to_string().into());
+    // As the theme sends the folder's text.
+    let args = serde_json::json!({ "name": "games", "paths": games.path().display().to_string() });
     host.instance()
-        .invoke_global("Host", "set-folder", &[slint_interpreter::Value::String("games".into()), value])
+        .invoke_global(
+            "Host",
+            "command",
+            &[
+                slint_interpreter::Value::String("SetFolders".into()),
+                slint_interpreter::Value::String(args.to_string().into()),
+            ],
+        )
         .unwrap();
     host.pump();
 
@@ -256,13 +276,13 @@ export component HomeScreen inherits Rectangle {
 fn the_default_settings_screen_edits_a_folder_with_the_keys() {
     use slint::platform::{Key, WindowEvent};
     let plugin = nexus_testkit::StubPlugin::from_toml(
-        "id = \"pc\"\nkind = \"emulator\"\nname = \"PC games\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"pc\"\nkind = \"emulator\"\nname = \"PC games\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          [[permissions.filesystem]]\nfolder = \"games\"",
     );
     let mut host = composed(|h| h.plugin(plugin));
     host.ui.start().unwrap();
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
-    settle(&mut host);
+    host.settle();
     let press = |host: &Composed, text: slint::SharedString| {
         use slint_interpreter::ComponentHandle;
         host.instance().window().dispatch_event(WindowEvent::KeyPressed { text: text.clone() });
@@ -272,20 +292,23 @@ fn the_default_settings_screen_edits_a_folder_with_the_keys() {
     // The focus starts on the folder's row. Enter opens its text box; Enter again saves it.
     press(&host, Key::Return.into());
     host.pump();
-    settle(&mut host);
+    host.settle();
     let typed = full_path("/games");
     for c in typed.chars() {
         press(&host, c.to_string().into());
     }
     press(&host, Key::Return.into());
     host.pump();
-    settle(&mut host);
+    host.settle();
     assert_eq!(host.core().kernel().config().get(&["app", "folders", "games"]), serde_json::json!([typed]));
 
     // The keys reach the sheet again: Down moves on to the Rescan row, and Enter there scans.
     press(&host, Key::DownArrow.into());
     press(&host, Key::Return.into());
-    let asked =
-        host.requests.borrow().iter().any(|r| matches!(r, nexus_ui_host::UiRequest::Core(Command::RefreshLibrary)));
+    let asked = host
+        .requests
+        .borrow()
+        .iter()
+        .any(|r| matches!(r, nexus_ui_host::UiRequest::Core(Command::Library(nexus_core::LibraryCmd::Refresh))));
     assert!(asked, "Enter on Rescan, after the text box closed, asks the core to scan");
 }
