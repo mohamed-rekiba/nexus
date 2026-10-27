@@ -325,7 +325,7 @@ pub(crate) fn schedule_refresh(core: &Core) {
 }
 
 /// What the player asks of the machine.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum SystemCommand {
     /// Reads everything again now.
     Refresh,

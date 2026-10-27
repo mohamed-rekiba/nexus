@@ -23,7 +23,7 @@ use crate::view;
 use crate::{CoreError, CoreResult, Kernel};
 
 /// Where the player is. The navigation stack is a list of routes.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Route {
     Home,
     GameDetail(GameKey),
@@ -41,7 +41,7 @@ pub enum Route {
 }
 
 /// A grid of game cards that tells the core how many columns it shows.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Grid {
     /// The Library's grid, of the installed games.
     Library,
@@ -49,8 +49,9 @@ pub enum Grid {
     Catalog,
 }
 
-/// Everything the UI can ask the core to do.
-#[derive(Clone, Debug, PartialEq)]
+/// Everything the UI can ask the core to do. It reads and writes as JSON with `serde`, each
+/// variant by its name: `{"Navigate": "Settings"}`, `"Back"`, `{"Torrent": {"SeedDownloads": true}}`.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Command {
     Navigate(Route),
     Back,
@@ -1684,5 +1685,49 @@ impl LibraryView {
             }
             Some(_) => self.system = system,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn round_trip(command: Command) {
+        let json = serde_json::to_string(&command).expect("a command serializes");
+        let back: Command = serde_json::from_str(&json).expect("a command deserializes");
+        assert_eq!(back, command, "{json}");
+    }
+
+    #[test]
+    fn commands_read_as_json_by_their_variant_names() {
+        let read = |json: &str| serde_json::from_str::<Command>(json).expect(json);
+        assert_eq!(read(r#"{"Navigate": "Settings"}"#), Command::Navigate(Route::Settings));
+        assert_eq!(read(r#""Back""#), Command::Back);
+        assert_eq!(
+            read(r#"{"Torrent": {"SeedDownloads": true}}"#),
+            Command::Torrent(crate::TorrentCmd::SeedDownloads(true))
+        );
+        assert_eq!(read(r#"{"Pref": ["sounds", false]}"#), Command::Pref(Pref::Sounds, Value::Bool(false)));
+    }
+
+    #[test]
+    fn every_kind_of_command_goes_to_json_and_back() {
+        let game = GameKey::new(PluginId::new("emu").unwrap(), "astro");
+        round_trip(Command::Navigate(Route::GameDetail(game.clone())));
+        round_trip(Command::Select(game.clone()));
+        round_trip(Command::GridColumns { grid: Grid::Catalog, columns: 6 });
+        round_trip(Command::SetConfig {
+            plugin: game.plugin.clone(),
+            scope: ConfigScope::Game("astro".into()),
+            value: serde_json::json!({ "fps": 60 }),
+        });
+        round_trip(Command::Session(crate::SessionCmd::Launch(game.clone())));
+        round_trip(Command::Torrent(crate::TorrentCmd::Act { id: "abc".into(), action: crate::TorrentAction::Pause }));
+        round_trip(Command::System(crate::system::SystemCommand::JoinWifi {
+            ssid: "home".into(),
+            password: Some("secret".into()),
+        }));
+        round_trip(Command::SetFolders { name: "games".into(), paths: vec!["/games".into()] });
+        round_trip(Command::ReportResult(None));
     }
 }
