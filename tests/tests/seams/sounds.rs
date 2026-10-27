@@ -61,23 +61,6 @@ fn a_theme_whose_sound_file_is_missing_does_not_load_and_the_old_one_stays() {
     assert_eq!(host.ui.current(), Some(&id("default")));
 }
 
-/// Runs the core's runtime until `done` is true, for at most five seconds, then shows it.
-fn until(host: &mut Composed, what: &str, done: impl Fn(&nexus_core::Core) -> bool) {
-    let core = host.core().clone();
-    host.rt
-        .block_on(async {
-            tokio::time::timeout(std::time::Duration::from_secs(5), async {
-                while !done(&core) {
-                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-                }
-            })
-            .await
-        })
-        .unwrap_or_else(|_| panic!("timed out waiting until {what}"));
-    host.ui.render().unwrap();
-    settle(host);
-}
-
 #[test]
 fn the_default_theme_has_upstream_s_five_sounds() {
     let host = tv();
@@ -134,12 +117,12 @@ fn a_game_that_starts_plays_start_and_one_that_crashes_plays_error() {
     settle(&mut host);
     host.requests.borrow_mut().clear();
     host.dispatch(Command::Launch("emu-a:G0".parse().unwrap()));
-    until(&mut host, "the game is in front", |core| core.game_in_front());
+    watch_until(&mut host, "the game is in front", |core| core.game_in_front());
     assert!(asked_for(&host).contains(&"start".to_owned()), "{:?}", asked_for(&host));
 
     host.requests.borrow_mut().clear();
     host.test.spawner.spawned()[0].exit(1);
-    until(&mut host, "the game closed", |core| !core.game_running());
+    watch_until(&mut host, "the game closed", |core| !core.game_running());
     assert!(asked_for(&host).contains(&"error".to_owned()), "{:?}", asked_for(&host));
 }
 
@@ -152,7 +135,7 @@ fn a_notice_that_is_not_a_problem_plays_no_error() {
     host.test.desktop.set_problem("Install xdotool so games come to the front and the launcher comes back");
     host.requests.borrow_mut().clear();
     host.dispatch(Command::Launch("emu-a:G0".parse().unwrap()));
-    until(&mut host, "the notice shows", |core| !core.view().notices.is_empty());
+    watch_until(&mut host, "the notice shows", |core| !core.view().notices.is_empty());
     settle(&mut host);
     assert!(!asked_for(&host).contains(&"error".to_owned()), "advice: {:?}", asked_for(&host));
 }

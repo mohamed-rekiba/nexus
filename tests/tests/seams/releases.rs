@@ -2,7 +2,7 @@
 
 use crate::common::*;
 use nexus_api::{ConfigScope, ReleaseList, ReleaseSource};
-use nexus_core::Command;
+use nexus_core::{Area, Command};
 use std::sync::{Arc, Mutex};
 
 use nexus_testkit::{FakeHost, StubPlugin, TestCore};
@@ -154,7 +154,7 @@ async fn a_slow_catalog_address_still_gives_the_bundled_catalog_at_once_and_the_
     assert_eq!((first.source, first.problem), (ReleaseSource::Bundled, None));
 
     // Past the call timeout, the held fetch is no error.
-    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    t.clock.advance(std::time::Duration::from_millis(600)).await;
     assert!(t.core.view().notices.is_empty(), "{:?}", t.core.view().notices);
 
     // The fetch ends in the background, and the core reads the catalogs again.
@@ -166,26 +166,22 @@ async fn a_slow_catalog_address_still_gives_the_bundled_catalog_at_once_and_the_
     assert_eq!(t.http.sent(), [URL], "fetched once");
 }
 
-/// The PS5 catalog once `done` says it is the one the test waits for, or after a second.
+/// The PS5 catalog once `done` says it is the one the test waits for, or after a second of the
+/// clock: the Game Catalog fetches in its own task, which says only that the catalogs changed.
 async fn list_once(t: &TestCore, done: impl Fn(&ReleaseList) -> bool) -> ReleaseList {
     for _ in 0..100 {
         let got = list(t).await;
         if got.as_ref().is_some_and(&done) {
             break;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        t.clock.advance(std::time::Duration::from_millis(10)).await;
     }
     list(t).await.expect("a PS5 catalog")
 }
 
-/// The keys of the Catalog's offers, sorted, once they are `keys`, or after a second.
+/// The keys of the Catalog's offers, sorted, once they are `keys`.
 async fn offers_once(t: &TestCore, keys: &[&str]) -> Vec<String> {
-    for _ in 0..100 {
-        if offer_keys(t) == keys {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
+    t.until(Area::Catalogs, |_| offer_keys(t) == keys).await;
     offer_keys(t)
 }
 
@@ -200,18 +196,6 @@ async fn an_address_on_a_host_the_manifest_does_not_name_is_refused() {
 /// A PS4 catalog with one game, Racer.
 fn ps4_catalog() -> String {
     catalog_of("2026-10-18T00:00:00Z", serde_json::json!([topic(1, "CUSA00001", "Racer", "1.00", "2026-10-01", 'a')]))
-}
-
-/// Waits until each catalog on the Catalog is the copy fetched from the catalog address, or a
-/// second passes: the first read gets the bundled copy, and the fetch runs in the background.
-async fn fetched_on_the_catalog(t: &TestCore) {
-    for _ in 0..100 {
-        let sources = t.core.view().catalog.sources;
-        if !sources.is_empty() && sources.iter().all(|s| s.contains(": fetched from ")) {
-            return;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
 }
 
 /// The keys of the Catalog's offers, sorted.
@@ -233,7 +217,7 @@ async fn an_emulator_gets_the_catalog_of_the_console_it_plays_and_keeps_its_own_
     t.http.serve("https://xyz.dev/catalog/ps4.json", ps4_catalog());
     set_address(&t, "https://xyz.dev/catalog").await.unwrap();
     t.core.dispatch(Command::Navigate(nexus_core::Route::Catalog)).await.unwrap();
-    fetched_on_the_catalog(&t).await;
+    catalogs_fetched(&t.core).await;
 
     assert_eq!(offer_keys(&t), ["release-catalog:emu-a/PPSA01234", "release-catalog:emu-b/CUSA00001"]);
     let mut sent = t.http.sent();
@@ -254,7 +238,7 @@ async fn a_console_turned_off_in_the_catalog_s_settings_offers_nothing_and_its_g
     set_address(&t, "https://xyz.dev/catalog").await.unwrap();
     t.core.dispatch(Command::RefreshLibrary).await.unwrap();
     t.core.dispatch(Command::Navigate(nexus_core::Route::Catalog)).await.unwrap();
-    fetched_on_the_catalog(&t).await;
+    catalogs_fetched(&t.core).await;
 
     // A toggle for each console an emulator plays, on.
     t.core.dispatch(Command::Navigate(nexus_core::Route::Settings)).await.unwrap();
@@ -351,7 +335,7 @@ async fn of_two_emulators_for_one_console_the_first_loaded_gets_the_catalog() {
     t.http.serve(URL, catalog("2026-10-18T00:00:00Z"));
     set_address(&t, "https://xyz.dev/catalog").await.unwrap();
     t.core.dispatch(Command::Navigate(nexus_core::Route::Catalog)).await.unwrap();
-    fetched_on_the_catalog(&t).await;
+    catalogs_fetched(&t.core).await;
 
     let order = t.core.kernel().order();
     let first = order.iter().find(|p| ["emu-a", "emu-c"].contains(&p.as_str())).unwrap();
@@ -416,7 +400,7 @@ async fn with_offers() -> TestCore {
     set_address(&t, "https://xyz.dev/catalog").await.unwrap();
     t.core.dispatch(Command::RefreshLibrary).await.unwrap();
     t.core.dispatch(Command::Navigate(nexus_core::Route::Catalog)).await.unwrap();
-    fetched_on_the_catalog(&t).await;
+    catalogs_fetched(&t.core).await;
     t
 }
 
@@ -511,7 +495,7 @@ async fn the_catalog_shows_a_page_at_a_time_and_describes_only_what_it_shows() {
     t.http.serve(URL, catalog_of("2026-10-18T00:00:00Z", serde_json::Value::Array(topics)));
     set_address(&t, "https://xyz.dev/catalog").await.unwrap();
     t.core.dispatch(Command::Navigate(nexus_core::Route::Catalog)).await.unwrap();
-    fetched_on_the_catalog(&t).await;
+    catalogs_fetched(&t.core).await;
 
     let page = |t: &TestCore| {
         let g = t.core.view().catalog.games;
@@ -521,9 +505,7 @@ async fn the_catalog_shows_a_page_at_a_time_and_describes_only_what_it_shows() {
     // Until the fetch is in, the Catalog shows the bundled catalog, and the store is asked
     // about its first page too: only this catalog's games (CUSA…) count.
     let described = || async {
-        for _ in 0..200 {
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
+        t.clock.advance(std::time::Duration::from_secs(1)).await;
         asked.lock().unwrap().iter().filter(|id| id.starts_with("CUSA")).count()
     };
     assert_eq!(described().await, nexus_core::GRID_PAGE, "the store is asked about the shown page only");
@@ -567,7 +549,7 @@ async fn offering(emulator: &str, console: &'static str, topics: serde_json::Val
     t.http.serve(&format!("https://xyz.dev/catalog/{file}.json"), catalog_of("2026-10-18T00:00:00Z", topics));
     set_address(&t, "https://xyz.dev/catalog").await.unwrap();
     t.core.dispatch(Command::Navigate(nexus_core::Route::Catalog)).await.unwrap();
-    fetched_on_the_catalog(&t).await;
+    catalogs_fetched(&t.core).await;
     t
 }
 
@@ -621,7 +603,7 @@ async fn an_installed_game_with_no_art_of_its_own_has_its_offer_s_and_keeps_it_w
     set_address(&t, "https://xyz.dev/catalog").await.unwrap();
     t.core.dispatch(Command::RefreshLibrary).await.unwrap();
     t.core.dispatch(Command::Navigate(nexus_core::Route::Catalog)).await.unwrap();
-    fetched_on_the_catalog(&t).await;
+    catalogs_fetched(&t.core).await;
     let card = t.core.view().catalog.games.games.first().cloned().unwrap();
     assert!(card.badges.iter().any(|b| b.text == "Installed"), "the offer is the installed game");
 
@@ -689,14 +671,8 @@ async fn the_store_s_data_comes_first_and_steam_fills_what_it_leaves_out() {
     .await;
     let offer = t.core.view().catalog.games.games.first().cloned().unwrap();
     t.core.dispatch(Command::OpenGame(offer.key.parse().unwrap())).await.unwrap();
-    let mut detail = t.core.view().detail.unwrap();
-    for _ in 0..200 {
-        if detail.developer == "MOJANG AB" {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        detail = t.core.view().detail.unwrap();
-    }
+    t.until(Area::Library, |core| core.view().detail.is_some_and(|d| d.developer == "MOJANG AB")).await;
+    let detail = t.core.view().detail.unwrap();
     assert_eq!(detail.developer, "MOJANG AB", "the store's publisher");
     assert_eq!(detail.genres, ["Adventure", "Arcade"], "the store's genres");
     assert_eq!(detail.screenshots.len(), 2, "the store's screenshots");
@@ -942,7 +918,7 @@ async fn an_installed_game_matches_its_offer_by_name_on_the_same_console_and_has
     set_address(&t, "https://xyz.dev/catalog").await.unwrap();
     t.core.dispatch(Command::RefreshLibrary).await.unwrap();
     t.core.dispatch(Command::Navigate(nexus_core::Route::Catalog)).await.unwrap();
-    fetched_on_the_catalog(&t).await;
+    catalogs_fetched(&t.core).await;
 
     let installed = |t: &TestCore| {
         cards(t).into_iter().filter(|(_, _, badges)| badges.contains(&"Installed".to_owned())).collect::<Vec<_>>()
@@ -1002,7 +978,7 @@ async fn a_card_shows_its_best_release_and_the_game_hub_orders_them_by_version()
     t.core.dispatch(Command::OpenGame(alpha.key.parse().unwrap())).await.unwrap();
     t.core.dispatch(Command::Back).await.unwrap();
     t.core.dispatch(Command::Navigate(nexus_core::Route::Catalog)).await.unwrap();
-    fetched_on_the_catalog(&t).await;
+    catalogs_fetched(&t.core).await;
 
     let mut sizes: Vec<(String, Option<u64>)> =
         t.core.view().catalog.games.games.iter().map(|c| (c.title.clone(), c.size_bytes)).collect();
@@ -1218,12 +1194,7 @@ async fn the_catalog_opens_at_once_and_says_it_is_loading_until_the_catalogs_are
         .await;
     let core = t.core.clone();
     let navigate = tokio::spawn(async move { core.dispatch(Command::Navigate(nexus_core::Route::Catalog)).await });
-    for _ in 0..100 {
-        if t.core.view().screen == nexus_ui_api::ScreenId::Catalog {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
+    t.until(Area::Navigation, |core| core.view().screen == nexus_ui_api::ScreenId::Catalog).await;
     assert_eq!(t.core.view().screen, nexus_ui_api::ScreenId::Catalog, "the Catalog opens before the read ends");
     assert!(t.core.view().catalog.loading, "the catalogs are not read yet");
 
@@ -1317,7 +1288,7 @@ async fn a_hidden_game_leaves_the_catalog_and_the_hidden_filter_shows_it() {
     t.http.serve(URL, catalog_of("2026-10-18T00:00:00Z", serde_json::Value::Array(topics)));
     set_address(&t, "https://xyz.dev/catalog").await.unwrap();
     t.core.dispatch(Command::Navigate(nexus_core::Route::Catalog)).await.unwrap();
-    fetched_on_the_catalog(&t).await;
+    catalogs_fetched(&t.core).await;
     let titles =
         |t: &TestCore| -> Vec<String> { t.core.view().catalog.games.games.iter().map(|g| g.title.clone()).collect() };
     let hidden_chip =

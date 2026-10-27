@@ -7,7 +7,7 @@ use std::time::Duration;
 use emu_kyty::{COMPATIBILITY, KytyPlugin, RELEASES};
 use futures::StreamExt;
 use nexus_api::*;
-use nexus_core::{Command, Route};
+use nexus_core::{Area, Command, Route};
 use nexus_testkit::{FakeHost, FakeHttp, TestCore, contract};
 
 #[test]
@@ -495,15 +495,11 @@ async fn install_game(k: &Kyty, file: &str) -> String {
     let start =
         Command::RunAction { plugin: kyty(), action: HOST_INSTALL_GAME.into(), game: None, args: offer.args.clone() };
     k.test.core.dispatch(start).await.unwrap();
-    for _ in 0..500 {
-        if let Some(job) = k.test.core.view().downloads.jobs.first()
-            && job.state != "installing"
-        {
-            return format!("{} {}", job.state, job.error);
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("the install never ended");
+    k.test
+        .until(Area::Installs, |core| core.view().downloads.jobs.first().is_some_and(|j| j.state != "installing"))
+        .await;
+    let job = k.test.core.view().downloads.jobs.into_iter().next().unwrap();
+    format!("{} {}", job.state, job.error)
 }
 
 #[tokio::test]
@@ -546,12 +542,9 @@ async fn a_download_folder_installs_from_the_package_inside_it() {
     let source = serde_json::json!({ "folder": "packages", "root": 0, "path": "PS5/torrent-abc" });
     let start = Command::RunAction { plugin: kyty(), action: HOST_INSTALL_GAME.into(), game: None, args: source };
     k.test.core.dispatch(start).await.unwrap();
-    for _ in 0..500 {
-        if k.test.core.view().downloads.jobs.first().is_some_and(|j| j.state != "installing") {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    k.test
+        .until(Area::Installs, |core| core.view().downloads.jobs.first().is_some_and(|j| j.state != "installing"))
+        .await;
     let job = k.test.core.view().downloads.jobs.into_iter().next().unwrap();
     assert_eq!((job.state.as_str(), job.error.as_str()), ("done", ""));
     let game = k.games.path().join("PS5/PPSA12345-app0");
@@ -818,15 +811,11 @@ async fn install_download(k: &Kyty) -> String {
     if let Err(e) = k.test.core.dispatch(start).await {
         return format!("failed {e}");
     }
-    for _ in 0..500 {
-        if let Some(job) = k.test.core.view().downloads.jobs.first()
-            && job.state != "installing"
-        {
-            return format!("{} {}", job.state, job.error);
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("the install never ended");
+    k.test
+        .until(Area::Installs, |core| core.view().downloads.jobs.first().is_some_and(|j| j.state != "installing"))
+        .await;
+    let job = k.test.core.view().downloads.jobs.into_iter().next().unwrap();
+    format!("{} {}", job.state, job.error)
 }
 
 #[tokio::test]

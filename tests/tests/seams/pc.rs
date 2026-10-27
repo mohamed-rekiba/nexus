@@ -8,7 +8,7 @@ use std::time::Duration;
 use crate::common::native;
 use emu_pc::{GAME_FILE, GameManifest, PcPlugin};
 use nexus_api::*;
-use nexus_core::Command;
+use nexus_core::{Area, Command};
 use nexus_testkit::{FakeHost, TestCore, contract};
 
 fn pc() -> PluginId {
@@ -74,18 +74,14 @@ impl Pc {
         if let Err(e) = self.test.core.dispatch(start).await {
             return format!("failed {e}");
         }
-        for _ in 0..500 {
-            let jobs = self.test.core.view().downloads.jobs;
+        let ended = |core: &nexus_core::Core| {
+            let jobs = core.view().downloads.jobs;
             // The newest job is first.
-            if jobs.len() > before
-                && let Some(job) = jobs.first()
-                && job.state != "installing"
-            {
-                return format!("{} {}", job.state, job.error).trim().to_owned();
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        panic!("the install never ended");
+            jobs.len() > before && jobs.first().is_some_and(|j| j.state != "installing")
+        };
+        self.test.until(Area::Installs, ended).await;
+        let job = self.test.core.view().downloads.jobs.into_iter().next().unwrap();
+        format!("{} {}", job.state, job.error).trim().to_owned()
     }
 
     fn manifest(&self, folder: &str) -> GameManifest {
@@ -182,7 +178,7 @@ async fn play_starts_the_script_in_its_folder_and_the_starts_setting_picks_anoth
     assert_eq!(field.value, "bin/game.x86_64");
     assert_eq!(field.choices, ["start.sh", "bin/game.x86_64"], "the list keeps its order");
     assert_eq!(field.help, "Play starts bin/game.x86_64, from the game's folder.", "the whole path");
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    p.test.clock.advance(Duration::from_millis(50)).await;
     p.test.core.dispatch(Command::Launch(key)).await.unwrap();
     let second = p.test.spawner.wait_for(2).await;
     assert_eq!(second.command.program, game.join("bin/game.x86_64"));
@@ -367,24 +363,17 @@ async fn a_game_a_catalog_download_installed_has_the_offer_s_art_and_the_repack_
     t.core.dispatch(set).await.unwrap();
     t.core.dispatch(Command::Navigate(nexus_core::Route::Catalog)).await.unwrap();
     // The Catalog shows the bundled copy first: wait for the one fetched from the address.
-    for _ in 0..500 {
-        let catalog = t.core.view().catalog;
+    t.until(Area::Catalogs, |core| {
+        let catalog = core.view().catalog;
         let fetched = !catalog.sources.is_empty() && catalog.sources.iter().all(|s| s.contains(": fetched from "));
-        if fetched && !catalog.games.games.is_empty() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+        fetched && !catalog.games.games.is_empty()
+    })
+    .await;
     let offer: GameKey = t.core.view().catalog.games.games[0].key.parse().unwrap();
     t.core.dispatch(Command::DownloadRelease { offer, release: HASH.into(), folder: None }).await.unwrap();
     let row = |t: &TestCore| t.core.view().downloads.torrents.into_iter().next();
     for (step, state) in [("ready", "ready"), ("complete", "complete")] {
-        for _ in 0..300 {
-            if row(t).is_some_and(|r| r.state == state) {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
+        t.until(Area::Torrents, |_| row(t).is_some_and(|r| r.state == state)).await;
         if step == "ready" {
             let start = Command::Torrent { id: HASH.into(), action: nexus_core::TorrentAction::Start };
             t.core.dispatch(start).await.unwrap();
@@ -392,12 +381,7 @@ async fn a_game_a_catalog_download_installed_has_the_offer_s_art_and_the_repack_
         }
     }
     t.core.dispatch(Command::Torrent { id: HASH.into(), action: nexus_core::TorrentAction::Install }).await.unwrap();
-    for _ in 0..300 {
-        if row(t).is_some_and(|r| r.install == "done") {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    t.until(Area::Installs, |_| row(t).is_some_and(|r| r.install == "done")).await;
     assert_eq!(p.titles(), [("Pocket Tanks Deluxe".to_owned(), "PC".to_owned())], "the repack's name for it");
     let portrait = nexus_ui_api::ImageRef::Url {
         plugin: PluginId::new("release-catalog").unwrap(),
@@ -443,7 +427,7 @@ async fn play_runs_the_start_script_as_it_is_even_beside_a_wine_this_system_can_
     let first = p.test.spawner.wait_for(1).await;
     assert_eq!(first.command.program, game.join("start.sh"));
     first.exit(1);
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    p.test.clock.advance(Duration::from_millis(50)).await;
 
     p.set("Pocket-Tanks", "starts", "game_info/data/pockettanks.exe").await.unwrap();
     p.test.core.dispatch(launch).await.unwrap();
@@ -518,7 +502,7 @@ async fn on_windows_the_exe_runs_as_it_is_and_a_linux_game_says_it_can_t_run_her
     let run = p.test.spawner.wait_for(1).await;
     assert_eq!(run.command.program, p.games.path().join("PC/Game/Game.exe"));
     run.exit(0);
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    p.test.clock.advance(Duration::from_millis(50)).await;
 
     std::fs::remove_dir_all(p.packages.path().join("PC/torrent-abc")).unwrap();
     p.download(&[("Penguins/penguins.x86_64", &elf())]);

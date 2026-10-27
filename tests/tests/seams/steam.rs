@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use emu_steam::SteamPlugin;
 use nexus_api::*;
-use nexus_core::Command;
+use nexus_core::{Area, Command};
 use nexus_testkit::{FakeHost, TestCore, contract};
 use nexus_ui_api::ImageRef;
 
@@ -143,7 +143,7 @@ async fn play_asks_steam_to_start_the_game_and_follows_the_game_steam_started() 
     // Steam hands the game to its reaper and the command exits.
     steam_command.exit(0);
     s.test.processes.start(7001, "/home/p/.local/share/Steam/ubuntu12_32/reaper SteamLaunch AppId=570 -- dota");
-    tokio::time::sleep(Duration::from_millis(700)).await;
+    s.test.clock.advance(Duration::from_millis(700)).await;
     assert!(s.test.core.view().running.is_some(), "Dota 2 runs");
     s.test.processes.exit(7001);
     let exit = loop {
@@ -345,13 +345,7 @@ fn catalog(s: &Steam) -> Vec<(String, Vec<String>)> {
 /// The Catalog open, once it shows `n` games.
 async fn open_catalog(s: &Steam, n: usize) {
     s.test.core.dispatch(Command::Navigate(nexus_core::Route::Catalog)).await.unwrap();
-    for _ in 0..200 {
-        if s.test.core.view().catalog.games.games.len() >= n {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("the Catalog never showed {n} games: {:?}", catalog(s));
+    s.test.until(Area::Catalogs, |core| core.view().catalog.games.games.len() >= n).await;
 }
 
 #[tokio::test]
@@ -516,16 +510,11 @@ fn installing_tf2(root: &Path, flags: u32, downloaded: u32, staged: u32) {
 
 /// The Downloads card of Steam's install of Team Fortress 2, once `done` says it is the one.
 async fn steam_card(s: &Steam, done: impl Fn(&nexus_ui_api::TorrentVm) -> bool) -> nexus_ui_api::TorrentVm {
-    for _ in 0..300 {
-        let cards = s.test.core.view().downloads.torrents;
-        if let Some(card) = cards.into_iter().find(|t| t.id == "store:emu-steam:steam-440")
-            && done(&card)
-        {
-            return card;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("no such card: {:?}", s.test.core.view().downloads.torrents);
+    let card = |core: &nexus_core::Core| {
+        core.view().downloads.torrents.into_iter().find(|t| t.id == "store:emu-steam:steam-440").filter(|c| done(c))
+    };
+    s.test.until(Area::Downloads, |core| card(core).is_some()).await;
+    card(&s.test.core).unwrap()
 }
 
 #[tokio::test]
@@ -555,12 +544,7 @@ async fn steam_s_install_shows_in_downloads_until_the_game_is_installed() {
     installing_tf2(s.library.path(), 4, 1000, 1000);
     std::fs::create_dir_all(s.library.path().join("steamapps/common/Team Fortress 2")).unwrap();
     let tf2_card = |s: &Steam| s.test.core.view().downloads.torrents.into_iter().any(|t| t.id.ends_with("steam-440"));
-    for _ in 0..300 {
-        if !tf2_card(&s) {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    s.test.until(Area::Downloads, |_| !tf2_card(&s)).await;
     assert!(!tf2_card(&s), "{:?}", s.test.core.view().downloads.torrents);
     let titles: Vec<_> = s.test.core.view().home.games.into_iter().map(|g| g.title).collect();
     assert!(titles.contains(&"Team Fortress 2".to_owned()), "{titles:?}");
@@ -591,7 +575,8 @@ async fn a_steam_game_s_hub_has_steam_s_screenshots_words_and_trailer_kept_a_wee
         if hub.is_some() {
             break;
         }
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        // The plugin reads the store in the background.
+        s.test.clock.advance(Duration::from_millis(10)).await;
     }
     let hub = hub.unwrap_or_else(|| panic!("no details; sent {:?}", s.test.http.sent()));
     assert_eq!(hub.screenshots.len(), 2);

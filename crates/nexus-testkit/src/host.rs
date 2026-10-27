@@ -3,12 +3,21 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use nexus_api::PluginByKind;
-use nexus_core::{BootReport, Core, HostConfig, Kernel, KernelBuilder, Loader};
+use nexus_core::{Area, BootReport, Core, HostConfig, Kernel, KernelBuilder, Loader};
 use tempfile::TempDir;
+use tokio::sync::broadcast::error::RecvError;
 
-use crate::{FakeArchives, FakeDesktop, FakeHttp, FakeNetwork, FakeProcessTree, FakeSpawner, FakeTorrents, StubPlugin};
+use crate::{
+    FakeArchives, FakeClock, FakeDesktop, FakeHttp, FakeNetwork, FakeProcessTree, FakeSpawner, FakeTorrents, StubPlugin,
+};
 
-/// Builds a real core over a temporary data folder, with fake HTTP and fake processes.
+/// How long [`TestCore::until`] waits on the fake clock. Its time moves only while every task
+/// waits for a timer, so a slow machine doesn't use it up: only a wait for something that never
+/// comes does.
+const UNTIL_LIMIT: Duration = Duration::from_secs(60);
+
+/// Builds a real core over a temporary data folder, with fake HTTP, fake processes and a
+/// [`FakeClock`].
 pub struct FakeHost {
     host: HostConfig,
     dir: TempDir,
@@ -27,6 +36,7 @@ pub struct FakeHost {
     /// Folders on a disk of their own, and its free bytes.
     disks: Vec<(PathBuf, u64)>,
     first_run: bool,
+    clock: FakeClock,
 }
 
 impl Default for FakeHost {
@@ -71,6 +81,7 @@ impl FakeHost {
             free_space: None,
             disks: Vec::new(),
             first_run: false,
+            clock: FakeClock::default(),
         }
     }
 
@@ -191,6 +202,11 @@ impl FakeHost {
         &self.http
     }
 
+    /// The clock the core's timers and its plugin calls' timeouts run on.
+    pub fn clock(&self) -> FakeClock {
+        self.clock.clone()
+    }
+
     /// The data folder, before boot: for tests that set up files a previous run left.
     pub fn data_dir(&self) -> &Path {
         self.dir.path()
@@ -209,7 +225,8 @@ impl FakeHost {
             .desktop(Arc::new(self.desktop.clone()))
             .torrents(Arc::new(self.torrents.clone()))
             .network(Arc::new(self.network.clone()))
-            .archives(Arc::new(self.archives.clone()));
+            .archives(Arc::new(self.archives.clone()))
+            .clock(Arc::new(self.clock.clone()));
         if self.hardware.is_some() || self.free_space.is_some() || !self.disks.is_empty() {
             let hardware = FixedHardware(self.hardware.unwrap_or_default(), self.free_space, self.disks);
             builder = builder.hardware(Arc::new(hardware));
@@ -226,14 +243,17 @@ impl FakeHost {
         (builder, self.dir, self.http, self.spawner, self.desktop)
     }
 
+    /// Boots the kernel. From here on the runtime's time is the fake clock's.
     pub async fn boot(self) -> TestHost {
+        self.clock.pause();
+        let clock = self.clock.clone();
         let processes = self.processes.clone();
         let torrents = self.torrents.clone();
         let network = self.network.clone();
         let archives = self.archives.clone();
         let (builder, dir, http, spawner, desktop) = self.into_builder();
         let (kernel, report) = builder.boot().await;
-        TestHost { kernel, report, http, spawner, processes, desktop, torrents, network, archives, _dir: dir }
+        TestHost { kernel, report, http, spawner, processes, desktop, torrents, network, archives, clock, _dir: dir }
     }
 
     /// Boots the kernel and starts the app on it.
@@ -252,6 +272,36 @@ impl FakeHost {
 pub struct TestCore {
     pub core: Core,
     pub host: TestHost,
+}
+
+impl TestCore {
+    /// Returns once `done` holds: see [`until`].
+    pub async fn until(&self, area: Area, done: impl FnMut(&Core) -> bool) {
+        until(&self.core, area, done).await;
+    }
+}
+
+/// Returns once `done` holds for `core`. It asks at once, then after each change in `area`: no
+/// sleeps. It panics when the fake clock passes [`UNTIL_LIMIT`] first.
+pub async fn until(core: &Core, area: Area, mut done: impl FnMut(&Core) -> bool) {
+    let mut changes = core.changes();
+    let wait = async {
+        loop {
+            if done(core) {
+                return;
+            }
+            loop {
+                match changes.recv().await {
+                    Ok(change) if change.area != area => continue,
+                    Ok(_) | Err(RecvError::Lagged(_)) => break,
+                    Err(RecvError::Closed) => unreachable!("the core holds its changes' sender"),
+                }
+            }
+        }
+    };
+    if tokio::time::timeout(UNTIL_LIMIT, wait).await.is_err() {
+        panic!("no change in {area:?} made it so in {UNTIL_LIMIT:?} of the fake clock");
+    }
 }
 
 impl std::ops::Deref for TestCore {
@@ -273,6 +323,7 @@ pub struct TestHost {
     pub torrents: FakeTorrents,
     pub network: FakeNetwork,
     pub archives: FakeArchives,
+    pub clock: FakeClock,
     _dir: TempDir,
 }
 

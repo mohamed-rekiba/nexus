@@ -5,8 +5,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use nexus_api::*;
-use nexus_core::{Command, TorrentAction};
-use nexus_testkit::{FakeHost, StubPlugin, TestCore};
+use nexus_core::{Area, Command, TorrentAction};
+use nexus_testkit::{FakeHost, StubPlugin, TestCore, until as until_in};
 
 use crate::common::{catalogs_fetched, native};
 
@@ -127,15 +127,8 @@ fn row(t: &TestCore) -> nexus_ui_api::TorrentVm {
 
 /// Waits until the download's row says `state`.
 async fn until(t: &TestCore, state: &str) -> nexus_ui_api::TorrentVm {
-    for _ in 0..300 {
-        if let Some(r) = t.core.view().downloads.torrents.into_iter().next()
-            && r.state == state
-        {
-            return r;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("never {state}: {:?}", t.core.view().downloads.torrents);
+    t.until(Area::Torrents, |core| core.view().downloads.torrents.first().is_some_and(|r| r.state == state)).await;
+    row(t)
 }
 
 async fn act(t: &TestCore, action: TorrentAction) {
@@ -238,12 +231,7 @@ async fn a_finished_download_installs_through_the_emulator_s_game_installer() {
     act(t, TorrentAction::Install).await;
     let sources = s.sources.lock().unwrap().clone();
     assert_eq!(sources, [HostPath::new("packages", 0, RelPath::new(format!("PS5/torrent-{HASH}")).unwrap())]);
-    for _ in 0..100 {
-        if row(t).install == "done" {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    t.until(Area::Installs, |_| row(t).install == "done").await;
     assert_eq!(row(t).install, "done");
 }
 
@@ -264,12 +252,7 @@ async fn sharing_turned_off_stops_seeding_and_a_restart_brings_downloads_back() 
     // The next start: with sharing on, the finished download checks its files and seeds.
     t.core.dispatch(Command::SetSeedDownloads(true)).await.unwrap();
     let again = nexus_core::Core::start(t.kernel.clone()).await;
-    for _ in 0..100 {
-        if again.view().downloads.torrents.first().is_some_and(|r| r.seeding) {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    until_in(&again, Area::Torrents, |core| core.view().downloads.torrents.first().is_some_and(|r| r.seeding)).await;
     let restored = again.view().downloads.torrents.into_iter().next().unwrap();
     assert!(restored.seeding, "seeding again after its check: {restored:?}");
     assert_eq!(t.torrents.started().last().unwrap().1, nexus_core::TorrentStart::SeedOnly);
@@ -314,12 +297,8 @@ async fn a_finished_download_whose_files_moved_does_not_seed_after_a_restart() {
     std::fs::remove_dir_all(s.home.path().join(format!("Downloads/PS5/torrent-{HASH}"))).unwrap();
 
     let again = nexus_core::Core::start(t.kernel.clone()).await;
-    for _ in 0..100 {
-        if again.view().downloads.torrents.first().is_some_and(|r| !r.error.is_empty()) {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    let failed = |core: &nexus_core::Core| core.view().downloads.torrents.first().is_some_and(|r| !r.error.is_empty());
+    until_in(&again, Area::Torrents, failed).await;
     let restored = again.view().downloads.torrents.into_iter().next().unwrap();
     assert!(!restored.seeding, "{restored:?}");
     assert!(restored.error.contains("moved, changed or deleted"), "{}", restored.error);
@@ -359,21 +338,11 @@ async fn a_download_shows_its_time_left_while_bytes_arrive() {
     act(t, TorrentAction::Start).await;
     t.torrents.progress(HASH, 4);
     t.torrents.rate(HASH, 2);
-    for _ in 0..100 {
-        if row(t).seconds_left == 5 {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    t.until(Area::Torrents, |_| row(t).seconds_left == 5).await;
     assert_eq!(row(t).seconds_left, 5, "10 bytes left at 2 bytes a second");
 
     t.torrents.rate(HASH, 0);
-    for _ in 0..100 {
-        if row(t).download_rate == 0 {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    t.until(Area::Torrents, |_| row(t).download_rate == 0).await;
     assert_eq!(row(t).seconds_left, 0, "no time left with no bytes arriving");
 }
 
@@ -391,7 +360,7 @@ async fn a_download_that_stops_with_an_error_sends_one_notice() {
     let failed = until(t, "failed").await;
     assert_eq!(failed.error, "the disk is full");
     // A few more polls see the same state.
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    t.clock.advance(Duration::from_millis(50)).await;
     let stopped: Vec<String> =
         t.core.view().notices.into_iter().filter(|n| n.starts_with("Download stopped")).collect();
     assert_eq!(stopped, ["Download stopped: Astro. Open Downloads to see why"]);
@@ -500,17 +469,14 @@ async fn downloaded(
     act(&t, TorrentAction::Start).await;
     t.torrents.complete(HASH);
     until(&t, "complete").await;
+    // A finished download unpacks first; its card offers Install once that is done.
+    t.until(Area::Torrents, |_| row(&t).actions.contains(&"install".to_owned())).await;
     (t, home)
 }
 
 /// Waits until the download's install ends, and gives its row.
 async fn installed(t: &TestCore) -> nexus_ui_api::TorrentVm {
-    for _ in 0..500 {
-        if !matches!(row(t).install.as_str(), "" | "installing") {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    t.until(Area::Installs, |_| !matches!(row(t).install.as_str(), "" | "installing")).await;
     row(t)
 }
 
@@ -633,14 +599,9 @@ async fn after_a_restart_a_pc_download_s_card_still_plays_the_game_it_installed(
     let again = nexus_core::Core::start(t.kernel.clone()).await;
     again.dispatch(Command::RefreshLibrary).await.unwrap();
     catalogs_fetched(&again).await;
-    let card = || again.view().downloads.torrents.into_iter().next().unwrap();
-    for _ in 0..200 {
-        if !card().game.is_empty() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    let card = card();
+    let card = |core: &nexus_core::Core| core.view().downloads.torrents.into_iter().next().unwrap();
+    until_in(&again, Area::Library, |core| !card(core).game.is_empty()).await;
+    let card = card(&again);
     assert!(!card.game.is_empty(), "the installed game: {card:?}");
     assert!(card.actions.contains(&"play".to_owned()), "Play, not Install: {:?}", card.actions);
 }
@@ -769,22 +730,12 @@ async fn an_install_shows_on_its_download_s_card_which_cancels_it() {
 
     act(t, TorrentAction::Install).await;
     // The install's progress reaches the card a moment later: the plugin never waits for it.
-    for _ in 0..100 {
-        if row(t).install_progress > 0.0 {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    t.until(Area::Installs, |_| row(t).install_progress > 0.0).await;
     let installing = row(t);
     assert_eq!((installing.install.as_str(), installing.install_progress), ("installing", 0.25));
     assert_eq!(installing.actions, ["stop-seeding", "cancel-install"], "no Remove while it installs");
     act(t, TorrentAction::CancelInstall).await;
-    for _ in 0..100 {
-        if row(t).install == "cancelled" {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    t.until(Area::Installs, |_| row(t).install == "cancelled").await;
     assert_eq!(row(t).install, "cancelled");
     assert!(row(t).actions.contains(&"install".to_owned()), "it installs again: {:?}", row(t).actions);
 }
@@ -807,10 +758,28 @@ async fn a_download_reads_up_to_100_of_its_files_and_counts_them_all() {
     let names: Vec<String> = (0..120).map(|i| format!("Astro/part{i:03}.bin")).collect();
     let files: Vec<(&str, &[u8])> = names.iter().map(|n| (n.as_str(), &b"x"[..])).collect();
     t.torrents.has(HASH, "Astro", &files);
-    t.torrents.hold(true);
+    let held = t.torrents.hold();
     t.core.dispatch(Command::DownloadRelease { offer: offer(), release: HASH.into(), folder: None }).await.unwrap();
     assert_eq!(row(t).state, "resolving", "the lookup waits");
-    t.torrents.hold(false);
+    held.release();
     let ready = until(t, "ready").await;
     assert_eq!((ready.files.len(), ready.file_count), (100, 120));
+}
+
+#[tokio::test]
+async fn a_running_download_is_read_every_poll_on_the_clock_and_not_between() {
+    let s = setup().await;
+    let t = &s.t;
+    t.core.dispatch(Command::DownloadRelease { offer: offer(), release: HASH.into(), folder: None }).await.unwrap();
+    until(t, "ready").await;
+    act(t, TorrentAction::Start).await;
+    t.torrents.progress(HASH, 4);
+    until(t, "downloading").await;
+
+    // A poll just read 4 bytes: the next is `torrent_poll` (10 ms on the fake host) away.
+    t.torrents.progress(HASH, 8);
+    t.clock.advance(Duration::from_millis(5)).await;
+    assert_eq!(row(t).done, 4, "not read between two polls");
+    t.clock.advance(Duration::from_millis(7)).await;
+    assert_eq!(row(t).done, 8);
 }

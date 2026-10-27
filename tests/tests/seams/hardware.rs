@@ -1,10 +1,8 @@
 //! Seam 1, core app API: "This PC". Each emulator's manifest says what its games need; the
 //! core compares it with what the computer has.
 
-use std::time::Duration;
-
 use crate::common::{catalogs_fetched, games_needing, offering_emulator};
-use nexus_core::{Command, Core, Gpu, Specs};
+use nexus_core::{Area, Command, Core, Gpu, Specs};
 use nexus_testkit::{FakeHost, StubPlugin, TestCore};
 use nexus_ui_api::VerdictVm;
 
@@ -40,13 +38,7 @@ async fn verdict(specs: Specs, requires: &str) -> VerdictVm {
 }
 
 async fn wait_for_check(core: &Core) {
-    for _ in 0..100 {
-        if core.view().settings.hardware.known {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("the check never ran");
+    nexus_testkit::until(core, Area::Hardware, |core| core.view().settings.hardware.known).await;
 }
 
 #[tokio::test]

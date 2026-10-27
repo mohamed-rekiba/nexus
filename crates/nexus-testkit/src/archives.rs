@@ -7,8 +7,15 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use futures::StreamExt;
 use nexus_api::{PluginError, PluginResult};
-use nexus_core::{ArchiveKind, Archives, UnpackProgress};
+use nexus_core::{ArchiveKind, Archives, Clock, UnpackProgress};
+use tokio::sync::watch;
+
+use crate::{FakeClock, Gate};
+
+/// How often a held unpack reads whether it was cancelled.
+const CANCEL_READ: Duration = Duration::from_millis(5);
 
 /// An archive's files: each path and its bytes.
 type Files = Vec<(String, Vec<u8>)>;
@@ -22,8 +29,8 @@ struct State {
     folders: BTreeMap<String, Vec<String>>,
     /// The first part's file name -> why it fails.
     failures: BTreeMap<String, String>,
-    /// Unpacks wait while this is set.
-    held: bool,
+    /// Unpacks wait for this gate.
+    held: Option<watch::Receiver<bool>>,
     /// Counts the cuts: an unpack that began before the latest cut never ends.
     cuts: u64,
     /// Every unpack: its kind and its parts' file names.
@@ -64,9 +71,11 @@ impl FakeArchives {
         self.lock().failures.insert(first_part.to_owned(), why.to_owned());
     }
 
-    /// While held, unpacks wait (and stop when cancelled).
-    pub fn hold(&self, held: bool) {
-        self.lock().held = held;
+    /// Until the gate is released, unpacks wait (and stop when cancelled).
+    pub fn hold(&self) -> Gate {
+        let (gate, held) = Gate::new();
+        self.lock().held = Some(held);
+        gate
     }
 
     /// The unpacks that run now never end, as in an app that closed during them, and the
@@ -74,7 +83,7 @@ impl FakeArchives {
     pub fn cut(&self) {
         let mut state = self.lock();
         state.cuts += 1;
-        state.held = false;
+        state.held = None;
     }
 
     /// Every unpack so far: its kind and its parts' file names.
@@ -94,16 +103,23 @@ impl Archives for FakeArchives {
         cancel: Arc<AtomicBool>,
     ) -> PluginResult<()> {
         let first = parts.first().map(|p| file_name(p)).unwrap_or_default();
-        let cuts = {
+        let (cuts, held) = {
             let mut state = self.lock();
             state.unpacked.push((kind, parts.iter().map(|p| file_name(p)).collect()));
-            state.cuts
+            (state.cuts, state.held.clone())
         };
-        while self.lock().held {
-            if cancel.load(Ordering::Acquire) {
-                return Err(PluginError::Other("The unpacking was cancelled".into()));
+        if let Some(mut held) = held {
+            // The port says a cancel only by a flag: it is read on the fake clock's time.
+            let mut ticks = FakeClock::default().interval(CANCEL_READ);
+            let cancelled = async {
+                while !cancel.load(Ordering::Acquire) {
+                    ticks.next().await;
+                }
+            };
+            tokio::select! {
+                _ = held.wait_for(|open| *open) => {}
+                () = cancelled => return Err(PluginError::Other("The unpacking was cancelled".into())),
             }
-            tokio::time::sleep(Duration::from_millis(5)).await;
         }
         if self.lock().cuts != cuts {
             std::future::pending::<()>().await;

@@ -54,12 +54,12 @@ fn art(i: usize, kind: &str) -> String {
     format!("https://art.example/CUSA0000{i}-{kind}.png")
 }
 
-/// Runs the core for `ms` milliseconds.
+/// Runs the core for `ms` milliseconds of its clock.
 fn run(host: &mut Composed, ms: u64) {
-    host.rt.block_on(async { tokio::time::sleep(Duration::from_millis(ms)).await });
+    host.advance(Duration::from_millis(ms));
 }
 
-/// Runs the core until `art` was asked for, for at most five seconds.
+/// Runs the core until `art` was asked for, for at most five seconds of its clock.
 fn until_asked(host: &mut Composed, art: &[String]) {
     for _ in 0..500 {
         if art.iter().all(|a| asked(host).contains(a)) {
@@ -94,12 +94,12 @@ fn a_fast_scroll_fetches_only_around_where_it_stops() {
     let before = asked(&host).len();
 
     // A select every 20 ms, as a held key does.
-    let core = host.core().clone();
+    let (core, clock) = (host.core().clone(), host.test.clock.clone());
     host.rt.block_on(async {
         for i in 1..11 {
             let core = core.clone();
             tokio::spawn(async move { core.dispatch(Command::Select(format!("emu-a:G{i}").parse().unwrap())).await });
-            tokio::time::sleep(Duration::from_millis(20)).await;
+            clock.advance(Duration::from_millis(20)).await;
         }
     });
     run(&mut host, 1000);

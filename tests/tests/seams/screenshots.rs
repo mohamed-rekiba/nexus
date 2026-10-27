@@ -7,16 +7,39 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use crate::common::*;
-use nexus_core::{Command, Route};
+use nexus_core::{Area, Command, Route};
 use slint::platform::software_renderer::{MinimalSoftwareWindow, PremultipliedRgbaColor, RepaintBufferType};
 use slint::platform::{Platform, WindowAdapter};
 use slint_interpreter::ComponentHandle;
 
 struct Offscreen(Rc<MinimalSoftwareWindow>);
 
+thread_local! {
+    /// Slint's time on this thread: it moves only when [`pass`] moves it.
+    static ELAPSED: std::cell::Cell<Duration> = const { std::cell::Cell::new(Duration::ZERO) };
+}
+
+/// Moves Slint's time on by `by`, for its timers and animations.
+fn pass(by: Duration) {
+    ELAPSED.with(|e| e.set(e.get() + by));
+}
+
+/// Runs the core on its clock until `done`, for at most `ms` milliseconds of it.
+fn run_until(host: &Composed, ms: u64, done: impl Fn(&nexus_core::Core) -> bool) {
+    for _ in 0..ms / 10 {
+        if done(host.core()) {
+            return;
+        }
+        host.advance(Duration::from_millis(10));
+    }
+}
+
 impl Platform for Offscreen {
     fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
         Ok(self.0.clone())
+    }
+    fn duration_since_start(&self) -> Duration {
+        ELAPSED.with(|e| e.get())
     }
     fn debug_log(&self, arguments: std::fmt::Arguments) {
         if keeps_log_line(&arguments) {
@@ -42,7 +65,7 @@ fn shoot(window: &MinimalSoftwareWindow, path: &Path) {
     // A timer that a change handler starts runs from the next pass: the hero's and the
     // art's wait for details takes three, as the event loop would make them.
     for _ in 0..2 {
-        std::thread::sleep(Duration::from_millis(500));
+        pass(Duration::from_millis(500));
         slint::platform::update_timers_and_animations();
     }
     window.request_redraw();
@@ -143,17 +166,12 @@ fn shoot_default(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path
                 &[("Sample/game.rar", b"archive"), ("Sample/readme.txt", b"hi")],
             );
             host.test.archives.holds("game.rar", &[("game.pkg", b"package")]);
-            host.test.archives.hold(true);
+            let held = host.test.archives.hold();
             key(host, Key::DownArrow);
             key(host, Key::Return);
             shoot(window, &out.join(format!("{prefix}-download-sheet.png")));
             key(host, Key::Return);
-            for _ in 0..50 {
-                host.rt.block_on(async { tokio::time::sleep(Duration::from_millis(10)).await });
-                if host.core().view().downloads.torrents.first().is_some_and(|t| t.state == "ready") {
-                    break;
-                }
-            }
+            run_until(host, 500, |core| core.view().downloads.torrents.first().is_some_and(|t| t.state == "ready"));
             follow(host);
             shoot(window, &out.join(format!("{prefix}-downloads-torrent.png")));
             // The keys on the download's first button.
@@ -166,21 +184,15 @@ fn shoot_default(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path
                 // Bytes arrive: the card says the time left, and Open folder follows its buttons.
                 host.test.torrents.progress(&release.id, 4);
                 host.test.torrents.rate(&release.id, 1);
-                for _ in 0..100 {
-                    host.rt.block_on(async { tokio::time::sleep(Duration::from_millis(10)).await });
-                    if host.core().view().downloads.torrents.first().is_some_and(|t| t.seconds_left > 0) {
-                        break;
-                    }
-                }
+                run_until(host, 1000, |core| {
+                    core.view().downloads.torrents.first().is_some_and(|t| t.seconds_left > 0)
+                });
                 host.ui.render().unwrap();
                 shoot(window, &out.join(format!("{prefix}-downloads-downloading.png")));
                 host.test.torrents.complete(&release.id);
-                for _ in 0..100 {
-                    host.rt.block_on(async { tokio::time::sleep(Duration::from_millis(10)).await });
-                    if host.core().view().downloads.torrents.first().is_some_and(|t| t.unpack == "unpacking") {
-                        break;
-                    }
-                }
+                run_until(host, 1000, |core| {
+                    core.view().downloads.torrents.first().is_some_and(|t| t.unpack == "unpacking")
+                });
                 host.pump();
                 host.ui.render().unwrap();
                 // The card's buttons follow its actions on a drawn window, not only on the
@@ -188,13 +200,10 @@ fn shoot_default(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path
                 let shown = ["pause", "stop-seeding", "cancel"].map(|a| host.count(&format!("torrent-action:{a}")));
                 assert_eq!(shown, [0, 1, 1]);
                 shoot(window, &out.join(format!("{prefix}-downloads-unpacking.png")));
-                host.test.archives.hold(false);
-                for _ in 0..100 {
-                    host.rt.block_on(async { tokio::time::sleep(Duration::from_millis(10)).await });
-                    if host.core().view().downloads.torrents.first().is_some_and(|t| t.unpack == "unpacked") {
-                        break;
-                    }
-                }
+                held.release();
+                run_until(host, 1000, |core| {
+                    core.view().downloads.torrents.first().is_some_and(|t| t.unpack == "unpacked")
+                });
                 host.ui.render().unwrap();
                 shoot(window, &out.join(format!("{prefix}-downloads-unpacked.png")));
             }
@@ -259,7 +268,7 @@ fn shoot_resolving(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Pa
     host.dispatch(Command::OpenGame(offer.key.parse().unwrap()));
     let Some(release) = host.core().view().detail.and_then(|d| d.releases.first().cloned()) else { return };
     host.test.torrents.has(&release.id, "Sample", &[("Sample/game.pkg", b"package")]);
-    host.test.torrents.hold(true);
+    let held = host.test.torrents.hold();
     host.dispatch(Command::DownloadRelease {
         offer: offer.key.parse().unwrap(),
         release: release.id.clone(),
@@ -268,13 +277,10 @@ fn shoot_resolving(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Pa
     host.dispatch(Command::Navigate(Route::Downloads));
     host.load_images();
     shoot(window, &out.join(format!("{prefix}-downloads-resolving.png")));
-    host.test.torrents.hold(false);
-    for _ in 0..100 {
-        host.rt.block_on(async { tokio::time::sleep(Duration::from_millis(10)).await });
-        if host.core().view().downloads.torrents.iter().any(|t| t.id == release.id && t.state == "ready") {
-            break;
-        }
-    }
+    held.release();
+    run_until(host, 1000, |core| {
+        core.view().downloads.torrents.iter().any(|t| t.id == release.id && t.state == "ready")
+    });
     host.dispatch(Command::Torrent { id: release.id, action: nexus_core::TorrentAction::Remove });
 }
 
@@ -371,12 +377,9 @@ fn shoot_vpn(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path, pr
 
     // Off: the download reads its files, then goes.
     host.dispatch(Command::SetVpnOnly(false));
-    for _ in 0..100 {
-        host.rt.block_on(async { tokio::time::sleep(Duration::from_millis(10)).await });
-        if host.core().view().downloads.torrents.iter().any(|t| t.id == release.id && t.state == "ready") {
-            break;
-        }
-    }
+    run_until(host, 1000, |core| {
+        core.view().downloads.torrents.iter().any(|t| t.id == release.id && t.state == "ready")
+    });
     if host.core().view().downloads.torrents.iter().any(|t| t.id == release.id) {
         host.dispatch(Command::Torrent { id: release.id, action: nexus_core::TorrentAction::Remove });
     }
@@ -609,12 +612,7 @@ fn shoot_genres(window: &MinimalSoftwareWindow, out: &Path) {
         host.dispatch(Command::SetScale(1.4));
         host.dispatch(Command::SetThemeOption { key: "direction".into(), value: direction.into() });
         host.dispatch(Command::RefreshLibrary);
-        let core = host.core().clone();
-        host.rt.block_on(async {
-            while core.view().home.library.genres.len() < 3 {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        });
+        host.until(Area::Library, |core| core.view().home.library.genres.len() >= 3);
         host.load_images();
         // Up to the Library tab, in, then up to the genres and on to the last one.
         key(&mut host, Key::UpArrow);
@@ -648,12 +646,7 @@ fn shoot_trailer(window: &MinimalSoftwareWindow, out: &Path) {
         host.ui.start().unwrap();
         host.dispatch(Command::SetThemeOption { key: "direction".into(), value: direction.into() });
         host.dispatch(Command::RefreshLibrary);
-        let core = host.core().clone();
-        host.rt.block_on(async {
-            while core.view().detail.is_none_or(|d| d.trailer_url.is_empty()) {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        });
+        host.until(Area::Library, |core| core.view().detail.is_some_and(|d| !d.trailer_url.is_empty()));
         host.load_images();
         let text: slint::SharedString = "t".into();
         host.instance().window().dispatch_event(slint::platform::WindowEvent::KeyPressed { text });
@@ -663,7 +656,7 @@ fn shoot_trailer(window: &MinimalSoftwareWindow, out: &Path) {
         shoot(window, &out.join(format!("{prefix}-trailer.png")));
         // The controls hide 3 s after the last key.
         for _ in 0..7 {
-            std::thread::sleep(Duration::from_millis(500));
+            pass(Duration::from_millis(500));
             slint::platform::update_timers_and_animations();
         }
         shoot(window, &out.join(format!("{prefix}-trailer-hidden.png")));
@@ -1006,12 +999,8 @@ fn every_default_screen_renders_the_library() {
     host.dispatch(Command::CancelInstall);
     // A game runs; the PS button brought the launcher back in front of it.
     host.dispatch(Command::Launch("emu-p:G0".parse().unwrap()));
-    let core = host.core().clone();
-    host.rt.block_on(async {
-        while !core.game_in_front() {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    });
+    // The game watcher's rounds bring the game to the front.
+    run_until(&host, 5000, |core| core.game_in_front());
     host.dispatch(Command::ToggleFocus);
     // The theme selects the running game: carry that out, as the app does.
     slint::platform::update_timers_and_animations();

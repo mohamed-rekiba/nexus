@@ -7,6 +7,9 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use nexus_api::{PluginError, PluginResult};
 use nexus_core::{TorrentFile, TorrentInfo, TorrentPhase, TorrentStart, TorrentStatus, Torrents};
+use tokio::sync::watch;
+
+use crate::Gate;
 
 /// A torrent's files: each path and its bytes.
 type Files = Vec<(String, Vec<u8>)>;
@@ -28,8 +31,8 @@ struct State {
     routes: Vec<Option<String>>,
     /// How many times every torrent was stopped at once.
     stopped_all: usize,
-    /// Lookups wait while this is on.
-    held: bool,
+    /// Lookups wait for this gate.
+    held: Option<watch::Receiver<bool>>,
 }
 
 /// A fake swarm. Torrents are known by the info hash in their magnet link.
@@ -57,9 +60,12 @@ impl FakeTorrents {
         self.lock().swarm.insert(hash.to_owned(), (name.to_owned(), files));
     }
 
-    /// While `on`, a lookup of a torrent's files waits: the download stays Resolving.
-    pub fn hold(&self, on: bool) {
-        self.lock().held = on;
+    /// Until the gate is released, a lookup of a torrent's files waits: the download stays
+    /// Resolving.
+    pub fn hold(&self) -> Gate {
+        let (gate, held) = Gate::new();
+        self.lock().held = Some(held);
+        gate
     }
 
     /// The running torrent has `done` bytes.
@@ -130,8 +136,10 @@ impl FakeTorrents {
 impl Torrents for FakeTorrents {
     async fn resolve(&self, magnet: &str) -> PluginResult<TorrentInfo> {
         let hash = hash_of(magnet)?;
-        while self.lock().held {
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        let held = self.lock().held.clone();
+        if let Some(mut held) = held {
+            // A released gate is open; a dropped one too.
+            let _ = held.wait_for(|open| *open).await;
         }
         let state = self.lock();
         let (name, files) = state.swarm.get(&hash).ok_or_else(|| PluginError::Network("no peers have it".into()))?;

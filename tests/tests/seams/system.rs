@@ -9,8 +9,8 @@ use nexus_api::{
     AudioLevel, AudioOutput, Battery, BluetoothDevice, Connection, InstallDisk, Installed, NetworkStatus, OsUpdate,
     WifiNetwork,
 };
-use nexus_core::Command;
 use nexus_core::system::{Place, SystemCommand};
+use nexus_core::{Area, Command};
 use nexus_testkit::{FakeHost, FakeSystem, StubPlugin};
 
 fn wifi(ssid: &str, signal: u8, secured: bool) -> WifiNetwork {
@@ -96,7 +96,7 @@ async fn a_scan_finds_more_networks_and_joining_a_secured_one_takes_its_password
     let job = t.core.view().system.jobs.last().cloned().unwrap();
     assert_eq!((job.state.as_str(), job.text.as_str()), ("done", "Connected"));
     // The job's end reads the machine again.
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    t.clock.advance(std::time::Duration::from_millis(50)).await;
     let vm = t.core.view().system;
     assert_eq!((vm.connection.as_str(), vm.network_name.as_str(), vm.signal_bars), ("wifi", "Home", 4));
 }
@@ -122,12 +122,12 @@ async fn a_scan_finds_a_controller_to_pair_and_pairing_connects_it() {
     system.with(|m| m.pair_refusals = vec![("CC:DD".into(), "The device didn't answer".into())]);
     let t = FakeHost::new().plugin(system.plugin()).boot_core().await;
     ask(SystemCommand::ScanBluetooth, &t).await;
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    t.clock.advance(std::time::Duration::from_millis(50)).await;
     let found = t.core.view().system.devices;
     assert!(found.iter().any(|d| d.name == "Xbox Controller" && !d.paired), "{found:?}");
 
     ask(SystemCommand::Pair("EE:FF".into()), &t).await;
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    t.clock.advance(std::time::Duration::from_millis(50)).await;
     let vm = t.core.view().system;
     assert_eq!(vm.jobs.last().map(|j| (j.kind.as_str(), j.state.as_str())), Some(("pair", "done")));
     assert!(vm.devices.iter().any(|d| d.address == "EE:FF" && d.paired && d.connected));
@@ -307,11 +307,21 @@ async fn on_nexus_os_a_staged_update_says_restart_and_a_newer_launcher_asks_the_
 
     t.core.kernel().config().set(&["app", "update_repo"], "owner/nexus".into()).unwrap();
     t.core.dispatch(Command::CheckLauncherUpdate).await.unwrap();
-    for _ in 0..50 {
-        if system.read(|m| m.os_checks) > 0 {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
+    // The check runs in a task of its own.
+    t.clock.run_until_idle().await;
     assert_eq!(system.read(|m| m.os_checks), 1, "the OS looks for the update that brings it");
+}
+
+#[tokio::test]
+async fn the_machine_is_read_again_every_five_seconds_on_the_clock_and_not_between() {
+    let system = machine();
+    let t = FakeHost::new().plugin(system.plugin()).boot_core().await;
+    t.until(Area::System, |core| core.view().system.volume == 40).await;
+
+    // Changed outside Nexus: the next read is five seconds after the first.
+    system.with(|m| m.level.volume = 70);
+    t.clock.advance(std::time::Duration::from_millis(4500)).await;
+    assert_eq!(t.core.view().system.volume, 40, "not read again yet");
+    t.clock.advance(std::time::Duration::from_secs(1)).await;
+    assert_eq!(t.core.view().system.volume, 70);
 }

@@ -6,7 +6,7 @@ use std::path::Path;
 use emu_shadps4::{COMPATIBILITY, RELEASES, ShadPlugin};
 use emulator_kit::sfo::{Value as Sfo, build};
 use nexus_api::*;
-use nexus_core::Command;
+use nexus_core::{Area, Command};
 use nexus_testkit::{FakeHost, FakeHttp, FakeSpawner, TestCore, contract};
 
 const TAG: &str = "v.0.18.0";
@@ -280,17 +280,13 @@ async fn install_game(test: &TestCore, file: &str) -> String {
     if let Err(e) = test.core.dispatch(start).await {
         return format!("failed {e}");
     }
-    for _ in 0..500 {
-        let jobs = test.core.view().downloads.jobs;
-        if jobs.len() > jobs_before
-            && let Some(job) = jobs.first()
-            && job.state != "installing"
-        {
-            return format!("{} {}", job.state, job.error);
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
-    panic!("the install never ended");
+    let ended = |core: &nexus_core::Core| {
+        let jobs = core.view().downloads.jobs;
+        jobs.len() > jobs_before && jobs.first().is_some_and(|j| j.state != "installing")
+    };
+    test.until(Area::Installs, ended).await;
+    let job = test.core.view().downloads.jobs.into_iter().next().unwrap();
+    format!("{} {}", job.state, job.error)
 }
 
 fn ps4_package(kind: emu_shadps4::pkg4::Kind, files: &[(&str, &[u8])]) -> Vec<u8> {
@@ -434,15 +430,10 @@ async fn install_download(test: &TestCore, folder: &str) -> String {
     if let Err(e) = test.core.dispatch(start).await {
         return format!("failed {e}");
     }
-    for _ in 0..500 {
-        if let Some(job) = test.core.view().downloads.jobs.first()
-            && job.state != "installing"
-        {
-            return format!("{} {}", job.state, job.error);
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
-    panic!("the install never ended");
+    test.until(Area::Installs, |core| core.view().downloads.jobs.first().is_some_and(|j| j.state != "installing"))
+        .await;
+    let job = test.core.view().downloads.jobs.into_iter().next().unwrap();
+    format!("{} {}", job.state, job.error)
 }
 
 /// Writes `files` into the download folder `PS4/torrent-abc`.

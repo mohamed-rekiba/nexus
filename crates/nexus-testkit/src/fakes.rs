@@ -27,10 +27,16 @@ struct HttpState {
     sent: Vec<String>,
 }
 
-/// Lets a held download or request go on. Dropping it also lets it go on.
+/// Lets a held download, request, lookup or unpack go on. Dropping it also lets it go on.
 pub struct Gate(watch::Sender<bool>);
 
 impl Gate {
+    /// A closed gate, and what waits for it: `wait_for(|open| *open)`.
+    pub(crate) fn new() -> (Gate, watch::Receiver<bool>) {
+        let (tx, rx) = watch::channel(false);
+        (Gate(tx), rx)
+    }
+
     pub fn release(&self) {
         let _ = self.0.send(true);
     }

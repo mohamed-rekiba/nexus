@@ -181,7 +181,6 @@ fn dev_reload_picks_up_an_edit_and_keeps_the_last_good_version_on_a_bad_one() {
     assert!(!host.ui.reload_if_changed().unwrap(), "nothing changed yet");
 
     let file = dir.path().join("live/screens/home.slint");
-    std::thread::sleep(std::time::Duration::from_millis(20));
     std::fs::write(&file, home("v2")).unwrap();
     bump_mtime(&file);
     assert!(host.ui.reload_if_changed().unwrap());

@@ -7,7 +7,7 @@ use std::time::Duration;
 use futures::StreamExt;
 use nexus_api::*;
 use nexus_core::Front;
-use nexus_core::{Command, Core, CoreError, Route};
+use nexus_core::{Area, Clock, Command, Core, CoreError, Route};
 use nexus_testkit::{FakeHost, Shown, Signal, SpawnedProcess, StubPlugin, TestCore};
 use nexus_ui_api::ScreenId;
 
@@ -199,6 +199,9 @@ impl Slots for FakeEmu {
         Ok(())
     }
 }
+
+/// The fake host's `watch_every`: how often the game watcher looks at the desktop.
+const WATCH_EVERY: Duration = Duration::from_millis(20);
 
 const PERMISSIONS: &str = "network = [\"builds.example\"]\nprocess = [\"builds/*/emu\"]";
 
@@ -648,15 +651,16 @@ async fn play(t: &TestCore) -> (SessionId, SpawnedProcess) {
     (session, process)
 }
 
-/// Waits until `done` is true, for at most five seconds.
-async fn until(what: &str, done: impl Fn() -> bool) {
-    tokio::time::timeout(Duration::from_secs(5), async {
-        while !done() {
-            tokio::time::sleep(Duration::from_millis(10)).await;
+/// Moves the clock one round of the game watcher at a time until `done` is true, for at most
+/// five seconds of it: the watcher's rounds are what change the desktop and the game's state.
+async fn until(t: &TestCore, what: &str, done: impl Fn() -> bool) {
+    for _ in 0..250 {
+        if done() {
+            return;
         }
-    })
-    .await
-    .unwrap_or_else(|_| panic!("timed out waiting until {what}"));
+        t.clock.advance(WATCH_EVERY).await;
+    }
+    panic!("not {what} after five seconds of the clock");
 }
 
 async fn closed(events: &mut futures::stream::BoxStream<'static, Event>) -> ExitInfo {
@@ -673,7 +677,7 @@ async fn a_started_game_comes_to_the_front_and_the_launcher_comes_back_when_it_c
     let mut events = t.core.events();
     let (_, process) = play(&t).await;
 
-    until("the game is in front", || t.core.game_in_front()).await;
+    until(&t, "the game is in front", || t.core.game_in_front()).await;
     assert_eq!(t.desktop.shown(), [Shown::Game(process.id)]);
     let running = t.core.view().running.unwrap();
     assert_eq!(running.state, "running", "its window showed");
@@ -694,7 +698,7 @@ async fn a_game_whose_window_closed_is_stopped_and_the_launcher_comes_back() {
     t.desktop.windows_end_games();
     let mut events = t.core.events();
     let (_, process) = play(&t).await;
-    until("the game is in front", || t.core.game_in_front()).await;
+    until(&t, "the game is in front", || t.core.game_in_front()).await;
 
     t.desktop.no_windows();
     closed(&mut events).await;
@@ -708,11 +712,11 @@ async fn a_game_whose_window_closed_is_stopped_and_the_launcher_comes_back() {
 async fn a_launcher_s_own_window_closing_before_the_game_s_opens_leaves_the_game_running() {
     let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
     let (_, process) = play(&t).await;
-    until("the launcher's menu is in front", || t.core.game_in_front()).await;
+    until(&t, "the launcher's menu is in front", || t.core.game_in_front()).await;
 
     // The player picked "Start Game": the menu closed, and the game takes a while to open.
     t.desktop.no_windows();
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    t.clock.advance(Duration::from_millis(300)).await;
     assert!(process.signals().is_empty(), "nothing stopped it: {:?}", process.signals());
     assert!(t.core.view().running.is_some(), "the game keeps its session");
 }
@@ -727,7 +731,7 @@ async fn a_game_a_start_script_left_running_keeps_the_session_until_it_ends() {
     t.processes.add(process.id, game);
     process.exit(0);
 
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    t.clock.advance(Duration::from_millis(200)).await;
     assert!(t.core.view().running.is_some(), "the game still runs");
     assert!(process.signals().is_empty(), "nothing was killed: {:?}", process.signals());
 
@@ -740,15 +744,15 @@ async fn a_game_a_start_script_left_running_keeps_the_session_until_it_ends() {
 async fn the_window_in_front_is_the_game_s_when_a_process_below_it_owns_it() {
     let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
     let (_, process) = play(&t).await;
-    until("the game is in front", || t.core.game_in_front()).await;
+    until(&t, "the game is in front", || t.core.game_in_front()).await;
     // A sandbox's process, out of the game's group, draws the game.
     let sandboxed = process.id + 1000;
     t.processes.add(process.id, sandboxed);
 
     t.desktop.set_front(Front::Launcher);
-    until("the launcher is in front", || !t.core.game_in_front()).await;
+    until(&t, "the launcher is in front", || !t.core.game_in_front()).await;
     t.desktop.set_front(Front::Other(sandboxed));
-    until("the sandboxed window counts as the game's", || t.core.game_in_front()).await;
+    until(&t, "the sandboxed window counts as the game's", || t.core.game_in_front()).await;
 }
 
 #[tokio::test]
@@ -778,15 +782,15 @@ async fn a_game_another_program_starts_runs_until_its_own_process_ends() {
     let (_, launcher) = play(&t).await;
     // `steam steam://rungameid/7` hands the game to Steam and exits.
     launcher.exit(0);
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    t.clock.advance(Duration::from_millis(100)).await;
     assert!(t.core.view().running.is_some(), "waiting for the game");
     let game = 9000;
     t.processes.start(game, STEAM_GAME);
     t.processes.add(game, game + 1);
 
-    tokio::time::sleep(Duration::from_millis(700)).await;
+    t.clock.advance(Duration::from_millis(700)).await;
     assert!(t.core.view().running.is_some(), "the game runs, past the time a game has to show");
-    until("the game's window came to the front", || t.desktop.shown().contains(&Shown::Game(game))).await;
+    until(&t, "the game's window came to the front", || t.desktop.shown().contains(&Shown::Game(game))).await;
 
     t.processes.exit(game + 1);
     t.processes.exit(game);
@@ -803,7 +807,7 @@ async fn stop_ends_the_game_another_program_started_and_leaves_that_program_runn
     let (session, steam) = play(&t).await;
     let game = 9000;
     t.processes.start(game, STEAM_GAME);
-    until("the game is in front", || t.core.game_in_front()).await;
+    until(&t, "the game is in front", || t.core.game_in_front()).await;
 
     t.core.dispatch(Command::Stop(session)).await.unwrap();
     closed(&mut events).await;
@@ -834,7 +838,7 @@ async fn stop_before_the_game_another_program_starts_shows_ends_with_nothing_pla
     let mut events = t.core.events();
     let (session, launcher) = play(&t).await;
     // Steam is still starting, and the player gives up.
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    t.clock.advance(Duration::from_millis(100)).await;
     t.core.dispatch(Command::Stop(session)).await.unwrap();
 
     closed(&mut events).await;
@@ -854,13 +858,13 @@ async fn the_same_game_already_running_before_play_isn_t_taken_for_the_one_play_
     t.processes.start(8000, STEAM_GAME);
     let (_, launcher) = play(&t).await;
     launcher.exit(0);
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    t.clock.advance(Duration::from_millis(100)).await;
     let game = 9000;
     t.processes.start(game, STEAM_GAME);
-    until("the new game came to the front", || t.desktop.shown().contains(&Shown::Game(game))).await;
+    until(&t, "the new game came to the front", || t.desktop.shown().contains(&Shown::Game(game))).await;
 
     t.processes.exit(8000);
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    t.clock.advance(Duration::from_millis(200)).await;
     assert!(t.core.view().running.is_some(), "the other one ending doesn't end this one");
     t.processes.exit(game);
     closed(&mut events).await;
@@ -891,7 +895,7 @@ async fn what_the_desktop_is_missing_is_said_once_a_run() {
     t.desktop.set_problem("Install xdotool so games come to the front and the launcher comes back");
     let mut events = t.core.events();
     let (_, process) = play(&t).await;
-    until("the notice shows", || !t.core.view().notices.is_empty()).await;
+    until(&t, "the notice shows", || !t.core.view().notices.is_empty()).await;
     assert_eq!(t.core.view().notices, ["Install xdotool so games come to the front and the launcher comes back"]);
     assert_eq!(t.core.view().notice_cards[0].kind, nexus_ui_api::NoticeKind::Info, "advice, not a failure");
 
@@ -900,7 +904,7 @@ async fn what_the_desktop_is_missing_is_said_once_a_run() {
     t.core.dispatch(Command::DismissNotices).await.unwrap();
     t.core.dispatch(Command::Launch(key("emu-a:G0"))).await.unwrap();
     t.spawner.wait_for(2).await;
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    t.clock.advance(Duration::from_millis(100)).await;
 
     assert!(t.core.view().notices.is_empty(), "not again in the same run: {:?}", t.core.view().notices);
 }
@@ -1007,7 +1011,7 @@ async fn a_desktop_that_can_t_say_leaves_the_pad_to_the_game() {
     t.desktop.no_windows();
     let (_, _process) = play(&t).await;
 
-    until("the launcher stops waiting", || t.core.view().running.is_some_and(|r| r.state == "running")).await;
+    until(&t, "the launcher stops waiting", || t.core.view().running.is_some_and(|r| r.state == "running")).await;
     assert!(t.core.game_in_front(), "the game's window took the screen as it opened");
     t.core.dispatch(Command::ToggleFocus).await.unwrap();
     assert!(!t.core.game_in_front(), "the PS button gives the pad back");
@@ -1020,10 +1024,10 @@ async fn a_game_whose_window_the_desktop_never_saw_is_not_taken_for_closed() {
     t.desktop.set_front(Front::Unknown);
     t.desktop.no_windows();
     let (_, process) = play(&t).await;
-    until("the launcher stops waiting", || t.core.view().running.is_some_and(|r| r.state == "running")).await;
+    until(&t, "the launcher stops waiting", || t.core.view().running.is_some_and(|r| r.state == "running")).await;
 
     // Longer than the window may be gone before the game counts as closed.
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    t.clock.advance(Duration::from_millis(300)).await;
     assert!(process.signals().is_empty(), "the game keeps running: {:?}", process.signals());
     assert!(t.core.view().running.is_some(), "the game keeps running");
 }
@@ -1049,7 +1053,7 @@ async fn the_running_screen_says_starting_until_the_game_shows_a_window() {
 
     assert_eq!(t.core.view().running.unwrap().state, "starting");
     // The host's show_timeout is short in tests: the launcher stops waiting.
-    until("the launcher stops waiting", || t.core.view().running.is_some_and(|r| r.state == "running")).await;
+    until(&t, "the launcher stops waiting", || t.core.view().running.is_some_and(|r| r.state == "running")).await;
     assert!(t.desktop.shown().is_empty());
     assert!(!t.core.game_in_front(), "no window came to the front");
 }
@@ -1061,7 +1065,7 @@ async fn the_launcher_stays_behind_a_closed_game_when_the_player_says_so() {
     assert!(!t.core.view().settings.return_on_exit);
     let mut events = t.core.events();
     let (_, process) = play(&t).await;
-    until("the game is in front", || t.core.game_in_front()).await;
+    until(&t, "the game is in front", || t.core.game_in_front()).await;
 
     process.exit(0);
     closed(&mut events).await;
@@ -1073,7 +1077,7 @@ async fn the_launcher_stays_behind_a_closed_game_when_the_player_says_so() {
 async fn the_ps_button_goes_from_the_game_to_the_launcher_and_back() {
     let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
     let (_, process) = play(&t).await;
-    until("the game is in front", || t.core.game_in_front()).await;
+    until(&t, "the game is in front", || t.core.game_in_front()).await;
 
     t.core.dispatch(Command::ToggleFocus).await.unwrap();
     assert!(!t.core.game_in_front());
@@ -1088,11 +1092,11 @@ async fn the_ps_button_goes_from_the_game_to_the_launcher_and_back() {
 async fn the_desktop_says_which_window_is_in_front() {
     let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
     let (session, process) = play(&t).await;
-    until("the game is in front", || t.core.game_in_front()).await;
+    until(&t, "the game is in front", || t.core.game_in_front()).await;
 
     // The player clicked the launcher's window.
     t.desktop.set_front(Front::Launcher);
-    until("the launcher is in front", || !t.core.game_in_front()).await;
+    until(&t, "the launcher is in front", || !t.core.game_in_front()).await;
 
     // Resume, from the Running screen.
     t.core.dispatch(Command::ShowGame(session)).await.unwrap();
@@ -1106,7 +1110,7 @@ async fn without_the_desktop_s_answer_the_last_window_shown_counts() {
     t.desktop.set_front(Front::Unknown);
     let (_, _process) = play(&t).await;
 
-    until("the game is in front", || t.core.game_in_front()).await;
+    until(&t, "the game is in front", || t.core.game_in_front()).await;
     t.core.dispatch(Command::ToggleFocus).await.unwrap();
     assert!(!t.core.game_in_front());
 }
@@ -1167,7 +1171,7 @@ async fn play_time_adds_up_and_the_game_page_shows_it() {
     let (_, process) = play(&t).await;
 
     // A session shorter than three seconds doesn't count.
-    tokio::time::sleep(Duration::from_millis(3100)).await;
+    t.clock.advance(Duration::from_millis(3100)).await;
     process.exit(0);
     closed(&mut events).await;
 
@@ -1488,7 +1492,7 @@ async fn an_update_waits_until_the_emulator_s_game_closes() {
         if installed(&t.core).await.contains(&"2.0".to_owned()) {
             return;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        t.clock.advance(WATCH_EVERY).await;
     }
     panic!("the update didn't run after the game closed");
 }
@@ -1559,13 +1563,8 @@ async fn a_game_doesn_t_start_while_its_emulator_updates() {
 
     let core = t.core.clone();
     let update = tokio::spawn(async move { core.dispatch(Command::UpdateEmulator { plugin: id("emu-a") }).await });
-    for _ in 0..200 {
-        let busy = t.core.view().emulators.emulators.iter().any(|e| e.plugin == id("emu-a") && e.busy);
-        if busy {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    let busy = |core: &Core| core.view().emulators.emulators.iter().any(|e| e.plugin == id("emu-a") && e.busy);
+    t.until(Area::Downloads, busy).await;
     let err = t.core.dispatch(Command::Launch(key("emu-a:G0"))).await.unwrap_err();
     assert!(err.to_string().contains("updating"), "{err}");
     assert!(t.spawner.spawned().is_empty());
@@ -1611,4 +1610,31 @@ async fn an_emulator_s_row_shows_its_installed_build_not_the_plugin_s_version() 
     install(&t.core).await;
     t.core.dispatch(Command::Navigate(Route::Emulators)).await.unwrap();
     assert_eq!(row(&t).build, "1.0");
+}
+
+#[tokio::test]
+async fn the_game_watcher_reads_the_desktop_every_round_on_the_clock_and_not_between() {
+    let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
+    play(&t).await;
+    t.until(Area::Sessions, |core| core.game_in_front()).await;
+
+    // A round just saw the game in front: the next is `watch_every` away.
+    t.desktop.set_front(Front::Launcher);
+    t.clock.advance(WATCH_EVERY / 2).await;
+    assert!(t.core.game_in_front(), "not read between two rounds");
+    t.clock.advance(WATCH_EVERY / 2 + Duration::from_millis(3)).await;
+    assert!(!t.core.game_in_front(), "the next round read the launcher in front");
+}
+
+#[tokio::test]
+async fn emulator_updates_are_looked_for_a_minute_after_the_start_on_the_clock() {
+    let (t, emu) = core_with(FakeEmu::new(vec!["A"])).await;
+    let started = t.clock.now();
+    install(&t.core).await;
+    *emu.latest.lock().unwrap() = "2.0".into();
+
+    t.clock.advance(Duration::from_secs(59) - (t.clock.now() - started)).await;
+    assert_eq!(installed(&t.core).await, ["1.0"], "not before the minute");
+    t.clock.advance(Duration::from_secs(2)).await;
+    assert!(installed(&t.core).await.contains(&"2.0".to_owned()), "the check found and installed 2.0");
 }

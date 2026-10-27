@@ -70,30 +70,13 @@ fn the_shoulder_button_goes_to_the_next_section_and_the_guide_button_home() {
     assert_eq!(host.core().view().screen, ScreenId::Home);
 }
 
-/// Runs the core's runtime until `done` is true, for at most five seconds.
-fn until(host: &mut Composed, what: &str, done: impl Fn(&nexus_core::Core) -> bool) {
-    let core = host.core().clone();
-    host.rt
-        .block_on(async {
-            tokio::time::timeout(std::time::Duration::from_secs(5), async {
-                while !done(&core) {
-                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-                }
-            })
-            .await
-        })
-        .unwrap_or_else(|_| panic!("timed out waiting until {what}"));
-    host.ui.render().unwrap();
-    settle(host);
-}
-
 #[test]
 fn while_a_game_is_in_front_the_pad_is_the_game_s_and_a_ps_button_tap_too() {
     let mut host = composed(|h| h.plugin(playable_games("emu-a", vec!["Alpha"])));
     host.ui.start().unwrap();
     host.dispatch(Command::RefreshLibrary);
     host.dispatch(Command::Launch("emu-a:G0".parse().unwrap()));
-    until(&mut host, "the game is in front", |core| core.game_in_front());
+    watch_until(&mut host, "the game is in front", |core| core.game_in_front());
     assert_eq!(host.core().view().screen, ScreenId::Running);
     let process = host.test.spawner.spawned()[0].clone();
     // What the theme asked for as the game started (it selects the running game).
@@ -116,12 +99,12 @@ fn holding_the_ps_button_closes_a_running_game_at_once_and_opens_no_power_menu()
     host.ui.start().unwrap();
     host.dispatch(Command::RefreshLibrary);
     host.dispatch(Command::Launch("emu-a:G0".parse().unwrap()));
-    until(&mut host, "the game is in front", |core| core.game_in_front());
+    watch_until(&mut host, "the game is in front", |core| core.game_in_front());
     let process = host.test.spawner.spawned()[0].clone();
     host.pump();
 
     press(&mut host, PadButton::GuideHeld);
-    until(&mut host, "the game was asked to close", |_| process.signals().contains(&Signal::Terminate));
+    watch_until(&mut host, "the game was asked to close", |_| process.signals().contains(&Signal::Terminate));
     assert_eq!(host.count("power-menu"), 0, "no power menu while a game runs");
 }
 
@@ -153,10 +136,10 @@ fn after_a_game_closes_the_launcher_asks_how_far_it_got() {
     host.ui.start().unwrap();
     host.dispatch(Command::RefreshLibrary);
     host.dispatch(Command::Launch("emu-a:G0".parse().unwrap()));
-    until(&mut host, "the game is in front", |core| core.game_in_front());
+    watch_until(&mut host, "the game is in front", |core| core.game_in_front());
     host.pump();
     host.test.spawner.spawned()[0].exit(0);
-    until(&mut host, "the game closed", |core| !core.game_running());
+    watch_until(&mut host, "the game closed", |core| !core.game_running());
     let asked = i_slint_backend_testing::ElementHandle::find_by_accessible_label(host.instance(), "result-prompt")
         .map(|e| e.accessible_value().unwrap_or_default().to_string())
         .collect::<Vec<_>>();

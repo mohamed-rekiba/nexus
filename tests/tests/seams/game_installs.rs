@@ -2,11 +2,11 @@
 //! in the background; the host owns the job: it shows progress in Downloads, cancels it, and
 //! cleans up after a crash.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use nexus_api::*;
-use nexus_core::Command;
+use nexus_core::{Area, Clock, Command};
 use nexus_testkit::{FakeHost, StubPlugin, TestCore};
 
 const MANIFEST: &str = "id = \"emu-g\"\nkind = \"emulator\"\nname = \"G\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
@@ -19,7 +19,12 @@ const MANIFEST: &str = "id = \"emu-g\"\nkind = \"emulator\"\nname = \"G\"\nversi
 /// `burst.pkg` reports its progress 10,000 times first, as fast as it can.
 struct Packages {
     ctx: PluginContext,
+    hold: Hold,
 }
+
+/// What the next install waits for after its first piece: it goes on when the test sends, or
+/// drops the sender.
+type Hold = Arc<Mutex<Option<std::sync::mpsc::Receiver<()>>>>;
 
 fn at(folder: &str, path: &str) -> HostPath {
     HostPath::new(folder, 0, RelPath::new(path).unwrap())
@@ -107,6 +112,7 @@ impl GameInstaller for Packages {
         let (part, dest) = (at("games", &format!("{name}.part")), at("games", &name));
         let (source, work) = (source.clone(), part.clone());
         let handle = tokio::runtime::Handle::current();
+        let hold = self.hold.lock().unwrap().take();
         tokio::task::spawn_blocking(move || {
             if name == "burst" {
                 for n in 1..=10_000 {
@@ -128,7 +134,10 @@ impl GameInstaller for Packages {
                 if name == "panic" && done * 2 >= size {
                     panic!("the decoder broke");
                 }
-                std::thread::sleep(Duration::from_millis(5));
+                if let Some(hold) = &hold {
+                    // Sent or dropped, it goes on.
+                    let _ = hold.recv();
+                }
             }
             handle.block_on(folders.rename(&work, &dest)).unwrap();
             job.finished(Ok(InstalledGame { dest, title: name }));
@@ -138,14 +147,17 @@ impl GameInstaller for Packages {
 }
 
 struct Booted {
+    hold: Hold,
     test: TestCore,
     packages: tempfile::TempDir,
     games: tempfile::TempDir,
 }
 
 async fn boot_with(host: FakeHost, games: tempfile::TempDir) -> Booted {
-    let plugin = StubPlugin::from_toml(MANIFEST).provides(|ctx| {
-        let p = Arc::new(Packages { ctx: ctx.clone() });
+    let hold = Hold::default();
+    let held = hold.clone();
+    let plugin = StubPlugin::from_toml(MANIFEST).provides(move |ctx| {
+        let p = Arc::new(Packages { ctx: ctx.clone(), hold: held.clone() });
         Ok(Provided {
             catalog: Some(p.clone()),
             slots: Some(p.clone()),
@@ -158,7 +170,16 @@ async fn boot_with(host: FakeHost, games: tempfile::TempDir) -> Booted {
     for (name, folder) in [("packages", packages.path()), ("games", games.path())] {
         test.core.dispatch(Command::SetFolders { name: name.into(), paths: vec![folder.into()] }).await.unwrap();
     }
-    Booted { test, packages, games }
+    Booted { hold, test, packages, games }
+}
+
+impl Booted {
+    /// The next install stops after its first piece until the test sends on what this gives.
+    fn hold(&self) -> std::sync::mpsc::Sender<()> {
+        let (go, wait) = std::sync::mpsc::channel();
+        *self.hold.lock().unwrap() = Some(wait);
+        go
+    }
 }
 
 async fn boot() -> Booted {
@@ -186,16 +207,9 @@ fn install(source: &str) -> Command {
 
 /// Waits until the install job is over, and returns its state.
 async fn wait_for_end(t: &TestCore) -> String {
-    for _ in 0..500 {
-        let jobs = t.core.view().downloads.jobs;
-        if let Some(job) = jobs.first()
-            && !matches!(job.state.as_str(), "queued" | "installing")
-        {
-            return job.state.clone();
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("the install never ended: {:?}", t.core.view().downloads.jobs);
+    let state = |core: &nexus_core::Core| core.view().downloads.jobs.first().map(|job| job.state.clone());
+    t.until(Area::Installs, |core| state(core).is_some_and(|s| !matches!(s.as_str(), "queued" | "installing"))).await;
+    state(&t.core).unwrap()
 }
 
 #[tokio::test]
@@ -229,10 +243,13 @@ async fn a_file_that_isn_t_a_package_fails_at_once() {
 async fn cancelling_an_install_leaves_nothing_behind() {
     let b = boot().await;
     package(&b, "big.pkg", 4 * 1024 * 1024);
+    let go = b.hold();
     b.test.core.dispatch(install("big.pkg")).await.unwrap();
     let id = b.test.core.view().downloads.jobs[0].id;
-    tokio::time::sleep(Duration::from_millis(30)).await;
+    // Part of it is written.
+    b.test.until(Area::Installs, |core| core.view().downloads.jobs[0].progress > 0.0).await;
     b.test.core.dispatch(Command::CancelDownload(JobId(id))).await.unwrap();
+    drop(go);
 
     assert_eq!(wait_for_end(&b.test).await, "cancelled");
     assert!(!b.games.path().join("big.part").exists());
@@ -250,13 +267,11 @@ async fn an_install_whose_decoder_panics_fails_and_the_app_goes_on() {
     assert!(!b.games.path().join("panic.part").exists(), "the host removes what the broken install wrote");
     package(&b, "fine.pkg", 64 * 1024);
     b.test.core.dispatch(install("fine.pkg")).await.unwrap();
-    for _ in 0..200 {
-        if b.games.path().join("fine/data.bin").is_file() {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("the next install didn't run");
+    let fine = |core: &nexus_core::Core| {
+        core.view().downloads.jobs.iter().any(|j| j.label == "Install fine.pkg" && j.state == "done")
+    };
+    b.test.until(Area::Installs, fine).await;
+    assert!(b.games.path().join("fine/data.bin").is_file(), "the next install ran");
 }
 
 #[tokio::test]
@@ -287,9 +302,11 @@ async fn a_work_folder_left_by_a_crash_is_removed_at_the_next_start() {
 async fn the_same_package_doesn_t_install_twice_at_once() {
     let b = boot().await;
     package(&b, "big.pkg", 4 * 1024 * 1024);
+    let go = b.hold();
     b.test.core.dispatch(install("big.pkg")).await.unwrap();
     let err = b.test.core.dispatch(install("big.pkg")).await.unwrap_err();
     assert!(err.to_string().contains("already installing"), "{err}");
+    drop(go);
 
     assert_eq!(wait_for_end(&b.test).await, "done");
     assert_eq!(std::fs::read(b.games.path().join("big/data.bin")).unwrap().len(), 4 * 1024 * 1024);
@@ -301,10 +318,10 @@ async fn an_install_s_progress_never_waits_for_the_screen_and_redraws_a_few_time
     let b = boot().await;
     package(&b, "burst.pkg", 64 * 1024);
     let mut events = b.test.core.events();
-    let started = std::time::Instant::now();
+    let started = b.test.clock.now();
     b.test.core.dispatch(install("burst.pkg")).await.unwrap();
     assert_eq!(wait_for_end(&b.test).await, "done");
-    let took = started.elapsed();
+    let took = b.test.clock.now() - started;
     let mut changes = 0;
     while let Ok(Some(event)) = tokio::time::timeout(Duration::from_millis(50), events.next()).await {
         if matches!(event, Event::StateChanged) {

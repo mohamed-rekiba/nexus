@@ -2,10 +2,9 @@
 //! archives port (a fake) before the emulator's game installer takes the download.
 
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use nexus_api::*;
-use nexus_core::{ArchiveKind, Command, TorrentAction};
+use nexus_core::{ArchiveKind, Area, Command, TorrentAction};
 use nexus_testkit::{FakeHost, StubPlugin, TestCore};
 
 use crate::common::catalogs_fetched;
@@ -109,10 +108,10 @@ impl Setup {
     async fn finish(&self) {
         let offer: GameKey = "release-catalog:emu-kyty/PPSA01234".parse().unwrap();
         self.t.core.dispatch(Command::DownloadRelease { offer, release: HASH.into(), folder: None }).await.unwrap();
-        until(&self.t.core, |r| r.state == "ready").await;
+        until(&self.t.core, Area::Torrents, |r| r.state == "ready").await;
         act(&self.t.core, TorrentAction::Start).await;
         self.t.torrents.complete(HASH);
-        until(&self.t.core, |r| r.state == "complete").await;
+        until(&self.t.core, Area::Torrents, |r| r.state == "complete").await;
     }
 }
 
@@ -120,17 +119,14 @@ fn row(core: &nexus_core::Core) -> nexus_ui_api::TorrentVm {
     core.view().downloads.torrents.into_iter().next().expect("a download")
 }
 
-/// Waits until the download's row passes `test`.
-async fn until(core: &nexus_core::Core, test: impl Fn(&nexus_ui_api::TorrentVm) -> bool) -> nexus_ui_api::TorrentVm {
-    for _ in 0..300 {
-        if let Some(r) = core.view().downloads.torrents.into_iter().next()
-            && test(&r)
-        {
-            return r;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("never: {:?}", core.view().downloads.torrents);
+/// Waits until the download's row passes `test`, looking after each change in `area`.
+async fn until(
+    core: &nexus_core::Core,
+    area: Area,
+    test: impl Fn(&nexus_ui_api::TorrentVm) -> bool,
+) -> nexus_ui_api::TorrentVm {
+    nexus_testkit::until(core, area, |core| core.view().downloads.torrents.first().is_some_and(&test)).await;
+    row(core)
 }
 
 async fn act(core: &nexus_core::Core, action: TorrentAction) {
@@ -144,7 +140,7 @@ async fn a_finished_download_unpacks_its_archive_and_install_takes_the_unpacked_
     s.t.archives.holds("game.part1.rar", &[("Astro-app0/eboot.bin", b"elf")]);
     s.finish().await;
 
-    let done = until(&s.t.core, |r| r.unpack == "unpacked").await;
+    let done = until(&s.t.core, Area::Torrents, |r| r.unpack == "unpacked").await;
     assert_eq!(s.t.archives.unpacked(), [(ArchiveKind::Rar, vec!["game.part1.rar".into(), "game.part2.rar".into()])]);
     let file = s.folder().join("unpacked/Astro/game/Astro-app0/eboot.bin");
     assert_eq!(std::fs::read(file).unwrap(), b"elf");
@@ -152,7 +148,7 @@ async fn a_finished_download_unpacks_its_archive_and_install_takes_the_unpacked_
     assert_eq!(done.unpack_progress, 1.0);
 
     act(&s.t.core, TorrentAction::Install).await;
-    until(&s.t.core, |r| r.install == "done").await;
+    until(&s.t.core, Area::Installs, |r| r.install == "done").await;
     let sources = s.sources.lock().unwrap().clone();
     assert_eq!(sources, [HostPath::new("packages", 0, RelPath::new(format!("PS5/torrent-{HASH}")).unwrap())]);
 }
@@ -165,7 +161,7 @@ async fn several_archives_each_unpack_into_their_own_folder() {
     s.t.archives.holds("game.7z", &[("addon.pkg", b"dlc")]);
     s.finish().await;
 
-    until(&s.t.core, |r| r.unpack == "unpacked").await;
+    until(&s.t.core, Area::Torrents, |r| r.unpack == "unpacked").await;
     let unpacked = s.folder().join("unpacked");
     assert_eq!(std::fs::read(unpacked.join("Astro/game/game.pkg")).unwrap(), b"game");
     assert_eq!(std::fs::read(unpacked.join("Astro/update/patch.pkg")).unwrap(), b"update");
@@ -177,7 +173,7 @@ async fn a_set_with_a_missing_part_fails_before_anything_is_unpacked() {
     let s = setup(&[("Astro/game.part1.rar", b"one"), ("Astro/game.part3.rar", b"three")]).await;
     s.finish().await;
 
-    let failed = until(&s.t.core, |r| r.unpack == "failed").await;
+    let failed = until(&s.t.core, Area::Torrents, |r| r.unpack == "failed").await;
     assert!(failed.error.contains("part 2 of Astro/game is missing"), "{}", failed.error);
     assert!(s.t.archives.unpacked().is_empty(), "nothing unpacked");
     assert!(!s.folder().join("unpacked").exists());
@@ -189,7 +185,7 @@ async fn an_unpack_that_fails_says_why_and_leaves_no_half_folder() {
     s.t.archives.fails("game.rar", "This archive needs a password");
     s.finish().await;
 
-    let failed = until(&s.t.core, |r| r.unpack == "failed").await;
+    let failed = until(&s.t.core, Area::Torrents, |r| r.unpack == "failed").await;
     assert!(failed.error.contains("needs a password"), "{}", failed.error);
     assert_eq!(failed.actions, ["install", "stop-seeding"], "Install tries again");
     let left: Vec<_> = walk(&s.folder().join("unpacked"));
@@ -203,7 +199,7 @@ async fn a_failed_unpack_removes_the_sets_it_already_unpacked() {
     s.t.archives.fails("b.rar", "b is damaged");
     s.finish().await;
 
-    let failed = until(&s.t.core, |r| r.unpack == "failed").await;
+    let failed = until(&s.t.core, Area::Torrents, |r| r.unpack == "failed").await;
     assert!(failed.error.contains("b is damaged"), "{}", failed.error);
     assert!(walk(&s.folder().join("unpacked")).is_empty(), "{:?}", walk(&s.folder().join("unpacked")));
 }
@@ -212,19 +208,19 @@ async fn a_failed_unpack_removes_the_sets_it_already_unpacked() {
 async fn cancel_stops_the_unpacking_and_install_starts_it_again() {
     let s = setup(&[("Astro/game.rar", b"g")]).await;
     s.t.archives.holds("game.rar", &[("game.pkg", b"game")]);
-    s.t.archives.hold(true);
+    let held = s.t.archives.hold();
     s.finish().await;
 
-    let unpacking = until(&s.t.core, |r| r.unpack == "unpacking").await;
+    let unpacking = until(&s.t.core, Area::Torrents, |r| r.unpack == "unpacking").await;
     assert_eq!(unpacking.actions, ["stop-seeding", "cancel"], "Cancel stops the unpacking");
     act(&s.t.core, TorrentAction::Cancel).await;
-    let cancelled = until(&s.t.core, |r| r.unpack == "cancelled").await;
+    let cancelled = until(&s.t.core, Area::Torrents, |r| r.unpack == "cancelled").await;
     assert_eq!(cancelled.state, "complete", "the download stays");
     assert!(walk(&s.folder().join("unpacked")).is_empty());
 
-    s.t.archives.hold(false);
+    held.release();
     act(&s.t.core, TorrentAction::Install).await;
-    until(&s.t.core, |r| r.install == "done").await;
+    until(&s.t.core, Area::Installs, |r| r.install == "done").await;
     assert_eq!(std::fs::read(s.folder().join("unpacked/Astro/game/game.pkg")).unwrap(), b"game");
     assert_eq!(s.sources.lock().unwrap().len(), 1, "installed once unpacked");
 }
@@ -233,17 +229,22 @@ async fn cancel_stops_the_unpacking_and_install_starts_it_again() {
 async fn an_unpack_cut_by_a_restart_comes_back_failed_and_install_unpacks_first() {
     let s = setup(&[("Astro/game.rar", b"g")]).await;
     s.t.archives.holds("game.rar", &[("game.pkg", b"game")]);
-    s.t.archives.hold(true);
+    let _held = s.t.archives.hold();
     s.finish().await;
-    until(&s.t.core, |r| r.unpack == "unpacking").await;
+    until(&s.t.core, Area::Torrents, |r| r.unpack == "unpacking").await;
+    // The row says it unpacks before the unpacker is asked: let it get there.
+    s.t.clock.run_until_idle().await;
+    assert_eq!(s.t.archives.unpacked().len(), 1, "the first app's unpack runs");
 
     let again = nexus_core::Core::start(s.t.kernel.clone()).await;
-    let restored = until(&again, |r| r.unpack == "failed").await;
+    let restored = until(&again, Area::Torrents, |r| r.unpack == "failed").await;
     assert!(restored.error.contains("stopped when Nexus closed"), "{}", restored.error);
+    // The download checks its files first, and seeds once they check out.
+    until(&again, Area::Torrents, |r| r.seeding).await;
     // The first app closed: its unpack never ends, so only the new one writes the folder.
     s.t.archives.cut();
     act(&again, TorrentAction::Install).await;
-    until(&again, |r| r.install == "done").await;
+    until(&again, Area::Installs, |r| r.install == "done").await;
     assert_eq!(std::fs::read(s.folder().join("unpacked/Astro/game/game.pkg")).unwrap(), b"game");
 }
 
@@ -252,7 +253,7 @@ async fn remove_unpacked_files_keeps_the_download_and_its_seeding() {
     let s = setup(&[("Astro/game.rar", b"g")]).await;
     s.t.archives.holds("game.rar", &[("game.pkg", b"game")]);
     s.finish().await;
-    until(&s.t.core, |r| r.unpack == "unpacked").await;
+    until(&s.t.core, Area::Torrents, |r| r.unpack == "unpacked").await;
 
     act(&s.t.core, TorrentAction::RemoveUnpacked).await;
     let after = row(&s.t.core);
@@ -300,12 +301,12 @@ async fn installing_the_unpacked_game_moves_it_into_the_games_folder_and_the_arc
     s.t.archives
         .holds("game.7z", &[("PPSA01234-app0/sce_sys/param.json", param), ("PPSA01234-app0/eboot.bin", b"elf")]);
     s.finish().await;
-    until(&s.t.core, |r| r.unpack == "unpacked").await;
+    until(&s.t.core, Area::Torrents, |r| r.unpack == "unpacked").await;
     let unpacked = s.folder().join("unpacked/Astro/game/PPSA01234-app0");
     let inode = std::fs::metadata(unpacked.join("eboot.bin")).unwrap().ino();
 
     act(&s.t.core, TorrentAction::Install).await;
-    let done = until(&s.t.core, |r| r.install == "done").await;
+    let done = until(&s.t.core, Area::Installs, |r| r.install == "done").await;
     let installed = s.home.path().join("Games/PS5/PPSA01234-app0/eboot.bin");
     assert_eq!(std::fs::read(&installed).unwrap(), b"elf");
     assert_eq!(std::fs::metadata(&installed).unwrap().ino(), inode, "moved, not copied");

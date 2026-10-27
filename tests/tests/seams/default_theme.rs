@@ -2,7 +2,7 @@
 //! the Library's filters and grid, and the theme's options.
 
 use crate::common::*;
-use nexus_core::Command;
+use nexus_core::{Area, Command};
 use slint_interpreter::ComponentHandle;
 
 fn default_theme() -> Composed {
@@ -114,12 +114,7 @@ fn the_boot_screen_shows_until_the_library_is_in() {
 /// Home's line for the first game, once its details are in.
 fn home_line(host: &mut Composed) -> String {
     host.dispatch(Command::RefreshLibrary);
-    let core = host.core().clone();
-    host.rt.block_on(async {
-        while core.view().detail.is_none() {
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-    });
+    host.until(Area::Library, |core| core.view().detail.is_some());
     host.ui.render().unwrap();
     settle(host);
     let shown = values(host, "default-description");
@@ -419,12 +414,7 @@ fn settings_show_this_pc_and_how_each_emulator_runs_on_it() {
     };
     let mut host = composed(|h| h.hardware(specs).plugin(playable_games("emu-a", vec!["Alpha"])));
     host.ui.start().unwrap();
-    let core = host.core().clone();
-    host.rt.block_on(async {
-        while !core.view().settings.hardware.known {
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-    });
+    host.until(Area::Hardware, |core| core.view().settings.hardware.known);
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
     settle(&mut host);
 
@@ -444,26 +434,21 @@ fn the_game_hub_stops_a_running_game() {
     host.ui.start().unwrap();
     host.dispatch(Command::RefreshLibrary);
     host.dispatch(Command::Launch("emu-a:G0".parse().unwrap()));
-    let core = host.core().clone();
-    host.rt.block_on(async {
-        while !core.game_running() {
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-    });
+    host.until(Area::Sessions, |core| core.game_running());
     host.dispatch(Command::OpenGame("emu-a:G0".parse().unwrap()));
     settle(&mut host);
 
     press(&mut host, "hub-stop", "Stop");
     let process = host.test.spawner.spawned()[0].clone();
-    let asked = host.rt.block_on(async {
-        for _ in 0..100 {
-            if !process.signals().is_empty() {
-                return true;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    // The game watcher's rounds carry out the stop.
+    let mut asked = false;
+    for _ in 0..100 {
+        asked = !process.signals().is_empty();
+        if asked {
+            break;
         }
-        false
-    });
+        host.advance(std::time::Duration::from_millis(10));
+    }
     assert!(asked, "Stop asks the game to close");
 }
 
@@ -2043,15 +2028,14 @@ fn the_game_catalog_page_shows_its_sources_its_refresh_and_refresh_now() {
     // it while the test waits.
     let feed = release_catalog::refresh::feed_url("546");
     let asked = |host: &Composed| host.test.http.sent().iter().filter(|u| **u == feed).count();
+    // The refresh runs in the plugin's own task: the clock moves until it asked.
     let wait_for = |host: &Composed, count: usize| {
-        host.rt.block_on(async {
-            for _ in 0..100 {
-                if asked(host) >= count {
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        for _ in 0..100 {
+            if asked(host) >= count {
+                break;
             }
-        })
+            host.advance(std::time::Duration::from_millis(10));
+        }
     };
     wait_for(&host, 1);
     let before = asked(&host);
@@ -2061,7 +2045,7 @@ fn the_game_catalog_page_shows_its_sources_its_refresh_and_refresh_now() {
     settle(&mut host);
     wait_for(&host, before + 1);
     // Once for the action. The core's read of the catalogs after it finds the copy fresh.
-    host.rt.block_on(async { tokio::time::sleep(std::time::Duration::from_millis(100)).await });
+    host.advance(std::time::Duration::from_millis(100));
     assert_eq!(asked(&host), before + 1, "Refresh now asked the forums");
 }
 
@@ -2452,7 +2436,7 @@ fn the_catalog_loads_only_the_covers_near_the_screen() {
     host.resize(1600.0, 900.0);
     host.dispatch(Command::Navigate(nexus_core::Route::Catalog));
     // The store describes the page in the background.
-    host.rt.block_on(async { tokio::time::sleep(std::time::Duration::from_millis(100)).await });
+    host.advance(std::time::Duration::from_millis(100));
     settle(&mut host);
     host.pump();
     host.ui.render().unwrap();
@@ -2508,12 +2492,7 @@ fn astro_with(home: &std::path::Path, emulator: nexus_testkit::StubPlugin) -> Co
 /// Waits until the first download's state is `state`, then carries out what the theme asked
 /// for when it saw it (the download sheet opens Downloads once the download is there).
 fn until_torrent(host: &mut Composed, state: &str) {
-    for _ in 0..100 {
-        if host.core().view().downloads.torrents.first().is_some_and(|t| t.state == state) {
-            break;
-        }
-        host.rt.block_on(async { tokio::time::sleep(std::time::Duration::from_millis(10)).await });
-    }
+    host.until(Area::Torrents, |core| core.view().downloads.torrents.first().is_some_and(|t| t.state == state));
     settle(host);
     host.pump();
     settle(host);
@@ -2539,12 +2518,7 @@ fn a_release_downloads_only_after_the_player_agrees_and_starts_it_in_downloads()
     press(&mut host, "release-download", hash);
     host.first("download-agree").invoke_accessible_default_action();
     host.pump();
-    for _ in 0..50 {
-        host.rt.block_on(async { tokio::time::sleep(std::time::Duration::from_millis(10)).await });
-        if host.core().view().downloads.torrents.first().is_some_and(|t| t.state == "ready") {
-            break;
-        }
-    }
+    host.until(Area::Torrents, |core| core.view().downloads.torrents.first().is_some_and(|t| t.state == "ready"));
     settle(&mut host);
     // The sheet saw the download there, and asked for Downloads.
     host.pump();
@@ -2619,12 +2593,7 @@ fn the_keys_reach_each_download_s_buttons() {
     key(&mut host, Key::Return);
     assert_eq!(values(&host, "remove-title"), ["Remove Astro?"]);
     key(&mut host, Key::Return);
-    for _ in 0..50 {
-        if host.core().view().downloads.torrents.is_empty() {
-            break;
-        }
-        host.rt.block_on(async { tokio::time::sleep(std::time::Duration::from_millis(10)).await });
-    }
+    host.until(Area::Torrents, |core| core.view().downloads.torrents.is_empty());
     assert!(host.core().view().downloads.torrents.is_empty(), "Enter removes it");
 }
 
@@ -2745,7 +2714,7 @@ fn a_download_s_card_shows_its_archives_unpacking_and_offers_to_remove_them() {
     let mut host = astro_on_its_game_hub(home.path());
     host.test.torrents.has(ASTRO_HASH, "Astro", &[("Astro/game.rar", b"archive")]);
     host.test.archives.holds("game.rar", &[("game.pkg", b"package")]);
-    host.test.archives.hold(true);
+    let held = host.test.archives.hold();
     press(&mut host, "release-download", ASTRO_HASH);
     host.first("download-agree").invoke_accessible_default_action();
     host.pump();
@@ -2755,12 +2724,7 @@ fn a_download_s_card_shows_its_archives_unpacking_and_offers_to_remove_them() {
     until_torrent(&mut host, "downloading");
     host.test.torrents.complete(ASTRO_HASH);
     until_torrent(&mut host, "complete");
-    for _ in 0..100 {
-        if host.core().view().downloads.torrents[0].unpack == "unpacking" {
-            break;
-        }
-        host.rt.block_on(async { tokio::time::sleep(std::time::Duration::from_millis(10)).await });
-    }
+    host.until(Area::Torrents, |core| core.view().downloads.torrents[0].unpack == "unpacking");
     settle(&mut host);
 
     assert_eq!(values(&host, "torrent"), ["Astro complete"]);
@@ -2773,13 +2737,8 @@ fn a_download_s_card_shows_its_archives_unpacking_and_offers_to_remove_them() {
     };
     assert_eq!(buttons(&host), ["cancel", "stop-seeding"], "while it unpacks: Stop unpacking");
 
-    host.test.archives.hold(false);
-    for _ in 0..100 {
-        if host.core().view().downloads.torrents[0].unpack == "unpacked" {
-            break;
-        }
-        host.rt.block_on(async { tokio::time::sleep(std::time::Duration::from_millis(10)).await });
-    }
+    held.release();
+    host.until(Area::Torrents, |core| core.view().downloads.torrents[0].unpack == "unpacked");
     settle(&mut host);
     assert_eq!(buttons(&host), ["stop-seeding", "install", "remove-unpacked"]);
     press(&mut host, "torrent-action:remove-unpacked", ASTRO_HASH);
@@ -3312,12 +3271,7 @@ fn key_refused(host: &mut Composed, key: slint::platform::Key) -> Vec<String> {
 
 /// Waits until the first download's install is `state`.
 fn until_install(host: &mut Composed, state: &str) {
-    for _ in 0..200 {
-        if host.core().view().downloads.torrents.first().is_some_and(|t| t.install == state) {
-            break;
-        }
-        host.rt.block_on(async { tokio::time::sleep(std::time::Duration::from_millis(10)).await });
-    }
+    host.until(Area::Installs, |core| core.view().downloads.torrents.first().is_some_and(|t| t.install == state));
     settle(host);
     assert_eq!(host.core().view().downloads.torrents[0].install, state);
 }
@@ -3666,7 +3620,7 @@ fn a_ready_download_lists_up_to_100_files_in_a_scroll_area() {
 fn while_it_looks_up_or_installs_a_card_shows_a_button_that_does_nothing_and_cancel_install() {
     let home = tempfile::tempdir().unwrap();
     let mut host = astro_with(home.path(), slow_installer());
-    host.test.torrents.hold(true);
+    let held = host.test.torrents.hold();
     let offer: nexus_api::GameKey = "release-catalog:emu-kyty/PPSA01234".parse().unwrap();
     host.dispatch(Command::DownloadRelease { offer, release: ASTRO_HASH.into(), folder: None });
     host.dispatch(Command::Navigate(nexus_core::Route::Downloads));
@@ -3675,7 +3629,7 @@ fn while_it_looks_up_or_installs_a_card_shows_a_button_that_does_nothing_and_can
     // The keys skip it: the card's first button is Cancel.
     assert_eq!(host.core().view().downloads.torrents[0].actions, ["cancel"]);
 
-    host.test.torrents.hold(false);
+    held.release();
     until_torrent(&mut host, "ready");
     assert_eq!(host.count("torrent-placeholder"), 0);
     host.dispatch(Command::Torrent { id: ASTRO_HASH.into(), action: nexus_core::TorrentAction::Start });
@@ -3823,7 +3777,7 @@ fn the_catalog_says_loading_catalog_until_the_catalogs_are_read() {
     host.ui.start().unwrap();
     let core = host.core().clone();
     let navigate = host.rt.spawn(async move { core.dispatch(Command::Navigate(nexus_core::Route::Catalog)).await });
-    host.rt.block_on(async { tokio::time::sleep(std::time::Duration::from_millis(50)).await });
+    host.advance(std::time::Duration::from_millis(50));
     host.ui.render().unwrap();
     settle(&mut host);
     assert_eq!(values(&host, "grid-empty"), ["Loading catalog…"]);

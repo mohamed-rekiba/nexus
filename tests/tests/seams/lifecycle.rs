@@ -8,7 +8,7 @@ use nexus_api::{
     Catalog, Event, GameDetails, GameSummary, HttpRequest, Page, PageRequest, PluginError, PluginId, PluginResult,
     Provided, RelPath, SearchQuery,
 };
-use nexus_core::{CoreError, LoadError, PluginStatus};
+use nexus_core::{Clock, CoreError, LoadError, PluginStatus};
 use nexus_testkit::{FakeHost, StubPlugin};
 
 fn id(s: &str) -> PluginId {
@@ -140,9 +140,10 @@ async fn a_shutdown_that_hangs_is_cut_off_by_the_timeout() {
     let host = FakeHost::new().plugin(stub).boot().await;
     host.kernel.activate(&id("stuck")).await.unwrap();
 
-    let started = std::time::Instant::now();
+    let started = host.clock.now();
     host.kernel.deactivate(&id("stuck")).await.unwrap();
-    assert!(started.elapsed() < Duration::from_secs(2));
+    let took = host.clock.now() - started;
+    assert!(took >= Duration::from_millis(200) && took < Duration::from_secs(2), "the 200 ms limit: {took:?}");
     assert_eq!(host.kernel.plugins().await[0].status, PluginStatus::Loaded);
 }
 
@@ -206,4 +207,20 @@ async fn the_context_scopes_storage_network_and_events_to_the_plugin() {
         events.next().await,
         Some(Event::Custom { plugin: id("scoped"), topic: "hello".into(), payload: serde_json::json!({"n": 1}) })
     );
+}
+
+#[tokio::test]
+async fn a_plugin_call_s_limit_runs_on_the_clock_and_not_before() {
+    let stub = StubPlugin::from_toml(&manifest("stuck", "")).hangs_on_shutdown();
+    let host = FakeHost::new().plugin(stub).boot().await;
+    host.kernel.activate(&id("stuck")).await.unwrap();
+
+    let kernel = host.kernel.clone();
+    let off = tokio::spawn(async move { kernel.deactivate(&id("stuck")).await });
+    // The fake host gives a shutdown 200 ms.
+    host.clock.advance(Duration::from_millis(150)).await;
+    assert!(!off.is_finished(), "the shutdown still runs");
+    host.clock.advance(Duration::from_millis(60)).await;
+    assert!(off.is_finished(), "the limit cut it off");
+    off.await.unwrap().unwrap();
 }

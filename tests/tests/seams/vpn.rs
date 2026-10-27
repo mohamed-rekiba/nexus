@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use nexus_api::*;
-use nexus_core::{Command, TorrentAction};
+use nexus_core::{Area, Command, TorrentAction};
 use nexus_testkit::{FakeHost, StubPlugin, TestCore};
 
 use crate::common::{catalogs_fetched, full_path};
@@ -61,8 +61,13 @@ struct Setup {
 }
 
 async fn setup() -> Setup {
+    setup_on(|h| h).await
+}
+
+/// [`setup`] on a host that `build` changes first.
+async fn setup_on(build: impl FnOnce(FakeHost) -> FakeHost) -> Setup {
     let home = tempfile::tempdir().unwrap();
-    let t = FakeHost::new()
+    let t = build(FakeHost::new())
         .home(home.path())
         .plugin(emulator())
         .built_in(PluginByKind::service(release_catalog::ReleaseCatalog::default()))
@@ -94,13 +99,11 @@ fn row(t: &TestCore, hash: &str) -> nexus_ui_api::TorrentVm {
 
 /// Waits until `hash`'s row passes `check`.
 async fn until(t: &TestCore, hash: &str, what: &str, check: impl Fn(&nexus_ui_api::TorrentVm) -> bool) {
-    for _ in 0..300 {
-        if t.core.view().downloads.torrents.iter().any(|r| r.id == hash && check(r)) {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("{hash} never {what}: {:?}", t.core.view().downloads.torrents);
+    let passes = |core: &nexus_core::Core| core.view().downloads.torrents.iter().any(|r| r.id == hash && check(r));
+    t.until(Area::Torrents, passes).await;
+    assert!(passes(&t.core), "{hash} {what}");
+    // The row changes before the swarm is asked: let that work end too.
+    t.clock.run_until_idle().await;
 }
 
 async fn download(t: &TestCore, hash: &str) {
@@ -209,7 +212,7 @@ async fn with_the_setting_off_the_vpn_changes_nothing() {
     running(t, ASTRO).await;
 
     t.network.down("wg0");
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    t.clock.advance(Duration::from_millis(100)).await;
     assert_eq!(row(t, ASTRO).state, "downloading");
     assert!(!row(t, ASTRO).waiting_vpn);
     assert!(t.torrents.routes().is_empty());
@@ -290,4 +293,20 @@ async fn where_downloads_can_t_be_bound_the_setting_stays_off_and_says_why() {
     let vpn = t.core.view().settings.vpn;
     assert!(!vpn.only);
     assert_eq!(vpn.problem, "Not available on Windows");
+}
+
+#[tokio::test]
+async fn the_vpn_is_checked_every_vpn_poll_on_the_clock_and_not_between() {
+    let s = setup_on(|h| h.vpn_poll(Duration::from_secs(2))).await;
+    let t = &s.t;
+    t.network.up("wg0");
+    t.core.dispatch(Command::SetVpnOnly(true)).await.unwrap();
+    running(t, ASTRO).await;
+
+    // The watch began when the download did: its first check is two seconds after that.
+    t.network.down("wg0");
+    t.clock.advance(Duration::from_secs(1)).await;
+    assert!(!row(t, ASTRO).waiting_vpn, "not checked yet");
+    t.clock.advance(Duration::from_millis(1100)).await;
+    assert!(row(t, ASTRO).waiting_vpn, "the check saw the VPN drop");
 }

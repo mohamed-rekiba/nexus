@@ -8,10 +8,12 @@ use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use futures::StreamExt;
 use i_slint_backend_testing::ElementHandle;
 use nexus_api::*;
-use nexus_core::{Command, Core};
-use nexus_testkit::{FakeHost, StubPlugin, TestCore};
+use nexus_core::Clock;
+use nexus_core::{Area, Command, Core};
+use nexus_testkit::{FakeClock, FakeHost, StubPlugin, TestCore};
 use nexus_ui_host::{ThemeHost, UiRequest};
 use slint_interpreter::ComponentHandle;
 
@@ -120,13 +122,29 @@ impl Composed {
         self.ui.render().unwrap();
     }
 
-    /// Waits until each catalog on the Catalog is the copy fetched from the catalog address, or
-    /// a second passes, then renders: the Game Catalog fetches in the background, and the
-    /// first read gets the bundled copy.
+    /// Waits until each catalog on the Catalog is the copy fetched from the catalog address,
+    /// then renders: the Game Catalog fetches in the background, and the first read gets the
+    /// bundled copy.
     pub fn catalogs_fetched(&mut self) {
-        let core = self.test.core.clone();
-        self.rt.block_on(async move { catalogs_fetched(&core).await });
+        self.rt.block_on(catalogs_fetched(&self.test.core));
         self.ui.render().unwrap();
+    }
+
+    /// Runs the core until `done` holds: see [`TestCore::until`]. It doesn't render.
+    pub fn until(&self, area: Area, done: impl FnMut(&Core) -> bool) {
+        self.rt.block_on(self.test.until(area, done));
+    }
+
+    /// Moves the core's clock on by `by`: see [`nexus_testkit::FakeClock::advance`]. It
+    /// doesn't render.
+    pub fn advance(&self, by: std::time::Duration) {
+        self.rt.block_on(self.test.clock.advance(by));
+    }
+
+    /// Runs the core until every task waits: see [`nexus_testkit::FakeClock::run_until_idle`].
+    /// It doesn't render.
+    pub fn run_until_idle(&self) {
+        self.rt.block_on(self.test.clock.run_until_idle());
     }
 
     /// Carries out what the theme asked for, as the app would.
@@ -177,18 +195,29 @@ impl Composed {
 }
 
 /// Waits until each catalog the core has is the copy fetched from the catalog address: the Game
-/// Catalog fetches in the background, and the first read gets the bundled copy. A busy runner
-/// can take seconds; after ten it fails, rather than letting the test go on with the bundled
-/// copy and fail somewhere that doesn't say why.
+/// Catalog fetches in the background, and the first read gets the bundled copy. It fails when
+/// the catalogs never change to that, rather than letting the test go on with the bundled copy
+/// and fail somewhere that doesn't say why.
 pub async fn catalogs_fetched(core: &Core) {
-    for _ in 0..1000 {
+    nexus_testkit::until(core, Area::Catalogs, |core| {
         let sources = core.view().catalog.sources;
-        if !sources.is_empty() && sources.iter().all(|s| s.contains(": fetched from ")) {
-            return;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        !sources.is_empty() && sources.iter().all(|s| s.contains(": fetched from "))
+    })
+    .await;
+}
+
+/// Moves the core's clock one round of the game watcher (the fake host's `watch_every`) at a
+/// time until `done` is true, for at most five seconds of it, then shows it: the watcher's
+/// rounds are what change the desktop and the game's state.
+pub fn watch_until(host: &mut Composed, what: &str, done: impl Fn(&Core) -> bool) {
+    let mut rounds = 0;
+    while !done(host.core()) {
+        assert!(rounds < 250, "not {what} after five seconds of the clock");
+        host.advance(std::time::Duration::from_millis(20));
+        rounds += 1;
     }
-    panic!("the catalogs weren't fetched in 10 s: {:?}", core.view().catalog.sources);
+    host.ui.render().unwrap();
+    settle(host);
 }
 
 /// Lets the theme's moves reach the core, as the app would: a move in the Home row or a grid
@@ -673,7 +702,7 @@ struct Store {
 #[async_trait]
 impl Metadata for Store {
     async fn describe(&self, game: &GameRef) -> PluginResult<Option<GameMetadata>> {
-        tokio::time::sleep(self.delay).await;
+        FakeClock::default().sleep(self.delay).await;
         let Some((_, score, tagline)) = self.known.iter().find(|(id, ..)| *id == game.title_id) else {
             return Ok(None);
         };
@@ -721,8 +750,10 @@ pub fn slow_installer() -> StubPlugin {
         async fn begin(&self, _: &HostPath, job: Arc<dyn InstallJob>) -> PluginResult<HostPath> {
             job.progress(1, 4);
             tokio::spawn(async move {
+                // The job says a cancel only by a flag: it is read on the fake clock's time.
+                let mut ticks = FakeClock::default().interval(std::time::Duration::from_millis(5));
                 while !job.cancelled() {
-                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                    ticks.next().await;
                 }
                 job.finished(Err(PluginError::Other("The install was cancelled".into())));
             });

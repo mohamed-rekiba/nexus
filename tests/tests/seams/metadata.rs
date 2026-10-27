@@ -80,3 +80,22 @@ async fn the_library_has_no_in_game_filter_and_sorts_by_rating_and_release() {
     t.core.dispatch(Command::LibrarySort("compat".into())).await.unwrap();
     assert_eq!(titles(&t)[0], "Beta", "the game that runs best first");
 }
+
+#[tokio::test]
+async fn a_slow_store_holds_the_first_load_ten_seconds_on_the_clock_and_no_more() {
+    let t = FakeHost::new()
+        // Longer than the boot's own limit, so that limit is the one that ends the wait.
+        .call_timeout(Duration::from_secs(60))
+        .plugin(games("emu-a", vec!["Alpha"]))
+        .plugin(store("store", vec![("CUSA00000", 4.5, "")], None, Duration::from_secs(30)))
+        .boot_core()
+        .await;
+    let core = t.core.clone();
+    let load = tokio::spawn(async move { core.dispatch(Command::RefreshLibrary).await });
+
+    t.clock.advance(Duration::from_secs(9)).await;
+    assert!(!t.core.view().boot.ready, "the first load waits for the store");
+    t.clock.advance(Duration::from_secs(2)).await;
+    assert!(t.core.view().boot.ready, "but no more than ten seconds");
+    load.await.unwrap().unwrap();
+}
