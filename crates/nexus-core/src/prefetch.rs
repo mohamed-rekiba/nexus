@@ -31,7 +31,7 @@ impl Core {
     }
 
     async fn prefetch(&self, game: GameKey) {
-        let clock = self.kernel().clock().clone();
+        let clock = self.ports().clock.clone();
         let rested = clock.now() + SCREENSHOTS_AFTER;
         clock.sleep(NEIGHBOURS_AFTER).await;
         let art: Vec<ImageRef> = {

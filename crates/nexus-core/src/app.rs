@@ -357,6 +357,8 @@ pub(crate) struct AppState {
 
 pub(crate) struct Inner {
     pub kernel: Kernel,
+    /// Every port the app plugged in, split per subsystem when the core starts.
+    pub ports: crate::ports::Ports,
     pub state: Mutex<AppState>,
     pub downloads: Downloads,
     pub changes: Changes,
@@ -405,7 +407,18 @@ impl Core {
             catalog_grid: None,
             grid_columns: HashMap::new(),
         };
-        let downloads = Downloads::spawn(kernel.clone());
+        let ports = kernel.ports().clone();
+        let downloads = Downloads::spawn(crate::downloads::DownloadContext {
+            ports: ports.downloads(),
+            host: kernel.host().clone(),
+            permissions: kernel
+                .order()
+                .iter()
+                .filter_map(|id| Some((id.clone(), kernel.manifest(id).ok()?.permissions.clone())))
+                .collect(),
+            config: kernel.config().clone(),
+            bus: kernel.events().clone(),
+        });
         let changes = Changes::new();
         let library = crate::library::LibrarySubsystem::new(
             crate::library::Records::new(kernel.config().clone()),
@@ -424,16 +437,16 @@ impl Core {
                 })
             };
             let torrents = crate::torrents::TorrentsSubsystem::new(
-                kernel.torrent_ports(),
+                ports.torrents(),
                 crate::torrents::Polls { torrents: kernel.host().torrent_poll, vpn: kernel.host().vpn_poll },
                 crate::torrents::Records::new(kernel.config().clone()),
-                kernel.vpn_rule().clone(),
+                ports.vpn.clone(),
                 Notifier::new(changes.clone(), kernel.events().clone()),
                 events,
             );
             let preferences = Preferences::new(
                 kernel.config().clone(),
-                kernel.pref_ports(),
+                ports.preferences(),
                 Notifier::new(changes.clone(), kernel.events().clone()),
             );
             let install_events: crate::game_installs::EventSink = Arc::new(move |event| {
@@ -445,13 +458,7 @@ impl Core {
                 })
             });
             let installs = crate::game_installs::GameInstallsSubsystem::new(
-                crate::game_installs::InstallPorts {
-                    archives: kernel.archives().clone(),
-                    hardware: kernel.hardware().clone(),
-                    clock: kernel.clock().clone(),
-                    downloads: Arc::new(torrents.clone()),
-                    call_timeout: kernel.host().call_timeout,
-                },
+                ports.installs(Arc::new(torrents.clone()), kernel.host().call_timeout),
                 crate::game_installs::Records::new(kernel.config().clone()),
                 Notifier::new(changes.clone(), kernel.events().clone()),
                 install_events,
@@ -462,7 +469,7 @@ impl Core {
                 }
             });
             let sessions = crate::sessions::SessionsSubsystem::new(
-                kernel.session_ports(),
+                ports.sessions(),
                 crate::sessions::Timings {
                     watch_every: kernel.host().watch_every,
                     show_timeout: kernel.host().show_timeout,
@@ -477,10 +484,7 @@ impl Core {
             let notices =
                 crate::notices::NoticesSubsystem::new(Notifier::new(changes.clone(), kernel.events().clone()));
             let launcher_update = crate::launcher_update::LauncherUpdateSubsystem::new(
-                crate::launcher_update::LauncherUpdatePorts {
-                    http: kernel.http().clone(),
-                    login_session: kernel.login_session().clone(),
-                },
+                ports.launcher_update(),
                 crate::launcher_update::ThisLauncher {
                     data_dir: kernel.host().data_dir.clone(),
                     install: kernel.host().install,
@@ -491,7 +495,7 @@ impl Core {
             // The setting or the VPNs changed: the downloads' kill switch looks at once.
             let kill_switch = torrents.clone();
             let vpn = crate::vpn::VpnSubsystem::new(
-                kernel.vpn_rule().clone(),
+                ports.vpn.clone(),
                 kernel.host().home.clone(),
                 Notifier::new(changes.clone(), kernel.events().clone()),
                 Arc::new(move || {
@@ -502,6 +506,7 @@ impl Core {
             Inner {
                 preferences,
                 kernel,
+                ports,
                 state: Mutex::new(state),
                 downloads,
                 changes,
@@ -533,7 +538,7 @@ impl Core {
     fn check_hardware(&self) {
         let core = self.clone();
         tokio::spawn(async move {
-            let hardware = core.inner.kernel.hardware().clone();
+            let hardware = core.ports().hardware.clone();
             let Ok(specs) = tokio::task::spawn_blocking(move || hardware.specs()).await else { return };
             core.notice_blocked(&specs);
             core.state().hardware = Some(specs);
@@ -568,6 +573,11 @@ impl Core {
 
     pub fn kernel(&self) -> &Kernel {
         &self.inner.kernel
+    }
+
+    /// Every port the app plugged in.
+    pub(crate) fn ports(&self) -> &crate::ports::Ports {
+        &self.inner.ports
     }
 
     pub fn events(&self) -> BoxStream<'static, Event> {
@@ -729,7 +739,7 @@ impl Core {
                 if !wanted {
                     return Ok(());
                 }
-                self.kernel().clock().sleep(SELECT_SETTLE).await;
+                self.ports().clock.sleep(SELECT_SETTLE).await;
                 let still = {
                     let state = self.state();
                     state.selected.as_ref() == Some(&game) || state.catalog_selected.as_ref() == Some(&game)
@@ -1435,7 +1445,7 @@ impl Core {
     /// Runs [`Command::CheckUpdates`] every few hours while the app runs.
     fn schedule_update_checks(&self) {
         let weak = Arc::downgrade(&self.inner);
-        let clock = self.kernel().clock().clone();
+        let clock = self.ports().clock.clone();
         tokio::spawn(async move {
             clock.sleep(FIRST_UPDATE_CHECK).await;
             loop {
@@ -1647,7 +1657,7 @@ impl Core {
                 }
                 let permissions = &kernel.manifest(plugin)?.permissions;
                 let request = nexus_api::HttpRequest::get(url.clone());
-                let response = crate::facades::send_checked(kernel.http().as_ref(), plugin, permissions, request)
+                let response = crate::facades::send_checked(self.ports().http.as_ref(), plugin, permissions, request)
                     .await
                     .map_err(|error| CoreError::Plugin { plugin: plugin.clone(), error })?;
                 if response.status == 200 {

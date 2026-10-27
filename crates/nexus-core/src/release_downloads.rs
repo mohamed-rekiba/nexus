@@ -25,9 +25,9 @@ use crate::{CoreError, CoreResult, Kernel};
 
 /// The free bytes on the disk that holds `folder`, which may not be there yet: the disk of the
 /// nearest folder above it.
-pub(crate) fn free_at(kernel: &Kernel, folder: &Path) -> Option<u64> {
+pub(crate) fn free_at(hardware: &dyn crate::Hardware, folder: &Path) -> Option<u64> {
     let there = folder.ancestors().find(|p| p.is_dir())?;
-    kernel.hardware().free_bytes(there)
+    hardware.free_bytes(there)
 }
 
 /// A folder inside one of `emulator`'s `grant` folders (`packages` or `games`): `chosen`, or
@@ -220,7 +220,7 @@ impl Core {
         let store = crate::view::system_of(self.kernel(), &release.platform).name;
         tracing::info!(%offer, link = %release.store, "asked the store to install");
         // The store writes its install down a moment later: its progress is read often for now.
-        self.state().store_watch_until = Some(self.kernel().clock().now() + std::time::Duration::from_secs(60));
+        self.state().store_watch_until = Some(self.ports().clock.now() + std::time::Duration::from_secs(60));
         self.notice(format!("{store} is installing {}: it shows in your Library when it's done", release.title));
         self.changed(Area::Downloads);
         Ok(())
@@ -258,7 +258,7 @@ impl Core {
         let (source, folder) = self.torrent_folder(&found.emulator, &release.platform, &release.id, folder)?;
         // A picked folder may be on another disk than the one the Game Hub checked.
         if chosen
-            && let (Some(size), Some(free)) = (release.size_bytes, free_at(self.kernel(), &folder))
+            && let (Some(size), Some(free)) = (release.size_bytes, free_at(self.ports().hardware.as_ref(), &folder))
             && let Some(error) = no_room(size, free, "download folder")
         {
             return Err(CoreError::Invalid(error));
@@ -386,7 +386,7 @@ impl Core {
         }
         let kernel = self.kernel();
         let (into, path) = install_folder(kernel, &job.emulator, folder)?;
-        if let Some(free) = free_at(kernel, &path)
+        if let Some(free) = free_at(self.ports().hardware.as_ref(), &path)
             && let Some(error) = no_room(job.total, free, "game folder")
         {
             return Err(CoreError::Invalid(error));

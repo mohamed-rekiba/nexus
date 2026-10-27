@@ -101,7 +101,7 @@ impl Core {
         // checklist, and the store's art and details, as the old launcher's boot did, so Home
         // opens whole. A slow network doesn't hold it for more than BOOT_DESCRIBE_LIMIT.
         self.refresh_emulators().await;
-        if self.kernel().clock().timeout(BOOT_DESCRIBE_LIMIT, self.describe_library()).await.is_none() {
+        if self.ports().clock.timeout(BOOT_DESCRIBE_LIMIT, self.describe_library()).await.is_none() {
             tracing::info!("the store's descriptions are slow: Home opens without the rest");
             let core = self.clone();
             tokio::spawn(async move { core.describe_library().await });

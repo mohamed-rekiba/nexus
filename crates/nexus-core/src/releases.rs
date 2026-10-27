@@ -470,7 +470,7 @@ impl Core {
     pub(crate) fn watch_store_installs(&self) {
         let weak = std::sync::Arc::downgrade(&self.inner);
         let every = self.kernel().host().store_poll;
-        let clock = self.kernel().clock().clone();
+        let clock = self.ports().clock.clone();
         tokio::spawn(async move {
             loop {
                 let Some(inner) = weak.upgrade() else { return };

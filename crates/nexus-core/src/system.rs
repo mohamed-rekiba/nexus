@@ -142,7 +142,7 @@ async fn call<T>(
     method: &'static str,
     future: impl Future<Output = PluginResult<T>>,
 ) -> CoreResult<T> {
-    guarded(core.kernel().clock().as_ref(), plugin, method, core.kernel().host().call_timeout, future)
+    guarded(core.ports().clock.as_ref(), plugin, method, core.kernel().host().call_timeout, future)
         .await
         .map_err(|error| CoreError::Plugin { plugin: plugin.clone(), error })
 }
@@ -174,7 +174,7 @@ impl HostJob {
             let id = self.id;
             self.runtime.spawn(async move {
                 refresh(&core).await;
-                core.kernel().clock().sleep(JOB_KEPT).await;
+                core.ports().clock.sleep(JOB_KEPT).await;
                 core.state().system.jobs.retain(|j| j.id != id || j.phase == JobPhase::Running);
                 core.changed(Area::System);
             });
@@ -317,7 +317,7 @@ pub(crate) fn schedule_refresh(core: &Core) {
             if !core.kernel().of_kind(PluginKind::System).is_empty() {
                 refresh(&core).await;
             }
-            let wait = core.kernel().clock().sleep(REFRESH_EVERY);
+            let wait = core.ports().clock.sleep(REFRESH_EVERY);
             drop(core);
             wait.await;
         }

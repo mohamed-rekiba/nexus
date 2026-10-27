@@ -768,7 +768,7 @@ pub(crate) fn build(core: &Core) -> AppView {
             Route::Plugin(plugin) => plugin_page_vm(kernel, &state, &statuses, plugin),
             _ => None,
         },
-        running: running_vm(kernel, &sessions, &route),
+        running: running_vm(kernel, &sessions, &route, core.ports().clock.now()),
         notices: notices.iter().map(|n| n.message.clone()).collect(),
         notice_cards: notices.iter().map(|n| notice_vm(kernel, &library, n)).collect(),
         install_prompt: state.install_prompt.as_ref().map(|p| InstallPromptVm {
@@ -1142,7 +1142,7 @@ fn detail_vm(
     let free = download_folder
         .as_ref()
         .and_then(|folder| folder.ancestors().find(|p| p.is_dir()).map(std::path::Path::to_path_buf))
-        .and_then(|folder| kernel.hardware().free_bytes(&folder));
+        .and_then(|folder| core.ports().hardware.free_bytes(&folder));
     let no_room = |r: &nexus_api::Release| match (r.size_bytes, free) {
         (Some(size), Some(free)) if !torrents.jobs.contains_key(&r.id) => {
             crate::torrents::no_room(size, free, "download folder").unwrap_or_default()
@@ -1729,7 +1729,7 @@ fn settings_vm(
         return_on_exit: prefs.return_on_exit,
         auto_update: prefs.auto_update,
         scale: prefs.scale,
-        can_start_at_login: kernel.login_session().can_start_at_login(),
+        can_start_at_login: core.ports().login_session.can_start_at_login(),
         start_at_login: prefs.start_at_login,
         start_at_login_error: prefs.start_at_login_error.clone().unwrap_or_default(),
         vpn: vpn_vm(vpn),
@@ -2017,7 +2017,12 @@ impl Look {
 }
 
 /// The game on the Running screen, or else the newest one still running.
-fn running_vm(kernel: &Kernel, sessions: &SessionsSnapshot, route: &Route) -> Option<RunningVm> {
+fn running_vm(
+    kernel: &Kernel,
+    sessions: &SessionsSnapshot,
+    route: &Route,
+    now: std::time::Instant,
+) -> Option<RunningVm> {
     let session = match route {
         Route::Running(session) => *session,
         _ => *sessions.sessions.keys().next_back()?,
@@ -2037,7 +2042,7 @@ fn running_vm(kernel: &Kernel, sessions: &SessionsSnapshot, route: &Route) -> Op
         } else {
             "starting".into()
         },
-        elapsed_secs: kernel.clock().now().saturating_duration_since(s.started).as_secs(),
+        elapsed_secs: now.saturating_duration_since(s.started).as_secs(),
         in_front: sessions.game_in_front,
         keymap: manifest.map(|m| m.keymap.clone()).unwrap_or_default(),
     })

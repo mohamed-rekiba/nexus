@@ -143,7 +143,7 @@ pub(crate) async fn launch(core: &Core, game: GameKey) -> CoreResult<()> {
     let core = core.clone();
     tokio::spawn(async move {
         let ended = started.ended.await;
-        let played = core.kernel().clock().now().saturating_duration_since(started.at);
+        let played = core.ports().clock.now().saturating_duration_since(started.at);
         finish(&core, session, &game, ended, played, &launcher).await;
     });
     Ok(())
