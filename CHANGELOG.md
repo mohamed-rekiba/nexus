@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.6.2](https://github.com/mohamed-rekiba/nexus/compare/v0.6.1...v0.6.2) (2026-10-26)
+
+
+### Bug Fixes
+
+* **app:** build on Windows: the login module names the process types in full ([f785932](https://github.com/mohamed-rekiba/nexus/commit/f78593238b8a17aab130f3d342ec2de8f1967285))
+
+## [0.6.1](https://github.com/mohamed-rekiba/nexus/compare/v0.6.0...v0.6.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* **app:** build on Windows: opening a link needs the process imports there too ([2d880be](https://github.com/mohamed-rekiba/nexus/commit/2d880be1cb11586a6d66a0c08d0c0c6fdb5bae73))
+
+## [0.6.0](https://github.com/mohamed-rekiba/nexus/compare/v0.5.0...v0.6.0) (2026-10-26)
+
+
+### Features
+
+* Steam games in the Library, PC games copied in by hand, and GameMode ([84a90ce](https://github.com/mohamed-rekiba/nexus/commit/84a90cec587027df4da1ff7921cf88cd9ded880c))
+* Steam's libraries are found by themselves, and each plugin describes its system ([bf8d1da](https://github.com/mohamed-rekiba/nexus/commit/bf8d1da3e663299f2fe4347cadbdf421d4eeaa68))
+* **steam:** installs in Downloads, Steam's store details, and art Steam has ([b8f5d36](https://github.com/mohamed-rekiba/nexus/commit/b8f5d367f7cf7cc792d72b0897f0463087185f5c))
+* the player's Steam library in the Catalog, and one schema for a game's actions ([ff6c6ce](https://github.com/mohamed-rekiba/nexus/commit/ff6c6cee6cc0e7766c4564620f5ce7300391e36c))
+
+
+### Bug Fixes
+
+* sharper wide covers, dedicated servers last, and no In-game filter in the Library ([19db0d3](https://github.com/mohamed-rekiba/nexus/commit/19db0d31204819eff90276b2770ba80954c6990b))
+* update d-pad symbols in the UI to use new arrow characters ([c28b74f](https://github.com/mohamed-rekiba/nexus/commit/c28b74fc0aa05ce217e7c95c1c16c5e0a31476b9))
+
 ## [0.5.0](https://github.com/mohamed-rekiba/nexus/compare/v0.4.1...v0.5.0) (2026-10-26)
 
 

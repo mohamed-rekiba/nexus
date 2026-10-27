@@ -19,7 +19,6 @@
 //! `~/Library/LaunchAgents` on macOS, and a value in the `Run` key of the registry on Windows,
 //! through `reg.exe`.
 
-#[cfg(unix)]
 use std::process::{Command, Stdio};
 
 use nexus_core::{Desktop, Front};
