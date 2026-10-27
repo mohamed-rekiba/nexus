@@ -23,6 +23,7 @@ Each image also gets a dated tag (`minimal-20261024`) and, from an OS release, a
 |---|---|
 | `Containerfile` | Fedora's minimal bootc set (`bootc-base-imagectl build-rootfs --manifest=minimal`: bootc, systemd, the kernel, dnf), then drivers and firmware, gamescope, cage, greetd, NetworkManager, BlueZ, PipeWire, the boot screen, and what Nexus and the emulators load. Then the nexus rpm from `nexus-rpm/`. Universal Blue's kernel-module key is stored for the NVIDIA edition. os-release says Nexus OS. |
 | `fetch-nexus.sh` | Downloads the nexus rpm from the latest Nexus release (or a given tag) into `nexus-rpm/`, checked against its `.sha256`. |
+| `nexus.txt` | The latest Nexus release, which the image bundles. `package.yml` writes it after each Nexus release, which opens the OS release pull request ([Releases](#releases)). |
 | `files/etc/greetd/config.toml` | Logs `player` in at boot and runs `/usr/bin/nexus-session`, the session from the nexus package (`packaging/linux/nexus-session`). |
 | `files/usr/lib/nexus-os/` (made at build time) | `release`, the marker, holds `nexus --version`. `image` holds where the PC updates from. |
 | `files/usr/share/plymouth/themes/nexus-os/` | The boot screen: the Nexus logo, with Fedora's spinner images copied in at build time. |
@@ -107,7 +108,11 @@ image-builder's `iso.yaml` has no hidden-menu setting, so its menu shows for 5 s
 
 The OS is its own Release Please package (`os/`, component `nexus-os`): its own release pull
 request, `version.txt`, `CHANGELOG.md` and tags `nexus-os-v<version>`. Nexus's releases leave
-`os/` out. Merging the OS release pull request makes a draft release and its tag
+`os/` out. The OS bundles Nexus, so each Nexus release is a change to the OS too: once it's
+published, `.github/workflows/package.yml` writes its tag to `nexus.txt` on main, as
+`feat(os): bundle Nexus v<version>` for a new major or minor Nexus and `fix(os)` for a patch,
+and the OS release pull request opens. Merge it after the Nexus release is out, so the stick
+bundles that Nexus. Merging the OS release pull request makes a draft release and its tag
 (`.github/workflows/release.yml`), which starts `.github/workflows/os.yml` on the tag, in a run of
 its own, which:
 

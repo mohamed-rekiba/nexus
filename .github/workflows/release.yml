@@ -14,9 +14,13 @@ name: Release
 #   package.yml starts it once Nexus's release is published, since the images bundle it.
 # GitHub doesn't start workflows for a tag made with a workflow's own token, but it does start
 # one asked for by name (workflow_dispatch), and `--ref <tag>` runs it on the tag.
+#
+# package.yml starts this one by name too, after it names a new Nexus in os/nexus.txt (a push
+# with the workflow's own token, which starts nothing), so the OS release pull request opens.
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions: {}
 
