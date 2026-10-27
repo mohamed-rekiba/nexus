@@ -354,7 +354,7 @@ async fn finish(
     {
         core.state().result_prompt = Some((game.clone(), ended.build));
     }
-    if core.return_on_exit_on() {
+    if core.prefs().return_on_exit {
         running::show_launcher(core).await;
     }
     if let Err(e) = core.kernel().guard(&game.plugin, "launcher.on_exit", launcher.on_exit(&game.local, &exit)).await {

@@ -212,7 +212,7 @@ pub const DEFAULT_REPO: &str = "mohamed-rekiba/nexus";
 /// The repo to read releases from, "owner/name": `app.update_repo`, or [`DEFAULT_REPO`] when it
 /// isn't set. An empty `app.update_repo` turns the checks off.
 pub(crate) fn repo(core: &Core) -> Option<String> {
-    let value = core.kernel().config().get(&["app", "update_repo"]);
+    let value = crate::preferences::Pref::UpdateRepo.load(core.kernel().config());
     let repo = value.as_str().map(str::trim).unwrap_or(DEFAULT_REPO);
     (repo.split('/').count() == 2 && !repo.contains(' ') && !repo.starts_with('/') && !repo.ends_with('/'))
         .then(|| repo.to_owned())

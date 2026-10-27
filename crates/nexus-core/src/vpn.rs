@@ -28,10 +28,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use async_trait::async_trait;
 use nexus_api::{VpnBlock, VpnCheck, VpnPass};
+use serde_json::Value;
 
 use crate::app::Core;
 use crate::changes::Area;
 use crate::config::ConfigService;
+use crate::preferences::Pref;
 use crate::{Network, Vpn};
 
 /// The interface of the VPN downloads use: the picked one when it is connected, or else the
@@ -50,12 +52,12 @@ pub(crate) fn pick(vpns: &[Vpn], chosen: &str, finds: bool) -> Option<String> {
 
 /// Downloads go only through the VPN. Never where the system can't bind them to one.
 pub(crate) fn vpn_only(config: &ConfigService, network: &dyn Network) -> bool {
-    config.get(&["app", "vpn_only"]).as_bool().unwrap_or(false) && network.problem().is_none()
+    Pref::VpnOnly.load(config) == Value::Bool(true) && network.problem().is_none()
 }
 
 /// The VPN the player picked; empty for none.
 pub(crate) fn vpn_chosen(config: &ConfigService) -> String {
-    config.get(&["app", "vpn"]).as_str().unwrap_or_default().to_owned()
+    Pref::Vpn.load(config).as_str().unwrap_or_default().to_owned()
 }
 
 /// "Download only through a VPN" for plugins: the same setting and the same VPN as the
@@ -88,7 +90,7 @@ impl NetworkSource {
 #[async_trait]
 impl VpnCheck for HostVpnGate {
     async fn check(&self) -> Result<VpnPass, VpnBlock> {
-        if !self.config.get(&["app", "vpn_only"]).as_bool().unwrap_or(false) {
+        if Pref::VpnOnly.load(&self.config) != Value::Bool(true) {
             return Ok(VpnPass::Open);
         }
         let network = self.network.get();
@@ -118,16 +120,6 @@ impl VpnCheck for HostVpnGate {
 }
 
 impl Core {
-    /// Downloads go only through the VPN. Never where the system can't bind them to one.
-    pub(crate) fn vpn_only(&self) -> bool {
-        vpn_only(self.kernel().config(), self.kernel().network().as_ref())
-    }
-
-    /// The VPN the player picked; empty for none.
-    pub(crate) fn vpn_chosen(&self) -> String {
-        vpn_chosen(self.kernel().config())
-    }
-
     /// Reads the VPNs again, off the UI thread, and keeps them for the view.
     pub(crate) async fn refresh_vpns(&self) -> Vec<Vpn> {
         let network = self.kernel().network();

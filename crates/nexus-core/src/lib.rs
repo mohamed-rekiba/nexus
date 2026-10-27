@@ -22,6 +22,7 @@ mod launch;
 pub mod launcher_update;
 mod order;
 mod ports;
+mod preferences;
 mod prefetch;
 mod programs;
 mod release_downloads;
@@ -36,9 +37,7 @@ mod unpack;
 mod view;
 mod vpn;
 
-pub use app::{
-    Command, Core, GRID_PAGE, Grid, HIDDEN_FILTER, INGAME_FILTER, INSTALLED_FILTER, MAX_SCALE, MIN_SCALE, Route,
-};
+pub use app::{Command, Core, GRID_PAGE, Grid, HIDDEN_FILTER, INGAME_FILTER, INSTALLED_FILTER, Route};
 pub use archive_plan::{ArchiveEntry, EntryKind, Plan, Planned, UNPACK_SPARE, plan_unpack, room};
 pub use archives::embedded_archive;
 pub use bus::EventBus;
@@ -54,6 +53,7 @@ pub use ports::{
     ProcessHandle, ProcessSpawner, ProcessTree, SEED_UPLOAD_LIMIT, SpawnCommand, Specs, TokioClock, TokioSpawner,
     TorrentFile, TorrentInfo, TorrentStats, Torrents, TransferState, UnpackProgress, Vpn,
 };
+pub use preferences::{MAX_SCALE, MIN_SCALE, Pref, PrefKind, PrefSpec, PreferencesSnapshot};
 pub use storage::DirStorage;
 pub use themes::{DataTheme, DirFiles};
 pub use torrents::{TorrentAction, TorrentCmd};

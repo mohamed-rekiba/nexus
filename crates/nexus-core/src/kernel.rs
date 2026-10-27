@@ -591,6 +591,11 @@ impl Kernel {
         }
     }
 
+    /// The ports the preferences subsystem takes.
+    pub(crate) fn pref_ports(&self) -> crate::preferences::PrefPorts {
+        crate::preferences::PrefPorts { desktop: self.inner.desktop.clone(), network: self.inner.network.clone() }
+    }
+
     /// Set while a plugin waits for the VPN: see [`crate::vpn::HostVpnGate`].
     pub(crate) fn vpn_waited(&self) -> &Arc<AtomicBool> {
         &self.inner.vpn_waited

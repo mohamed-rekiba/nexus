@@ -6,7 +6,7 @@ use std::time::SystemTime;
 
 use nexus_api::{GameKey, JobId, PluginId, SessionId};
 use nexus_core::system::SystemCommand;
-use nexus_core::{Command, Core, Grid, Route, TorrentCmd};
+use nexus_core::{Command, Core, Grid, Pref, Route, TorrentCmd};
 use nexus_ui_api::{ScreenId, ThemeError};
 use slint_interpreter::{ComponentDefinition, ComponentHandle, ComponentInstance, Image, SharedString, Value};
 
@@ -308,7 +308,7 @@ impl ThemeHost {
             live.options = options;
         }
         let live = self.live.as_ref().expect("checked above");
-        (self.fullscreen)(live.instance.window(), self.core.fullscreen_on() && !self.windowed);
+        (self.fullscreen)(live.instance.window(), self.core.prefs().fullscreen && !self.windowed);
         live.instance
             .set_global_property("Vm", "clock", Value::String(self.clock.as_str().into()))
             .map_err(|e| ThemeError::Binding { theme: id.clone(), message: e.to_string() })?;
@@ -327,7 +327,7 @@ impl ThemeHost {
                     self.monitors.iter().map(|m| Value::String(m.as_str().into())).collect::<Vec<_>>(),
                 ))),
             ),
-            ("monitor", Value::String(self.core.monitor().unwrap_or_default().into())),
+            ("monitor", Value::String(self.core.prefs().monitor.unwrap_or_default().into())),
             ("has-trailer", Value::Bool(self.trailer.is_some())),
             ("trailer", Value::Struct(fields)),
         ] {
@@ -484,7 +484,7 @@ impl ThemeHost {
     /// The bytes of the current theme's sound `name`, to play. `None` when the theme has no
     /// such sound, or the player turned sounds off.
     pub fn sound(&self, name: &str) -> Option<std::sync::Arc<[u8]>> {
-        if !self.core.sounds_on() {
+        if !self.core.prefs().sounds {
             return None;
         }
         self.live.as_ref()?.sounds.get(name).cloned()
@@ -557,6 +557,7 @@ impl ThemeHost {
                 .map_err(|e| ThemeError::Binding { theme: theme.clone(), message: format!("Host.{name}: {e}") })
         };
         let core = |c: Command| Some(UiRequest::Core(c));
+        let pref = move |p: Pref, value: serde_json::Value| core(Command::Pref(p, value));
         callback("navigate", Box::new(move |a| route(&arg(a, 0)).and_then(|r| core(Command::Navigate(r)))))?;
         callback("back", Box::new(move |_| core(Command::Back)))?;
         callback(
@@ -646,11 +647,8 @@ impl ThemeHost {
                 core(Command::Torrent(TorrentCmd::SeedDownloads(matches!(a.first(), Some(Value::Bool(true))))))
             }),
         )?;
-        callback(
-            "set-vpn-only",
-            Box::new(move |a| core(Command::SetVpnOnly(matches!(a.first(), Some(Value::Bool(true)))))),
-        )?;
-        callback("set-vpn", Box::new(move |a| core(Command::SetVpn(arg(a, 0)))))?;
+        callback("set-vpn-only", Box::new(move |a| pref(Pref::VpnOnly, flag(a, 0).into())))?;
+        callback("set-vpn", Box::new(move |a| pref(Pref::Vpn, arg(a, 0).into())))?;
         callback("connect-vpn", Box::new(move |a| core(Command::ConnectVpn(arg(a, 0)))))?;
         callback("disconnect-vpn", Box::new(move |a| core(Command::DisconnectVpn(arg(a, 0)))))?;
         callback(
@@ -703,16 +701,10 @@ impl ThemeHost {
             Box::new(move |a| core(Command::SetFolders { name: arg(a, 0), paths: split_folders(&arg(a, 1)) })),
         )?;
         callback("switch-theme", Box::new(move |a| PluginId::new(arg(a, 0)).ok().map(UiRequest::SwitchTheme)))?;
-        callback(
-            "set-fullscreen",
-            Box::new(move |a| core(Command::SetFullscreen(matches!(a.first(), Some(Value::Bool(true)))))),
-        )?;
-        callback(
-            "set-return-on-exit",
-            Box::new(move |a| core(Command::SetReturnOnExit(matches!(a.first(), Some(Value::Bool(true)))))),
-        )?;
+        callback("set-fullscreen", Box::new(move |a| pref(Pref::Fullscreen, flag(a, 0).into())))?;
+        callback("set-return-on-exit", Box::new(move |a| pref(Pref::ReturnOnExit, flag(a, 0).into())))?;
         callback("show-game", Box::new(move |a| core(Command::ShowGame(SessionId(int(a, 0))))))?;
-        callback("finish-welcome", Box::new(move |_| core(Command::FinishWelcome)))?;
+        callback("finish-welcome", Box::new(move |_| pref(Pref::Welcomed, true.into())))?;
         callback("library-search", Box::new(move |a| core(Command::LibrarySearch(arg(a, 0)))))?;
         callback(
             "report-result",
@@ -728,25 +720,16 @@ impl ThemeHost {
         callback("catalog-genre", Box::new(move |a| core(Command::CatalogGenre(some(arg(a, 0))))))?;
         callback("catalog-sort", Box::new(move |a| core(Command::CatalogSort(arg(a, 0)))))?;
         callback("catalog-more", Box::new(move |_| core(Command::CatalogMore)))?;
-        callback(
-            "set-sounds",
-            Box::new(move |a| core(Command::SetSounds(matches!(a.first(), Some(Value::Bool(true)))))),
-        )?;
-        callback(
-            "set-auto-update",
-            Box::new(move |a| core(Command::SetAutoUpdate(matches!(a.first(), Some(Value::Bool(true)))))),
-        )?;
+        callback("set-sounds", Box::new(move |a| pref(Pref::Sounds, flag(a, 0).into())))?;
+        callback("set-auto-update", Box::new(move |a| pref(Pref::AutoUpdate, flag(a, 0).into())))?;
         callback(
             "set-scale",
             Box::new(move |a| match a.first() {
-                Some(Value::Number(size)) => core(Command::SetScale(*size as f32)),
+                Some(Value::Number(size)) => pref(Pref::Scale, (*size as f32).into()),
                 _ => None,
             }),
         )?;
-        callback(
-            "set-start-at-login",
-            Box::new(move |a| core(Command::SetStartAtLogin(matches!(a.first(), Some(Value::Bool(true)))))),
-        )?;
+        callback("set-start-at-login", Box::new(move |a| pref(Pref::StartAtLogin, flag(a, 0).into())))?;
         callback("confirm-install", Box::new(move |_| core(Command::ConfirmInstall)))?;
         callback("cancel-install", Box::new(move |_| core(Command::CancelInstall)))?;
         callback("dismiss-notices", Box::new(move |_| core(Command::DismissNotices)))?;
@@ -755,10 +738,8 @@ impl ThemeHost {
         callback("refresh-library", Box::new(move |_| core(Command::RefreshLibrary)))?;
         callback("play-sound", Box::new(move |a| Some(UiRequest::PlaySound(arg(a, 0)))))?;
         callback("quit", Box::new(move |_| Some(UiRequest::Quit)))?;
-        callback(
-            "set-monitor",
-            Box::new(move |a| core(Command::SetMonitor(Some(arg(a, 0)).filter(|m| !m.is_empty())))),
-        )?;
+        // Empty: the monitor the launcher is on.
+        callback("set-monitor", Box::new(move |a| pref(Pref::Monitor, arg(a, 0).into())))?;
         callback(
             "open-game-settings",
             Box::new(move |a| game(a, 0).and_then(|g| core(Command::Navigate(Route::GameSettings(g))))),

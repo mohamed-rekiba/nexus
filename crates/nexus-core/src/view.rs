@@ -12,7 +12,7 @@ use serde_json::Value;
 use crate::app::{AppState, EmulatorState, Entry, Grid, Route};
 use crate::order::sort_by_order;
 use crate::torrents::{TorrentJob, TorrentsSnapshot};
-use crate::{Core, Job, JobPhase, Kernel, PluginStatus};
+use crate::{Core, Job, JobPhase, Kernel, PluginStatus, PreferencesSnapshot};
 
 pub(crate) fn image(plugin: &PluginId, source: &ImageSource) -> ImageRef {
     match source {
@@ -690,6 +690,7 @@ pub(crate) fn build(core: &Core) -> AppView {
     let jobs = core.inner.downloads.jobs();
     let statuses = kernel.statuses();
     let torrents = core.torrents().snapshot();
+    let prefs = core.prefs();
     let mut state = core.state();
 
     let route = state.nav.last().cloned().unwrap_or(Route::Home);
@@ -728,7 +729,7 @@ pub(crate) fn build(core: &Core) -> AppView {
         detail: detail_game.and_then(|key| detail_vm(core, kernel, &state, &torrents, &key)),
         catalog,
         downloads: downloads_vm(kernel, jobs, &state, &torrents),
-        settings: settings_vm(core, &state),
+        settings: settings_vm(core, &prefs, &state),
         emulators: emulators_vm(kernel, &state, &statuses),
         plugin_page: match &route {
             Route::Plugin(plugin) => plugin_page_vm(kernel, &state, &statuses, plugin),
@@ -744,7 +745,7 @@ pub(crate) fn build(core: &Core) -> AppView {
             game: p.title.clone(),
             size_bytes: p.size_bytes,
         }),
-        boot: boot_vm(core, kernel, &state),
+        boot: boot_vm(kernel, &prefs, &state),
         task: state.task.clone(),
         notice_opens: state.notices.last().map(|n| notice_opens(kernel, n)).unwrap_or_default(),
         notice_art: state.notices.last().and_then(|n| notice_art(&state, n)),
@@ -1622,7 +1623,7 @@ fn launcher_update_vm(core: &Core, update: &crate::launcher_update::UpdateState)
     nexus_ui_api::LauncherUpdateVm { state: state.into(), current, version, text, method }
 }
 
-fn settings_vm(core: &Core, state: &AppState) -> SettingsVm {
+fn settings_vm(core: &Core, prefs: &PreferencesSnapshot, state: &AppState) -> SettingsVm {
     let kernel = core.kernel();
     let manifests: Vec<_> = kernel
         .of_kind(PluginKind::Emulator)
@@ -1661,22 +1662,22 @@ fn settings_vm(core: &Core, state: &AppState) -> SettingsVm {
         theme_options,
         // The game folders. The other folders are on the pages of the plugins that ask for them.
         folders: folders_vm(kernel).into_iter().filter(|f| nexus_api::shared_folder(&f.name).is_some()).collect(),
-        sounds: core.sounds_on(),
-        fullscreen: core.fullscreen_on(),
-        return_on_exit: core.return_on_exit_on(),
-        auto_update: core.auto_update_on(),
-        scale: core.scale(),
+        sounds: prefs.sounds,
+        fullscreen: prefs.fullscreen,
+        return_on_exit: prefs.return_on_exit,
+        auto_update: prefs.auto_update,
+        scale: prefs.scale,
         can_start_at_login: kernel.desktop().can_start_at_login(),
-        start_at_login: core.start_at_login_on(),
-        start_at_login_error: state.login_error.clone().unwrap_or_default(),
-        vpn: vpn_vm(core, state),
+        start_at_login: prefs.start_at_login,
+        start_at_login_error: prefs.start_at_login_error.clone().unwrap_or_default(),
+        vpn: vpn_vm(core, prefs, state),
     }
 }
 
-fn vpn_vm(core: &Core, state: &AppState) -> nexus_ui_api::VpnSettingsVm {
+fn vpn_vm(core: &Core, prefs: &PreferencesSnapshot, state: &AppState) -> nexus_ui_api::VpnSettingsVm {
     let network = core.kernel().network();
-    let only = core.vpn_only();
-    let chosen = core.vpn_chosen();
+    let only = prefs.vpn_only && network.problem().is_none();
+    let chosen = prefs.vpn.clone();
     let finds = network.finds_vpns();
     nexus_ui_api::VpnSettingsVm {
         problem: network.problem().unwrap_or_default(),
@@ -1891,7 +1892,7 @@ fn plugin_page_vm(
 /// The most covers the boot screen's wall shows.
 const BOOT_COVERS: usize = 30;
 
-fn boot_vm(core: &Core, kernel: &Kernel, state: &AppState) -> BootVm {
+fn boot_vm(kernel: &Kernel, prefs: &PreferencesSnapshot, state: &AppState) -> BootVm {
     let ready = state.booted;
     let games = state.library.len();
     let step = |label: String, detail: String| BootStepVm {
@@ -1932,7 +1933,7 @@ fn boot_vm(core: &Core, kernel: &Kernel, state: &AppState) -> BootVm {
     steps.push(step("Covers & Home screen".into(), if ready { "Ready".into() } else { "Loading…".into() }));
     BootVm {
         ready,
-        welcome: !core.welcomed(),
+        welcome: !prefs.welcomed,
         progress: if ready {
             1.0
         } else if state.loading {

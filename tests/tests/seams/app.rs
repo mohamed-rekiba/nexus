@@ -7,7 +7,7 @@ use std::time::Duration;
 use futures::StreamExt;
 use nexus_api::*;
 use nexus_core::Front;
-use nexus_core::{Area, Clock, Command, Core, CoreError, Route};
+use nexus_core::{Area, Clock, Command, Core, CoreError, Pref, Route};
 use nexus_testkit::{FakeHost, Shown, Signal, SpawnedProcess, StubPlugin, TestCore};
 use nexus_ui_api::ScreenId;
 
@@ -1061,7 +1061,7 @@ async fn the_running_screen_says_starting_until_the_game_shows_a_window() {
 #[tokio::test]
 async fn the_launcher_stays_behind_a_closed_game_when_the_player_says_so() {
     let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
-    t.core.dispatch(Command::SetReturnOnExit(false)).await.unwrap();
+    t.core.dispatch(Command::Pref(Pref::ReturnOnExit, false.into())).await.unwrap();
     assert!(!t.core.view().settings.return_on_exit);
     let mut events = t.core.events();
     let (_, process) = play(&t).await;
@@ -1502,7 +1502,7 @@ async fn automatic_updates_can_be_turned_off() {
     let (t, emu) = core_with(FakeEmu::new(vec!["A"])).await;
     install(&t.core).await;
     assert!(t.core.view().settings.auto_update, "on by default, as in the old launcher");
-    t.core.dispatch(Command::SetAutoUpdate(false)).await.unwrap();
+    t.core.dispatch(Command::Pref(Pref::AutoUpdate, false.into())).await.unwrap();
     *emu.latest.lock().unwrap() = "2.0".into();
 
     t.core.dispatch(Command::CheckUpdates).await.unwrap();
@@ -1514,13 +1514,13 @@ async fn automatic_updates_can_be_turned_off() {
 async fn the_size_of_everything_is_saved_and_stays_between_0_8_and_1_4() {
     let t = FakeHost::new().boot_core().await;
     assert_eq!(t.core.view().settings.scale, 1.0, "the theme's own size by default");
-    t.core.dispatch(Command::SetScale(1.2)).await.unwrap();
+    t.core.dispatch(Command::Pref(Pref::Scale, 1.2.into())).await.unwrap();
     assert_eq!(t.core.view().settings.scale, 1.2);
-    t.core.dispatch(Command::SetScale(3.0)).await.unwrap();
+    t.core.dispatch(Command::Pref(Pref::Scale, 3.0.into())).await.unwrap();
     assert_eq!(t.core.view().settings.scale, 1.4);
-    t.core.dispatch(Command::SetScale(0.1)).await.unwrap();
+    t.core.dispatch(Command::Pref(Pref::Scale, 0.1.into())).await.unwrap();
     assert_eq!(t.core.view().settings.scale, 0.8);
-    assert!(t.core.dispatch(Command::SetScale(f32::NAN)).await.is_err());
+    assert!(t.core.dispatch(Command::Pref(Pref::Scale, f32::NAN.into())).await.is_err());
     assert_eq!(t.core.view().settings.scale, 0.8);
 }
 
@@ -1530,18 +1530,28 @@ async fn start_at_login_goes_through_the_desktop_and_stays_off_when_the_system_r
     let settings = t.core.view().settings;
     assert!(settings.can_start_at_login);
     assert!(!settings.start_at_login, "off by default");
-    t.core.dispatch(Command::SetStartAtLogin(true)).await.unwrap();
+    t.core.dispatch(Command::Pref(Pref::StartAtLogin, true.into())).await.unwrap();
     assert!(t.core.view().settings.start_at_login);
-    t.core.dispatch(Command::SetStartAtLogin(false)).await.unwrap();
+    t.core.dispatch(Command::Pref(Pref::StartAtLogin, false.into())).await.unwrap();
     assert!(!t.core.view().settings.start_at_login);
     assert_eq!(t.desktop.logins(), [true, false]);
 
     t.desktop.refuse_login("reg.exe: access is denied");
-    let refused = t.core.dispatch(Command::SetStartAtLogin(true)).await.unwrap_err();
+    let refused = t.core.dispatch(Command::Pref(Pref::StartAtLogin, true.into())).await.unwrap_err();
     assert!(refused.to_string().contains("access is denied"), "{refused}");
     let settings = t.core.view().settings;
     assert!(!settings.start_at_login, "it stays off");
     assert_eq!(settings.start_at_login_error, "reg.exe: access is denied");
+}
+
+#[tokio::test]
+async fn a_command_doesn_t_set_the_preferences_the_core_keeps() {
+    let t = FakeHost::new().boot_core().await;
+    let refused = t.core.dispatch(Command::Pref(Pref::Theme, "fixture-grid".into())).await.unwrap_err();
+    assert!(matches!(refused, CoreError::Invalid(_)), "{refused}");
+    assert_eq!(t.core.prefs().theme, None, "the UI host switches themes, through ThemeSwitched");
+    assert!(t.core.dispatch(Command::Pref(Pref::Sounds, "off".into())).await.is_err(), "a flag takes on or off");
+    assert!(t.core.prefs().sounds);
 }
 
 #[tokio::test]
@@ -1550,7 +1560,7 @@ async fn start_at_login_is_hidden_when_this_build_isn_t_installed() {
     host.desktop().no_login();
     let t = host.boot_core().await;
     assert!(!t.core.view().settings.can_start_at_login);
-    assert!(t.core.dispatch(Command::SetStartAtLogin(true)).await.is_err());
+    assert!(t.core.dispatch(Command::Pref(Pref::StartAtLogin, true.into())).await.is_err());
     assert!(t.desktop.logins().is_empty(), "the desktop is not asked");
 }
 

@@ -7,7 +7,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use crate::common::*;
-use nexus_core::{Area, Command, Route};
+use nexus_core::{Area, Command, Pref, Route};
 use slint::platform::software_renderer::{MinimalSoftwareWindow, PremultipliedRgbaColor, RepaintBufferType};
 use slint::platform::{Platform, WindowAdapter};
 use slint_interpreter::ComponentHandle;
@@ -323,7 +323,7 @@ fn shoot_vpn(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path, pr
     use slint::platform::Key;
     host.test.network.up("wg-se");
     host.test.network.down("work");
-    host.dispatch(Command::SetVpnOnly(true));
+    host.dispatch(Command::Pref(Pref::VpnOnly, true.into()));
     host.dispatch(Command::Navigate(Route::Settings));
     host.load_images();
     // Down past GAMES, UPDATES' two rows and LAUNCHER's six to the VPN switch.
@@ -372,7 +372,7 @@ fn shoot_vpn(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path, pr
     // The VPN drops: the setting reads it again. The keys are still on the release.
     key(host, Key::Escape);
     host.test.network.down("wg-se");
-    host.dispatch(Command::SetVpnOnly(true));
+    host.dispatch(Command::Pref(Pref::VpnOnly, true.into()));
     key(host, Key::Return);
     shoot(window, &out.join(format!("{prefix}-download-sheet-no-vpn.png")));
     key(host, Key::Return);
@@ -380,7 +380,7 @@ fn shoot_vpn(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path, pr
     shoot(window, &out.join(format!("{prefix}-downloads-waiting.png")));
 
     // Off: the download reads its files, then goes.
-    host.dispatch(Command::SetVpnOnly(false));
+    host.dispatch(Command::Pref(Pref::VpnOnly, false.into()));
     run_until(host, 1000, |core| {
         core.view().downloads.torrents.iter().any(|t| t.id == release.id && t.state == "ready")
     });
@@ -413,12 +413,12 @@ fn shoot_sizes(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path) 
     shoot(window, &out.join("default-settings-login.png"));
     key(host, Key::Escape);
     for (size, name) in [(0.8, "80"), (1.4, "140")] {
-        host.dispatch(Command::SetScale(size));
+        host.dispatch(Command::Pref(Pref::Scale, size.into()));
         host.dispatch(Command::Navigate(Route::Home));
         host.load_images();
         shoot(window, &out.join(format!("default-home-{name}.png")));
     }
-    host.dispatch(Command::SetScale(1.0));
+    host.dispatch(Command::Pref(Pref::Scale, 1.0.into()));
 }
 
 /// A picture `width` by `height` that fades from `from` to `to`, as PNG bytes.
@@ -616,7 +616,7 @@ fn shoot_genres(window: &MinimalSoftwareWindow, out: &Path) {
             ))
         });
         host.ui.start().unwrap();
-        host.dispatch(Command::SetScale(1.4));
+        host.dispatch(Command::Pref(Pref::Scale, 1.4.into()));
         host.dispatch(Command::SetThemeOption { key: "direction".into(), value: direction.into() });
         host.dispatch(Command::RefreshLibrary);
         host.until(Area::Library, |core| core.view().home.library.genres.len() >= 3);
@@ -697,10 +697,10 @@ fn shoot_keyboard(window: &MinimalSoftwareWindow, out: &Path) {
     shoot(window, &out.join("default-keyboard-symbols.png"));
     pad(&mut host, PadButton::RightShoulder);
     for (size, name) in [(0.8, "80"), (1.4, "140")] {
-        host.dispatch(Command::SetScale(size));
+        host.dispatch(Command::Pref(Pref::Scale, size.into()));
         shoot(window, &out.join(format!("default-keyboard-{name}.png")));
     }
-    host.dispatch(Command::SetScale(1.0));
+    host.dispatch(Command::Pref(Pref::Scale, 1.0.into()));
     // The same window on a screen with 1.5 pixels to the point.
     window.dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: 1.5 });
     window.set_size(slint::PhysicalSize::new(WIDTH * 3 / 2, HEIGHT * 3 / 2));
@@ -773,10 +773,10 @@ fn shoot_system(window: &MinimalSoftwareWindow, out: &Path) {
     shoot(window, &out.join("default-system-bluetooth.png"));
     open(&mut host, "status:network");
     for (size, name) in [(0.8, "80"), (1.4, "140")] {
-        host.dispatch(Command::SetScale(size));
+        host.dispatch(Command::Pref(Pref::Scale, size.into()));
         shoot(window, &out.join(format!("default-system-{name}.png")));
     }
-    host.dispatch(Command::SetScale(1.0));
+    host.dispatch(Command::Pref(Pref::Scale, 1.0.into()));
     window.dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: 1.5 });
     window.set_size(slint::PhysicalSize::new(WIDTH * 3 / 2, HEIGHT * 3 / 2));
     host.ui.render().unwrap();
@@ -839,7 +839,7 @@ fn shoot_console_names(window: &MinimalSoftwareWindow, out: &Path) {
         host.dispatch(Command::RefreshLibrary);
         host.load_images();
         shoot(window, &out.join(format!("{prefix}-names-welcome.png")));
-        host.dispatch(Command::FinishWelcome);
+        host.dispatch(Command::Pref(Pref::Welcomed, true.into()));
         host.dispatch(Command::Navigate(Route::Emulators));
         host.load_images();
         shoot(window, &out.join(format!("{prefix}-names-emulators.png")));

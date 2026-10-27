@@ -485,12 +485,12 @@ fn place_on_monitor(
 ) {
     use slint::winit_030::WinitWindowAccessor;
     let Some(instance) = app.ui.instance() else { return };
-    let saved = app.core.monitor();
+    let saved = app.core.prefs().monitor;
     if flag.as_ref().is_some_and(|(_, at_start)| *at_start != saved) {
         *flag = None;
     }
     let wanted = flag.as_ref().map(|(name, _)| name.clone()).or(saved);
-    let fullscreen = app.core.fullscreen_on();
+    let fullscreen = app.core.prefs().fullscreen;
     let mut names = Vec::new();
     // Moved once per choice: the player may still drag the window elsewhere.
     let changed = wanted != *placed;
@@ -833,7 +833,7 @@ fn run(args: Args) -> Result<(), String> {
     let mut last_clock = String::new();
     let mut monitors = Vec::new();
     let mut placed_on = None;
-    let mut monitor_flag = args.monitor.clone().map(|name| (name, core.monitor()));
+    let mut monitor_flag = args.monitor.clone().map(|name| (name, core.prefs().monitor));
     let mut announced = false;
     // Under Gamescope the window shows only once it carries Gamescope's id (desktop.rs).
     let mut claimed = std::env::var_os("GAMESCOPE_WAYLAND_DISPLAY").is_none();

@@ -2,7 +2,7 @@
 //! the Library's filters and grid, and the theme's options.
 
 use crate::common::*;
-use nexus_core::{Area, Command};
+use nexus_core::{Area, Command, Pref};
 use slint_interpreter::ComponentHandle;
 
 fn default_theme() -> Composed {
@@ -254,7 +254,7 @@ fn the_first_run_welcomes_the_player_and_enter_starts() {
 
     key(&mut host, Key::Return);
 
-    assert!(host.core().welcomed(), "saved: it doesn't show again");
+    assert!(host.core().prefs().welcomed, "saved: it doesn't show again");
     assert!(values(&host, "welcome").is_empty());
 }
 
@@ -1070,11 +1070,11 @@ fn with_two_monitors_settings_choose_the_one_the_launcher_fills() {
     settle(&mut host);
     down_to(&mut host, "monitor");
     press(&mut host, "monitor", "");
-    assert_eq!(host.core().monitor().as_deref(), Some("LEN G32qc-10"), "the next monitor after the one it is on");
+    assert_eq!(host.core().prefs().monitor.as_deref(), Some("LEN G32qc-10"), "the next monitor after the one it is on");
     host.ui.render().unwrap();
     settle(&mut host);
     press(&mut host, "monitor", "LEN G32qc-10");
-    assert_eq!(host.core().monitor().as_deref(), Some("Built-in Retina Display"), "round again");
+    assert_eq!(host.core().prefs().monitor.as_deref(), Some("Built-in Retina Display"), "round again");
 }
 
 #[test]
@@ -1777,7 +1777,7 @@ fn settings_keep_the_launcher_behind_a_closed_game() {
     settle(&mut host);
 
     assert_eq!(host.first("return-on-exit").accessible_value().as_deref(), Some("off"));
-    assert!(!host.core().return_on_exit_on());
+    assert!(!host.core().prefs().return_on_exit);
 }
 
 #[test]
@@ -1821,7 +1821,7 @@ fn settings_change_the_size_of_everything_and_the_rows_grow_with_it() {
     key(&mut host, Key::LeftArrow);
     assert_eq!(values(&host, "scale"), ["1.0"]);
     // The largest goes round to the smallest.
-    host.dispatch(Command::SetScale(1.4));
+    host.dispatch(Command::Pref(Pref::Scale, 1.4.into()));
     settle(&mut host);
     press(&mut host, "scale", "1.4");
     assert_eq!(values(&host, "scale"), ["0.8"]);
@@ -1999,7 +1999,7 @@ fn the_game_catalog_page_shows_its_sources_its_refresh_and_refresh_now() {
             "refresh_from_forums": true }),
     });
     // Small enough for the blocks to fit under the settings, a "Show PS5 games" among them.
-    host.dispatch(Command::SetScale(0.8));
+    host.dispatch(Command::Pref(Pref::Scale, 0.8.into()));
     host.dispatch(Command::Navigate(nexus_core::Route::Emulators));
     host.dispatch(Command::Navigate(nexus_core::Route::Plugin(id("release-catalog"))));
     settle(&mut host);
@@ -3176,7 +3176,7 @@ fn where_downloads_can_t_be_bound_the_vpn_switch_says_why_and_stays_off() {
 fn with_no_vpn_the_download_sheet_and_the_card_say_the_download_waits() {
     let home = tempfile::tempdir().unwrap();
     let mut host = astro_on_its_game_hub(home.path());
-    host.dispatch(Command::SetVpnOnly(true));
+    host.dispatch(Command::Pref(Pref::VpnOnly, true.into()));
     press(&mut host, "release-download", ASTRO_HASH);
     let privacy = values(&host, "download-privacy").concat();
     assert!(privacy.starts_with("Your VPN isn't connected: the download waits"), "{privacy}");
@@ -3198,7 +3198,7 @@ fn with_the_vpn_connected_the_download_sheet_names_it() {
     let home = tempfile::tempdir().unwrap();
     let mut host = astro_on_its_game_hub(home.path());
     host.test.network.up("wg0");
-    host.dispatch(Command::SetVpnOnly(true));
+    host.dispatch(Command::Pref(Pref::VpnOnly, true.into()));
     host.dispatch(Command::OpenGame("release-catalog:emu-kyty/PPSA01234".parse().unwrap()));
     press(&mut host, "release-download", ASTRO_HASH);
     let privacy = values(&host, "download-privacy").concat();
@@ -3582,7 +3582,7 @@ fn downloads_sums_up_its_transfers_and_says_how_they_behave() {
     assert_eq!(host.count("downloads-footer"), 0);
 
     host.test.network.up("wg0");
-    host.dispatch(Command::SetVpnOnly(true));
+    host.dispatch(Command::Pref(Pref::VpnOnly, true.into()));
     let offer = "release-catalog:emu-kyty/PPSA01234".parse().unwrap();
     host.dispatch(Command::Torrent(nexus_core::TorrentCmd::Download {
         offer,

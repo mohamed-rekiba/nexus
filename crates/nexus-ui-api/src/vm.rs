@@ -756,7 +756,7 @@ pub struct RunningVm {
 pub struct BootVm {
     /// The library and the first game's details are in.
     pub ready: bool,
-    /// The player hasn't been welcomed yet: the theme shows Welcome until `FinishWelcome`.
+    /// The player hasn't been welcomed yet: the theme shows Welcome until `finish-welcome`.
     pub welcome: bool,
     /// 0 to 1.
     pub progress: f32,

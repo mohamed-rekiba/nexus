@@ -18,6 +18,7 @@ use serde_json::Value;
 use crate::changes::{Area, Change, Changes, Notifier};
 use crate::downloads::Downloads;
 use crate::error::require;
+use crate::preferences::{Pref, Preferences, PreferencesSnapshot};
 use crate::view::{self, slot_vms};
 use crate::{CoreError, CoreResult, Kernel};
 
@@ -125,18 +126,10 @@ pub enum Command {
         name: String,
         paths: Vec<std::path::PathBuf>,
     },
-    /// Theme sounds on or off.
-    SetSounds(bool),
-    /// The launcher's window full screen, or a normal window.
-    SetFullscreen(bool),
-    /// Whether the launcher comes back to the front when a game closes.
-    SetReturnOnExit(bool),
-    /// The size of everything the theme draws, from 0.8 to 1.4 (1 is the theme's own size).
-    /// A value outside that range goes to its nearest end.
-    SetScale(f32),
-    /// The launcher starts when the player logs in, or not. When the system refuses, the
-    /// setting stays as it was and says why.
-    SetStartAtLogin(bool),
+    /// Sets one of the player's preferences: sounds, full screen, size, the VPN rule and so
+    /// on. [`Pref`] says what values each takes; a size outside its range goes to its nearest
+    /// end, and a value of the wrong type is refused.
+    Pref(Pref, Value),
     /// The UI host finished swapping to this theme.
     ThemeSwitched(PluginId),
     /// Closes every notice.
@@ -147,12 +140,6 @@ pub enum Command {
     /// for an emulator whose game is running waits until the game closes. The core runs this
     /// every few hours by itself.
     CheckUpdates,
-    /// Automatic emulator updates on or off.
-    SetAutoUpdate(bool),
-    /// The player pressed Start on the Welcome screen: it doesn't show again.
-    FinishWelcome,
-    /// The monitor the launcher goes on, by name; `None` for the one it is on.
-    SetMonitor(Option<String>),
     /// The notice with this id was clicked: open what it is about, and dismiss it.
     OpenNotice(u64),
     /// Reads the newest release of the launcher (`app.update_repo`).
@@ -199,12 +186,6 @@ pub enum Command {
     /// The catalogs' downloads: download a release, act on a download, install it, and
     /// "Keep sharing finished downloads".
     Torrent(crate::TorrentCmd),
-    /// "Download only through a VPN". On is refused where the system can't bind downloads to
-    /// a VPN, and says why.
-    SetVpnOnly(bool),
-    /// The VPN downloads use, by its name. Empty: the first connected one, where the system
-    /// finds VPNs.
-    SetVpn(String),
     /// Connects or disconnects a VPN the system can switch, by its name.
     ConnectVpn(String),
     DisconnectVpn(String),
@@ -220,10 +201,6 @@ pub enum Command {
 }
 
 pub use nexus_api::HOST_INSTALL_GAME;
-
-/// The smallest and the largest size of everything ([`Command::SetScale`]).
-pub const MIN_SCALE: f32 = 0.8;
-pub const MAX_SCALE: f32 = 1.4;
 
 /// How often the core looks for emulator updates by itself, and how long after start it
 /// looks first.
@@ -430,8 +407,6 @@ pub(crate) struct AppState {
     pub launcher_update: crate::launcher_update::UpdateState,
     /// The machine's settings, from the system plugins.
     pub system: crate::system::SystemState,
-    /// Why the system refused the last change to "Start at login".
-    pub login_error: Option<String>,
     /// The store's descriptions: how many of how many are in. `None` without a store.
     pub describing: Option<(usize, usize)>,
     /// The store has been asked about every game of the library.
@@ -495,6 +470,8 @@ pub(crate) struct Inner {
     pub changes: Changes,
     /// The catalogs' downloads.
     pub torrents: crate::torrents::TorrentsSubsystem,
+    /// The app's own settings.
+    pub preferences: Preferences,
     /// Held while the catalogs are read: see [`Core::refresh_releases`].
     pub reading_catalogs: tokio::sync::Mutex<()>,
 }
@@ -544,7 +521,7 @@ impl AppState {
 impl Core {
     /// Starts the app on a booted kernel and resumes installs a crash interrupted.
     pub async fn start(kernel: Kernel) -> Core {
-        let theme = kernel.config().get(&["app", "theme"]).as_str().and_then(|s| PluginId::new(s).ok());
+        let theme = Pref::Theme.load(kernel.config()).as_str().and_then(|s| PluginId::new(s).ok());
         let state = AppState {
             nav: vec![Route::Home],
             selected: None,
@@ -569,7 +546,6 @@ impl Core {
             hardware: None,
             launcher_update: crate::launcher_update::UpdateState::Idle,
             system: Default::default(),
-            login_error: None,
             describing: None,
             described: false,
             notices: Vec::new(),
@@ -611,7 +587,13 @@ impl Core {
                 Notifier::new(changes.clone(), kernel.events().clone()),
                 events,
             );
+            let preferences = Preferences::new(
+                kernel.config().clone(),
+                kernel.pref_ports(),
+                Notifier::new(changes.clone(), kernel.events().clone()),
+            );
             Inner {
+                preferences,
                 kernel,
                 state: Mutex::new(state),
                 downloads,
@@ -654,7 +636,7 @@ impl Core {
     fn notice_blocked(&self, specs: &crate::Specs) {
         let kernel = &self.inner.kernel;
         let summary = crate::hardware::summary(specs);
-        if kernel.config().get(&["app", "pc_noticed"]).as_str() == Some(summary.as_str()) {
+        if self.preferences().get(Pref::PcNoticed).as_str() == Some(summary.as_str()) {
             return;
         }
         let blocked: Vec<(String, String)> = kernel
@@ -669,7 +651,7 @@ impl Core {
             .collect();
         let Some(message) = crate::hardware::blocked_notice(&blocked) else { return };
         self.notice_opening(NoticeKind::Error, Route::Settings, message);
-        if let Err(e) = kernel.config().set(&["app", "pc_noticed"], Value::String(summary)) {
+        if let Err(e) = self.preferences().save(Pref::PcNoticed, Value::String(summary)) {
             tracing::warn!(error = %e, "could not save the PC the notice was for");
         }
     }
@@ -685,6 +667,16 @@ impl Core {
     /// The catalogs' downloads.
     pub(crate) fn torrents(&self) -> &crate::torrents::TorrentsSubsystem {
         &self.inner.torrents
+    }
+
+    /// The app's own settings.
+    pub(crate) fn preferences(&self) -> &Preferences {
+        &self.inner.preferences
+    }
+
+    /// The app's own settings, read whole: sounds, full screen, size, the monitor and so on.
+    pub fn prefs(&self) -> PreferencesSnapshot {
+        self.preferences().snapshot()
     }
 
     pub(crate) fn state(&self) -> MutexGuard<'_, AppState> {
@@ -857,22 +849,11 @@ impl Core {
             Command::ThemeSwitched(theme) => self.theme_switched(theme),
             Command::SetFolders { name, paths } => self.set_folders(&name, &paths),
             Command::SetPluginEnabled { plugin, enabled } => self.set_plugin_enabled(&plugin, enabled).await,
-            Command::SetSounds(on) => {
-                self.inner
-                    .kernel
-                    .config()
-                    .set(&["app", "sounds"], Value::Bool(on))
-                    .map_err(|e| CoreError::Io(e.to_string()))?;
-                self.changed(Area::Settings);
-                Ok(())
-            }
-            Command::SetFullscreen(on) => {
-                self.inner
-                    .kernel
-                    .config()
-                    .set(&["app", "fullscreen"], Value::Bool(on))
-                    .map_err(|e| CoreError::Io(e.to_string()))?;
-                self.changed(Area::Settings);
+            Command::Pref(pref, value) => {
+                self.preferences().set(pref, value).await?;
+                if pref.area() == Area::Vpn {
+                    self.vpn_changed().await;
+                }
                 Ok(())
             }
             Command::ReportResult(level) => {
@@ -917,27 +898,6 @@ impl Core {
             }
             Command::CatalogMore => self.more(true),
             Command::Torrent(command) => self.torrent(command).await,
-            Command::SetVpnOnly(on) => {
-                if on && let Some(why) = self.inner.kernel.network().problem() {
-                    return Err(CoreError::Invalid(why));
-                }
-                self.inner
-                    .kernel
-                    .config()
-                    .set(&["app", "vpn_only"], Value::Bool(on))
-                    .map_err(|e| CoreError::Io(e.to_string()))?;
-                self.vpn_changed().await;
-                Ok(())
-            }
-            Command::SetVpn(name) => {
-                self.inner
-                    .kernel
-                    .config()
-                    .set(&["app", "vpn"], Value::String(name))
-                    .map_err(|e| CoreError::Io(e.to_string()))?;
-                self.vpn_changed().await;
-                Ok(())
-            }
             Command::ConnectVpn(name) => self.vpn_call(move |n| n.connect(&name)).await,
             Command::DisconnectVpn(name) => self.vpn_call(move |n| n.disconnect(&name)).await,
             Command::ImportVpn(file) => {
@@ -950,30 +910,6 @@ impl Core {
                 let build = self.build_of(&game.plugin);
                 self.state().result_prompt = Some((game, build));
                 self.changed(Area::Sessions);
-                Ok(())
-            }
-            Command::SetMonitor(name) => {
-                let value = name.map(Value::String).unwrap_or(Value::Null);
-                self.inner.kernel.config().set(&["app", "monitor"], value).map_err(|e| CoreError::Io(e.to_string()))?;
-                self.changed(Area::Settings);
-                Ok(())
-            }
-            Command::FinishWelcome => {
-                self.inner
-                    .kernel
-                    .config()
-                    .set(&["app", "welcomed"], Value::Bool(true))
-                    .map_err(|e| CoreError::Io(e.to_string()))?;
-                self.changed(Area::Settings);
-                Ok(())
-            }
-            Command::SetReturnOnExit(on) => {
-                self.inner
-                    .kernel
-                    .config()
-                    .set(&["app", "return_on_exit"], Value::Bool(on))
-                    .map_err(|e| CoreError::Io(e.to_string()))?;
-                self.changed(Area::Settings);
                 Ok(())
             }
             Command::System(command) => crate::system::run(self, command).await,
@@ -1033,51 +969,6 @@ impl Core {
             }
             Command::CheckUpdates => {
                 self.check_updates().await;
-                Ok(())
-            }
-            Command::SetScale(scale) => {
-                if !scale.is_finite() {
-                    return Err(CoreError::Invalid(format!("{scale} is not a size")));
-                }
-                let scale = scale.clamp(MIN_SCALE, MAX_SCALE);
-                self.inner
-                    .kernel
-                    .config()
-                    // Two decimals: 1.2, not the f32's 1.2000000476837158.
-                    .set(&["app", "scale"], Value::from((f64::from(scale) * 100.0).round() / 100.0))
-                    .map_err(|e| CoreError::Io(e.to_string()))?;
-                self.changed(Area::Settings);
-                Ok(())
-            }
-            Command::SetStartAtLogin(on) => {
-                let desktop = self.inner.kernel.desktop().clone();
-                if !desktop.can_start_at_login() {
-                    return Err(CoreError::Invalid("this build can't start when you log in".into()));
-                }
-                let done = tokio::task::spawn_blocking(move || desktop.start_at_login(on))
-                    .await
-                    .map_err(|e| CoreError::Io(e.to_string()))?;
-                if let Err(error) = done {
-                    self.state().login_error = Some(error.clone());
-                    self.changed(Area::Settings);
-                    return Err(CoreError::Invalid(error));
-                }
-                self.state().login_error = None;
-                self.inner
-                    .kernel
-                    .config()
-                    .set(&["app", "start_at_login"], Value::Bool(on))
-                    .map_err(|e| CoreError::Io(e.to_string()))?;
-                self.changed(Area::Settings);
-                Ok(())
-            }
-            Command::SetAutoUpdate(on) => {
-                self.inner
-                    .kernel
-                    .config()
-                    .set(&["app", "auto_update"], Value::Bool(on))
-                    .map_err(|e| CoreError::Io(e.to_string()))?;
-                self.changed(Area::Settings);
                 Ok(())
             }
             Command::ConfirmInstall => {
@@ -1486,7 +1377,8 @@ impl Core {
 
     async fn open_game(&self, game: GameKey) -> CoreResult<()> {
         // A game a catalog offers: its download sheet names the VPN in use.
-        if self.vpn_only() && self.offer(&game).is_some() {
+        let kernel = self.kernel();
+        if crate::vpn::vpn_only(kernel.config(), kernel.network().as_ref()) && self.offer(&game).is_some() {
             self.refresh_vpns().await;
         }
         self.load_detail(&game).await?;
@@ -2050,22 +1942,6 @@ impl Core {
         Ok(())
     }
 
-    /// The size of everything the theme draws: 1 unless the player changed it.
-    pub fn scale(&self) -> f32 {
-        let saved = self.inner.kernel.config().get(&["app", "scale"]).as_f64().unwrap_or(1.0) as f32;
-        if saved.is_finite() { saved.clamp(MIN_SCALE, MAX_SCALE) } else { 1.0 }
-    }
-
-    /// The launcher starts when the player logs in. Off until the player turns it on.
-    pub fn start_at_login_on(&self) -> bool {
-        self.inner.kernel.config().get(&["app", "start_at_login"]).as_bool().unwrap_or(false)
-    }
-
-    /// Emulator updates install by themselves. On unless the player turned it off.
-    pub fn auto_update_on(&self) -> bool {
-        self.inner.kernel.config().get(&["app", "auto_update"]).as_bool().unwrap_or(true)
-    }
-
     /// Runs [`Command::CheckUpdates`] every few hours while the app runs.
     fn schedule_update_checks(&self) {
         let weak = Arc::downgrade(&self.inner);
@@ -2075,7 +1951,7 @@ impl Core {
             loop {
                 let Some(inner) = weak.upgrade() else { return };
                 let core = Core { inner };
-                if core.auto_update_on() {
+                if core.prefs().auto_update {
                     core.check_updates().await;
                 }
                 drop(core);
@@ -2095,7 +1971,7 @@ impl Core {
             }
             self.refresh_emulator(&plugin).await;
             let emu = self.state().emulators.get(&plugin).cloned().unwrap_or_default();
-            if emu.installed.is_empty() || emu.own || view::update_for(&emu).is_none() || !self.auto_update_on() {
+            if emu.installed.is_empty() || emu.own || view::update_for(&emu).is_none() || !self.prefs().auto_update {
                 continue;
             }
             if self.plays(&plugin) {
@@ -2165,17 +2041,6 @@ impl Core {
         Ok(true)
     }
 
-    /// Whether the launcher fills the screen. On until the player turns it off, as in the old
-    /// launcher.
-    /// The monitor the player chose for the launcher, by name.
-    pub fn monitor(&self) -> Option<String> {
-        self.inner.kernel.config().get(&["app", "monitor"]).as_str().map(str::to_owned)
-    }
-
-    pub fn fullscreen_on(&self) -> bool {
-        self.inner.kernel.config().get(&["app", "fullscreen"]).as_bool().unwrap_or(true)
-    }
-
     /// The game's folder on disk, through its plugin's folder grants. `None` before its
     /// details are in, or when it has no folder.
     pub fn game_folder(&self, game: &GameKey) -> Option<std::path::PathBuf> {
@@ -2242,17 +2107,6 @@ impl Core {
         self.state().booted
     }
 
-    /// Whether the player has been welcomed: the Welcome screen shows on the first run only.
-    pub fn welcomed(&self) -> bool {
-        self.inner.kernel.config().get(&["app", "welcomed"]).as_bool().unwrap_or(false)
-    }
-
-    /// Whether the launcher comes back to the front when a game closes. On until the player
-    /// turns it off, as in the old launcher.
-    pub fn return_on_exit_on(&self) -> bool {
-        self.inner.kernel.config().get(&["app", "return_on_exit"]).as_bool().unwrap_or(true)
-    }
-
     /// A game is running.
     pub fn game_running(&self) -> bool {
         !self.state().sessions.is_empty()
@@ -2268,11 +2122,6 @@ impl Core {
     /// Cheap: it reads app state, so the UI can ask on every press.
     pub fn game_in_front(&self) -> bool {
         crate::launch::game_in_front(self)
-    }
-
-    /// Whether theme sounds play. On until the player turns them off.
-    pub fn sounds_on(&self) -> bool {
-        self.inner.kernel.config().get(&["app", "sounds"]).as_bool().unwrap_or(true)
     }
 
     /// The player's option values for a theme.
@@ -2361,13 +2210,8 @@ impl Core {
     /// calls it once the new theme is on screen.
     pub fn theme_switched(&self, theme: PluginId) -> CoreResult<()> {
         let from = self.state().theme.replace(theme.clone());
-        self.inner
-            .kernel
-            .config()
-            .set(&["app", "theme"], Value::from(theme.as_str()))
-            .map_err(|e| CoreError::Io(e.to_string()))?;
+        self.preferences().save(Pref::Theme, Value::from(theme.as_str()))?;
         self.inner.kernel.events().publish(Event::ThemeChanged { from, to: theme });
-        self.changed(Area::Settings);
         Ok(())
     }
 
