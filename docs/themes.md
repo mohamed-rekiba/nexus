@@ -594,10 +594,11 @@ the saved choice.
 
 ## Dev mode
 
-With `--dev`, the app checks the current theme's files four times a second and calls
-`ThemeHost::reload_if_changed`. When a file in a theme folder on disk has a newer modification
-time, the host loads the theme again: validate, compile, swap. A broken edit logs the error and
-keeps the last good version on screen, and isn't retried until the next change.
+With `--dev`, the app shell's tick (`AppShell::on_tick` in `crates/nexus-ui-host/src/shell.rs`)
+checks the current theme's files four times a second and calls `ThemeHost::reload_if_changed`.
+When a file in a theme folder on disk has a newer modification time, the host loads the theme
+again: validate, compile, swap. A broken edit logs the error and keeps the last good version on
+screen, and isn't retried until the next change.
 
 Only themes loaded from a folder reload. The default theme is embedded in the binary, so an
 edit to `plugins/themes/default/theme/` needs a rebuild (`cargo run -p nexus-app`). To work on
@@ -609,12 +610,17 @@ The theme tests run the core and the theme host together on Slint's testing back
 window (`tests/tests/seams/common/mod.rs`):
 
 - `composed(|host| ...)` boots a `FakeHost` with the default theme and what the closure adds
-  (stub plugins, `discover(dir)` for theme folders), and a `ThemeHost` on it.
+  (`FakeCatalog`, `FakeStore` or `FakeService` plugins, `discover(dir)` for theme folders), and
+  the app shell the app ships (`AppShell`) on it, over a `FakePlatform` and the core's
+  `FakeClock`. `host.ui` is the shell's `ThemeHost`.
 - `write_theme(parent, id, theme_section, files)` writes a data-only theme folder for a test.
 - `fixture_themes()` is `tests/fixtures/themes`, holding `fixture-grid`.
 - `host.ui.start()` shows the saved theme, `host.ui.switch(&id)` another one.
 - `host.dispatch(Command::...)` drives the core through the shell, which renders when the core
   changed; `host.pump()` carries out what the theme asked through `Host`.
+- The core runs on a fake clock, so a test never sleeps: `host.advance(duration)` moves it,
+  `host.until(Area::X, pred)` runs the core until `pred` holds, and `host.run_until_idle()` runs
+  it until every task waits. None of them renders.
 
 `Composed` is a `ThemeDriver` (`nexus-testkit`): a test drives the theme as a player does, through
 accessible labels, keys, clicks and the passing of time, and never through the `Vm` globals or
@@ -653,7 +659,10 @@ The theme test files:
 | `tests/tests/seams/themes.rs` | The default theme compiles and renders every screen; inheritance; the rules above; options |
 | `tests/tests/seams/switching.rs` | Switching, rollback on a broken theme, dev-mode reload |
 | `tests/tests/seams/slots.rs` | Slot items in the default theme and in `fixture-grid` |
-| `tests/tests/seams/default_theme/` | The default theme, one module per screen: Home, the Library, the Game Hub, the Catalog, Downloads, Settings, the emulator pages, and the on-screen keyboard |
+| `tests/tests/seams/default_theme/` | The default theme, one module per screen: Home, the Library, the Catalog, the Game Hub and its releases, Downloads, installs, play, the trailer, notices, Settings, the emulator pages, the keyboards, and the theme's files |
+| `tests/tests/seams/gamepad.rs` | A gamepad drives the default theme through its keys |
+| `tests/tests/seams/sounds.rs` | Which sounds play |
+| `tests/tests/seams/system_theme.rs` | The default theme's machine settings, over a fake system plugin |
 | `tests/tests/seams/screenshots.rs` | The README's screenshots, rendered offscreen |
 
 ```sh

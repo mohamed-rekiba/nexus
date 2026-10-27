@@ -165,11 +165,12 @@ version = "0.1.0"
 host_api = "^0.2"
 platforms = ["linux", "macos", "windows"]
 console = "PC"
-capabilities = ["catalog", "launcher", "slots", "game_installer"]
+capabilities = ["catalog", "launcher", "slots", "game_installer", "configurator"]
 install_note = "Installs a PC game from its folder, a GOG installer or an AppImage, ..."
 
 [permissions]
-process = ["folder:games", "system:umu-run", "system:wine", "system:wine64", "system:sh"]
+process = ["folder:games", "umu/umu-run", "system:umu-run", "system:wine", "system:wine64", "system:sh", "system:gamescope", "system:gamemoderun"]
+network = ["api.github.com", "github.com", "*.githubusercontent.com"]
 
 [[permissions.filesystem]]
 folder = "games"
@@ -177,6 +178,11 @@ write = true
 
 [[permissions.filesystem]]
 folder = "packages"
+
+[system]
+id = "PC"
+name = "PC"
+color = "#7ee2b0"
 ```
 
 And a service, `plugins/services/playstation-store/plugin.toml`:
@@ -303,16 +309,14 @@ reaches the host, and it is `Clone`, so capability objects keep their own copy:
 #[async_trait]
 impl CodePlugin for PcPlugin {
     async fn init(&self, ctx: PluginContext) -> PluginResult<Provided> {
-        let platform = ctx
-            .services()
-            .get::<HostInfo>()
-            .and_then(|h| h.platform)
-            .or_else(Platform::current)
-            .unwrap_or(Platform::Linux);
-        let pc = Arc::new(Pc { ctx, platform });
+        let host = ctx.services().get::<HostInfo>();
+        let platform = host.as_ref().and_then(|h| h.platform).or_else(Platform::current).unwrap_or(Platform::Linux);
+        let runs_32bit = host.is_some_and(|h| h.runs_32bit);
+        let pc = Arc::new(Pc { ctx, platform, runs_32bit, not_games: Mutex::default() });
         Ok(Provided {
             catalog: Some(pc.clone()),
             launcher: Some(pc.clone()),
+            configurator: Some(pc.clone()),
             game_installer: Some(pc.clone()),
             slots: Some(pc),
             ..Provided::default()
@@ -342,11 +346,12 @@ part it adds.
 
 `HostPath` is a path in a host folder: `folder` (the grant's name), `root` (which of the
 player's folders for that name, an index into `Folders::roots`) and `path` (a `RelPath`
-inside it). A plugin finds its games by walking the roots, as `Pc::games` does:
+inside it). A plugin finds its games by walking the roots, as `Pc::pc_folders` and `Pc::games`
+do:
 
 ```rust
 for root in folders.roots(GAMES).await? {
-    let dir = HostPath::new(GAMES, root.root, path(CONSOLE_FOLDER)?);
+    let dir = HostPath::new(GAMES, root.root, RelPath::new(CONSOLE_FOLDER)?);
     for entry in folders.list(&dir).await.unwrap_or_default() {
         // ...
     }
@@ -378,8 +383,9 @@ stops the process.
 
 ### Host services
 
-`HostInfo` has `api_version`, `platform` (an `Option<Platform>`) and `safe_mode`. Prefer its
-`platform` over `Platform::current()`: tests set it with `FakeHost::platform`.
+`HostInfo` has `api_version`, `platform` (an `Option<Platform>`), `safe_mode` and `runs_32bit`
+(the host runs 32-bit Linux programs). Prefer its `platform` over `Platform::current()`: tests
+set it with `FakeHost::platform`.
 
 `VpnGate::check()` tells whether the player's "Download only through a VPN" lets the plugin
 fetch now: `Ok(VpnPass::Open)`, `Ok(VpnPass::Unbound { reason })` where the system can't bind
@@ -422,7 +428,7 @@ The files are in `crates/nexus-api/src/`. What the built-in plugins provide:
 | Plugin | Capabilities |
 |---|---|
 | `emu-kyty`, `emu-shadps4` | catalog, downloader, installer, configurator, launcher, compatibility, slots, game_installer |
-| `emu-pc` | catalog, launcher, slots, game_installer |
+| `emu-pc` | catalog, launcher, slots, game_installer, configurator |
 | `emu-steam` | catalog, launcher, slots, releases, metadata |
 | `release-catalog` | releases, configurator, slots |
 | `playstation-store` | metadata |
@@ -552,8 +558,9 @@ to `false`, the Catalog has no "Hidden" filter.
 
 An emulator that provides `releases` itself is its console's only catalog: the core asks no
 other plugin for that console (the Steam plugin's console, `Steam`). The Game Catalog gives no
-list for a console whose `show_<console>` setting (`show_ps5`) is `false`. Its settings schema names one such toggle for each console an emulator turned on
-plays. The library is the emulator's, so that console's installed games stay.
+list for a console whose `show_<console>` setting (`show_ps5`) is `false`. Its settings schema
+names one such toggle for each console an emulator turned on plays. The library is the
+emulator's, so that console's installed games stay.
 
 ### Metadata
 
@@ -584,8 +591,8 @@ Rust struct with `schemars::schema_for!`. The host stores the values; the theme 
 From `plugins/services/release-catalog/src/lib.rs`:
 
 ```rust
-#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
-#[serde(crate = "nexus_api::serde", deny_unknown_fields)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(crate = "nexus_api::serde")]
 #[schemars(crate = "nexus_api::schemars")]
 pub struct Settings {
     /// Where the catalog files are: `https://xyz.dev/catalog` gives
@@ -597,12 +604,15 @@ pub struct Settings {
     #[serde(default)]
     #[schemars(title = "Refresh from the forums")]
     pub refresh_from_forums: bool,
+    // ...
 }
 
 #[async_trait]
 impl Configurator for Catalogs {
     async fn schema(&self, _scope: &ConfigScope) -> PluginResult<Value> {
-        Ok(serde_json::to_value(schemars::schema_for!(Settings))?)
+        let mut schema = serde_json::to_value(schemars::schema_for!(Settings))?;
+        // ... adds a "Show <console> games" toggle for each console an emulator plays.
+        Ok(schema)
     }
     async fn defaults(&self, _scope: &ConfigScope) -> PluginResult<Value> {
         Ok(serde_json::to_value(Settings::default())?)
@@ -613,7 +623,7 @@ impl Configurator for Catalogs {
 }
 ```
 
-How the core turns a schema into fields (`fields` in `crates/nexus-core/src/view.rs`):
+How the core turns a schema into fields (`fields` in `crates/nexus-core/src/settings_schema.rs`):
 
 - `boolean` is a toggle, `integer` and `number` a number, `string` a text field, and an `enum`
   or `oneOf`/`anyOf` of `const`s a choice. Other properties are left out.
@@ -663,26 +673,39 @@ item's `action` and `args`. After it, the host reads the plugin's slots again. T
 are the host's own: `HOST_OPEN_SETTINGS` (`"host:open-settings"`) opens Settings, and
 `HOST_INSTALL_GAME` installs a package.
 
-KytyPS5's `items` shows each kind:
+The emulator kit's `ConsoleEmulator::items`, which KytyPS5 and shadPS4 provide, shows each
+kind (trimmed):
 
 ```rust
 Ok(match (request.slot, request.game.as_deref()) {
     (SlotId::GameBadge, Some(game)) => {
-        vec![item("compat", games::compat_badge(&self.status(game).await?, self.platform))]
+        vec![item("compat", games::compat_badge(&self.status(game).await?, self.host.platform))]
     }
-    (SlotId::EmulatorPanel, None) => vec![item(
-        "check",
-        SlotContent::Action {
-            label: "Check for new builds".into(),
-            action: "check".into(),
-            args: Value::Null,
-            style: ActionStyle::Secondary,
-            icon: None,
-        },
-    )],
+    (SlotId::GameDetailSection, Some(game)) => {
+        // ... the title id, the version and the build, as rows.
+        vec![item(self.spec.section, SlotContent::Section { title: F::NAME.into(), rows })]
+    }
+    (SlotId::EmulatorPanel, None) => {
+        let mut items = self.builds.switch_items().await;
+        for found in self.candidates().await.unwrap_or_default() {
+            items.push(item(
+                &format!("install-{}", found.label),
+                SlotContent::Action {
+                    label: format!("Install {}", found.label),
+                    action: HOST_INSTALL_GAME.into(),
+                    args: serde_json::to_value(&found.source)?,
+                    style: ActionStyle::Secondary,
+                    icon: None,
+                },
+            ));
+        }
+        items.push(self.controls().keyboard_panel());
+        items.extend(self.builds.update_items().await);
+        items
+    }
     (SlotId::SettingsPanel, None) => vec![item(
         "settings",
-        SlotContent::SettingsPanel { title: "KytyPS5".into(), scope: ConfigScope::Emulator },
+        SlotContent::SettingsPanel { title: F::NAME.into(), scope: ConfigScope::Emulator },
     )],
     _ => Vec::new(),
 })
@@ -693,7 +716,8 @@ Themes render each item with the accessible label `<plugin-id>:<item-id>`, such 
 
 ## Errors
 
-`PluginError` (`crates/nexus-api/src/error.rs`) carries text only:
+`PluginError` (`crates/nexus-api/src/error.rs`) carries text, except a typed precondition, which
+carries data:
 
 | Variant | Use it for |
 |---|---|
@@ -774,10 +798,13 @@ cargo test -p playstation-store
 cargo test -p release-catalog
 ```
 
+Code that takes a `Storage` tests over `nexus_testkit::MemStorage`, a plugin's data folder in
+memory, as the emulator kit and `release-catalog` do.
+
 ### The fake host
 
 `crates/nexus-testkit` runs a real core over a temporary data folder with fake HTTP, processes,
-desktop, torrents, VPNs and archives.
+windows, login session, opener, torrents, VPNs and archives, and a fake clock.
 
 - `FakeHost::new()` builds one. Add plugins with `built_in(PluginBox)`,
   `third_party(PluginBox)`, `plugin(StubPlugin)` or `discover(dir)`. Set the system with
@@ -792,6 +819,10 @@ desktop, torrents, VPNs and archives.
   `SpawnedProcess`, which can `exit(code)`.
 - `test.core.dispatch(Command::...)` drives the app as the UI does; `test.core.view()` reads
   the view models a theme would get.
+- Time is the `FakeClock`'s (`host.clock()` before boot, `test.clock` after): tokio's time,
+  paused at boot. A test never sleeps. `test.until(Area::Library, |core| ...)` returns once the
+  check holds, asking again after each change in that area. `test.clock.advance(d)` fires the
+  timers due in `d`, and `run_until_idle()` lets the woken work run.
 
 `StubPlugin::from_toml(manifest)` is a plugin made from a manifest, with `provides(|ctx| ...)`
 for its `init`, `console(name)`, and `panics_on_init`, `hangs_on_init`, `fails_on_init`,
@@ -817,8 +848,8 @@ Most tests need a plugin of a usual shape, and build it from a few choices:
 rules the host relies on, for every capability it provides: unique game ids, an unknown game
 failing, a schema that is a JSON object and defaults that pass `validate`, slot ids unique in
 each slot, each `[[keymap]]` button once, and a full install, uninstall and launch through the
-host. Each broken rule panics
-with `contract <capability>: ...`. From `tests/tests/shadps4.rs`:
+host. Each broken rule panics with `contract <capability>: ...`. From
+`tests/tests/seams/shadps4.rs`:
 
 ```rust
 #[tokio::test]
@@ -832,23 +863,24 @@ where `boot` serves a release and a compatibility list on `FakeHttp`, writes a g
 boots the plugin:
 
 ```rust
-let test = FakeHost::new()
-    .platform(Some(Platform::Linux))
-    .built_in(PluginBox::code(ShadPlugin))
-    .boot_core()
-    .await;
+let host = FakeHost::new().platform(Some(Platform::Linux));
+host.http().serve(RELEASES, serde_json::to_vec(&releases).unwrap());
+// ... the compatibility list and a game folder.
+let test = host.built_in(PluginBox::code(ShadPlugin)).boot_core().await;
 ```
 
-`tests/tests/seams/contracts.rs` shows the suite catching a stub catalog that lists one game twice.
+`tests/tests/seams/contracts.rs` shows the suite catching a stub catalog that lists one game
+twice.
 
 ### The tests crate
 
-`tests/` (package `nexus-tests`) holds the seam tests: one module per area in `tests/tests/seams/` (one test binary), with
-shared helpers in `tests/tests/seams/common/mod.rs`. Each plugin has its own file: `kyty.rs`,
-`shadps4.rs`, `pc.rs`, `metadata.rs`, `catalog_refresh.rs`, `slots.rs` and more. An area with
+`tests/` (package `nexus-tests`) holds the seam tests: one module per area in
+`tests/tests/seams/` (one test binary), with shared helpers in
+`tests/tests/seams/common/mod.rs`. Each plugin has its own file: `kyty.rs`, `shadps4.rs`,
+`pc.rs`, `steam.rs`, `metadata.rs`, `catalog_refresh.rs`, `slots.rs` and more. An area with
 many tests is a folder with a module per part, such as `releases/`, `app/` and
-`default_theme/`. A new plugin adds its crate to `[dev-dependencies]` in `tests/Cargo.toml`, a file
-here, and its `mod` line in `main.rs`.
+`default_theme/`. A new plugin adds its crate to `[dev-dependencies]` in `tests/Cargo.toml`, a
+file here, and its `mod` line in `main.rs`.
 
 ```sh
 cargo test -p nexus-tests --test seams shadps4::  # one area

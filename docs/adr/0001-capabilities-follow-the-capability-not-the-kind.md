@@ -13,8 +13,9 @@ nothing: data capabilities only give the core data.
 
 ## Decision
 
-- One `init` trait replaces `EmulatorPlugin`, `ServicePlugin` and `SystemPlugin`. Themes keep
-  having no `init`.
+- One `init` trait, `CodePlugin`, replaces `EmulatorPlugin`, `ServicePlugin` and
+  `SystemPlugin`. Themes keep having no `init`: they implement `ThemePlugin`. The host holds
+  either as a `PluginBox` (`PluginBox::code` or `PluginBox::theme`).
 - Any plugin with `init` may provide the data capabilities: `catalog`, `releases`,
   `metadata`, `slots`, `configurator` and the rest.
 - The manifest `kind` stays, and it still governs privileges: the system capabilities,
@@ -22,7 +23,10 @@ nothing: data capabilities only give the core data.
 
 ## Consequences
 
-- The kernel checks privileges by kind, and nothing else by kind.
-- A manifest test shows that a plugin that isn't `system` can't declare system capabilities.
+- The kernel checks privileges by kind (`validate` in `crates/nexus-core/src/kernel.rs`).
+  Beyond privileges, `validate` uses the kind only to tell a theme from a plugin with code.
+- A manifest test shows that a plugin that isn't `system` can't declare system capabilities:
+  `a_plugin_that_isn_t_system_can_t_declare_system_capabilities` in
+  `tests/tests/seams/boot.rs`.
 - The plugin API changes, so `API_VERSION` goes from 0.1.0 to 0.2.0, with every `plugin.toml`
   `host_api` in the same commit (step 8 of the architecture plan).

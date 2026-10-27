@@ -35,7 +35,8 @@ A download goes to `<folder>/torrent-<info hash>`. `<folder>` is, in order:
 - the folder the player typed on the download sheet, which must be inside one of the
   emulator's packages folders;
 - the folder last picked for that console (`app.download_folder.<console>`);
-- `<console>` in the emulator's first packages folder (`PS5` when the release doesn't say).
+- `<console>` in the emulator's first packages folder. When the release doesn't name its
+  console, it is the one the emulator's manifest names, else the emulator's id.
 
 A typed folder is saved for the next download of the same console. At most 32 downloads are
 kept. A start checks the free space first: "Not enough free space in the download folder:
@@ -100,8 +101,9 @@ in [desktop.md](desktop.md#quitting).
 
 ### Downloads through a VPN
 
-"Download only through a VPN" (`app.vpn_only`) is off by default. The rules are in
-`crates/nexus-core/src/vpn.rs` and `crates/nexus-core/src/torrents/vpn.rs`; what each system can do is in
+"Download only through a VPN" (`app.vpn_only`) is off by default. The rules are in the VPN
+subsystem (`crates/nexus-core/src/vpn.rs`) and the torrents subsystem's gate
+(`crates/nexus-core/src/torrents/vpn.rs`). What each system can do is in
 [desktop.md](desktop.md#downloads-through-a-vpn).
 
 - The VPN in use is the one the player picked (`app.vpn`). With none picked, it is the first
@@ -278,8 +280,9 @@ first unpacks the RAR, ZIP, 7z and TAR archives in the download, but not one wit
 
 ### The install job
 
-The core owns the job (`crates/nexus-core/src/game_installs.rs`). The plugin's `GameInstaller`
-gets the download's folder as a `HostPath` and an `InstallJob`. Plugins never see real paths.
+The game installs subsystem owns the job (`crates/nexus-core/src/game_installs/`). The
+plugin's `GameInstaller` gets the download's folder as a `HostPath` and an `InstallJob`.
+Plugins never see real paths.
 
 - The plugin writes into a work folder, `<dest>.part`, and moves it into place at the end. On
   an error the work folder goes.
@@ -559,19 +562,22 @@ sibling `.unpacking` folder first, so a failure leaves the old build.
 
 ## Tests
 
-- `tests/tests/seams/torrents.rs`, `unpack.rs`, `release_archives.rs`, `game_installs.rs`, `kyty.rs`,
-  `shadps4.rs`, `pc.rs` and `vpn.rs` drive the core with fakes, as a player or a plugin does.
-- The tests in `crates/nexus-app/src/archives.rs` unpack real zip, tar.gz, GOG, script installer and RAR files,
-  and check the refusals and cancel. The RAR files in `crates/nexus-app/testdata/` come from the
-  `unrar` crate's test data.
+- `tests/tests/seams/torrents.rs`, `unpack.rs`, `release_archives.rs`, `game_installs.rs`,
+  `kyty.rs`, `shadps4.rs`, `pc.rs` and `vpn.rs` drive the core with fakes, as a player or a
+  plugin does.
+- The torrents subsystem's phase rules have table tests in `torrents/phase.rs`, and the game
+  installs subsystem has its own tests on fake ports (`game_installs/tests.rs`).
+- The tests in `crates/nexus-app/src/archives.rs` unpack real zip, tar.gz, GOG, script
+  installer and RAR files, and check the refusals and cancel. The RAR files in
+  `crates/nexus-app/testdata/` come from the `unrar` crate's test data.
 - `contract::archives` in the test kit checks the refusals every `Archives` adapter makes: `..`,
   an absolute path, a link out, a password and no room, plus a plain archive that unpacks. It
   runs against `HostArchives` (with real zip files) in `crates/nexus-app/src/archives.rs`, and
   against `FakeArchives` in `crates/nexus-testkit/src/archives.rs`.
 - The archive plan's tests in `crates/nexus-core/src/archive_plan.rs` run a table of hostile
   paths and 5000 generated listings, and check that no planned path leaves the folder.
-- `tests/tests/seams/real_archives.rs` installs the real KytyPS5 and shadPS4 release archives, with
-  `NEXUS_REAL_ARCHIVES` set to a folder of them.
+- `tests/tests/seams/real_archives.rs` installs the real KytyPS5 and shadPS4 release
+  archives, with `NEXUS_REAL_ARCHIVES` set to a folder of them.
 - A real transfer between two local librqbit sessions runs with `NEXUS_TORRENT_TESTS=1`.
 
 ## Limits

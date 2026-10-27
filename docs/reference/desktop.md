@@ -131,8 +131,8 @@ fallback. On Gamescope it is what actually shows the launcher, since winit doesn
 
 ### The running game
 
-The running-game module runs while the game runs. The game ends when none of its processes is
-left, whatever its first process does.
+The sessions subsystem's watch (`sessions/watch.rs`) runs while the game runs. The game ends
+when none of its processes is left, whatever its first process does.
 
 1. Every 250 ms it tries `show_game`. It stops trying once a window came up, or after
    `show_timeout` (20 s, in `HostConfig`).
@@ -151,7 +151,8 @@ left, whatever its first process does.
    game this way. Elsewhere a closed window stops nothing: a launcher's own menu or setup
    window closes before the game's opens.
 
-`game_in_front` is app state. `Core::game_in_front()` reads it and never asks the desktop.
+`game_in_front` is the sessions subsystem's state. `Core::game_in_front()` reads it and never
+asks the desktop.
 
 ### A game another program starts
 
@@ -213,8 +214,8 @@ The Guide button (PS or Xbox) is not sent to the theme as a key. In
   with no question.
 - A hold with no game running opens the power menu (`Vm.power-menu`).
 
-The theme's Resume button calls `Host.show-game`, which shows the game again when the launcher
-is in front of it.
+The theme's Resume button sends `SessionCmd::ShowGame` through `Host.command`, which shows the
+game again when the launcher is in front of it.
 
 ## The pad acts only while the launcher has the focus
 
@@ -312,7 +313,8 @@ opens Settings. The config keeps a summary of the PC the notice was for (`app.pc
 
 ## Downloads through a VPN
 
-"Download only through a VPN" (`app.vpn_only`) differs by system (`crates/nexus-app/src/vpn.rs`):
+"Download only through a VPN" (`app.vpn_only`) differs by system. The host system plugin's VPN
+adapter (`plugins/system/host/src/vpn.rs`) decides:
 
 - Linux: a VPN is a WireGuard or OpenVPN interface in `/sys/class/net`, or another layer-3
   tunnel, up and with an address. Tailscale, ZeroTier, Docker, libvirt, LXC and Waydroid
