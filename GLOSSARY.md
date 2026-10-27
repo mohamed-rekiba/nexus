@@ -66,6 +66,10 @@ run when the current build changes.
 **Forum list**: a forum's list of topics with a torrent, from the tracker's API: the hash, size,
 peers and upload time of each topic, with no titles.
 
+**Hand-off** (`HandOff`): the fields of a download that another area writes: the unpack of its
+archives and the install from it. They change only through the torrents subsystem's
+`hand_off` call.
+
 **Hold**: the wait of a fetch or a refresh that failed or waits for the VPN. The work doesn't
 try again before the hold ends. Each hold is twice as long as the one before, at most the
 fresh time.
@@ -83,6 +87,10 @@ name as the archive spells it, its size, its kind, and whether it needs a passwo
 **Own build**: an emulator build the player built or installed, used instead of a downloaded
 one while the `own_build` setting is on. The host never updates it.
 
+**Phase rules** (`torrents::phase::next`): what the BitTorrent engine's stats mean for a
+download, and what the core does next: unpause, stop, finished or stopped. They exist once, in
+the core; the adapter and the fake decide nothing.
+
 **Port**: what the core needs from the outside world, as one interface. The app plugs in real ones and
 the tests plug in fakes.
 _Avoid_: adapter (that is the thing plugged in), driver
@@ -93,9 +101,22 @@ Game Catalog keeps it in `refreshed/`.
 **Schedule**: the Game Catalog's rules for when a fetch or a refresh runs and how long a hold
 is (`schedule.rs`). They take the time as an input, so the tests need no clock.
 
+**Seed-only start**: a start of a finished download after a restart. The torrent starts paused,
+checks its files, and seeds only when every piece is there. It never downloads.
+
+**Snapshot**: a subsystem's state read whole, in one lock. Reading it changes nothing.
+
+**Subsystem**: one area of the core's state with its own lock, saved records and ports. The core
+sends it commands, reads its snapshot and turns its events into work. The torrents subsystem
+is the first.
+
 **Test run**: a new build runs once with `--help` before it becomes current. A build that fails
 it is removed.
 
 **Topic**: one release thread of a forum, as a catalog file lists it: the title, magnet link,
 size, peers and game info. `topic.rs` has its typed model, which the refresh and the reader
 share.
+
+**Torrent stats** (`TorrentStats`): what the BitTorrent engine reports for a torrent: its
+state (checking, live, paused or error), whether every piece is in, bytes, rates, peers and
+the error. Raw numbers, with no decision.

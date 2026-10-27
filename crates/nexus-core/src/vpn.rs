@@ -14,6 +14,10 @@
 //! them, then waits for the player as always. A restart forgets the waiting: the downloads
 //! come back paused.
 //!
+//! The downloads' half lives in the torrents subsystem (`torrents/vpn.rs`): the gate before a
+//! download talks to the swarm, and the kill switch. This module keeps the rule, the VPN list
+//! for the view, and the plugins' gate.
+//!
 //! Plugins see the same rule through [`HostVpnGate`], in their service registry: while the
 //! setting is on, a plugin asks it before it fetches what the player downloads in bulk. When
 //! the gate tells a plugin to wait, the kill switch checks the VPN every `vpn_poll` too. When

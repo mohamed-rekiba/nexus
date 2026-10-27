@@ -36,7 +36,7 @@ nexus-app (the binary)         ──▶ nexus-ui-host, nexus-core, every built-
 | Crate | Owns |
 | --- | --- |
 | `crates/nexus-api` | The plugin API. The plugin traits, `PluginManifest`, `Capability`, `Provided`, `PluginContext` and its facades (`ConfigStore`, `Storage`, `Folders`, `Programs`, `HttpClient`, `Logger`, `EventSink`, `ServiceRegistry`), `RelPath` and `HostPath`, plans (`DownloadPlan`, `LaunchSpec`), slots, `Event`, `VpnGate`. Semver-versioned: a manifest's `host_api` must match `API_VERSION`, which is set by hand with the API, not from Nexus's version. |
-| `crates/nexus-core` | The kernel and the app. Plugin lifecycle and registry (`Kernel`), the event bus (`EventBus`), settings (`ConfigService`), the app state and commands (`Core`, `AppState`, `Command`), view building (`view.rs`), HTTP downloads, torrents, unpacking, game installs, launches, VPN rules, catalogs, "This PC", the launcher update, and the port traits. |
+| `crates/nexus-core` | The kernel and the app. Plugin lifecycle and registry (`Kernel`), the event bus (`EventBus`), settings (`ConfigService`), the app state and commands (`Core`, `AppState`, `Command`), the subsystems (`torrents/`), view building (`view.rs`), HTTP downloads, unpacking, game installs, launches, VPN rules, catalogs, "This PC", the launcher update, and the port traits. |
 | `crates/nexus-ui-api` | The theme contract. View models (`vm.rs`: `AppView` and the rest), the theme manifest (`ThemeManifest`), design tokens, and `contract/types.slint` with the `Vm` and `Host` globals. No toolkit code. |
 | `crates/nexus-ui-host` | `ThemeSet` (finds themes, resolves `extends`) and `ThemeHost`: compiles a theme with `slint-interpreter`, binds the view models, loads images, turns gamepad buttons into keys, and swaps themes. |
 | `crates/nexus-app` | The binary. The event loop, render scheduling, the image loader, and the system adapters: `desktop.rs`, `processes.rs` (a running game's processes), `torrents.rs` (librqbit), `archives.rs` and `libarchive.rs`, `hardware.rs` and `gpu_probe.rs` (Vulkan), `trailer.rs` (libmpv), `gamepad.rs` (gilrs), `audio.rs` (rodio), `http.rs` (reqwest), `disk.rs`, `clock.rs`. |
@@ -76,10 +76,13 @@ theme callback ─▶ UiRequest::Core(Command) ─▶ Core::dispatch ─▶ AppS
 1. A theme calls a `Host` callback. `ThemeHost::wire` turns it into a `UiRequest`: a core
    `Command`, or something only the app can do (`SwitchTheme`, `PlaySound`, `OpenUrl`,
    `OpenPath`, `Quit`, `Restart`, `Trailer`, `Render`).
-2. `Core::dispatch` runs the command. All state lives in one `AppState` behind a mutex in
+2. `Core::dispatch` runs the command. Most state lives in one `AppState` behind a mutex in
    `Core`: navigation (`nav`, a stack of `Route`s), selection, the library, details, store
-   metadata, catalogs and offers, downloads, sessions, notices and more.
-3. A change calls `Core::changed(area)`. It sends a `Change { area }` (the torrents, the
+   metadata, catalogs and offers, downloads, sessions, notices and more. An area that became a
+   subsystem keeps its own state behind its own lock: the torrents so far (see
+   [Subsystems](#subsystems)). `view::build` reads each subsystem's snapshot before it locks
+   `AppState`.
+3. A change calls `Core::changed(area)`, or a subsystem's `Notifier`. It sends a `Change { area }` (the torrents, the
    catalogs, the installs, …) to `Core::changes()`, a broadcast for the core and its tests, and
    publishes `Event::StateChanged` on the `EventBus` (a `tokio::sync::broadcast` channel of
    1024; a reader that falls behind skips the oldest). Plugins see neither the change nor its
@@ -270,6 +273,11 @@ starts with a stand-in for each; the app plugs in the real ones; the test kit ha
 - `Desktop` says which window is in front (`front`), brings one of the game's processes' windows
   up (`show_game`), brings the launcher back (`show_launcher`), and answers `has_window`,
   `window_close_ends_game` (macOS only), `problem` and start at login.
+- `Torrents` is raw: `start` (paused or not), `unpause`, `stop`, and `stats`, which reports the
+  engine's state (`TransferState`: checking, live, paused, error), whether every piece is in,
+  bytes, rates, peers and the error. Reading `stats` changes nothing. What those numbers mean
+  for a download is the core's phase rules (`torrents/phase.rs`), so the adapter and the fake
+  decide nothing.
 - `Hardware::specs` is slow (it runs system tools); the core calls it once a run, off the async
   threads. `free_bytes` gives a disk's free space.
 - `Archives` has one call, `unpack`, which takes the free space the core read from `Hardware`.
@@ -312,6 +320,27 @@ Some `app` keys the core keeps: `theme`, `theme-options`, `disabled_plugins`,
 Downloaded games are not in the data folder: they go to the player's `packages` folders and are
 installed into the `games` folders.
 
+## Subsystems
+
+`Core` is splitting into subsystems, one for each area of its state. The torrents are the
+first (`crates/nexus-core/src/torrents/mod.rs`); the other areas follow the same shape:
+
+- A subsystem owns its state behind its own lock, and its saved records (the torrents:
+  `app.torrents` and `app.seed_downloads`). Nothing else takes that lock or writes those keys.
+- It takes only the ports it needs (`TorrentPorts`: `Torrents`, `Network`, `Hardware`,
+  `Clock`), never the `Kernel` or the `Core`.
+- The core sends it commands (`handle(TorrentCmd)`) and reads it whole (`snapshot()`). A read
+  changes nothing.
+- It publishes its changes with its area on the core's one change signal, through a
+  `Notifier`. `Core::changes()` is the merge of every subsystem's changes.
+- What other areas must do about it goes out as events (`TorrentEvent`), which the core turns
+  into work: an unpack, a notice, a catalog refresh. A subsystem never calls into the core.
+- A command that needs another area first is resolved by the core, which hands the subsystem
+  plain data (`add(NewDownload)`). Fields another area still writes on a record (`HandOff`:
+  the unpack and the install) change through one call, `hand_off`.
+- The subsystem never calls out while it holds its lock, and the core takes a subsystem's lock
+  only when it doesn't hold `AppState`.
+
 ## Downloads and torrents
 
 There are two download paths.
@@ -326,17 +355,22 @@ signature match. Unpacking (`unpack.rs`) refuses paths and links that leave the 
 downloads are saved under `app.downloads`, and installs under `app.installs.<plugin>`, so both
 resume after a crash.
 
-**Torrents (Catalog releases).** `crates/nexus-core/src/torrents.rs` drives the `Torrents`
-port. A download starts only from the player (`Command::DownloadRelease`). Its states
-(`TorrentState`) are Resolving (reading the torrent's files), Ready (waiting for the player),
-Checking, Downloading, Paused, Complete, Failed and Cancelled. Files go to
-`<folder>/torrent-<info hash>`, where the folder is the one picked (inside one of the
-emulator's `packages` folders) or `<console>` in the first one. A start checks free space
-first. Each download is saved under `app.torrents.<info hash>`; after a restart unfinished ones
-come back paused. A finished download seeds while `app.seed_downloads` is on, at most
-`SEED_UPLOAD_LIMIT` (128 KiB/s); after a restart it seeds only once its files check out
-(`TorrentStart::SeedOnly`). One task (`watch_torrents`) polls
-the running torrents every `torrent_poll` (1 s) while any run.
+**Torrents (Catalog releases).** The torrents subsystem (`crates/nexus-core/src/torrents/`)
+drives the `Torrents` port. A download starts only from the player
+(`Command::Torrent(TorrentCmd::Download)`). The core resolves the release and the folder first
+(`release_downloads.rs`), then adds the download to the subsystem. Its states (`TorrentState`)
+are Resolving (reading the torrent's files), Ready (waiting for the player), Checking,
+Downloading, Paused, Complete, Failed and Cancelled. Files go to `<folder>/torrent-<info hash>`,
+where the folder is the one picked (inside one of the emulator's `packages` folders) or
+`<console>` in the first one. A start checks free space first. Each download is saved under
+`app.torrents.<info hash>` (`torrents/records.rs`); after a restart unfinished ones come back
+paused. A finished download seeds while `app.seed_downloads` is on, at most `SEED_UPLOAD_LIMIT`
+(128 KiB/s); after a restart it starts paused, to check its files, and seeds only once they
+check out (a seed-only start). One task (`TorrentsSubsystem::watch`) reads the running
+torrents' stats every `torrent_poll` (1 s) while any run. `phase::next` turns each reading
+into the download's next phase and a list of actions (unpause, stop, finished, stopped), and
+the task runs them in order. A finished download goes to the core as an event, which unpacks
+its archives and posts the notice.
 
 The app's adapter (`crates/nexus-app/src/torrents.rs`) is librqbit 9.0.1: one session, made at
 first use, no local peer discovery, at most 50 peers, the upload cap above, and JSON
@@ -469,11 +503,12 @@ sound and Bluetooth controls only when it's the whole screen. The view model is 
 
 ## Downloads only through a VPN
 
-`crates/nexus-core/src/vpn.rs`, with the `Network` port. While `app.vpn_only` is on, the core
-binds the torrent port to the VPN's interface (`Torrents::route`) before a download talks to
+`crates/nexus-core/src/vpn.rs` holds the rule, and the torrents subsystem's
+`torrents/vpn.rs` applies it to the downloads, with the `Network` port. While `app.vpn_only` is
+on, the subsystem binds the torrent port to the VPN's interface (`Torrents::route`) before a download talks to
 the swarm. Without that VPN a download waits (`waiting_vpn`).
 
-The kill switch: while a download runs or waits, `watch_torrents` checks the VPN every
+The kill switch: while a download runs or waits, the subsystem's watch task checks the VPN every
 `vpn_poll` (2 s). When it drops or changes, every running download pauses and is marked
 waiting, and `Torrents::stop_all` closes the connections. When a VPN is back, the port is
 rebound and only the waiting downloads start again. A restart forgets the waiting.
@@ -481,7 +516,8 @@ rebound and only the waiting downloads start again. A restart forgets the waitin
 Plugins see the rule through `VpnGate::check`: `Ok(VpnPass::Open)`, `Ok(VpnPass::Unbound)` (the
 setting is on but this system can't bind traffic), or `Err(VpnBlock::Waiting | NoVpn)`. The gate
 only says whether the VPN is up; a plugin's HTTP doesn't go through it. When a plugin waited and
-the VPN comes back, the core reads the catalogs again.
+the VPN comes back, the subsystem says so (`TorrentEvent::VpnBack`) and the core reads the
+catalogs again.
 
 The app adapter binds librqbit with `SessionOptions::bind_device_name`. Linux and macOS are
 supported; on Windows the setting is unavailable.
@@ -623,6 +659,12 @@ Four seams, from the highest:
    inheritance, switching and rollback, slots, gamepad, screenshots.
 4. **The desktop adapter against real windows** (`crates/nexus-app/tests/desktop.rs`). It opens
    windows, so it runs only with `NEXUS_DESKTOP_TESTS=1`.
+
+Pure rules have table tests beside them, below the seams: the torrent phase rules
+(`torrents/phase.rs`) are one example. `FakeTorrents` is a swarm simulator: it reports raw
+stats and decides nothing, so the seam tests run the core's real phase rules.
+`NEXUS_TORRENT_TESTS=1` runs a real librqbit transfer between two sessions on this computer
+(`crates/nexus-app/src/torrents.rs`), with no DHT, trackers or other network.
 
 `NEXUS_REAL_RELEASES=1` runs `crates/nexus-app/src/real_releases.rs`, which installs the real
 emulator builds over the network. `scripts/check.sh` runs `cargo fmt --check`, clippy with

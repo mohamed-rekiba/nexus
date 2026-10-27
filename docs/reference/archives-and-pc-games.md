@@ -23,8 +23,10 @@ Each step is separate. Nothing in a download runs on the computer during these s
 
 ## Torrents
 
-The core's side is `crates/nexus-core/src/torrents.rs`. The app plugs in the `Torrents` port
-on librqbit 9.0.1 (`crates/nexus-app/src/torrents.rs`).
+The core's side is the torrents subsystem, `crates/nexus-core/src/torrents/`. The app plugs in
+the `Torrents` port on librqbit 9.0.1 (`crates/nexus-app/src/torrents.rs`). The port only
+reports the engine's raw stats; the core's phase rules (`torrents/phase.rs`) decide what they
+mean, and the core unpauses or stops the torrent.
 
 ### Where files go
 
@@ -87,7 +89,7 @@ says: "The downloaded files were moved, changed or deleted, so this download can
 Remove it, or download it again."
 
 Stop sharing stops one download until the next start. Turning the setting off stops every
-download from seeding. A download that finishes with the setting off is paused at once.
+download from seeding. A download that finishes with the setting off stops at once.
 
 ### Quitting
 
@@ -99,7 +101,7 @@ in [desktop.md](desktop.md#quitting).
 ### Downloads through a VPN
 
 "Download only through a VPN" (`app.vpn_only`) is off by default. The rules are in
-`crates/nexus-core/src/vpn.rs`; what each system can do is in
+`crates/nexus-core/src/vpn.rs` and `crates/nexus-core/src/torrents/vpn.rs`; what each system can do is in
 [desktop.md](desktop.md#downloads-through-a-vpn).
 
 - The VPN in use is the one the player picked (`app.vpn`). With none picked, it is the first
