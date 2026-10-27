@@ -103,21 +103,22 @@ dev mode (`--dev`) the same timer reloads edited theme files.
 
 ### Kinds
 
-`crates/nexus-api/src/plugin.rs` has one root trait and four kinds:
+`crates/nexus-api/src/plugin.rs` has one root trait and two kinds of code:
 
 - `Plugin`: `manifest()` and `shutdown()`. Every plugin has these.
-- `EmulatorPlugin: Plugin` adds `init(ctx) -> Provided`: emulator capabilities.
-- `ServicePlugin: Plugin` adds the same `init`, for code that adds to other plugins' games and
-  runs none. The kernel rejects a service that declares anything but `metadata`, `releases`,
-  `slots` and `configurator`.
+- `CodePlugin: Plugin` adds `init(ctx) -> Provided`. Emulators, services and system plugins
+  implement it.
 - `ThemePlugin: Plugin` adds `files()`, and has no other code. A theme has no `init`.
-- `SystemPlugin: Plugin` adds the same `init`, for the machine's own settings: the system
-  capabilities below, and `configurator`. Only a system plugin may declare those, or run
-  programs long (`Programs::stream`) or through polkit.
 
-The host holds a plugin as a `PluginByKind`. Built-in plugins register at compile time with
-`inventory`: `PluginFactory::emulator`, `::service`, `::theme` or `::system`. A crate registers only if
-it is linked, which is why `nexus-app` names each plugin crate (`use emu_kyty as _;`).
+The manifest's `kind` (`emulator`, `service`, `theme`, `system`) says what a plugin is for, and
+governs privileges only (ADR 0001): only a `system` plugin may declare the system capabilities,
+or run programs long (`Programs::stream`) or through polkit. Any plugin with code may provide
+the data capabilities; Steam's emulator plugin lists releases and describes games. A theme
+declares only `theme`, and no other kind may declare it.
+
+The host holds a plugin as a `PluginBox`: code or a theme. Built-in plugins register at compile
+time with `inventory`: `PluginFactory::code` or `::theme`. A crate registers only if it is
+linked, which is why `nexus-app` names each plugin crate (`use emu_kyty as _;`).
 
 ### Capabilities
 
@@ -127,24 +128,34 @@ fails with `LoadError::CapabilityMismatch`.
 
 | Capability | Trait | Provided by |
 | --- | --- | --- |
-| `catalog` | `Catalog` (the installed games) | all three emulators |
+| `catalog` | `Catalog` (the installed games) | all four emulators |
 | `downloader` | `Downloader` (plans emulator downloads) | KytyPS5, shadPS4 |
 | `installer` | `Installer` (installs builds) | KytyPS5, shadPS4 |
 | `configurator` | `Configurator` (settings schemas) | KytyPS5, shadPS4, release-catalog |
 | `launcher` | `Launcher` (`prepare` a `LaunchSpec`) | all three emulators |
 | `compatibility` | `Compatibility` | KytyPS5, shadPS4 |
-| `controllers` | `Controllers` | KytyPS5, shadPS4 |
 | `game_installer` | `GameInstaller` | all three emulators |
 | `slots` | `Slots` (badges, actions, sections as data) | all three emulators, release-catalog |
-| `metadata` | `Metadata` (store art and details) | playstation-store |
-| `releases` | `Releases` (what the Catalog offers) | release-catalog |
-| `saves`, `shaders`, `launch_middleware` | `Saves`, `Shaders`, `LaunchMiddleware` | none yet |
+| `metadata` | `Metadata` (store art and details) | playstation-store, Steam |
+| `releases` | `Releases` (what the Catalog offers) | release-catalog, Steam |
 | `theme` | (`ThemePlugin::files`) | themes only |
 | `network`, `vpn`, `bluetooth`, `audio`, `power` | `NetworkSettings`, `VpnSettings`, `BluetoothSettings`, `AudioSettings`, `PowerSettings` | the `system` plugin |
 | `os_updates`, `os_install` | `OsUpdates`, `OsInstall` (Nexus OS) | the `system` plugin (Linux) |
 
 The core aggregates across plugins through these traits only: one library from every
-`Catalog`, one Catalog from every `Releases`.
+`Catalog`, one Catalog from every `Releases`. The API has a seam only where a plugin uses it:
+saves, shader caches, launch middleware and firmware downloads went in API 0.2.0. An
+emulator's controllers come from its manifest's `[[keymap]]`.
+
+A `Release` carries no one catalog's schema. Its fields are what the core sorts, groups,
+searches and downloads by. What the catalog only shows is `facts` (`Fact { kind, label,
+value, url }`, with a typed `FactKind`), its game's store data is `metadata` (a
+`GameMetadata`), and why it may not install is `install_warning`. The plugin makes all three:
+the core shows the facts in their order, writes a release date in words, puts a `genre` fact
+under the genre chips, and shows a `compatibility` fact (ProtonDB's tier) on its own.
+
+A precondition the host knows is typed, and the core words it for the player:
+`PluginError::OwnBuildMissing { has_downloaded, folder, program }` names the emulator's page.
 
 ### Manifest
 
@@ -175,15 +186,17 @@ and the only `Loader` is `DataThemeLoader`, so a third-party plugin is a data-on
 `Kernel::boot` (`crates/nexus-core/src/kernel.rs`):
 
 1. **Validate** each candidate: the manifest reads, `host_api` matches, safe mode (third-party
-   plugins are rejected), folder grant names, kind rules (an emulator or service needs code, a
-   theme declares `theme`, a third-party plugin is data-only), and no duplicate id.
+   plugins are rejected), folder grant names, kind rules (only a system plugin declares system
+   capabilities or long-running and polkit programs, a plugin with code needs a native
+   runtime, a theme declares only `theme`, a third-party plugin is data-only), and no
+   duplicate id.
    A theme for other systems is rejected. An emulator or service for other systems loads, but
    turned off, with a warning.
 2. **Resolve** load order with `petgraph` (`resolve.rs`): `tarjan_scc` finds cycles and names
    each member; the rest is sorted with `toposort`. A theme's `[theme] extends` counts as a
    dependency. A plugin whose dependency is missing, the wrong version or rejected is rejected.
-3. **Load**: built-in plugins are already code; folders go to a `Loader`. Code whose kind
-   differs from its manifest's `kind` is rejected.
+3. **Load**: built-in plugins are already code; folders go to a `Loader`. A theme manifest
+   with code, or a code manifest with a theme, is rejected.
 4. **Init** the `eager` plugins (today only the default theme, which has no `init`). Others
    init the first time the core asks `Kernel::provided` for them. Dependencies init first.
 5. **Deactivate**: `Kernel::deactivate` deactivates dependents first, then calls `shutdown`
@@ -378,8 +391,7 @@ action `host:install-game` (`HOST_INSTALL_GAME`) installs a package the plugin l
 1. `Launching::claim`: one game at a time; a second press of Play is refused. No game starts
    while its emulator installs or updates.
 2. A first play whose emulator isn't installed asks the player first (`ask_to_install`).
-3. `Launcher::prepare` returns a `LaunchSpec`; launch middleware (Tower-style, ordered by
-   `before`/`after`, priority and id) may change or stop it. No built-in plugin adds any yet.
+3. `Launcher::prepare` returns a `LaunchSpec`, or a precondition the Game Hub shows.
 4. The program must pass `permissions.process`. Its output goes to the game's log.
 5. The process is spawned, a `Session` is added, `Event::ProcessStarted` is published, and the
    Running screen opens.

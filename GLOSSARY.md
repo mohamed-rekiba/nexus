@@ -39,6 +39,9 @@ _Avoid_: update, state event
 **Clock**: the time the core runs on: what time it is, and its waits. The app's clock is real time.
 _Avoid_: timer, time source
 
+**Code plugin** (`CodePlugin`): a plugin with code and an `init`: an emulator, a service or a
+system plugin. One trait for all three; the kind decides only the privileges.
+
 **Console emulator** (`ConsoleEmulator`, emulator-kit): a console emulator's games, compatibility
 list, settings and page, served from a console spec and a flavor.
 
@@ -51,6 +54,11 @@ then its meta file.
 
 **Current build**: the downloaded build games start. The build before it stays for a rollback.
 Both are saved in the plugin's `versions.json`.
+
+**Fact** (`Fact`): one thing a catalog says about a release: a kind, a label, a value and an
+optional page. Its `FactKind` tells the host what it is about, such as the publisher, the
+release date or a compatibility tier.
+_Avoid_: attribute, property
 
 **Fake clock**: the clock in tests. Its time moves only when a test moves it, or when every task waits for a
 timer.
@@ -73,8 +81,12 @@ fresh time.
 **Host facades** (`Host`, emulator-kit): the narrow parts of a `PluginContext` the kit takes:
 storage, folders, programs, HTTP, settings and the log.
 
+**Install warning**: why a release may not install, shown beside it in the Game Hub. The
+plugin that lists the release sets it; the release stays listed.
+
 **Kind**: what sort of plugin a manifest says it is: emulator, service, theme or system. The kind decides
-a plugin's privileges.
+a plugin's privileges only: the system capabilities, long-running programs and polkit are for
+system plugins. Any code plugin may provide the data capabilities.
 _Avoid_: type, category
 
 **Listing** (`ArchiveEntry`): an archive's entries as a format reader gives them, unchecked: each
@@ -83,12 +95,21 @@ name as the archive spells it, its size, its kind, and whether it needs a passwo
 **Own build**: an emulator build the player built or installed, used instead of a downloaded
 one while the `own_build` setting is on. The host never updates it.
 
+**Plugin box** (`PluginBox`): a plugin as the host registers it: code or a theme.
+
 **Port**: what the core needs from the outside world, as one interface. The app plugs in real ones and
 the tests plug in fakes.
 _Avoid_: adapter (that is the thing plugged in), driver
 
+**Precondition**: what must happen before a plugin call can work, such as installing a build.
+A plugin says it in words, or with a typed precondition (`OwnBuildMissing`) that the host
+words for the player.
+
 **Refreshed copy**: a base copy brought up to date from its forums' feeds and forum lists. The
 Game Catalog keeps it in `refreshed/`.
+
+**Release metadata**: a release's `GameMetadata`: its game's words and art from a store, such as
+Steam's. The host fills in from it what the `metadata` plugins leave out.
 
 **Schedule**: the Game Catalog's rules for when a fetch or a refresh runs and how long a hold
 is (`schedule.rs`). They take the time as an input, so the tests need no clock.
