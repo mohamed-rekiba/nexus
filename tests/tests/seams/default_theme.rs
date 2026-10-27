@@ -828,6 +828,8 @@ fn the_trailer_s_controls_hide_while_it_plays_and_a_key_shows_them() {
     home_line(&mut host);
     let text: slint::SharedString = "t".into();
     host.instance().window().dispatch_event(slint::platform::WindowEvent::KeyPressed { text });
+    // The shell starts the trailer: it opens, then the app's player says it plays.
+    host.pump();
     let playing = TrailerStatus { playing: true, loading: false, position: 42.0, duration: 130.0 };
     host.ui.set_trailer(Some(playing.clone()));
     wait(&mut host, 100);

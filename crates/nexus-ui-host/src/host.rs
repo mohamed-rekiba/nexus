@@ -500,11 +500,6 @@ impl ThemeHost {
         self.images.still_wanted()
     }
 
-    /// An image's bytes, decoded here, on the UI thread: for tests.
-    pub fn add_image(&mut self, key: ImageKey, bytes: Result<Vec<u8>, String>) {
-        self.images.insert(key, bytes);
-    }
-
     /// An image made ready on a worker thread (see [`crate::prepare`]); `None` when the
     /// loader dropped it because it left the screen.
     pub fn add_pixels(

@@ -13,8 +13,11 @@ futures.workspace = true
 hex.workspace = true
 nexus-api.workspace = true
 nexus-core.workspace = true
+# The app shell's platform, for FakePlatform.
+nexus-ui-host.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+slint-interpreter.workspace = true
 tempfile.workspace = true
 # Paused time, for FakeClock.
 tokio = { workspace = true, features = ["test-util"] }
