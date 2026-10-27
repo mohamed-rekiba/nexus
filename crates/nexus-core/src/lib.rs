@@ -20,6 +20,7 @@ mod error;
 mod facades;
 mod folders;
 mod game_installs;
+mod game_words;
 mod grid_query;
 mod guard;
 mod hardware;
