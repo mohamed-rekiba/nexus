@@ -323,7 +323,7 @@ fn shoot_vpn(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path, pr
     use slint::platform::Key;
     host.test.network.up("wg-se");
     host.test.network.down("work");
-    host.dispatch(Command::SetVpnOnly(true));
+    host.dispatch(Command::Vpn(nexus_core::VpnCmd::SetOnly(true)));
     host.dispatch(Command::Navigate(Route::Settings));
     host.load_images();
     // Down past GAMES, UPDATES' two rows and LAUNCHER's six to the VPN switch.
@@ -372,7 +372,7 @@ fn shoot_vpn(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path, pr
     // The VPN drops: the setting reads it again. The keys are still on the release.
     key(host, Key::Escape);
     host.test.network.down("wg-se");
-    host.dispatch(Command::SetVpnOnly(true));
+    host.dispatch(Command::Vpn(nexus_core::VpnCmd::SetOnly(true)));
     key(host, Key::Return);
     shoot(window, &out.join(format!("{prefix}-download-sheet-no-vpn.png")));
     key(host, Key::Return);
@@ -380,7 +380,7 @@ fn shoot_vpn(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path, pr
     shoot(window, &out.join(format!("{prefix}-downloads-waiting.png")));
 
     // Off: the download reads its files, then goes.
-    host.dispatch(Command::SetVpnOnly(false));
+    host.dispatch(Command::Vpn(nexus_core::VpnCmd::SetOnly(false)));
     run_until(host, 1000, |core| {
         core.view().downloads.torrents.iter().any(|t| t.id == release.id && t.state == "ready")
     });

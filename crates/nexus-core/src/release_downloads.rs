@@ -193,7 +193,7 @@ impl Core {
                 format!("Download stopped: {title}. Open Downloads to see why"),
             ),
             TorrentEvent::Problem(message) => self.problem(message),
-            TorrentEvent::VpnsRead(vpns) => self.keep_vpns(vpns),
+            TorrentEvent::VpnsRead(vpns) => self.vpn().keep(vpns),
             // Not in the VPN check: the catalogs' fetches would hold up the kill switch.
             TorrentEvent::VpnBack => {
                 let core = self.clone();

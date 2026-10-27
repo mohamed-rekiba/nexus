@@ -132,7 +132,7 @@ async fn downloads_go_through_the_vpn_and_pause_when_it_drops() {
     let s = setup().await;
     let t = &s.t;
     t.network.up("wg0");
-    t.core.dispatch(Command::SetVpnOnly(true)).await.unwrap();
+    t.core.dispatch(Command::Vpn(nexus_core::VpnCmd::SetOnly(true))).await.unwrap();
     running(t, ASTRO).await;
     assert_eq!(t.torrents.routes(), [Some("wg0".to_owned())], "bound to the VPN before it starts");
     assert_eq!(t.core.view().settings.vpn.route, "wg0");
@@ -151,7 +151,7 @@ async fn another_vpn_stops_the_downloads_and_starts_them_on_its_interface() {
     let s = setup().await;
     let t = &s.t;
     t.network.up("wg0");
-    t.core.dispatch(Command::SetVpnOnly(true)).await.unwrap();
+    t.core.dispatch(Command::Vpn(nexus_core::VpnCmd::SetOnly(true))).await.unwrap();
     running(t, ASTRO).await;
 
     t.network.down("wg0");
@@ -166,7 +166,7 @@ async fn the_vpn_back_starts_only_the_downloads_it_stopped() {
     let s = setup().await;
     let t = &s.t;
     t.network.up("wg0");
-    t.core.dispatch(Command::SetVpnOnly(true)).await.unwrap();
+    t.core.dispatch(Command::Vpn(nexus_core::VpnCmd::SetOnly(true))).await.unwrap();
     running(t, ASTRO).await;
     running(t, BOLT).await;
     // The player pauses Bolt: it stays paused.
@@ -188,7 +188,7 @@ async fn the_vpn_back_starts_only_the_downloads_it_stopped() {
 async fn with_no_vpn_a_new_download_waits_and_reads_its_files_once_the_vpn_connects() {
     let s = setup().await;
     let t = &s.t;
-    t.core.dispatch(Command::SetVpnOnly(true)).await.unwrap();
+    t.core.dispatch(Command::Vpn(nexus_core::VpnCmd::SetOnly(true))).await.unwrap();
     download(t, ASTRO).await;
 
     let waiting = row(t, ASTRO);
@@ -230,14 +230,14 @@ async fn turning_the_setting_on_moves_running_downloads_onto_the_vpn_and_off_let
     running(t, ASTRO).await;
     t.network.up("wg0");
 
-    t.core.dispatch(Command::SetVpnOnly(true)).await.unwrap();
+    t.core.dispatch(Command::Vpn(nexus_core::VpnCmd::SetOnly(true))).await.unwrap();
     until(t, ASTRO, "started on the VPN", |r| r.state == "checking" && !r.waiting_vpn).await;
     assert_eq!(t.torrents.routes(), [Some("wg0".to_owned())]);
     assert_eq!(t.torrents.stopped_all(), 1);
 
     t.network.down("wg0");
     until(t, ASTRO, "waiting", |r| r.waiting_vpn).await;
-    t.core.dispatch(Command::SetVpnOnly(false)).await.unwrap();
+    t.core.dispatch(Command::Vpn(nexus_core::VpnCmd::SetOnly(false))).await.unwrap();
     until(t, ASTRO, "started without the VPN", |r| r.state == "checking" && !r.waiting_vpn).await;
     assert_eq!(t.torrents.routes(), [Some("wg0".to_owned()), None]);
 }
@@ -249,11 +249,11 @@ async fn where_the_system_can_t_tell_a_vpn_the_player_picks_one() {
     t.network.picks_only();
     t.network.up("en0");
     t.network.up("utun4");
-    t.core.dispatch(Command::SetVpnOnly(true)).await.unwrap();
+    t.core.dispatch(Command::Vpn(nexus_core::VpnCmd::SetOnly(true))).await.unwrap();
     download(t, ASTRO).await;
     assert!(row(t, ASTRO).waiting_vpn, "no network counts as the VPN until the player picks one");
 
-    t.core.dispatch(Command::SetVpn("utun4".into())).await.unwrap();
+    t.core.dispatch(Command::Vpn(nexus_core::VpnCmd::Choose("utun4".into()))).await.unwrap();
     until(t, ASTRO, "ready", |r| r.state == "ready").await;
     assert_eq!(t.torrents.routes(), [Some("utun4".to_owned())]);
     let vpn = t.core.view().settings.vpn;
@@ -272,10 +272,10 @@ async fn the_setting_lists_the_vpns_and_connects_disconnects_and_adds_them() {
     assert_eq!(listed, [("wg0".to_owned(), true), ("work".to_owned(), false)]);
     assert!(vpn.can_import && vpn.problem.is_empty());
 
-    t.core.dispatch(Command::ConnectVpn("work".into())).await.unwrap();
-    t.core.dispatch(Command::DisconnectVpn("wg0".into())).await.unwrap();
+    t.core.dispatch(Command::Vpn(nexus_core::VpnCmd::Connect("work".into()))).await.unwrap();
+    t.core.dispatch(Command::Vpn(nexus_core::VpnCmd::Disconnect("wg0".into()))).await.unwrap();
     let file = full_path("/home/me/se-1.conf");
-    t.core.dispatch(Command::ImportVpn(file.clone().into())).await.unwrap();
+    t.core.dispatch(Command::Vpn(nexus_core::VpnCmd::Import(file.clone().into()))).await.unwrap();
     assert_eq!(t.network.calls(), ["connect work".to_owned(), "disconnect wg0".into(), format!("import {file}")]);
     let connected: Vec<String> =
         t.core.view().settings.vpn.vpns.into_iter().filter(|v| v.connected).map(|v| v.name).collect();
@@ -283,7 +283,7 @@ async fn the_setting_lists_the_vpns_and_connects_disconnects_and_adds_them() {
 
     // A refusal says why, on the setting.
     t.network.refuse("Error: Connection activation failed");
-    assert!(t.core.dispatch(Command::ConnectVpn("wg0".into())).await.is_err());
+    assert!(t.core.dispatch(Command::Vpn(nexus_core::VpnCmd::Connect("wg0".into()))).await.is_err());
     assert_eq!(t.core.view().settings.vpn.error, "Error: Connection activation failed");
 }
 
@@ -292,7 +292,7 @@ async fn where_downloads_can_t_be_bound_the_setting_stays_off_and_says_why() {
     let s = setup().await;
     let t = &s.t;
     t.network.unavailable("Not available on Windows");
-    assert!(t.core.dispatch(Command::SetVpnOnly(true)).await.is_err());
+    assert!(t.core.dispatch(Command::Vpn(nexus_core::VpnCmd::SetOnly(true))).await.is_err());
     let vpn = t.core.view().settings.vpn;
     assert!(!vpn.only);
     assert_eq!(vpn.problem, "Not available on Windows");
@@ -303,7 +303,7 @@ async fn the_vpn_is_checked_every_vpn_poll_on_the_clock_and_not_between() {
     let s = setup_on(|h| h.vpn_poll(Duration::from_secs(2))).await;
     let t = &s.t;
     t.network.up("wg0");
-    t.core.dispatch(Command::SetVpnOnly(true)).await.unwrap();
+    t.core.dispatch(Command::Vpn(nexus_core::VpnCmd::SetOnly(true))).await.unwrap();
     running(t, ASTRO).await;
 
     // The watch began when the download did: its first check is two seconds after that.

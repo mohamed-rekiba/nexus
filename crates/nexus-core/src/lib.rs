@@ -62,3 +62,4 @@ pub use themes::{DataTheme, DirFiles};
 pub use torrents::{TorrentAction, TorrentCmd};
 /// The path checks every unpacker runs before it writes.
 pub use unpack::{inside, link_stays_inside, stays_inside};
+pub use vpn::VpnCmd;

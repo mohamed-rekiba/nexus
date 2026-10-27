@@ -1,16 +1,13 @@
 //! The downloads' side of "Download only through a VPN": the gate before a download talks to
 //! the swarm, and the kill switch. See [`crate::vpn`] for the rule.
 
-use std::sync::atomic::Ordering;
-
 use super::phase::{TorrentStart, TorrentState};
 use super::{TorrentEvent, TorrentsSubsystem};
-use crate::vpn::{pick, vpn_chosen, vpn_only};
 
 impl TorrentsSubsystem {
     /// Downloads go only through the VPN. Never where the system can't bind them to one.
     pub(super) fn vpn_only(&self) -> bool {
-        vpn_only(self.inner.records.config(), self.inner.ports.network.get().as_ref())
+        self.inner.vpn.only()
     }
 
     /// Some download waits for the VPN.
@@ -20,7 +17,7 @@ impl TorrentsSubsystem {
 
     /// Some plugin waits for the VPN, with the setting on.
     pub fn plugin_waits_for_vpn(&self) -> bool {
-        self.vpn_only() && self.inner.vpn_waited.load(Ordering::SeqCst)
+        self.inner.vpn.plugin_waits()
     }
 
     /// The interface downloads may use now: `Ok(None)` for any, while the setting is off.
@@ -29,10 +26,7 @@ impl TorrentsSubsystem {
         if !self.vpn_only() {
             return Ok(None);
         }
-        let network = self.inner.ports.network.get();
-        let finds = network.finds_vpns();
-        let vpns = tokio::task::spawn_blocking(move || network.vpns()).await.unwrap_or_default();
-        let route = pick(&vpns, &vpn_chosen(self.inner.records.config()), finds);
+        let (vpns, route) = self.inner.vpn.read().await;
         self.emit(TorrentEvent::VpnsRead(vpns));
         route.map(Some).ok_or(())
     }
@@ -113,7 +107,7 @@ impl TorrentsSubsystem {
                     self.reroute(route).await;
                 }
                 self.resume_waiting().await;
-                back = self.vpn_only() && self.inner.vpn_waited.swap(false, Ordering::SeqCst);
+                back = self.vpn_only() && self.inner.vpn.take_waited();
             }
         }
         self.state().vpn_checking = false;

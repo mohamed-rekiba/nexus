@@ -5,7 +5,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use futures::future::BoxFuture;
@@ -381,10 +380,9 @@ struct Inner {
     desktop: Arc<dyn Desktop>,
     hardware: Arc<dyn Hardware>,
     torrents: Arc<dyn Torrents>,
-    /// The VPNs: the port the app plugged in, until a system plugin provides them.
-    network: crate::vpn::NetworkSource,
-    /// A plugin's [`VpnGate`] said "wait for the VPN", and the VPN check hasn't seen it back.
-    vpn_waited: Arc<AtomicBool>,
+    /// "Download only through a VPN", over the port the app plugged in until a system plugin
+    /// provides the VPNs. Plugins get it as their [`VpnGate`].
+    vpn: crate::vpn::VpnRule,
     archives: Arc<dyn Archives>,
     clock: Arc<dyn Clock>,
     order: Vec<PluginId>,
@@ -511,6 +509,7 @@ impl Kernel {
         }
 
         let config = config.unwrap_or_else(|| Arc::new(ConfigService::open(host.data_dir.join("config.json"))));
+        let vpn = crate::vpn::VpnRule::new(config.clone(), network);
         let kernel = Kernel {
             inner: Arc::new(Inner {
                 host,
@@ -522,8 +521,7 @@ impl Kernel {
                 desktop,
                 hardware,
                 torrents,
-                network: crate::vpn::NetworkSource::new(network),
-                vpn_waited: Arc::default(),
+                vpn,
                 archives,
                 clock,
                 order: order.clone(),
@@ -571,29 +569,18 @@ impl Kernel {
         &self.inner.hardware
     }
 
-    /// The VPNs, from the system plugin that provides them, or else from the app's port.
-    pub(crate) fn network(&self) -> Arc<dyn Network> {
-        self.inner.network.get()
-    }
-
-    /// From now on the VPNs come from `network` (a system plugin's).
-    pub(crate) fn use_network(&self, network: Arc<dyn Network>) {
-        self.inner.network.set(network);
+    /// The VPN rule, which the VPN and torrents subsystems share with the plugins.
+    pub(crate) fn vpn_rule(&self) -> &crate::vpn::VpnRule {
+        &self.inner.vpn
     }
 
     /// The ports the torrents subsystem takes.
     pub(crate) fn torrent_ports(&self) -> crate::torrents::TorrentPorts {
         crate::torrents::TorrentPorts {
             torrents: self.inner.torrents.clone(),
-            network: self.inner.network.clone(),
             hardware: self.inner.hardware.clone(),
             clock: self.inner.clock.clone(),
         }
-    }
-
-    /// Set while a plugin waits for the VPN: see [`crate::vpn::HostVpnGate`].
-    pub(crate) fn vpn_waited(&self) -> &Arc<AtomicBool> {
-        &self.inner.vpn_waited
     }
 
     pub(crate) fn archives(&self) -> &Arc<dyn Archives> {
@@ -814,11 +801,7 @@ impl Kernel {
                 safe_mode: host.safe_mode,
                 runs_32bit: host.runs_32bit,
             }))
-            .insert(Arc::new(VpnGate::new(Arc::new(crate::vpn::HostVpnGate {
-                config: self.inner.config.clone(),
-                network: self.inner.network.clone(),
-                waited: self.inner.vpn_waited.clone(),
-            }))))
+            .insert(Arc::new(VpnGate::new(Arc::new(self.inner.vpn.clone()))))
             .build();
         PluginContext::new(ContextParts {
             plugin: id.clone(),

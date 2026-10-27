@@ -193,18 +193,8 @@ pub enum Command {
     /// The catalogs' downloads: download a release, act on a download, install it, and
     /// "Keep sharing finished downloads".
     Torrent(crate::TorrentCmd),
-    /// "Download only through a VPN". On is refused where the system can't bind downloads to
-    /// a VPN, and says why.
-    SetVpnOnly(bool),
-    /// The VPN downloads use, by its name. Empty: the first connected one, where the system
-    /// finds VPNs.
-    SetVpn(String),
-    /// Connects or disconnects a VPN the system can switch, by its name.
-    ConnectVpn(String),
-    DisconnectVpn(String),
-    /// Adds a VPN from a provider's file (WireGuard `.conf`, OpenVPN `.ovpn`) and connects it.
-    /// `~/` is the home folder.
-    ImportVpn(std::path::PathBuf),
+    /// "Download only through a VPN", and the VPNs: connect, disconnect and add them.
+    Vpn(crate::VpnCmd),
     /// Something the player asked of the machine: Wi-Fi, Bluetooth, sound, power, Nexus OS.
     System(crate::system::SystemCommand),
     /// The player agreed to install the emulator a game needs: install it, then play.
@@ -453,10 +443,6 @@ pub(crate) struct AppState {
     pub offer_art: HashMap<GameKey, (PluginId, nexus_api::ImageSource)>,
     /// The offer each installed game is, by the game: its Game Hub has the offer's Steam data.
     pub installed_offers: HashMap<GameKey, GameKey>,
-    /// The VPNs, as last read.
-    pub vpns: Vec<crate::Vpn>,
-    /// Why the last connect, disconnect or import of a VPN failed.
-    pub vpn_error: Option<String>,
     /// The game selected in the Catalog. Home's selection stays a library game.
     pub catalog_selected: Option<GameKey>,
     /// The Catalog's grid as last built: on another screen, each view shows this one instead
@@ -485,6 +471,7 @@ pub(crate) struct Inner {
     pub torrents: crate::torrents::TorrentsSubsystem,
     pub notices: crate::notices::NoticesSubsystem,
     pub launcher_update: crate::launcher_update::LauncherUpdateSubsystem,
+    pub vpn: crate::vpn::VpnSubsystem,
     /// Held while the catalogs are read: see [`Core::refresh_releases`].
     pub reading_catalogs: tokio::sync::Mutex<()>,
 }
@@ -538,8 +525,6 @@ impl Core {
             asked: HashSet::new(),
             catalog_selected: None,
             catalog_grid: None,
-            vpns: Vec::new(),
-            vpn_error: None,
             grid_columns: HashMap::new(),
             prefetch: None,
             prefetched: HashSet::new(),
@@ -558,7 +543,7 @@ impl Core {
                 kernel.torrent_ports(),
                 crate::torrents::Polls { torrents: kernel.host().torrent_poll, vpn: kernel.host().vpn_poll },
                 crate::torrents::Records::new(kernel.config().clone()),
-                kernel.vpn_waited().clone(),
+                kernel.vpn_rule().clone(),
                 Notifier::new(changes.clone(), kernel.events().clone()),
                 events,
             );
@@ -576,6 +561,17 @@ impl Core {
                 kernel.config().clone(),
                 Notifier::new(changes.clone(), kernel.events().clone()),
             );
+            // The setting or the VPNs changed: the downloads' kill switch looks at once.
+            let kill_switch = torrents.clone();
+            let vpn = crate::vpn::VpnSubsystem::new(
+                kernel.vpn_rule().clone(),
+                kernel.host().home.clone(),
+                Notifier::new(changes.clone(), kernel.events().clone()),
+                Arc::new(move || {
+                    let torrents = kill_switch.clone();
+                    Box::pin(async move { torrents.vpn_changed().await })
+                }),
+            );
             Inner {
                 kernel,
                 state: Mutex::new(state),
@@ -587,6 +583,7 @@ impl Core {
                 torrents,
                 notices,
                 launcher_update,
+                vpn,
                 reading_catalogs: tokio::sync::Mutex::new(()),
             }
         });
@@ -662,6 +659,11 @@ impl Core {
     /// The launcher's own update.
     pub(crate) fn launcher_update(&self) -> &crate::launcher_update::LauncherUpdateSubsystem {
         &self.inner.launcher_update
+    }
+
+    /// "Download only through a VPN", and the VPNs.
+    pub(crate) fn vpn(&self) -> &crate::vpn::VpnSubsystem {
+        &self.inner.vpn
     }
 
     pub(crate) fn state(&self) -> MutexGuard<'_, AppState> {
@@ -891,35 +893,7 @@ impl Core {
             }
             Command::CatalogMore => self.more(true),
             Command::Torrent(command) => self.torrent(command).await,
-            Command::SetVpnOnly(on) => {
-                if on && let Some(why) = self.inner.kernel.network().problem() {
-                    return Err(CoreError::Invalid(why));
-                }
-                self.inner
-                    .kernel
-                    .config()
-                    .set(&["app", "vpn_only"], Value::Bool(on))
-                    .map_err(|e| CoreError::Io(e.to_string()))?;
-                self.vpn_changed().await;
-                Ok(())
-            }
-            Command::SetVpn(name) => {
-                self.inner
-                    .kernel
-                    .config()
-                    .set(&["app", "vpn"], Value::String(name))
-                    .map_err(|e| CoreError::Io(e.to_string()))?;
-                self.vpn_changed().await;
-                Ok(())
-            }
-            Command::ConnectVpn(name) => self.vpn_call(move |n| n.connect(&name)).await,
-            Command::DisconnectVpn(name) => self.vpn_call(move |n| n.disconnect(&name)).await,
-            Command::ImportVpn(file) => {
-                let home = self.inner.kernel.host().home.clone();
-                let file = crate::folders::expand(&file.to_string_lossy(), home.as_deref())
-                    .ok_or_else(|| CoreError::Invalid(format!("{} isn't a full path", file.display())))?;
-                self.vpn_call(move |n| n.import(&file)).await.map(|_| ())
-            }
+            Command::Vpn(command) => self.vpn().handle(command).await,
             Command::AskResult(game) => {
                 let build = self.build_of(&game.plugin);
                 self.state().result_prompt = Some((game, build));
@@ -1124,7 +1098,7 @@ impl Core {
                 self.refresh_settings().await;
             }
             Route::Settings => {
-                self.refresh_vpns().await;
+                self.vpn().refresh().await;
                 self.refresh_settings().await;
             }
             // Read once; a new catalog address reads them again. The Catalog opens at once and
@@ -1423,8 +1397,8 @@ impl Core {
 
     async fn open_game(&self, game: GameKey) -> CoreResult<()> {
         // A game a catalog offers: its download sheet names the VPN in use.
-        if self.vpn_only() && self.offer(&game).is_some() {
-            self.refresh_vpns().await;
+        if self.vpn().only() && self.offer(&game).is_some() {
+            self.vpn().refresh().await;
         }
         self.load_detail(&game).await?;
         self.select(&game);

@@ -3176,7 +3176,7 @@ fn where_downloads_can_t_be_bound_the_vpn_switch_says_why_and_stays_off() {
 fn with_no_vpn_the_download_sheet_and_the_card_say_the_download_waits() {
     let home = tempfile::tempdir().unwrap();
     let mut host = astro_on_its_game_hub(home.path());
-    host.dispatch(Command::SetVpnOnly(true));
+    host.dispatch(Command::Vpn(nexus_core::VpnCmd::SetOnly(true)));
     press(&mut host, "release-download", ASTRO_HASH);
     let privacy = values(&host, "download-privacy").concat();
     assert!(privacy.starts_with("Your VPN isn't connected: the download waits"), "{privacy}");
@@ -3198,7 +3198,7 @@ fn with_the_vpn_connected_the_download_sheet_names_it() {
     let home = tempfile::tempdir().unwrap();
     let mut host = astro_on_its_game_hub(home.path());
     host.test.network.up("wg0");
-    host.dispatch(Command::SetVpnOnly(true));
+    host.dispatch(Command::Vpn(nexus_core::VpnCmd::SetOnly(true)));
     host.dispatch(Command::OpenGame("release-catalog:emu-kyty/PPSA01234".parse().unwrap()));
     press(&mut host, "release-download", ASTRO_HASH);
     let privacy = values(&host, "download-privacy").concat();
@@ -3582,7 +3582,7 @@ fn downloads_sums_up_its_transfers_and_says_how_they_behave() {
     assert_eq!(host.count("downloads-footer"), 0);
 
     host.test.network.up("wg0");
-    host.dispatch(Command::SetVpnOnly(true));
+    host.dispatch(Command::Vpn(nexus_core::VpnCmd::SetOnly(true)));
     let offer = "release-catalog:emu-kyty/PPSA01234".parse().unwrap();
     host.dispatch(Command::Torrent(nexus_core::TorrentCmd::Download {
         offer,

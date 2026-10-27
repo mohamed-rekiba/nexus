@@ -692,6 +692,7 @@ pub(crate) fn build(core: &Core) -> AppView {
     let torrents = core.torrents().snapshot();
     let notices = core.notices().snapshot();
     let launcher_update = core.launcher_update().snapshot();
+    let vpn = core.vpn().snapshot();
     let mut state = core.state();
 
     let route = state.nav.last().cloned().unwrap_or(Route::Home);
@@ -730,7 +731,7 @@ pub(crate) fn build(core: &Core) -> AppView {
         detail: detail_game.and_then(|key| detail_vm(core, kernel, &state, &torrents, &key)),
         catalog,
         downloads: downloads_vm(kernel, jobs, &state, &torrents),
-        settings: settings_vm(core, &state, &launcher_update),
+        settings: settings_vm(core, &state, &launcher_update, &vpn),
         emulators: emulators_vm(kernel, &state, &statuses),
         plugin_page: match &route {
             Route::Plugin(plugin) => plugin_page_vm(kernel, &state, &statuses, plugin),
@@ -1626,6 +1627,7 @@ fn settings_vm(
     core: &Core,
     state: &AppState,
     launcher_update: &crate::launcher_update::LauncherUpdateSnapshot,
+    vpn: &crate::vpn::VpnSnapshot,
 ) -> SettingsVm {
     let kernel = core.kernel();
     let manifests: Vec<_> = kernel
@@ -1673,23 +1675,19 @@ fn settings_vm(
         can_start_at_login: kernel.desktop().can_start_at_login(),
         start_at_login: core.start_at_login_on(),
         start_at_login_error: state.login_error.clone().unwrap_or_default(),
-        vpn: vpn_vm(core, state),
+        vpn: vpn_vm(vpn),
     }
 }
 
-fn vpn_vm(core: &Core, state: &AppState) -> nexus_ui_api::VpnSettingsVm {
-    let network = core.kernel().network();
-    let only = core.vpn_only();
-    let chosen = core.vpn_chosen();
-    let finds = network.finds_vpns();
+fn vpn_vm(vpn: &crate::vpn::VpnSnapshot) -> nexus_ui_api::VpnSettingsVm {
     nexus_ui_api::VpnSettingsVm {
-        problem: network.problem().unwrap_or_default(),
-        only,
-        finds,
-        can_import: network.can_import(),
-        route: if only { crate::vpn::pick(&state.vpns, &chosen, finds).unwrap_or_default() } else { String::new() },
-        chosen,
-        vpns: state
+        problem: vpn.problem.clone().unwrap_or_default(),
+        only: vpn.only,
+        finds: vpn.finds,
+        can_import: vpn.can_import,
+        route: vpn.route.clone().unwrap_or_default(),
+        chosen: vpn.chosen.clone(),
+        vpns: vpn
             .vpns
             .iter()
             .map(|v| nexus_ui_api::VpnVm {
@@ -1699,7 +1697,7 @@ fn vpn_vm(core: &Core, state: &AppState) -> nexus_ui_api::VpnSettingsVm {
                 switchable: v.switchable,
             })
             .collect(),
-        error: state.vpn_error.clone().unwrap_or_default(),
+        error: vpn.error.clone().unwrap_or_default(),
     }
 }
 

@@ -648,16 +648,20 @@ impl ThemeHost {
         )?;
         callback(
             "set-vpn-only",
-            Box::new(move |a| core(Command::SetVpnOnly(matches!(a.first(), Some(Value::Bool(true)))))),
+            Box::new(move |a| {
+                core(Command::Vpn(nexus_core::VpnCmd::SetOnly(matches!(a.first(), Some(Value::Bool(true))))))
+            }),
         )?;
-        callback("set-vpn", Box::new(move |a| core(Command::SetVpn(arg(a, 0)))))?;
-        callback("connect-vpn", Box::new(move |a| core(Command::ConnectVpn(arg(a, 0)))))?;
-        callback("disconnect-vpn", Box::new(move |a| core(Command::DisconnectVpn(arg(a, 0)))))?;
+        callback("set-vpn", Box::new(move |a| core(Command::Vpn(nexus_core::VpnCmd::Choose(arg(a, 0))))))?;
+        callback("connect-vpn", Box::new(move |a| core(Command::Vpn(nexus_core::VpnCmd::Connect(arg(a, 0))))))?;
+        callback("disconnect-vpn", Box::new(move |a| core(Command::Vpn(nexus_core::VpnCmd::Disconnect(arg(a, 0))))))?;
         callback(
             "import-vpn",
             Box::new(move |a| {
                 let path = arg(a, 0);
-                (!path.trim().is_empty()).then(|| core(Command::ImportVpn(path.trim().into()))).flatten()
+                (!path.trim().is_empty())
+                    .then(|| core(Command::Vpn(nexus_core::VpnCmd::Import(path.trim().into()))))
+                    .flatten()
             }),
         )?;
         callback(
