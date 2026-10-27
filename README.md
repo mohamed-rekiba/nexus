@@ -1,11 +1,20 @@
 # Nexus
 
-Nexus is a game launcher that helps players run PS5, PS4 and PC games from one screen made for a
-TV and a controller. It runs on Linux, macOS and Windows. It plays PS5 games with
-[KytyPS5](https://github.com/KytyPS5/KytyPS5), PS4 games with
-[shadPS4](https://github.com/shadps4-emu/shadPS4), and PC games natively or through Wine or Proton.
-Each emulator is a plugin, and each look is a theme that changes the whole layout, not only the
+Nexus is a game launcher that helps players run their games from one screen made for a TV and a
+controller. It runs on Linux, macOS and Windows. Nexus starts games through plugins: each emulator
+or game source is a plugin, and each look is a theme that changes the whole layout, not only the
 colors.
+
+These plugins ship with Nexus today:
+
+- **PS5**, with [KytyPS5](https://github.com/KytyPS5/KytyPS5).
+- **PS4**, with [shadPS4](https://github.com/shadps4-emu/shadPS4).
+- **PC games**, natively or through Wine or Proton.
+- **Steam games**, on Linux.
+
+They are the ones supported so far, not the limit of the design. Support for another emulator or
+game source is another plugin, written against `nexus-api` and built into Nexus (a plugin found on
+disk can only be a theme): see [docs/plugins.md](docs/plugins.md).
 
 | Home | Library |
 |---|---|
@@ -22,10 +31,9 @@ games. The tests also render every screen offscreen with made-up games: run
 
 ## The problem
 
-Emulators for the PS5 and the PS4 are separate programs. Each has its own builds, which change
-often, its own settings and its own command line. PC games sit in folders, and the Windows ones
-need Wine or Proton set up. None of this is made for a couch: you need a keyboard and a mouse to
-start a game.
+Emulators are separate programs. Each has its own builds, which change often, its own settings and
+its own command line. PC games sit in folders, and the Windows ones need Wine or Proton set up.
+None of this is made for a couch: you need a keyboard and a mouse to start a game.
 
 Nexus puts all of it behind one library that works with a controller. It finds your games, shows
 their art and facts, downloads and updates the official emulator builds, installs games, starts
