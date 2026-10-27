@@ -1,7 +1,7 @@
 # Development
 
 How to build Nexus, run it, test it, package it and release it. Every command runs from the
-repo root. The README's "Build, run, check" has the short version; how the code is laid out is
+repo root. The README's "From source" has the short version; how the code is laid out is
 in [architecture.md](architecture.md).
 
 ## Toolchain
@@ -243,8 +243,13 @@ one module per area), so their shared code builds and links once; `spans.rs` is 
 
 The tests need no window, GPU, controller or sound device: they use Slint's testing backend and
 fakes. `tests/` (the `nexus-tests` crate) holds the seam tests: the core's API, the plugin
-contracts and the composed host. `cargo test -p nexus-tests --test seams screenshots::` renders each
-default theme screen to PNG files in `target/tmp/screenshots/`.
+contracts and the composed host (the core and the app shell).
+`cargo test -p nexus-tests --test seams screenshots::` renders each default theme screen to PNG
+files in `target/tmp/screenshots/`.
+
+The core in a test runs on a fake clock. A test waits for work with `until(area, done)` and for a
+timer with `advance`, never with a sleep, and drives a theme through `ThemeDriver`. How to write
+one is in [architecture.md](architecture.md#tests).
 
 Some tests touch the real system, the network or files you supply. Each one skips, or returns at
 once, unless its variable is set:
@@ -256,7 +261,7 @@ once, unless its variable is set:
 | `NEXUS_KWIN_TESTS=1` | `cargo test -p nexus-app kwin_says`: asks the real KWin which window is in front | A KDE Plasma Wayland session |
 | `NEXUS_TRAILER_TESTS=1` | `cargo test -p nexus-app libmpv_plays`: plays a made-up video through the real libmpv | libmpv, and `ffmpeg` (`ffmpeg-free` on Fedora) to make the video |
 | `NEXUS_TORRENT_TESTS=1` | `cargo test -p nexus-app a_torrent_downloads`: a real BitTorrent transfer between two sessions on this computer, with no DHT, tracker or network | |
-| `NEXUS_VPN_TESTS=1` | `cargo test -p nexus-app lists_this_computer_s_networks`: lists this computer's networks; it connects nothing | |
+| `NEXUS_VPN_TESTS=1` | `cargo test -p system-host lists_this_computer_s_networks`: lists this computer's networks; it connects nothing | |
 | `NEXUS_REAL_RELEASES=1` | `cargo test -p nexus-app real -- --nocapture`: downloads and installs the newest real KytyPS5 and shadPS4 releases | The network, and some hundreds of megabytes. Anonymous GitHub API calls can hit the rate limit. |
 | `NEXUS_REAL_ARCHIVES=<folder>` | `cargo test -p nexus-tests --test seams real_archives::`: installs real release archives through the plugins on a fake web | The archives, named as GitHub has them (`KytyPS5-*-Linux-x86_64.tar.gz`, `shadps4-linux*.zip` and so on). A missing one is skipped. |
 | `NEXUS_CATALOG_FILES=<file>[:<file>…]` | `cargo test -p release-catalog catalog_files -- --nocapture`: reads catalog files through the plugin's reader and prints what each holds | Catalog files, such as the collector's |
@@ -283,7 +288,8 @@ NEXUS_DESKTOP_TESTS=1 NEXUS_DESKTOP_REQUIRE=1 xvfb-run -a -s "-screen 0 1280x800
 - Before each push: `cargo clippy --workspace --all-targets -- -D warnings` and
   `cargo test --workspace`.
 
-`make hooks-install` installs them; `make hooks-run` runs them on every file. Each cargo hook moves
+`make hooks-install` installs the commit hooks and the push hooks. `make hooks-run` runs them on
+every file. Each cargo hook moves
 into `nexus/` first when the repo root has a `nexus/Cargo.toml`, so the hooks also work while
 Nexus is a folder of a larger repo. There, name the config:
 `pre-commit run -c nexus/.pre-commit-config.yaml`.
