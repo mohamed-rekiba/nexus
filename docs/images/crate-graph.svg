@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 680" width="1000" height="680" font-family="system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
+  <title id="t">Nexus crate graph</title>
+  <desc id="d">An arrow means "depends on". nexus-app depends on nexus-ui-host and the built-in plugins. nexus-ui-host depends on nexus-core. nexus-core depends on nexus-ui-api. nexus-ui-api depends on nexus-api. The built-in plugins depend on nexus-api, and the emulators also on emulator-kit, which depends on nexus-api. nexus-testkit, used by tests only, depends on nexus-core and nexus-ui-host.</desc>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#2f7d4f"/></marker>
+    <style>
+      .box { fill: #eaf5ee; stroke: #2f7d4f; stroke-width: 1.5; }
+      .tst { fill: #f6faf7; stroke: #2f7d4f; stroke-width: 1.5; stroke-dasharray: 6 4; }
+      .name { font-size: 16px; font-weight: 600; fill: #17361f; }
+      .sub { font-size: 13px; fill: #3d5a47; }
+      .edge { stroke: #2f7d4f; stroke-width: 1.5; fill: none; }
+      .dash { stroke: #2f7d4f; stroke-width: 1.5; fill: none; stroke-dasharray: 6 4; }
+      .cap { font-size: 14px; fill: #333; }
+      .leg { font-size: 12.5px; fill: #444; }
+    </style>
+  </defs>
+  <rect width="1000" height="680" fill="#ffffff"/>
+
+  <rect class="box" x="300" y="24" width="400" height="64" rx="12"/>
+  <text class="name" x="500" y="52" text-anchor="middle">nexus-app</text>
+  <text class="sub" x="500" y="72" text-anchor="middle">the binary and the adapters for each system</text>
+
+  <rect class="box" x="60" y="156" width="340" height="64" rx="12"/>
+  <text class="name" x="230" y="184" text-anchor="middle">nexus-ui-host</text>
+  <text class="sub" x="230" y="204" text-anchor="middle">Slint: ThemeHost and AppShell</text>
+
+  <rect class="box" x="60" y="276" width="340" height="64" rx="12"/>
+  <text class="name" x="230" y="304" text-anchor="middle">nexus-core</text>
+  <text class="sub" x="230" y="324" text-anchor="middle">kernel, subsystems, flows, view::build</text>
+
+  <rect class="box" x="60" y="396" width="340" height="64" rx="12"/>
+  <text class="name" x="230" y="424" text-anchor="middle">nexus-ui-api</text>
+  <text class="sub" x="230" y="444" text-anchor="middle">the theme contract: view models, tokens</text>
+
+  <rect class="box" x="60" y="516" width="340" height="64" rx="12"/>
+  <text class="name" x="230" y="544" text-anchor="middle">nexus-api</text>
+  <text class="sub" x="230" y="564" text-anchor="middle">the plugin contract</text>
+
+  <rect class="box" x="620" y="156" width="330" height="92" rx="12"/>
+  <text class="name" x="785" y="184" text-anchor="middle">built-in plugins</text>
+  <text class="sub" x="785" y="206" text-anchor="middle">emulators: kyty, shadps4, pc, steam</text>
+  <text class="sub" x="785" y="224" text-anchor="middle">services · system · default theme</text>
+
+  <rect class="box" x="720" y="324" width="230" height="64" rx="12"/>
+  <text class="name" x="835" y="352" text-anchor="middle">emulator-kit</text>
+  <text class="sub" x="835" y="372" text-anchor="middle">code the emulators share</text>
+
+  <rect class="tst" x="430" y="276" width="160" height="64" rx="12"/>
+  <text class="name" x="510" y="304" text-anchor="middle">nexus-testkit</text>
+  <text class="sub" x="510" y="324" text-anchor="middle">tests only</text>
+
+  <path class="edge" marker-end="url(#a)" d="M400 88 L230 156"/>
+  <path class="edge" marker-end="url(#a)" d="M600 88 L785 156"/>
+  <path class="edge" marker-end="url(#a)" d="M230 220 L230 276"/>
+  <path class="edge" marker-end="url(#a)" d="M230 340 L230 396"/>
+  <path class="edge" marker-end="url(#a)" d="M230 460 L230 516"/>
+  <path class="edge" marker-end="url(#a)" d="M835 248 L835 324"/>
+  <path class="edge" marker-end="url(#a)" d="M640 248 L640 540 L400 540"/>
+  <path class="edge" marker-end="url(#a)" d="M835 388 L835 562 L400 562"/>
+  <path class="dash" marker-end="url(#a)" d="M430 308 L400 308"/>
+  <path class="dash" marker-end="url(#a)" d="M470 276 L400 214"/>
+
+  <text class="cap" x="500" y="620" text-anchor="middle">An arrow means "depends on". An edge that follows from other edges is left out.</text>
+  <text class="cap" x="500" y="642" text-anchor="middle">Of the crates Nexus ships, only nexus-app depends on the plugins, and only nexus-ui-host and nexus-app use Slint.</text>
+  <rect x="60" y="656" width="14" height="14" rx="3" class="box"/>
+  <text class="leg" x="82" y="668">a crate in the workspace</text>
+  <rect x="300" y="656" width="14" height="14" rx="3" class="tst"/>
+  <text class="leg" x="322" y="668">dashed: used by tests only</text>
+</svg>
