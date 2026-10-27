@@ -31,10 +31,10 @@ on disk can only be a theme): see [docs/plugins.md](docs/plugins.md).
 |---|---|
 | ![Game Hub](docs/screenshots/detail.jpg) | ![Settings](docs/screenshots/settings.jpg) |
 
-The screenshots show the built-in theme, `default`, on Linux, with a real library of PS5 and PC
-games. The tests also render every screen offscreen with made-up games: run
-`cargo test -p nexus-tests --test seams screenshots::`, and the PNG files go to
-`target/tmp/screenshots/`.
+The screenshots are the running app (`cargo run`, in a window of 1600 × 900) with the built-in theme,
+`default`, on Linux, with a real library of PS5, PC and Steam games. The tests also render every
+screen offscreen with made-up games: run `cargo test -p nexus-tests --test seams screenshots::`, and
+the PNG files go to `target/tmp/screenshots/`.
 
 ## The problem
 
