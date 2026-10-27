@@ -379,7 +379,7 @@ mod tests {
 
     fn manifest(id: &str, theme: &str) -> ThemeManifest {
         let text = format!(
-            "id = \"{id}\"\nkind = \"theme\"\nname = \"{id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+            "id = \"{id}\"\nkind = \"theme\"\nname = \"{id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
              capabilities = [\"theme\"]\n[theme]\nui_api = \"^0.1\"\n{theme}"
         );
         ThemeManifest::from_plugin(&PluginManifest::from_toml(&text).unwrap()).unwrap()

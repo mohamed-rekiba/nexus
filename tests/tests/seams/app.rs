@@ -224,7 +224,7 @@ fn emu_plugin_with(plugin_id: &str, emu: FakeEmu, permissions: &str) -> StubPlug
 /// if it has one.
 fn emu_plugin_named(plugin_id: &str, names: &str, emu: FakeEmu, permissions: &str) -> StubPlugin {
     StubPlugin::from_toml(&format!(
-        "id = \"{plugin_id}\"\nkind = \"emulator\"\n{names}\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"{plugin_id}\"\nkind = \"emulator\"\n{names}\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          capabilities = [\"catalog\", \"downloader\", \"installer\", \"launcher\", \"slots\"]\n[permissions]\n{permissions}\n"
     ))
     .provides(move |ctx| {
@@ -1277,7 +1277,7 @@ async fn settings_are_checked_by_the_plugin_before_they_are_stored() {
         }
     }
     let plugin = StubPlugin::from_toml(
-        "id = \"cfg\"\nkind = \"emulator\"\nname = \"Cfg\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\ncapabilities = [\"configurator\"]",
+        "id = \"cfg\"\nkind = \"emulator\"\nname = \"Cfg\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\ncapabilities = [\"configurator\"]",
     )
     .provides(|_| Ok(Provided { configurator: Some(Arc::new(Strict)), ..Provided::default() }));
     let t = FakeHost::new().plugin(plugin).boot_core().await;
@@ -1337,7 +1337,7 @@ async fn a_plugin_s_own_requests_follow_redirects_only_inside_its_allowlist() {
     let http: Arc<Mutex<Option<Arc<dyn HttpClient>>>> = Arc::default();
     let slot = http.clone();
     let plugin = StubPlugin::from_toml(
-        "id = \"web\"\nkind = \"emulator\"\nname = \"W\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"web\"\nkind = \"emulator\"\nname = \"W\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          [permissions]\nnetwork = [\"*.builds.example\"]",
     )
     .provides(move |ctx| {

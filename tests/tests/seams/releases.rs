@@ -466,7 +466,7 @@ fn counting_store(asked: Arc<Mutex<Vec<String>>>) -> StubPlugin {
         }
     }
     StubPlugin::from_toml(
-        "id = \"store\"\nkind = \"service\"\nname = \"store\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"store\"\nkind = \"service\"\nname = \"store\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          capabilities = [\"metadata\"]",
     )
     .provides(move |_| {
@@ -1175,7 +1175,7 @@ fn slow_catalogs(open: Arc<tokio::sync::Semaphore>) -> StubPlugin {
         }
     }
     StubPlugin::from_toml(
-        "id = \"slow-catalog\"\nkind = \"service\"\nname = \"Slow\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"slow-catalog\"\nkind = \"service\"\nname = \"Slow\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          capabilities = [\"releases\"]",
     )
     .provides(move |_| Ok(nexus_api::Provided { releases: Some(Arc::new(Slow(open.clone()))), ..Default::default() }))

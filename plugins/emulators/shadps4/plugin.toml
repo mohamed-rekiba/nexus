@@ -5,7 +5,7 @@ name = "PS4"
 # The program the plugin installs and runs. Sentences about the program name it.
 emulator = "shadPS4"
 version = "0.1.0"
-host_api = "^0.1"
+host_api = "^0.2"
 # The official builds this plugin installs: the Linux AppImage and the Windows program.
 platforms = ["linux", "macos", "windows"]
 # The console it plays: it gets that console's catalog.

@@ -154,7 +154,7 @@ id = "emu-pc"
 kind = "emulator"
 name = "PC"
 version = "0.1.0"
-host_api = "^0.1"
+host_api = "^0.2"
 platforms = ["linux", "macos", "windows"]
 console = "PC"
 capabilities = ["catalog", "launcher", "slots", "game_installer"]
@@ -178,7 +178,7 @@ id = "playstation-store"
 kind = "service"
 name = "PlayStation Store"
 version = "0.1.0"
-host_api = "^0.1"
+host_api = "^0.2"
 platforms = ["linux", "macos", "windows"]
 capabilities = ["metadata"]
 
@@ -825,7 +825,7 @@ emulator releases; see [docs/development.md](development.md).
 
 1. Make the crate under `plugins/emulators/<name>` or `plugins/services/<name>`, depending on
    `nexus-api` (and `emulator-kit` if it helps).
-2. Write `plugin.toml`: `id`, `kind`, `name`, `version`, `host_api = "^0.1"`, `capabilities`,
+2. Write `plugin.toml`: `id`, `kind`, `name`, `version`, `host_api = "^0.2"`, `capabilities`,
    and only the permissions it needs.
 3. Implement `Plugin` and `EmulatorPlugin` or `ServicePlugin`. Return exactly the declared
    capabilities from `init`.

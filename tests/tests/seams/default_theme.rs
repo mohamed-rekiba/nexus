@@ -2073,7 +2073,7 @@ fn a_section_card_grows_with_values_that_wrap() {
         }
     }
     let facts = nexus_testkit::StubPlugin::from_toml(
-        "id = \"facts\"\nkind = \"service\"\nname = \"Facts\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"facts\"\nkind = \"service\"\nname = \"Facts\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          capabilities = [\"slots\"]",
     )
     .provides(|_| Ok(nexus_api::Provided { slots: Some(std::sync::Arc::new(Facts)), ..Default::default() }));
@@ -2217,7 +2217,7 @@ fn covers_store() -> nexus_testkit::StubPlugin {
         }
     }
     nexus_testkit::StubPlugin::from_toml(
-        "id = \"store\"\nkind = \"service\"\nname = \"store\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"store\"\nkind = \"service\"\nname = \"store\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          capabilities = [\"metadata\"]\n[permissions]\nnetwork = [\"art.example\"]",
     )
     .provides(|_| Ok(nexus_api::Provided { metadata: Some(std::sync::Arc::new(Covers)), ..Default::default() }))
@@ -3761,7 +3761,7 @@ fn the_catalog_says_loading_catalog_until_the_catalogs_are_read() {
         h.plugin(games("emu-kyty", vec![]).console("PS5")).plugin(
             nexus_testkit::StubPlugin::from_toml(
                 "id = \"slow-catalog\"\nkind = \"service\"\nname = \"Slow\"\nversion = \"1.0.0\"\n\
-                 host_api = \"^0.1\"\ncapabilities = [\"releases\"]",
+                 host_api = \"^0.2\"\ncapabilities = [\"releases\"]",
             )
             .provides(move |_| {
                 Ok(nexus_api::Provided {

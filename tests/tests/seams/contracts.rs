@@ -45,7 +45,7 @@ impl nexus_api::Catalog for Twice {
 #[should_panic(expected = "contract catalog: game ids must be unique")]
 async fn the_contract_catches_a_plugin_that_breaks_a_rule() {
     let plugin = nexus_testkit::StubPlugin::from_toml(
-        "id = \"twice\"\nkind = \"emulator\"\nname = \"Twice\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\ncapabilities = [\"catalog\"]",
+        "id = \"twice\"\nkind = \"emulator\"\nname = \"Twice\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\ncapabilities = [\"catalog\"]",
     )
     .provides(|_| Ok(nexus_api::Provided { catalog: Some(std::sync::Arc::new(Twice)), ..Default::default() }));
     let test = FakeHost::new().plugin(plugin).boot_core().await;

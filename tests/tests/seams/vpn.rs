@@ -35,7 +35,7 @@ fn emulator() -> StubPlugin {
         }
     }
     StubPlugin::from_toml(
-        "id = \"emu-kyty\"\nkind = \"emulator\"\nname = \"KytyPS5\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"emu-kyty\"\nkind = \"emulator\"\nname = \"KytyPS5\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          console = \"PS5\"\n\
          capabilities = [\"catalog\"]\n\
          [[permissions.filesystem]]\nfolder = \"packages\"\n",

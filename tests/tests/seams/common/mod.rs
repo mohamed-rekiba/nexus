@@ -249,7 +249,7 @@ pub fn write_theme(parent: &Path, theme_id: &str, theme_section: &str, files: &[
     std::fs::write(
         dir.join("theme.toml"),
         format!(
-            "id = \"{theme_id}\"\nkind = \"theme\"\nname = \"{theme_id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+            "id = \"{theme_id}\"\nkind = \"theme\"\nname = \"{theme_id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
              capabilities = [\"theme\"]\n[runtime]\ntype = \"data\"\n[theme]\nui_api = \"^0.1\"\n{theme_section}\n"
         ),
     )
@@ -398,7 +398,7 @@ fn catalog(
         _ => "",
     };
     StubPlugin::from_toml(&format!(
-        "id = \"{plugin_id}\"\nkind = \"emulator\"\nname = \"{plugin_id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"{plugin_id}\"\nkind = \"emulator\"\nname = \"{plugin_id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          capabilities = [\"catalog\", \"slots\"]\n{system}[requires]\n{requires}"
     ))
     .provides(move |_| {
@@ -427,7 +427,7 @@ pub fn offering_emulator(requires: &str) -> StubPlugin {
         }
     }
     StubPlugin::from_toml(&format!(
-        "id = \"emu-kyty\"\nkind = \"emulator\"\nname = \"PS5\"\nemulator = \"KytyPS5\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"emu-kyty\"\nkind = \"emulator\"\nname = \"PS5\"\nemulator = \"KytyPS5\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          console = \"PS5\"\n\
          capabilities = [\"catalog\", \"launcher\"]\n[permissions]\nprocess = [\"bin/*\"]\n\
          [[permissions.filesystem]]\nfolder = \"packages\"\n[requires]\n{requires}"
@@ -463,7 +463,7 @@ pub fn playable_games(plugin_id: &str, titles: Vec<&'static str>) -> StubPlugin 
 /// Like [`playable_games`], with `more` added to its manifest.
 pub fn playable_games_with(plugin_id: &str, titles: Vec<&'static str>, more: &str) -> StubPlugin {
     StubPlugin::from_toml(&format!(
-        "id = \"{plugin_id}\"\nkind = \"emulator\"\nname = \"{plugin_id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"{plugin_id}\"\nkind = \"emulator\"\nname = \"{plugin_id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          capabilities = [\"catalog\", \"slots\", \"launcher\"]\n[permissions]\nprocess = [\"bin/*\"]\n{more}"
     ))
     .provides(move |_| {
@@ -494,7 +494,7 @@ pub fn tested_games(plugin_id: &str, titles: Vec<&'static str>) -> StubPlugin {
         }
     }
     StubPlugin::from_toml(&format!(
-        "id = \"{plugin_id}\"\nkind = \"emulator\"\nname = \"{plugin_id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"{plugin_id}\"\nkind = \"emulator\"\nname = \"{plugin_id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          capabilities = [\"catalog\", \"slots\", \"compatibility\"]"
     ))
     .provides(move |_| {
@@ -511,7 +511,7 @@ pub fn tested_games(plugin_id: &str, titles: Vec<&'static str>) -> StubPlugin {
 /// Like [`playable_games`], with keyboard keys in its manifest (`[[keymap]]`).
 pub fn games_with_keys(plugin_id: &str, titles: Vec<&'static str>) -> StubPlugin {
     StubPlugin::from_toml(&format!(
-        "id = \"{plugin_id}\"\nkind = \"emulator\"\nname = \"{plugin_id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"{plugin_id}\"\nkind = \"emulator\"\nname = \"{plugin_id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          capabilities = [\"catalog\", \"slots\", \"launcher\"]\n[permissions]\nprocess = [\"bin/*\"]\n\
          [[keymap]]\nbutton = \"Cross\"\nkeys = \"J\""
     ))
@@ -530,7 +530,7 @@ pub fn games_with_keys(plugin_id: &str, titles: Vec<&'static str>) -> StubPlugin
 /// version 1.0 is a 300 MB download.
 pub fn games_needing_an_emulator(plugin_id: &str, titles: Vec<&'static str>) -> StubPlugin {
     StubPlugin::from_toml(&format!(
-        "id = \"{plugin_id}\"\nkind = \"emulator\"\nname = \"Emu\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"{plugin_id}\"\nkind = \"emulator\"\nname = \"Emu\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          capabilities = [\"catalog\", \"slots\", \"launcher\", \"installer\", \"downloader\"]\n\
          [permissions]\nprocess = [\"bin/*\"]\nnetwork = [\"builds.example\"]"
     ))
@@ -560,7 +560,7 @@ pub fn console_emulator(
 ) -> StubPlugin {
     StubPlugin::from_toml(&format!(
         "id = \"{plugin_id}\"\nkind = \"emulator\"\nname = \"{name}\"\nemulator = \"{emulator}\"\n\
-         version = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+         version = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          capabilities = [\"catalog\", \"launcher\", \"installer\", \"downloader\"]\n\
          [permissions]\nprocess = [\"bin/*\"]\nnetwork = [\"builds.example\"]"
     ))
@@ -653,7 +653,7 @@ pub fn store(
     delay: std::time::Duration,
 ) -> StubPlugin {
     StubPlugin::from_toml(&format!(
-        "id = \"{plugin_id}\"\nkind = \"service\"\nname = \"{plugin_id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"{plugin_id}\"\nkind = \"service\"\nname = \"{plugin_id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          capabilities = [\"metadata\"]\n[permissions]\nnetwork = [\"art.example\"]"
     ))
     .provides(move |_| {
@@ -730,7 +730,7 @@ pub fn slow_installer() -> StubPlugin {
         }
     }
     StubPlugin::from_toml(
-        "id = \"emu-kyty\"\nkind = \"emulator\"\nname = \"PS5\"\nemulator = \"KytyPS5\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"emu-kyty\"\nkind = \"emulator\"\nname = \"PS5\"\nemulator = \"KytyPS5\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          console = \"PS5\"\n\
          capabilities = [\"catalog\", \"game_installer\"]\n\
          [[permissions.filesystem]]\nfolder = \"packages\"\n\

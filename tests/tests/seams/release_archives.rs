@@ -46,7 +46,7 @@ fn emulator(sources: Arc<Mutex<Vec<HostPath>>>) -> StubPlugin {
         }
     }
     StubPlugin::from_toml(
-        "id = \"emu-kyty\"\nkind = \"emulator\"\nname = \"PS5\"\nemulator = \"KytyPS5\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"emu-kyty\"\nkind = \"emulator\"\nname = \"PS5\"\nemulator = \"KytyPS5\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          console = \"PS5\"\n\
          capabilities = [\"catalog\", \"game_installer\"]\n\
          [[permissions.filesystem]]\nfolder = \"packages\"\n\

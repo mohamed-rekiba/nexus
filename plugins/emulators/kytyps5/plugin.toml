@@ -5,7 +5,7 @@ name = "PS5"
 # The program the plugin installs and runs. Sentences about the program name it.
 emulator = "KytyPS5"
 version = "0.1.0"
-host_api = "^0.1"
+host_api = "^0.2"
 # KytyPS5 ships Linux and Windows builds, and macOS x86-64 builds that run under Rosetta 2.
 platforms = ["linux", "macos", "windows"]
 # The console it plays: it gets that console's catalog.

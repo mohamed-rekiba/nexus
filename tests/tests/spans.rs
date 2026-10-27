@@ -11,7 +11,7 @@ fn id(s: &str) -> PluginId {
 }
 
 fn manifest(id: &str, extra: &str) -> String {
-    format!("id = \"{id}\"\nkind = \"emulator\"\nname = \"{id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n{extra}")
+    format!("id = \"{id}\"\nkind = \"emulator\"\nname = \"{id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n{extra}")
 }
 
 #[test]

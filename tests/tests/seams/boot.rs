@@ -11,7 +11,7 @@ fn id(s: &str) -> PluginId {
 fn emulator(id: &str, deps: &[&str]) -> StubPlugin {
     let deps: String = deps.iter().map(|d| format!("[[dependencies]]\nid = \"{d}\"\n")).collect();
     StubPlugin::from_toml(&format!(
-        "id = \"{id}\"\nkind = \"emulator\"\nname = \"{id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n{deps}"
+        "id = \"{id}\"\nkind = \"emulator\"\nname = \"{id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n{deps}"
     ))
 }
 
@@ -80,7 +80,7 @@ async fn a_plugin_built_for_another_host_api_is_rejected_with_both_versions() {
 async fn an_emulator_for_another_platform_loads_turned_off_until_the_player_turns_it_on() {
     // A player may have their own build for this system, so it isn't rejected.
     let plugin = StubPlugin::from_toml(
-        "id = \"elsewhere\"\nkind = \"emulator\"\nname = \"E\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\nplatforms = [\"windows\"]",
+        "id = \"elsewhere\"\nkind = \"emulator\"\nname = \"E\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\nplatforms = [\"windows\"]",
     );
     let t = FakeHost::new().platform(Some(nexus_api::Platform::Linux)).plugin(plugin).boot_core().await;
     assert!(t.report().rejection(&id("elsewhere")).is_none());
@@ -99,7 +99,7 @@ async fn an_emulator_for_another_platform_loads_turned_off_until_the_player_turn
 #[tokio::test]
 async fn a_theme_for_another_platform_is_rejected() {
     let plugin = StubPlugin::from_toml(
-        "id = \"elsewhere\"\nkind = \"theme\"\nname = \"E\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\nplatforms = [\"windows\"]\ncapabilities = [\"theme\"]\n[runtime]\ntype = \"data\"",
+        "id = \"elsewhere\"\nkind = \"theme\"\nname = \"E\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\nplatforms = [\"windows\"]\ncapabilities = [\"theme\"]\n[runtime]\ntype = \"data\"",
     );
     let host = FakeHost::new().platform(Some(nexus_api::Platform::Linux)).plugin(plugin).boot().await;
     assert!(matches!(host.report().rejection(&id("elsewhere")), Some(LoadError::Platform { .. })));
@@ -109,7 +109,7 @@ async fn a_theme_for_another_platform_is_rejected() {
 async fn a_dependency_with_the_wrong_version_is_rejected() {
     let lib = emulator("lib", &[]);
     let app = StubPlugin::from_toml(
-        "id = \"app\"\nkind = \"emulator\"\nname = \"A\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"app\"\nkind = \"emulator\"\nname = \"A\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          [[dependencies]]\nid = \"lib\"\nversion = \"^2\"",
     );
     let host = FakeHost::new().plugin(lib).plugin(app).boot().await;
@@ -123,7 +123,7 @@ async fn a_dependency_with_the_wrong_version_is_rejected() {
 #[tokio::test]
 async fn a_missing_optional_dependency_is_ignored() {
     let app = StubPlugin::from_toml(
-        "id = \"app\"\nkind = \"emulator\"\nname = \"A\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"app\"\nkind = \"emulator\"\nname = \"A\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          [[dependencies]]\nid = \"extra\"\noptional = true",
     );
     let host = FakeHost::new().plugin(app).boot().await;
@@ -143,7 +143,7 @@ async fn two_plugins_with_one_id_keep_the_first_and_reject_the_second() {
 async fn an_optional_dependency_in_the_wrong_version_is_ignored() {
     let lib = emulator("lib", &[]);
     let app = StubPlugin::from_toml(
-        "id = \"app\"\nkind = \"emulator\"\nname = \"A\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"app\"\nkind = \"emulator\"\nname = \"A\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          [[dependencies]]\nid = \"lib\"\nversion = \"^2\"\noptional = true",
     );
     let host = FakeHost::new().plugin(lib).plugin(app).boot().await;
@@ -156,11 +156,11 @@ async fn an_optional_dependency_in_the_wrong_version_is_ignored() {
 async fn a_folder_grant_names_a_host_folder_never_a_path() {
     let plugin = |id: &str, grant: &str| {
         StubPlugin::from_toml(&format!(
-            "id = \"{id}\"\nkind = \"emulator\"\nname = \"R\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+            "id = \"{id}\"\nkind = \"emulator\"\nname = \"R\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
              [[permissions.filesystem]]\n{grant}"
         ))
     };
-    let by_path = "id = \"p\"\nkind = \"emulator\"\nname = \"R\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+    let by_path = "id = \"p\"\nkind = \"emulator\"\nname = \"R\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
                    [[permissions.filesystem]]\npath = \"/home\"\nwrite = true";
     let err = nexus_api::PluginManifest::from_toml(by_path).unwrap_err();
     assert!(err.to_string().contains("unknown field `path`"), "{err}");
@@ -193,7 +193,7 @@ async fn a_folder_grant_names_a_host_folder_never_a_path() {
 async fn a_system_s_color_is_written_as_rrggbb() {
     let plugin = |id: &str, color: &str| {
         StubPlugin::from_toml(&format!(
-            "id = \"{id}\"\nkind = \"emulator\"\nname = \"R\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+            "id = \"{id}\"\nkind = \"emulator\"\nname = \"R\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
              [system]\nid = \"R\"\nname = \"Retro\"\ncolor = \"{color}\""
         ))
     };
@@ -209,7 +209,7 @@ async fn a_system_s_color_is_written_as_rrggbb() {
 #[tokio::test]
 async fn the_kernel_loads_an_emulator_and_a_theme_each_through_its_own_trait() {
     let emu = StubPlugin::from_toml(
-        "id = \"emu\"\nkind = \"emulator\"\nname = \"E\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"",
+        "id = \"emu\"\nkind = \"emulator\"\nname = \"E\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"",
     );
     let host =
         FakeHost::new().plugin(emu).built_in(nexus_api::PluginBox::theme(theme_default::DefaultTheme)).boot().await;
@@ -225,14 +225,14 @@ async fn the_kernel_loads_an_emulator_and_a_theme_each_through_its_own_trait() {
 async fn code_of_one_kind_with_a_manifest_of_the_other_is_rejected() {
     // Emulator code whose manifest says it is a theme.
     let wrong = StubPlugin::from_toml(
-        "id = \"wrong\"\nkind = \"theme\"\nname = \"W\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\ncapabilities = [\"theme\"]",
+        "id = \"wrong\"\nkind = \"theme\"\nname = \"W\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\ncapabilities = [\"theme\"]",
     );
     // Theme code whose manifest says it is an emulator.
     struct ThemeCode;
     impl nexus_api::Plugin for ThemeCode {
         fn manifest(&self) -> nexus_api::PluginManifest {
             nexus_api::PluginManifest::from_toml(
-                "id = \"wrong-way\"\nkind = \"emulator\"\nname = \"W\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"",
+                "id = \"wrong-way\"\nkind = \"emulator\"\nname = \"W\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"",
             )
             .unwrap()
         }
@@ -257,7 +257,7 @@ async fn code_of_one_kind_with_a_manifest_of_the_other_is_rejected() {
 async fn a_service_may_provide_any_data_capability_but_no_system_one() {
     let service = |id: &str, capabilities: &str| {
         StubPlugin::from_toml(&format!(
-            "id = \"{id}\"\nkind = \"service\"\nname = \"S\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\ncapabilities = [{capabilities}]"
+            "id = \"{id}\"\nkind = \"service\"\nname = \"S\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\ncapabilities = [{capabilities}]"
         ))
     };
     let host = FakeHost::new()
@@ -282,7 +282,7 @@ async fn a_service_may_provide_any_data_capability_but_no_system_one() {
 async fn a_plugin_that_isn_t_system_can_t_declare_system_capabilities() {
     let plugin = |id: &str, kind: &str, capability: &str| {
         StubPlugin::from_toml(&format!(
-            "id = \"{id}\"\nkind = \"{kind}\"\nname = \"P\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\ncapabilities = [\"{capability}\"]"
+            "id = \"{id}\"\nkind = \"{kind}\"\nname = \"P\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\ncapabilities = [\"{capability}\"]"
         ))
     };
     let mut fake = FakeHost::new();
@@ -314,6 +314,7 @@ fn the_built_in_plugins_and_themes_accept_this_host() {
         "emulators/kytyps5/plugin.toml",
         "emulators/shadps4/plugin.toml",
         "emulators/pc/plugin.toml",
+        "emulators/steam/plugin.toml",
         "services/release-catalog/plugin.toml",
         "services/playstation-store/plugin.toml",
         "system/host/plugin.toml",
