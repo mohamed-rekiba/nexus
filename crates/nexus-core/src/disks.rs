@@ -62,11 +62,14 @@ fn read(core: &Core) -> Disks {
             continue;
         }
         // The folder of a download in it, less the download's own folder.
-        let Ok((_, download)) = core.torrent_folder(&offer.emulator, console, "x", None) else { continue };
+        let Ok((_, download)) = crate::release_downloads::torrent_folder(core, &offer.emulator, console, "x", None)
+        else {
+            continue;
+        };
         let Some(path) = download.parent().map(std::path::Path::to_path_buf) else { continue };
         // The console's folder may not be there yet: the disk that holds it is the one the
         // nearest folder above is on.
-        let free = path.ancestors().find(|p| p.is_dir()).and_then(|there| core.kernel().hardware().free_bytes(there));
+        let free = path.ancestors().find(|p| p.is_dir()).and_then(|there| core.ports().hardware.free_bytes(there));
         folders.insert(at, DownloadFolder { path, free });
     }
     Disks { folders: Arc::new(folders) }

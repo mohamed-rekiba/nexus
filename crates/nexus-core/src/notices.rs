@@ -79,6 +79,26 @@ impl NoticesSubsystem {
         self.inner.notifier.noted(Area::Notices);
     }
 
+    /// A notice of the default kind, `Info`.
+    pub fn info(&self, message: String) {
+        self.post(NoticeKind::Info, message, None, None);
+    }
+
+    /// A notice of the `Error` kind: something failed.
+    pub fn problem(&self, message: String) {
+        self.post(NoticeKind::Error, message, None, None);
+    }
+
+    /// A notice whose subject `route` shows: clicking it opens that screen.
+    pub fn opening(&self, kind: NoticeKind, route: Route, message: String) {
+        self.post(kind, message, Some(route), None);
+    }
+
+    /// A problem with one game: its card shows the game's art.
+    pub fn game_problem(&self, game: &GameKey, message: String) {
+        self.post(NoticeKind::Error, message, None, Some(game.clone()));
+    }
+
     /// Shows the player a problem outside the core, such as a theme's logic failing. Nothing
     /// else changes with it, so the app learns of it too.
     pub fn report(&self, message: String) {

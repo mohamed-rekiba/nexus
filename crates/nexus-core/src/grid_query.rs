@@ -10,6 +10,7 @@ use std::str::FromStr;
 use nexus_api::{CompatLevel, GameKey};
 use nexus_ui_api::{FilterVm, LibraryVm};
 
+use crate::app::Grid;
 use crate::library::{Entry, LibrarySnapshot};
 use crate::ownership::Ownership;
 use crate::releases::Offer;
@@ -27,15 +28,6 @@ pub const INSTALLED_FILTER: &str = "installed";
 
 /// The Catalog's "Hidden" filter, among the systems: only the games the player hid.
 pub const HIDDEN_FILTER: &str = "hidden";
-
-/// A grid of game cards.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub enum Grid {
-    /// The Library's grid, of the installed games.
-    Library,
-    /// The Catalog's grid, of the games the catalogs offer.
-    Catalog,
-}
 
 /// How a grid is sorted. Its text, for a theme, is its name in lower case.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

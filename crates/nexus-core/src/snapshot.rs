@@ -1,6 +1,6 @@
 //! The app's state, read at once for a render: one read of each subsystem, a copy of the
 //! core's own state, and what the view needs from the plugins, the config and the disk.
-//! [`take`] does every read; [`crate::view::build`] then works on the [`Snapshot`] alone, with
+//! [`Core::snapshot`] does every read; [`crate::view::build`] then works on the [`Snapshot`] alone, with
 //! no lock and no I/O.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -22,7 +22,7 @@ use crate::ownership::Ownership;
 use crate::sessions::SessionsSnapshot;
 use crate::torrents::TorrentsSnapshot;
 use crate::vpn::VpnSnapshot;
-use crate::{Core, HostConfig, Job, Kernel, PluginStatus, PreferencesSnapshot};
+use crate::{HostConfig, Job, Kernel, PluginStatus, PreferencesSnapshot};
 
 /// Everything a render shows.
 pub(crate) struct Snapshot<'a> {
@@ -204,47 +204,14 @@ pub(crate) fn detail_game(state: &AppState) -> Option<GameKey> {
     .or_else(|| state.selected.clone())
 }
 
-/// Reads the app for a render. The subsystems are read before the core's own state, as the
-/// core never holds that lock while it takes a subsystem's.
-pub(crate) fn take(core: &Core) -> Snapshot<'_> {
-    let kernel = core.kernel();
-    let library = core.library().snapshot();
-    let torrents = core.torrents().snapshot();
-    let installs = core.installs().snapshot();
-    let sessions = core.sessions().snapshot();
-    let prefs = core.prefs();
-    let notices = core.notices().snapshot();
-    let launcher_update = core.launcher_update().snapshot();
-    let vpn = core.vpn().snapshot();
-    let downloads = core.inner.downloads.jobs();
-    let state = core.state().clone();
-    let plugins = Plugins::new(kernel);
-    let detail_game = detail_game(&state);
-    let files = files(kernel, &library, &torrents, detail_game.as_ref());
-    let theme_options = state.theme.as_ref().map(|theme| core.theme_options(theme)).unwrap_or(Value::Null);
-    Snapshot {
-        hidden_filter: Core::hidden_filter_on(kernel),
-        can_start_at_login: kernel.login_session().can_start_at_login(),
-        now: kernel.clock().now(),
-        now_secs: crate::sessions::now_secs(),
-        plugins,
-        library,
-        torrents,
-        installs,
-        sessions,
-        prefs,
-        notices,
-        launcher_update,
-        vpn,
-        downloads,
-        state,
-        detail_game,
-        files,
-        theme_options,
-    }
-}
-
-fn files(kernel: &Kernel, library: &LibrarySnapshot, torrents: &TorrentsSnapshot, detail: Option<&GameKey>) -> Files {
+/// What the view reads from the disk: the games' folders, the Game Hub game's log, the
+/// downloads' install folders and the host folders.
+pub(crate) fn files(
+    kernel: &Kernel,
+    library: &LibrarySnapshot,
+    torrents: &TorrentsSnapshot,
+    detail: Option<&GameKey>,
+) -> Files {
     let folder_there = |key: &GameKey| {
         let folder = library.detail(key).and_then(|d| d.details.folder.as_ref());
         folder.is_some_and(|f| crate::app::resolve_game_folder(kernel, key, f).is_some())

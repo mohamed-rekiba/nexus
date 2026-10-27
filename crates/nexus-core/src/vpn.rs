@@ -58,9 +58,9 @@ pub(crate) fn pick(vpns: &[Vpn], chosen: &str, finds: bool) -> Option<String> {
 }
 
 /// The VPN rule as every area reads it: the setting, the picked VPN, where the VPNs come
-/// from, and whether a plugin waits for the VPN. The kernel makes it at boot, since each
-/// plugin gets the rule as its [`nexus_api::VpnGate`]; the torrents subsystem and the VPN
-/// subsystem share it. Cheap to clone; every clone is the same rule.
+/// from, and whether a plugin waits for the VPN. The ports bundle ([`crate::ports::Ports`])
+/// makes it at boot, before any plugin starts: the kernel gives it to each plugin as its
+/// [`nexus_api::VpnGate`], and the torrents subsystem and the VPN subsystem share it. Cheap to clone; every clone is the same rule.
 #[derive(Clone)]
 pub(crate) struct VpnRule {
     inner: Arc<Rule>,

@@ -1054,3 +1054,86 @@ impl Network for PluginVpn {
         self.0.disconnect(name)
     }
 }
+
+/// Every port the app plugged in, built once at boot and split per subsystem: each subsystem
+/// gets only the ports it names (`TorrentPorts`, `SessionPorts`, and so on). The bundle also
+/// makes the VPN rule over the `Network` port: the kernel hands it to each plugin as its
+/// [`nexus_api::VpnGate`], and the torrents and VPN subsystems share it.
+///
+/// The kernel uses the HTTP, process, clock and VPN ports for the plugins' contexts and
+/// calls, and hands the bundle on to the core. Cheap to clone.
+#[derive(Clone)]
+pub(crate) struct Ports {
+    pub http: Arc<dyn HttpTransport>,
+    pub spawner: Arc<dyn ProcessSpawner>,
+    pub processes: Arc<dyn ProcessTree>,
+    pub windows: Arc<dyn Windows>,
+    pub login_session: Arc<dyn LoginSession>,
+    pub opener: Arc<dyn Opener>,
+    pub hardware: Arc<dyn Hardware>,
+    pub torrents: Arc<dyn Torrents>,
+    pub archives: Arc<dyn Archives>,
+    pub clock: Arc<dyn Clock>,
+    /// "Download only through a VPN", over the `Network` port the app plugged in until a
+    /// system plugin provides the VPNs.
+    pub vpn: crate::vpn::VpnRule,
+}
+
+impl Ports {
+    /// The torrents subsystem's ports.
+    pub fn torrents(&self) -> crate::torrents::TorrentPorts {
+        crate::torrents::TorrentPorts {
+            torrents: self.torrents.clone(),
+            hardware: self.hardware.clone(),
+            clock: self.clock.clone(),
+        }
+    }
+
+    /// The game installs subsystem's ports. It reaches the downloads it installs through
+    /// `downloads`, and gives a plugin's `begin` at most `call_timeout`.
+    pub fn installs(
+        &self,
+        downloads: Arc<dyn crate::game_installs::TorrentDownloads>,
+        call_timeout: Duration,
+    ) -> crate::game_installs::InstallPorts {
+        crate::game_installs::InstallPorts {
+            archives: self.archives.clone(),
+            hardware: self.hardware.clone(),
+            clock: self.clock.clone(),
+            downloads,
+            call_timeout,
+        }
+    }
+
+    /// The sessions subsystem's ports.
+    pub fn sessions(&self) -> crate::sessions::SessionPorts {
+        crate::sessions::SessionPorts {
+            spawner: self.spawner.clone(),
+            processes: self.processes.clone(),
+            windows: self.windows.clone(),
+            clock: self.clock.clone(),
+        }
+    }
+
+    /// The preferences subsystem's ports.
+    pub fn preferences(&self) -> crate::preferences::PrefPorts {
+        crate::preferences::PrefPorts { login_session: self.login_session.clone() }
+    }
+
+    /// The download manager's ports.
+    pub fn downloads(&self) -> crate::downloads::DownloadPorts {
+        crate::downloads::DownloadPorts {
+            http: self.http.clone(),
+            spawner: self.spawner.clone(),
+            clock: self.clock.clone(),
+        }
+    }
+
+    /// The launcher update subsystem's ports.
+    pub fn launcher_update(&self) -> crate::launcher_update::LauncherUpdatePorts {
+        crate::launcher_update::LauncherUpdatePorts {
+            http: self.http.clone(),
+            login_session: self.login_session.clone(),
+        }
+    }
+}

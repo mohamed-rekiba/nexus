@@ -10,9 +10,9 @@ use nexus_api::{
 use nexus_ui_api::*;
 use serde_json::Value;
 
-use crate::app::Route;
+use crate::app::{Grid, Route};
 use crate::game_installs::InstallsSnapshot;
-use crate::grid_query::{Grid, GridData, GridGames, GridQuery};
+use crate::grid_query::{GridData, GridGames, GridQuery};
 use crate::library::{Entry, LibrarySnapshot, PluginImage, image_ref};
 use crate::order::sort_by_order;
 use crate::ownership::Ownership;

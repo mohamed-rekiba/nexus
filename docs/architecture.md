@@ -36,7 +36,7 @@ nexus-app (the binary)         ──▶ nexus-ui-host, nexus-core, every built-
 | Crate | Owns |
 | --- | --- |
 | `crates/nexus-api` | The plugin API. The plugin traits, `PluginManifest`, `Capability`, `Provided`, `PluginContext` and its facades (`ConfigStore`, `Storage`, `Folders`, `Programs`, `HttpClient`, `Logger`, `EventSink`, `ServiceRegistry`), `RelPath` and `HostPath`, plans (`DownloadPlan`, `LaunchSpec`), slots, `Event`, `VpnGate`. Semver-versioned: a manifest's `host_api` must match `API_VERSION`, which is set by hand with the API, not from Nexus's version. |
-| `crates/nexus-core` | The kernel and the app. Plugin lifecycle and registry (`Kernel`), the event bus (`EventBus`), settings (`ConfigService`), the app state and commands (`Core`, `AppState`, `Command`), the subsystems (`torrents/`, `game_installs/`, `library/`, `sessions/`), view building (`view.rs`), HTTP downloads, unpacking, launches, VPN rules, catalogs, "This PC", the launcher update, and the port traits. |
+| `crates/nexus-core` | The kernel and the app. Plugin lifecycle and registry (`Kernel`), the event bus (`EventBus`), settings (`ConfigService`), the ports bundle (`Ports`), the app router and its commands (`Core`, `Command`), the state no subsystem owns (`AppState`), the subsystems (`torrents/`, `game_installs/`, `library/`, `sessions/`) and the flows over them, view building (`view.rs`), HTTP downloads, unpacking, launches, VPN rules, catalogs, "This PC", the launcher update, and the port traits. |
 | `crates/nexus-ui-api` | The theme contract. View models (`vm.rs`: `AppView` and the rest), the theme manifest (`ThemeManifest`), design tokens, and `contract/types.slint` with the `Vm` and `Host` globals. No toolkit code. |
 | `crates/nexus-ui-host` | `ThemeSet` (finds themes, resolves `extends`), `ThemeHost`: compiles a theme with `slint-interpreter`, binds the view models, turns gamepad buttons into keys, and swaps themes. `AppShell` (`shell.rs`) owns the `ThemeHost` on the UI thread: it routes the theme's requests, coalesces renders, loads images (`loader.rs`) and runs the tick, through its `Platform` port. |
 | `crates/nexus-app` | The binary. The wiring (`main.rs`), the command line (`args.rs`), the launcher's update at startup (`update.rs`), the shell's platform (`platform.rs`), and the system adapters: `desktop.rs`, `processes.rs` (a running game's processes), `torrents.rs` (librqbit), `archives.rs` and `libarchive.rs`, `hardware.rs` and `gpu_probe.rs` (Vulkan), `trailer.rs` (libmpv), `gamepad.rs` (gilrs), `audio.rs` (rodio), `http.rs` (reqwest), `disk.rs`, `clock.rs`. |
@@ -71,7 +71,7 @@ The UI thread's state (`App`, which holds the `AppShell`) lives in a thread-loca
 ## Data flows one way
 
 ```
-theme callback ─▶ UiRequest::Core(Command) ─▶ Core::dispatch ─▶ AppState changes
+theme callback ─▶ UiRequest::Core(Command) ─▶ Core::dispatch ─▶ subsystem or flow
       ▲                                                               │
       │                                                   Core::changed()
       │                                                               ▼
@@ -82,13 +82,15 @@ theme callback ─▶ UiRequest::Core(Command) ─▶ Core::dispatch ─▶ AppS
    `Command`, or something only the app can do (`SwitchTheme`, `PlaySound`, `OpenUrl`,
    `OpenPath`, `Quit`, `Restart`, `LogOut`, `Trailer`, `Render`). `AppShell::on_request`
    carries it out: a command goes to the runtime, the rest to the `Platform`.
-2. `Core::dispatch` runs the command. Most state lives in one `AppState` behind a mutex in
-   `Core`: navigation (`nav`, a stack of `Route`s), selection and more. An area that became a
-   subsystem keeps its own state behind its own lock: the torrents, the game installs, the
-   library, the preferences, the running games, the notices, the VPN setting and the launcher's
-   update (see [Subsystems](#subsystems)). `view::build` reads each subsystem's snapshot before
-   it locks
-   `AppState`.
+2. `Core::dispatch` routes the command, one line per command, to the subsystem or the flow
+   that owns it (see [Subsystems](#subsystems)). Each subsystem keeps its own state behind its
+   own lock: the torrents, the game installs, the library, the preferences, the running games,
+   the notices, the VPN setting and the launcher's update. What no subsystem owns stays in one
+   `AppState` behind a mutex in `Core` (`app_state.rs`): navigation (`nav`, a stack of
+   `Route`s), the selections and the grids, the install prompt and "How far did it get?", each
+   emulator's builds, the Settings screen's panels, the machine's state, the stores' installs
+   and the theme on screen. `view::build` reads `Core::snapshot()`, one read per subsystem,
+   before it locks `AppState`.
 3. A change calls `Core::changed(area)`, or a subsystem's `Notifier`. It sends a `Change { area }` (the torrents, the
    catalogs, the installs, …) to `Core::changes()`, a broadcast for the core and its tests, and
    publishes `Event::StateChanged` on the `EventBus` (a `tokio::sync::broadcast` channel of
@@ -271,6 +273,13 @@ that blocks its thread without awaiting holds that worker thread.
 The core reaches the system through traits in `crates/nexus-core/src/ports.rs`. `KernelBuilder`
 starts with a stand-in for each; the app plugs in the real ones; the test kit has fakes.
 
+Boot builds them once into one bundle, `Ports`, which also makes the VPN rule over the
+`Network` port. The kernel uses the HTTP, process, clock and VPN ports for the plugins'
+contexts and calls, and has no getter for any single port: it hands the bundle to the core.
+`Core::start` splits the bundle per subsystem (`Ports::torrents()`, `sessions()`,
+`preferences()`, `installs(..)`, `launcher_update()`, `downloads()`), so each subsystem gets
+only the ports it names.
+
 | Port | Stand-in | App adapter | Test fake |
 | --- | --- | --- | --- |
 | `HttpTransport` | `NoNetwork` | `http::ReqwestTransport` | `FakeHttp` |
@@ -374,8 +383,9 @@ follow the same shape:
 - A subsystem owns its state behind its own lock, and its saved records (the torrents:
   `app.torrents` and `app.seed_downloads`). Nothing else takes that lock or writes those keys.
 - It takes only the ports it needs (`TorrentPorts`: `Torrents`, `Hardware`, `Clock`; the
-  VPN rule brings the `Network` port), never the `Kernel` or the `Core`. Until the ports are
-  one bundle, the core takes them from the kernel when it starts the subsystems.
+  VPN rule brings the `Network` port), never the `Kernel` or the `Core`. The core splits the
+  ports bundle (`Ports`) into them when it starts the subsystems. The download manager
+  (`downloads.rs`) takes its ports the same way, with the plugins' permissions read once.
 - The core sends it commands (`handle(TorrentCmd)`) and reads it whole (`snapshot()`). A read
   changes nothing. `Command` nests each subsystem's commands: `Command::Torrent(TorrentCmd)`,
   `Command::Notice(NoticeCmd)`, `Command::Vpn(VpnCmd)`,
@@ -398,6 +408,18 @@ follow the same shape:
   records and offers), and a change copies it only while a snapshot is held.
 - The subsystem never calls out while it holds its lock, and the core takes a subsystem's lock
   only when it doesn't hold `AppState`.
+
+`Core` is a router (`app.rs`). It starts the subsystems, sends each command to its owner,
+merges their changes into `Core::changes()`, and reads them all into one `Snapshot` for the
+view. Work that crosses areas is a flow: a free function over the core in its own module.
+`navigation.rs` moves the player between screens and grids; `emulator_builds.rs` installs,
+updates and uninstalls builds; `plugin_settings.rs` sets the plugins' settings, runs their
+actions and turns them on or off; `plugin_downloads.rs` queues the plugins' own downloads;
+`uninstall.rs` removes an installed game; `library_reads.rs` and `catalog_reads.rs` read the
+plugins for the library and the catalogs; `release_downloads.rs` resolves the catalogs'
+downloads and installs; `launch.rs` starts games; `system.rs` runs the machine's settings. The
+commands keep their flat names (`Command::Back`, `Command::LibrarySort`), which the themes
+send; `Command` reads and writes as JSON with `serde`.
 
 The preferences are a subsystem too (`crates/nexus-core/src/preferences.rs`). Each of the
 app's one-value settings is a `Pref`, saved as `app.<key>` with the same key and value as
@@ -547,8 +569,8 @@ and the offers through `Arc`, and answers the queries the view and the core ask:
 `metadata` (a store's catalog first, then a release's store data), `detail_state`, `title`,
 `offer`, `hidden` and `result`.
 
-It asks no plugin. The core reads the plugins (`library_reads.rs`, and the catalog reads in
-`releases.rs`) and hands it the answers, because a read crosses areas: the emulators' builds,
+It asks no plugin. The core's flows read the plugins (`library_reads.rs`, and the catalog
+reads in `catalog_reads.rs`) and hand it the answers, because a read crosses areas: the emulators' builds,
 notices and the selection. It owns `app.hidden_games`, `app.game_art` and `app.results` (with
 `app.result_builds` and `app.result_skipped`), and reads them from the config each time, so a
 value set there shows at once.
@@ -608,8 +630,8 @@ sound and Bluetooth controls only when it's the whole screen. The view model is 
 `crates/nexus-core/src/vpn.rs` holds the rule (`VpnRule`) and the VPN subsystem
 (`VpnSubsystem`). The rule reads `app.vpn_only` and `app.vpn`, holds the `Network` port (a
 system plugin's `vpn` replaces the app's once one provides it) and notes when a plugin waits.
-The kernel makes the rule at boot and gives it to each plugin as its `VpnGate`; the VPN and
-torrents subsystems share it. The VPN subsystem owns the two settings, the VPN list for the
+The ports bundle makes the rule at boot, before any plugin starts; the kernel gives it to each
+plugin as its `VpnGate`, and the VPN and torrents subsystems share it. The VPN subsystem owns the two settings, the VPN list for the
 view and the last connect error, and runs `Command::Vpn(VpnCmd)`: the setting, the picked VPN,
 and connecting, disconnecting and adding VPNs. After each of those it awaits the torrents' kill
 switch. The torrents subsystem's `torrents/vpn.rs` applies the rule to the downloads. While
@@ -697,7 +719,8 @@ keyboard's (the default theme's on-screen keyboard opens for a controller only).
    and restarts if there is one.
 3. A tokio runtime starts. `Kernel::builder` gets the ports, `built_in_plugins()`, the two
    `discover` folders, and `boot()`s.
-4. `Core::start` builds the `AppState`, spawns the download manager, removes work folders a
+4. `Core::start` splits the ports bundle per subsystem, starts the subsystems, builds the
+   `AppState`, spawns the download manager, removes work folders a
    crash left (`GameInstallsSubsystem::clean_up`), restores saved torrents, resumes installs and plan
    downloads, schedules emulator update checks, reads the hardware once in the background, and
    starts `watch_catalogs`.

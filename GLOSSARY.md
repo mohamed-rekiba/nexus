@@ -74,6 +74,11 @@ _Avoid_: mock time, test time
 matching asset, archive format, program, test run, own-build search paths, and the hooks that
 run when the current build changes.
 
+**Flow**: work that crosses the core's areas, as a free function over the core in its own
+module: a plugin read whose answer goes to a subsystem, an install that downloads and then
+posts a notice. The core routes a command to a flow when no one subsystem owns it.
+_Avoid_: handler, service
+
 **Format reader**: the code that lists and streams one archive format's entries: `zip`, `tar`,
 `sevenz-rust2`, libarchive, or `unar`. It decides nothing about safety; the archive plan does.
 
@@ -149,6 +154,9 @@ trailers, the local time, and the window's monitors and focus. The test fake rec
 the tests plug in fakes.
 _Avoid_: adapter (that is the thing plugged in), driver
 
+**Ports bundle** (`Ports`): every port the app plugged in, built once at boot. It makes the VPN
+rule. The kernel hands it to the core, which splits it per subsystem.
+
 **Precondition**: what must happen before a plugin call can work, such as installing a build.
 A plugin says it in words, or with a typed precondition (`OwnBuildMissing`) that the host
 words for the player.
@@ -178,7 +186,8 @@ _Avoid_: process, run
 game the core resolved, watches it, carries out Stop and the window focus calls, and saves play
 time.
 
-**Snapshot**: a subsystem's state read whole, in one lock. Reading it changes nothing.
+**Snapshot**: a subsystem's state read whole, in one lock. Reading it changes nothing. The
+core's `Snapshot` holds one read of each subsystem, for the view.
 
 **Subsystem**: one area of the core's state with its own lock, saved records and ports. The core
 sends it commands, reads its snapshot and turns its events into work. The torrents, the game

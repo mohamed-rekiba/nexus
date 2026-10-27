@@ -14,18 +14,22 @@
 
 use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use futures::StreamExt;
 use nexus_api::{
-    Artifact, DownloadPlan, DownloadedArtifact, Event, JobId, PluginError, PluginId, PluginResult, SignatureAlgorithm,
+    Artifact, DownloadPlan, DownloadedArtifact, Event, JobId, Permissions, PluginError, PluginId, PluginResult,
+    SignatureAlgorithm,
 };
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::facades::check_url;
-use crate::{CoreError, CoreResult, DirStorage, Kernel};
+use crate::{
+    Clock, ConfigService, CoreError, CoreResult, DirStorage, EventBus, HostConfig, HttpTransport, ProcessSpawner,
+};
 
 /// Where a download job is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -102,6 +106,33 @@ enum Stopped {
     Error(CoreError),
 }
 
+/// The ports the download manager takes: the files come over HTTP, and an AppImage runs to
+/// unpack itself.
+pub(crate) struct DownloadPorts {
+    pub http: Arc<dyn HttpTransport>,
+    pub spawner: Arc<dyn ProcessSpawner>,
+    pub clock: Arc<dyn Clock>,
+}
+
+/// What the download manager reads besides its ports: where each plugin's data folder is,
+/// what each plugin may fetch, and where it saves and announces its jobs.
+pub(crate) struct DownloadContext {
+    pub ports: DownloadPorts,
+    /// The data folder, the system, and how many downloads run at once.
+    pub host: HostConfig,
+    /// Each loaded plugin's permissions, as its manifest declares them.
+    pub permissions: BTreeMap<PluginId, Permissions>,
+    /// Holds a job's record under `app.downloads` until it ends.
+    pub config: Arc<ConfigService>,
+    pub bus: EventBus,
+}
+
+impl DownloadContext {
+    fn permissions(&self, plugin: &PluginId) -> CoreResult<&Permissions> {
+        self.permissions.get(plugin).ok_or_else(|| CoreError::UnknownPlugin(plugin.clone()))
+    }
+}
+
 /// The app's handle on the download manager. Dropping it stops the manager; running jobs stop
 /// where they are and keep their part files.
 pub(crate) struct Downloads {
@@ -112,13 +143,13 @@ pub(crate) struct Downloads {
 
 impl Downloads {
     /// Starts the manager task. Needs a Tokio runtime.
-    pub fn spawn(kernel: Kernel) -> Self {
+    pub fn spawn(context: DownloadContext) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
         let (jobs_tx, jobs) = watch::channel(BTreeMap::new());
         let (reports_tx, reports) = mpsc::unbounded_channel();
-        let max_running = kernel.host().max_downloads.max(1);
+        let max_running = context.host.max_downloads.max(1);
         let manager = Manager {
-            kernel,
+            context: Arc::new(context),
             max_running,
             jobs: jobs_tx,
             entries: BTreeMap::new(),
@@ -202,7 +233,7 @@ enum AfterStop {
 }
 
 struct Manager {
-    kernel: Kernel,
+    context: Arc<DownloadContext>,
     max_running: usize,
     jobs: watch::Sender<BTreeMap<JobId, Job>>,
     entries: BTreeMap<JobId, Entry>,
@@ -244,7 +275,7 @@ impl Manager {
     }
 
     fn handle(&mut self, msg: Msg) {
-        let bus = self.kernel.events().clone();
+        let bus = self.context.bus.clone();
         match msg {
             Msg::Submit { id, plugin, plan, saved_as, reply } => {
                 let total = plan.artifacts.iter().map(|a| a.size).sum::<Option<u64>>();
@@ -307,7 +338,7 @@ impl Manager {
         // A paused job has no worker, so it goes straight back in the queue.
         self.queue.push_back(id);
         self.set(id, |j| j.phase = JobPhase::Queued);
-        self.kernel.events().publish(Event::DownloadResumed { job: id });
+        self.context.bus.publish(Event::DownloadResumed { job: id });
         Ok(())
     }
 
@@ -342,7 +373,7 @@ impl Manager {
             entry.stop = Some(stop);
             entry.after_stop = AfterStop::Nothing;
             let worker = Worker {
-                kernel: self.kernel.clone(),
+                context: self.context.clone(),
                 id,
                 plugin: entry.plugin.clone(),
                 artifacts: entry.plan.artifacts.clone(),
@@ -365,7 +396,7 @@ impl Manager {
             Report::Progress(id, received) => {
                 self.set(id, |j| j.received = received);
                 let total = self.jobs.borrow().get(&id).and_then(|j| j.total);
-                self.kernel.events().publish(Event::DownloadProgress { job: id, received, total });
+                self.context.bus.publish(Event::DownloadProgress { job: id, received, total });
             }
             Report::Ended(id, result) => self.ended(id, result).await,
         }
@@ -375,7 +406,7 @@ impl Manager {
         let Some(entry) = self.entries.get_mut(&id) else { return };
         entry.stop = None;
         let after = std::mem::replace(&mut entry.after_stop, AfterStop::Nothing);
-        let bus = self.kernel.events().clone();
+        let bus = self.context.bus.clone();
         match result {
             Ok(files) => {
                 self.set(id, |j| j.phase = JobPhase::Done);
@@ -408,12 +439,12 @@ impl Manager {
 
     fn paused(&self, id: JobId) {
         self.set(id, |j| j.phase = JobPhase::Paused);
-        self.kernel.events().publish(Event::DownloadPaused { job: id });
+        self.context.bus.publish(Event::DownloadPaused { job: id });
     }
 
     fn finish_cancel(&mut self, id: JobId) {
         self.set(id, |j| j.phase = JobPhase::Cancelled);
-        self.kernel.events().publish(Event::DownloadCancelled { job: id });
+        self.context.bus.publish(Event::DownloadCancelled { job: id });
         self.close(id, Err(CoreError::Cancelled(id)));
     }
 
@@ -421,7 +452,7 @@ impl Manager {
     fn close(&mut self, id: JobId, outcome: Outcome) {
         let Some(mut entry) = self.entries.remove(&id) else { return };
         if let Some(key) = entry.saved_as.take()
-            && let Err(e) = self.kernel.config().remove(&["app", "downloads", &key])
+            && let Err(e) = self.context.config.remove(&["app", "downloads", &key])
         {
             tracing::warn!(error = %e, "could not save download state");
         }
@@ -432,7 +463,7 @@ impl Manager {
 
     async fn delete_parts(&self, id: JobId) {
         let Some(entry) = self.entries.get(&id) else { return };
-        let storage = DirStorage::new(self.kernel.host().plugin_dir(&entry.plugin));
+        let storage = DirStorage::new(self.context.host.plugin_dir(&entry.plugin));
         for artifact in &entry.plan.artifacts {
             if let Ok(dest) = storage.resolve(&artifact.dest) {
                 let _ = tokio::fs::remove_file(part_path(&dest)).await;
@@ -443,7 +474,7 @@ impl Manager {
 
 /// Runs one job's files in order and reports back.
 struct Worker {
-    kernel: Kernel,
+    context: Arc<DownloadContext>,
     id: JobId,
     plugin: PluginId,
     artifacts: Vec<Artifact>,
@@ -463,12 +494,12 @@ impl Worker {
 
     async fn run_job(&mut self) -> Result<Vec<DownloadedArtifact>, Stopped> {
         let failed = |e: String| Stopped::Error(CoreError::Download(e));
-        let permissions = &self.kernel.manifest(&self.plugin).map_err(Stopped::Error)?.permissions;
+        let permissions = self.context.permissions(&self.plugin).map_err(Stopped::Error)?;
         // Check every address before fetching anything.
         for artifact in &self.artifacts {
             check_url(&self.plugin, permissions, &artifact.url).map_err(|e| failed(e.to_string()))?;
         }
-        let storage = DirStorage::new(self.kernel.host().plugin_dir(&self.plugin));
+        let storage = DirStorage::new(self.context.host.plugin_dir(&self.plugin));
         let mut done_before = 0u64;
         let mut out = Vec::new();
         for artifact in self.artifacts.clone() {
@@ -488,15 +519,22 @@ impl Worker {
                     let size = self.fetch(&artifact, &dest, done_before).await?;
                     self.report(Report::Phase(self.id, JobPhase::Unpacking));
                     let root = storage.root().to_path_buf();
-                    let permissions = self.kernel.manifest(&self.plugin).map_err(Stopped::Error)?.permissions.clone();
+                    let permissions = self.context.permissions(&self.plugin).map_err(Stopped::Error)?.clone();
                     let may_run = move |path: &Path| {
                         let rel = path.strip_prefix(&root).ok().map(|p| p.to_string_lossy().replace('\\', "/"));
                         rel.and_then(|r| nexus_api::RelPath::new(r).ok())
                             .is_some_and(|r| permissions.allows_program(&nexus_api::Location::Data(r)))
                     };
-                    crate::unpack::unpack(&self.kernel, &may_run, unpack.format, &dest, &into)
-                        .await
-                        .map_err(Stopped::Error)?;
+                    crate::unpack::unpack(
+                        &self.context.ports,
+                        self.context.host.platform,
+                        &may_run,
+                        unpack.format,
+                        &dest,
+                        &into,
+                    )
+                    .await
+                    .map_err(Stopped::Error)?;
                     tokio::fs::write(into.join(UNPACKED_MARK), format!("{sha256} {size}")).await.map_err(io)?;
                     let _ = tokio::fs::remove_file(&dest).await;
                     size
@@ -547,11 +585,10 @@ impl Worker {
 
     /// Opens `url` at `offset`, following redirects that stay in the allowlist.
     async fn open(&self, url: &str, offset: u64) -> PluginResult<crate::Body> {
-        let permissions =
-            &self.kernel.manifest(&self.plugin).map_err(|e| PluginError::Other(e.to_string()))?.permissions;
+        let permissions = self.context.permissions(&self.plugin).map_err(|e| PluginError::Other(e.to_string()))?;
         let mut url = url.to_owned();
         for _ in 0..=crate::facades::MAX_REDIRECTS {
-            match self.kernel.http().open(&url, offset).await? {
+            match self.context.ports.http.open(&url, offset).await? {
                 crate::Opened::Body(body) => return Ok(body),
                 crate::Opened::Redirect(location) => {
                     url = crate::facades::next_hop(&self.plugin, permissions, &url, &location)?;

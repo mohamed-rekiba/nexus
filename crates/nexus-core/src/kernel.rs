@@ -18,6 +18,7 @@ use tokio::sync::Mutex;
 use crate::config::{ConfigService, ScopedConfig};
 use crate::facades::{AllowlistHttp, PluginEvents, TracingLog};
 use crate::guard::guarded;
+use crate::ports::Ports;
 use crate::resolve::{dependency_ids, resolve};
 use crate::themes::DataThemeLoader;
 use crate::{
@@ -380,19 +381,9 @@ struct Inner {
     host: HostConfig,
     bus: EventBus,
     config: Arc<ConfigService>,
-    http: Arc<dyn HttpTransport>,
-    spawner: Arc<dyn ProcessSpawner>,
-    processes: Arc<dyn ProcessTree>,
-    windows: Arc<dyn Windows>,
-    login_session: Arc<dyn LoginSession>,
-    opener: Arc<dyn Opener>,
-    hardware: Arc<dyn Hardware>,
-    torrents: Arc<dyn Torrents>,
-    /// "Download only through a VPN", over the port the app plugged in until a system plugin
-    /// provides the VPNs. Plugins get it as their [`VpnGate`].
-    vpn: crate::vpn::VpnRule,
-    archives: Arc<dyn Archives>,
-    clock: Arc<dyn Clock>,
+    /// The kernel uses the HTTP, process, clock and VPN ports, and hands the bundle on to the
+    /// core.
+    ports: Ports,
     order: Vec<PluginId>,
     records: BTreeMap<PluginId, Record>,
 }
@@ -517,26 +508,21 @@ impl Kernel {
         }
 
         let config = config.unwrap_or_else(|| Arc::new(ConfigService::open(host.data_dir.join("config.json"))));
-        let vpn = crate::vpn::VpnRule::new(config.clone(), network);
+        let ports = Ports {
+            http,
+            spawner,
+            processes,
+            windows,
+            login_session,
+            opener,
+            hardware,
+            torrents,
+            archives,
+            clock,
+            vpn: crate::vpn::VpnRule::new(config.clone(), network),
+        };
         let kernel = Kernel {
-            inner: Arc::new(Inner {
-                host,
-                bus: EventBus::default(),
-                config,
-                http,
-                spawner,
-                processes,
-                windows,
-                login_session,
-                opener,
-                hardware,
-                torrents,
-                vpn,
-                archives,
-                clock,
-                order: order.clone(),
-                records,
-            }),
+            inner: Arc::new(Inner { host, bus: EventBus::default(), config, ports, order: order.clone(), records }),
         };
 
         // Init the eager ones.
@@ -563,62 +549,10 @@ impl Kernel {
         &self.inner.config
     }
 
-    pub(crate) fn spawner(&self) -> &Arc<dyn ProcessSpawner> {
-        &self.inner.spawner
-    }
-
-    pub(crate) fn login_session(&self) -> &Arc<dyn LoginSession> {
-        &self.inner.login_session
-    }
-
-    pub(crate) fn opener(&self) -> &Arc<dyn Opener> {
-        &self.inner.opener
-    }
-
-    pub(crate) fn hardware(&self) -> &Arc<dyn Hardware> {
-        &self.inner.hardware
-    }
-
-    /// The VPN rule, which the VPN and torrents subsystems share with the plugins.
-    pub(crate) fn vpn_rule(&self) -> &crate::vpn::VpnRule {
-        &self.inner.vpn
-    }
-
-    /// The ports the torrents subsystem takes.
-    pub(crate) fn torrent_ports(&self) -> crate::torrents::TorrentPorts {
-        crate::torrents::TorrentPorts {
-            torrents: self.inner.torrents.clone(),
-            hardware: self.inner.hardware.clone(),
-            clock: self.inner.clock.clone(),
-        }
-    }
-
-    /// The ports the preferences subsystem takes.
-    pub(crate) fn pref_ports(&self) -> crate::preferences::PrefPorts {
-        crate::preferences::PrefPorts { login_session: self.inner.login_session.clone() }
-    }
-
-    /// The ports the sessions subsystem takes.
-    pub(crate) fn session_ports(&self) -> crate::sessions::SessionPorts {
-        crate::sessions::SessionPorts {
-            spawner: self.inner.spawner.clone(),
-            processes: self.inner.processes.clone(),
-            windows: self.inner.windows.clone(),
-            clock: self.inner.clock.clone(),
-        }
-    }
-
-    pub(crate) fn archives(&self) -> &Arc<dyn Archives> {
-        &self.inner.archives
-    }
-
-    /// The time the core's timers run on.
-    pub fn clock(&self) -> &Arc<dyn Clock> {
-        &self.inner.clock
-    }
-
-    pub(crate) fn http(&self) -> &Arc<dyn HttpTransport> {
-        &self.inner.http
+    /// Every port the app plugged in. The core takes the bundle once, when it starts, and
+    /// splits it per subsystem.
+    pub(crate) fn ports(&self) -> &Ports {
+        &self.inner.ports
     }
 
     /// Loaded plugins, dependencies first.
@@ -749,7 +683,7 @@ impl Kernel {
                 State::Loaded => {}
             }
 
-            let (host, clock) = (&self.inner.host, self.inner.clock.as_ref());
+            let (host, clock) = (&self.inner.host, self.inner.ports.clock.as_ref());
             let result = match &record.plugin {
                 // A theme has no init: its files are read on demand.
                 Code::Theme(_) => Ok(Provided::default()),
@@ -818,7 +752,7 @@ impl Kernel {
                 safe_mode: host.safe_mode,
                 runs_32bit: host.runs_32bit,
             }))
-            .insert(Arc::new(VpnGate::new(Arc::new(self.inner.vpn.clone()))))
+            .insert(Arc::new(VpnGate::new(Arc::new(self.inner.ports.vpn.clone()))))
             .build();
         PluginContext::new(ContextParts {
             plugin: id.clone(),
@@ -838,12 +772,12 @@ impl Kernel {
                 home: host.home.clone(),
                 platform: host.platform,
                 data_dir: host.plugin_dir(&id),
-                spawner: self.inner.spawner.clone(),
+                spawner: self.inner.ports.spawner.clone(),
             }),
             http: Arc::new(AllowlistHttp {
                 plugin: id.clone(),
                 permissions: record.manifest.permissions.clone(),
-                transport: self.inner.http.clone(),
+                transport: self.inner.ports.http.clone(),
             }),
             log: Logger::new(Arc::new(TracingLog { plugin: id.clone() })),
             events: Arc::new(PluginEvents { plugin: id, bus: self.inner.bus.clone() }),
@@ -867,7 +801,7 @@ impl Kernel {
             drop(state);
             let timeout = self.inner.host.shutdown_timeout;
             if let Err(error) =
-                guarded(self.clock().as_ref(), plugin, "shutdown", timeout, record.plugin.shutdown()).await
+                guarded(self.inner.ports.clock.as_ref(), plugin, "shutdown", timeout, record.plugin.shutdown()).await
             {
                 tracing::warn!(plugin_id = %plugin, %error, "shutdown failed");
             }
@@ -899,7 +833,7 @@ impl Kernel {
         method: &'static str,
         call: impl Future<Output = PluginResult<T>>,
     ) -> CoreResult<T> {
-        guarded(self.clock().as_ref(), plugin, method, self.inner.host.call_timeout, call)
+        guarded(self.inner.ports.clock.as_ref(), plugin, method, self.inner.host.call_timeout, call)
             .await
             .map_err(|error| CoreError::Plugin { plugin: plugin.clone(), error })
     }

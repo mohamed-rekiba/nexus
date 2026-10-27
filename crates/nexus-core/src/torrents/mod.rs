@@ -157,7 +157,7 @@ impl TorrentJob {
 }
 
 /// What the player can do with a download.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TorrentAction {
     /// Ready, paused, failed or cancelled: download it.
     Start,
@@ -176,7 +176,7 @@ pub enum TorrentAction {
 
 /// What the player asks of the catalogs' downloads. Installing one is a
 /// [`crate::GameInstallCmd`].
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum TorrentCmd {
     /// Downloads a release of a game the catalogs offer: the player agreed. It reads the
     /// torrent's files first and waits for the player to start it.

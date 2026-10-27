@@ -1,30 +1,33 @@
 //! The public app API: commands in, view models and events out.
 //!
-//! All state lives here, never in a theme, so the UI can be rebuilt (or a theme swapped) at
-//! any time without losing navigation, selection, downloads or running games.
+//! All state lives in the core, never in a theme, so the UI can be rebuilt (or a theme
+//! swapped) at any time without losing navigation, selection, downloads or running games.
+//!
+//! `Core` is a router. It starts the subsystems over the ports bundle, sends each
+//! [`Command`] to the subsystem or the flow that owns it, merges the subsystems' changes, and
+//! reads them all into one [`Snapshot`] for the view. A flow is a free function over the core
+//! in its own module (`navigation`, `emulator_builds`, `library_reads`, ...): it runs work that
+//! crosses areas, such as a plugin read whose answer goes to a subsystem and posts notices.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use futures::stream::BoxStream;
-use nexus_api::{
-    Capability, ConfigScope, DownloadRequest, Event, GameKey, InstallPhase, JobId, PluginId, PluginKind, Provided,
-    SessionId, SlotId, SlotRequest,
-};
-use nexus_ui_api::{AppView, NoticeKind};
+use nexus_api::{Capability, ConfigScope, DownloadRequest, Event, GameKey, JobId, PluginId, Provided, SessionId};
+use nexus_ui_api::AppView;
 use serde_json::Value;
 
 use crate::changes::{Area, Change, Changes, Notifier};
 use crate::downloads::Downloads;
-use crate::error::require;
-use crate::grid_query::{GRID_PAGE, Grid, GridQuery, ShownGrid};
-use crate::library::DetailState;
 use crate::preferences::{Pref, Preferences, PreferencesSnapshot};
+use crate::snapshot::Snapshot;
 use crate::view;
+// The view reads them from here.
+pub(crate) use crate::app_state::{AppState, SettingsPanel};
 use crate::{CoreError, CoreResult, Kernel};
+use crate::{emulator_builds, library_reads, navigation, plugin_downloads, plugin_settings, release_downloads};
 
 /// Where the player is. The navigation stack is a list of routes.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Route {
     Home,
     GameDetail(GameKey),
@@ -41,8 +44,18 @@ pub enum Route {
     Running(SessionId),
 }
 
-/// Everything the UI can ask the core to do.
-#[derive(Clone, Debug, PartialEq)]
+/// A grid of game cards that tells the core how many columns it shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum Grid {
+    /// The Library's grid, of the installed games.
+    Library,
+    /// The Catalog's grid, of the games the catalogs offer.
+    Catalog,
+}
+
+/// Everything the UI can ask the core to do. It reads and writes as JSON with `serde`, each
+/// variant by its name: `{"Navigate": "Settings"}`, `"Back"`, `{"Torrent": {"SeedDownloads": true}}`.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Command {
     Navigate(Route),
     Back,
@@ -174,47 +187,10 @@ pub enum Command {
 
 pub use nexus_api::HOST_INSTALL_GAME;
 
-/// How often the core looks for emulator updates by itself, and how long after start it
-/// looks first.
-pub const UPDATE_CHECK_EVERY: std::time::Duration = std::time::Duration::from_secs(6 * 3600);
-const FIRST_UPDATE_CHECK: std::time::Duration = std::time::Duration::from_secs(60);
-
-/// A first play waiting for the player to agree to install its emulator.
-#[derive(Clone, Debug)]
-pub(crate) struct InstallPrompt {
-    pub game: GameKey,
-    pub emulator: String,
-    pub version: String,
-    pub title: String,
-    pub size_bytes: Option<u64>,
-}
-
-/// An install in progress, saved under `app.installs.<plugin>` so a crash resumes it.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-struct InstallRecord {
-    version: String,
-    from: Option<String>,
-    phase: InstallPhase,
-}
-
-/// A download in progress, saved under `app.downloads` so a crash resumes it.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-struct DownloadRecord {
-    plugin: PluginId,
-    request: DownloadRequest,
-}
-
-impl DownloadRecord {
-    /// The same request for the same plugin is saved once.
-    fn key(&self) -> String {
-        serde_json::to_string(self).expect("records serialize")
-    }
-}
-
 /// Where a game's folder is on disk, through its plugin's folder grants; `None` when the
 /// grants refuse it or it isn't a folder.
 /// The player's folders as `game`'s plugin may use them.
-fn game_folders(kernel: &Kernel, game: &GameKey) -> Option<crate::folders::HostFolders> {
+pub(crate) fn game_folders(kernel: &Kernel, game: &GameKey) -> Option<crate::folders::HostFolders> {
     plugin_folders(kernel, &game.plugin)
 }
 
@@ -237,83 +213,10 @@ pub(crate) fn resolve_game_folder(
     game_folders(kernel, game)?.resolve(folder).ok().filter(|p| p.is_dir())
 }
 
-#[derive(Clone, Debug, Default)]
-pub(crate) struct EmulatorState {
-    pub installed: Vec<String>,
-    /// The installed build is the player's own: it never updates by itself.
-    pub own: bool,
-    pub available: Vec<String>,
-    pub busy: bool,
-    /// Its `emulator.panel` slot items.
-    pub panels: Vec<nexus_api::SlotItem>,
-}
-
-impl EmulatorState {
-    /// The newest available version, if it is newer than every installed one. Versions
-    /// compare as semver when they parse, as text otherwise.
-    pub fn update(&self) -> Option<String> {
-        let newest = self.available.first()?;
-        let installed = self.installed.last()?;
-        let newer = match (semver::Version::parse(newest), semver::Version::parse(installed)) {
-            (Ok(a), Ok(b)) => a > b,
-            _ => newest != installed && !self.installed.contains(newest),
-        };
-        newer.then(|| newest.clone())
-    }
-}
-
-/// A plugin's settings panel on the Settings screen: its slot item, and the schema and the
-/// values of the settings scope it names.
-#[derive(Clone, Debug)]
-pub(crate) struct SettingsPanel {
-    pub plugin: PluginId,
-    pub item: nexus_api::SlotItem,
-    pub schema: Value,
-    pub values: Value,
-}
-
-/// How long a selection must stay before its details load.
-const SELECT_SETTLE: std::time::Duration = std::time::Duration::from_millis(150);
-
-#[derive(Clone)]
-pub(crate) struct AppState {
-    pub nav: Vec<Route>,
-    pub selected: Option<GameKey>,
-    /// Each emulator's builds and blocks, and a service plugin's blocks once its page opens.
-    pub emulators: BTreeMap<PluginId, EmulatorState>,
-    pub settings: Vec<SettingsPanel>,
-    pub theme: Option<PluginId>,
-    /// The Library's search, filters and sort.
-    pub library_view: GridQuery,
-    /// The Catalog's.
-    pub catalog_view: GridQuery,
-    /// A game that just closed, to ask the player how far it got, and the emulator build it
-    /// ran on.
-    pub result_prompt: Option<(GameKey, Option<String>)>,
-    /// This PC, once the check ran.
-    pub hardware: Option<crate::Specs>,
-    /// The machine's settings, from the system plugins.
-    pub system: crate::system::SystemState,
-    pub install_prompt: Option<InstallPrompt>,
-    /// Emulators with an update that waits for their game to close.
-    pub pending_updates: BTreeSet<PluginId>,
-    /// The installs stores are doing (Steam's), by the catalog plugin, as last read.
-    pub store_installs: Vec<(PluginId, nexus_api::StoreInstall)>,
-    /// Until when the stores' installs are read often: a minute after Nexus asked a store to
-    /// install, as the store writes its install down a moment later.
-    pub store_watch_until: Option<std::time::Instant>,
-    /// The game selected in the Catalog. Home's selection stays a library game.
-    pub catalog_selected: Option<GameKey>,
-    /// The Catalog's grid as last shown.
-    pub catalog_grid: ShownGrid,
-    /// Each grid's columns.
-    pub grid_columns: HashMap<Grid, usize>,
-    /// Where the catalogs' downloads go, and the free space there.
-    pub disks: crate::disks::Disks,
-}
-
 pub(crate) struct Inner {
     pub kernel: Kernel,
+    /// Every port the app plugged in, split per subsystem when the core starts.
+    pub ports: crate::ports::Ports,
     pub state: Mutex<AppState>,
     pub downloads: Downloads,
     pub changes: Changes,
@@ -343,27 +246,19 @@ impl Core {
     /// Starts the app on a booted kernel and resumes installs a crash interrupted.
     pub async fn start(kernel: Kernel) -> Core {
         let theme = Pref::Theme.load(kernel.config()).as_str().and_then(|s| PluginId::new(s).ok());
-        let state = AppState {
-            nav: vec![Route::Home],
-            selected: None,
-            emulators: BTreeMap::new(),
-            settings: Vec::new(),
-            theme,
-            library_view: GridQuery::library(),
-            catalog_view: GridQuery::catalog(),
-            result_prompt: None,
-            hardware: None,
-            system: Default::default(),
-            install_prompt: None,
-            pending_updates: BTreeSet::new(),
-            store_installs: Vec::new(),
-            store_watch_until: None,
-            catalog_selected: None,
-            catalog_grid: ShownGrid::default(),
-            grid_columns: HashMap::new(),
-            disks: Default::default(),
-        };
-        let downloads = Downloads::spawn(kernel.clone());
+        let state = AppState::new(theme);
+        let ports = kernel.ports().clone();
+        let downloads = Downloads::spawn(crate::downloads::DownloadContext {
+            ports: ports.downloads(),
+            host: kernel.host().clone(),
+            permissions: kernel
+                .order()
+                .iter()
+                .filter_map(|id| Some((id.clone(), kernel.manifest(id).ok()?.permissions.clone())))
+                .collect(),
+            config: kernel.config().clone(),
+            bus: kernel.events().clone(),
+        });
         let changes = Changes::new();
         let library = crate::library::LibrarySubsystem::new(
             crate::library::Records::new(kernel.config().clone()),
@@ -377,39 +272,33 @@ impl Core {
                 let weak = weak.clone();
                 Arc::new(move |event| {
                     if let Some(inner) = weak.upgrade() {
-                        Core { inner }.torrent_event(event);
+                        crate::release_downloads::torrent_event(&Core { inner }, event);
                     }
                 })
             };
             let torrents = crate::torrents::TorrentsSubsystem::new(
-                kernel.torrent_ports(),
+                ports.torrents(),
                 crate::torrents::Polls { torrents: kernel.host().torrent_poll, vpn: kernel.host().vpn_poll },
                 crate::torrents::Records::new(kernel.config().clone()),
-                kernel.vpn_rule().clone(),
+                ports.vpn.clone(),
                 Notifier::new(changes.clone(), kernel.events().clone()),
                 events,
             );
             let preferences = Preferences::new(
                 kernel.config().clone(),
-                kernel.pref_ports(),
+                ports.preferences(),
                 Notifier::new(changes.clone(), kernel.events().clone()),
             );
             let install_events: crate::game_installs::EventSink = Arc::new(move |event| {
                 let core = weak.upgrade().map(|inner| Core { inner });
                 Box::pin(async move {
                     if let Some(core) = core {
-                        core.install_event(event).await;
+                        crate::release_downloads::install_event(&core, event).await;
                     }
                 })
             });
             let installs = crate::game_installs::GameInstallsSubsystem::new(
-                crate::game_installs::InstallPorts {
-                    archives: kernel.archives().clone(),
-                    hardware: kernel.hardware().clone(),
-                    clock: kernel.clock().clone(),
-                    downloads: Arc::new(torrents.clone()),
-                    call_timeout: kernel.host().call_timeout,
-                },
+                ports.installs(Arc::new(torrents.clone()), kernel.host().call_timeout),
                 crate::game_installs::Records::new(kernel.config().clone()),
                 Notifier::new(changes.clone(), kernel.events().clone()),
                 install_events,
@@ -420,7 +309,7 @@ impl Core {
                 }
             });
             let sessions = crate::sessions::SessionsSubsystem::new(
-                kernel.session_ports(),
+                ports.sessions(),
                 crate::sessions::Timings {
                     watch_every: kernel.host().watch_every,
                     show_timeout: kernel.host().show_timeout,
@@ -435,10 +324,7 @@ impl Core {
             let notices =
                 crate::notices::NoticesSubsystem::new(Notifier::new(changes.clone(), kernel.events().clone()));
             let launcher_update = crate::launcher_update::LauncherUpdateSubsystem::new(
-                crate::launcher_update::LauncherUpdatePorts {
-                    http: kernel.http().clone(),
-                    login_session: kernel.login_session().clone(),
-                },
+                ports.launcher_update(),
                 crate::launcher_update::ThisLauncher {
                     data_dir: kernel.host().data_dir.clone(),
                     install: kernel.host().install,
@@ -449,7 +335,7 @@ impl Core {
             // The setting or the VPNs changed: the downloads' kill switch looks at once.
             let kill_switch = torrents.clone();
             let vpn = crate::vpn::VpnSubsystem::new(
-                kernel.vpn_rule().clone(),
+                ports.vpn.clone(),
                 kernel.host().home.clone(),
                 Notifier::new(changes.clone(), kernel.events().clone()),
                 Arc::new(move || {
@@ -460,6 +346,7 @@ impl Core {
             Inner {
                 preferences,
                 kernel,
+                ports,
                 state: Mutex::new(state),
                 downloads,
                 changes,
@@ -477,55 +364,23 @@ impl Core {
         core.installs().clean_up(|plugin| plugin_folders(core.kernel(), plugin));
         crate::system::adopt_vpn(&core).await;
         core.torrents().restore();
-        core.resume_installs().await;
-        core.resume_downloads();
-        core.schedule_update_checks();
+        crate::emulator_builds::resume_installs(&core).await;
+        crate::plugin_downloads::resume_downloads(&core);
+        crate::emulator_builds::schedule_update_checks(&core);
         crate::system::schedule_refresh(&core);
-        core.check_hardware();
-        core.watch_catalogs();
-        core.watch_store_installs();
+        crate::hardware::check_hardware(&core);
+        crate::catalog_reads::watch_catalogs(&core);
+        crate::catalog_reads::watch_store_installs(&core);
         core
-    }
-
-    /// Reads this PC once, off the UI thread: the system's tools can take a moment.
-    fn check_hardware(&self) {
-        let core = self.clone();
-        tokio::spawn(async move {
-            let hardware = core.inner.kernel.hardware().clone();
-            let Ok(specs) = tokio::task::spawn_blocking(move || hardware.specs()).await else { return };
-            core.notice_blocked(&specs);
-            core.state().hardware = Some(specs);
-            core.changed(Area::Hardware);
-        });
-    }
-
-    /// Once for each PC: a notice when an emulator's games won't start here, before the
-    /// player downloads one. The config keeps the PC it was for.
-    fn notice_blocked(&self, specs: &crate::Specs) {
-        let kernel = &self.inner.kernel;
-        let summary = crate::hardware::summary(specs);
-        if self.preferences().get(Pref::PcNoticed).as_str() == Some(summary.as_str()) {
-            return;
-        }
-        let blocked: Vec<(String, String)> = kernel
-            .of_kind(PluginKind::Emulator)
-            .into_iter()
-            .filter_map(|id| kernel.manifest(&id).ok())
-            .filter(|m| m.capabilities.contains(&Capability::Launcher))
-            .filter_map(|m| match crate::hardware::verdict(specs, &m.requires) {
-                crate::hardware::Verdict::No(why) => Some((m.name.clone(), why)),
-                _ => None,
-            })
-            .collect();
-        let Some(message) = crate::hardware::blocked_notice(&blocked) else { return };
-        self.notice_opening(NoticeKind::Error, Route::Settings, message);
-        if let Err(e) = self.preferences().save(Pref::PcNoticed, Value::String(summary)) {
-            tracing::warn!(error = %e, "could not save the PC the notice was for");
-        }
     }
 
     pub fn kernel(&self) -> &Kernel {
         &self.inner.kernel
+    }
+
+    /// Every port the app plugged in.
+    pub(crate) fn ports(&self) -> &crate::ports::Ports {
+        &self.inner.ports
     }
 
     pub fn events(&self) -> BoxStream<'static, Event> {
@@ -564,7 +419,7 @@ impl Core {
     /// What the sessions subsystem says the core must do.
     fn session_event(&self, event: crate::sessions::SessionEvent) {
         match event {
-            crate::sessions::SessionEvent::Problem(problem) => self.notice(problem),
+            crate::sessions::SessionEvent::Problem(problem) => self.notices().info(problem),
         }
     }
 
@@ -600,40 +455,48 @@ impl Core {
         self.inner.kernel.events().publish(Event::StateChanged);
     }
 
-    /// Posts a notice. The change that goes with it publishes [`Event::StateChanged`].
-    fn post(&self, kind: NoticeKind, message: String, route: Option<Route>, game: Option<GameKey>) {
-        self.notices().post(kind, message, route, game);
-    }
-
-    /// A notice of the default kind, `Info`.
-    pub(crate) fn notice(&self, message: String) {
-        self.post(NoticeKind::Info, message, None, None);
-    }
-
-    /// A notice of the `Error` kind: something failed.
-    pub(crate) fn problem(&self, message: String) {
-        self.post(NoticeKind::Error, message, None, None);
-    }
-
-    /// A notice whose subject `route` shows: clicking it opens that screen.
-    pub(crate) fn notice_opening(&self, kind: NoticeKind, route: Route, message: String) {
-        self.post(kind, message, Some(route), None);
-    }
-
-    /// A problem with one game: its card shows the game's art.
-    pub(crate) fn game_problem(&self, game: &GameKey, message: String) {
-        self.post(NoticeKind::Error, message, None, Some(game.clone()));
-    }
-
     /// Shows the player a problem outside the core, such as a theme's logic failing.
     pub fn report(&self, message: String) {
         self.notices().report(message);
     }
 
+    /// The whole app, read for a render: every subsystem once, a copy of the state no
+    /// subsystem owns, and what the view needs from the plugins, the config and the disk. The
+    /// subsystems are read before that state, as the core never holds its lock while it takes a
+    /// subsystem's.
+    pub(crate) fn snapshot(&self) -> Snapshot<'_> {
+        let kernel = self.kernel();
+        let library = self.library().snapshot();
+        let torrents = self.torrents().snapshot();
+        let state = self.state().clone();
+        let detail_game = crate::snapshot::detail_game(&state);
+        let files = crate::snapshot::files(kernel, &library, &torrents, detail_game.as_ref());
+        Snapshot {
+            plugins: crate::snapshot::Plugins::new(kernel),
+            installs: self.installs().snapshot(),
+            sessions: self.sessions().snapshot(),
+            prefs: self.prefs(),
+            notices: self.notices().snapshot(),
+            launcher_update: self.launcher_update().snapshot(),
+            vpn: self.vpn().snapshot(),
+            downloads: self.inner.downloads.jobs(),
+            theme_options: state.theme.as_ref().map(|theme| self.theme_options(theme)).unwrap_or(Value::Null),
+            hidden_filter: crate::navigation::hidden_filter_on(kernel),
+            can_start_at_login: self.ports().login_session.can_start_at_login(),
+            now: self.ports().clock.now(),
+            now_secs: crate::sessions::now_secs(),
+            library,
+            torrents,
+            state,
+            detail_game,
+            files,
+        }
+    }
+
     /// The view models for the current state. The Catalog's grid, once built on the Catalog,
     /// stands on the other screens.
     pub fn view(&self) -> AppView {
-        let snapshot = crate::snapshot::take(self);
+        let snapshot = self.snapshot();
         let view = view::build(&snapshot);
         let on_catalog = snapshot.state.nav.last() == Some(&Route::Catalog);
         self.state().catalog_grid.keep(on_catalog, &view.catalog.games);
@@ -667,211 +530,79 @@ impl Core {
         self.inner.kernel.shutdown().await;
     }
 
+    /// Runs a command: each goes to the subsystem or the flow that owns it.
     pub async fn dispatch(&self, command: Command) -> CoreResult<()> {
         tracing::debug!(?command, "dispatch");
         let result = match command {
-            Command::Navigate(route) => self.navigate(route).await,
-            Command::Back => {
-                {
-                    let mut state = self.state();
-                    if state.nav.len() > 1 {
-                        state.nav.pop();
-                    }
-                }
-                self.changed(Area::Navigation);
-                Ok(())
-            }
-            Command::Select(game) => {
-                self.select(&game);
-                self.changed(Area::Navigation);
-                self.prefetch_around(&game);
-                // Themes show the selected game's details on the home screen, so load them
-                // once. Wait first: a player who scrolls past a game doesn't need its details.
-                // A plugin that fails here leaves one notice; the selection stands.
-                let wanted = matches!(self.library().snapshot().detail_state(&game), DetailState::Unread);
-                if !wanted {
-                    return Ok(());
-                }
-                self.kernel().clock().sleep(SELECT_SETTLE).await;
-                let still = {
-                    let state = self.state();
-                    state.selected.as_ref() == Some(&game) || state.catalog_selected.as_ref() == Some(&game)
-                };
-                if !still {
-                    return Ok(());
-                }
-                match self.load_detail(&game).await {
-                    Ok(()) => self.changed(Area::Library),
-                    Err(e) => {
-                        self.library().detail_failed(&game);
-                        self.problem(e.to_string());
-                    }
-                }
-                Ok(())
-            }
-            Command::OpenGame(game) => {
-                self.torrents().set_download_error(None);
-                self.open_game(game).await
-            }
-            Command::Library(crate::LibraryCmd::Refresh) => self.refresh_library().await,
+            Command::Navigate(route) => navigation::navigate(self, route).await,
+            Command::Back => navigation::back(self),
+            Command::Select(game) => navigation::select_game(self, game).await,
+            Command::OpenGame(game) => navigation::open_game_anew(self, game).await,
+            Command::Search(text) => navigation::search(self, text).await,
+            Command::LibrarySearch(text) => navigation::set_grid(self, false, |v| v.query = text),
+            Command::LibrarySystem(system) => navigation::set_grid(self, false, |v| v.set_system(system)),
+            Command::LibraryGenre(genre) => navigation::set_grid(self, false, |v| v.genre = genre),
+            Command::LibrarySort(sort) => navigation::sort(self, false, sort),
+            Command::LibraryMore => navigation::more(self, false),
+            Command::CatalogSearch(text) => navigation::set_grid(self, true, |v| v.query = text),
+            Command::CatalogSystem(system) => navigation::set_grid(self, true, |v| v.set_system(system)),
+            Command::CatalogGenre(genre) => navigation::set_grid(self, true, |v| v.genre = genre),
+            Command::CatalogSort(sort) => navigation::sort(self, true, sort),
+            Command::CatalogMore => navigation::more(self, true),
+            Command::GridColumns { grid, columns } => navigation::set_columns(self, grid, columns),
+            Command::Library(crate::LibraryCmd::Refresh) => library_reads::refresh_library(self).await,
             Command::Library(command) => self.library().handle(command),
-            Command::UninstallGame(game) => self.uninstall_game(&game).await,
-            Command::Search(text) => self.search(text).await,
-            Command::Download { plugin, request } => self.download(&plugin, request).await,
+            Command::UninstallGame(game) => crate::uninstall::uninstall_game(self, &game).await,
+            Command::Download { plugin, request } => plugin_downloads::download(self, &plugin, request).await,
             Command::PauseDownload(job) => self.inner.downloads.pause(job).await,
             Command::ResumeDownload(job) => self.inner.downloads.resume(job).await,
             Command::CancelDownload(job) if self.installs().cancel(job) => Ok(()),
             Command::CancelDownload(job) => self.inner.downloads.cancel(job).await,
-            Command::InstallEmulator { plugin, version } => self.install(&plugin, version, None).await,
-            Command::UpdateEmulator { plugin } => self.update(&plugin).await,
-            Command::UninstallEmulator { plugin, version } => self.uninstall(&plugin, &version).await,
+            Command::InstallEmulator { plugin, version } => {
+                emulator_builds::install(self, &plugin, version, None).await
+            }
+            Command::UpdateEmulator { plugin } => emulator_builds::update(self, &plugin).await,
+            Command::UninstallEmulator { plugin, version } => emulator_builds::uninstall(self, &plugin, &version).await,
+            Command::CheckUpdates => {
+                emulator_builds::check_updates(self).await;
+                Ok(())
+            }
+            Command::ConfirmInstall => emulator_builds::confirm_install(self).await,
+            Command::CancelInstall => emulator_builds::cancel_install(self),
             Command::Session(command) => crate::launch::session(self, command).await,
-            Command::SetConfig { plugin, scope, value } => self.set_config(&plugin, scope, value).await,
+            Command::AskResult(game) => crate::launch::ask_result(self, game),
+            Command::ReportResult(level) => crate::launch::report_result(self, level),
+            Command::SetConfig { plugin, scope, value } => {
+                plugin_settings::set_config(self, &plugin, scope, value).await
+            }
             Command::SetConfigField { plugin, scope, key, value } => {
-                self.set_config_field(&plugin, scope, key, value).await
+                plugin_settings::set_config_field(self, &plugin, scope, key, value).await
             }
-            Command::SetThemeOption { key, value } => self.set_theme_option(key, value),
-            Command::RunAction { plugin, action, game, args } => self.run_action(&plugin, &action, game, args).await,
+            Command::SetThemeOption { key, value } => plugin_settings::set_theme_option(self, key, value),
+            Command::RunAction { plugin, action, game, args } => {
+                plugin_settings::run_action(self, &plugin, &action, game, args).await
+            }
+            Command::SetFolders { name, paths } => plugin_settings::set_folders(self, &name, &paths),
+            Command::SetPluginEnabled { plugin, enabled } => {
+                plugin_settings::set_plugin_enabled(self, &plugin, enabled).await
+            }
             Command::ThemeSwitched(theme) => self.theme_switched(theme),
-            Command::SetFolders { name, paths } => self.set_folders(&name, &paths),
-            Command::SetPluginEnabled { plugin, enabled } => self.set_plugin_enabled(&plugin, enabled).await,
             Command::Pref(pref, value) => self.preferences().set(pref, value).await,
-            Command::ReportResult(level) => {
-                let Some((game, build)) = self.state().result_prompt.take() else { return Ok(()) };
-                self.library().answer(&game, level.as_deref(), build.as_deref())?;
-                self.changed(Area::Sessions);
-                Ok(())
-            }
-            Command::LibrarySearch(text) => self.set_grid(false, |v| v.query = text),
-            Command::LibrarySystem(system) => self.set_grid(false, |v| v.set_system(system)),
-            Command::LibraryGenre(genre) => self.set_grid(false, |v| v.genre = genre),
-            Command::LibrarySort(sort) => {
-                let sort = sort.parse()?;
-                self.set_grid(false, |v| v.sort = sort)
-            }
-            Command::LibraryMore => self.more(false),
-            Command::GridColumns { grid, columns } => {
-                self.state().grid_columns.insert(grid, columns);
-                Ok(())
-            }
-            Command::CatalogSearch(text) => self.set_grid(true, |v| v.query = text),
-            Command::CatalogSystem(system) => self.set_grid(true, |v| v.set_system(system)),
-            Command::CatalogGenre(genre) => self.set_grid(true, |v| v.genre = genre),
-            Command::CatalogSort(sort) => {
-                let sort = sort.parse()?;
-                self.set_grid(true, |v| v.sort = sort)
-            }
-            Command::CatalogMore => self.more(true),
-            Command::Torrent(command) => self.torrent(command).await,
-            Command::GameInstall(command) => self.game_install(command).await,
+            Command::Torrent(command) => release_downloads::torrent(self, command).await,
+            Command::GameInstall(command) => release_downloads::game_install(self, command).await,
             Command::Vpn(command) => self.vpn().handle(command).await,
-            Command::AskResult(game) => {
-                let build = self.build_of(&game.plugin);
-                self.state().result_prompt = Some((game, build));
-                self.changed(Area::Sessions);
-                Ok(())
-            }
             Command::System(command) => crate::system::run(self, command).await,
-            Command::Notice(crate::NoticeCmd::Open(id)) => match self.notices().take(id).and_then(|n| n.route) {
-                Some(route) => self.navigate(route).await,
-                None => Ok(()),
-            },
+            Command::Notice(crate::NoticeCmd::Open(id)) => navigation::open_notice(self, id).await,
             Command::Notice(command) => self.notices().handle(command),
             Command::LauncherUpdate(crate::LauncherUpdateCmd::Check) => {
-                let found = self.launcher_update().check().await;
-                // Nexus OS brings the new launcher with its next update: look for that now.
-                if matches!(found, crate::launcher_update::UpdateState::WithSystem { .. }) {
-                    let core = self.clone();
-                    tokio::spawn(async move {
-                        let _ = crate::system::run(&core, crate::system::SystemCommand::CheckOsUpdate).await;
-                    });
-                }
-                Ok(())
+                crate::system::check_launcher_update(self).await
             }
             Command::LauncherUpdate(command) => self.launcher_update().handle(command).await,
-            Command::CheckUpdates => {
-                self.check_updates().await;
-                Ok(())
-            }
-            Command::ConfirmInstall => {
-                let Some(prompt) = self.state().install_prompt.take() else { return Ok(()) };
-                self.changed(Area::Sessions);
-                self.install(&prompt.game.plugin, Some(prompt.version), None).await?;
-                crate::launch::launch(self, prompt.game).await
-            }
-            Command::CancelInstall => {
-                self.state().install_prompt = None;
-                self.changed(Area::Sessions);
-                Ok(())
-            }
         };
         if let Err(error) = &result {
             tracing::warn!(%error, "command failed");
         }
         result
-    }
-
-    /// The Catalog shows its "Hidden" filter: unless a plugin that gives catalogs turned it off
-    /// (its `show_hidden_filter` setting).
-    pub(crate) fn hidden_filter_on(kernel: &Kernel) -> bool {
-        kernel.providers(Capability::Releases).iter().all(|plugin| {
-            kernel.config().get(&["plugins", plugin.as_str(), "emulator", "show_hidden_filter"]).as_bool()
-                != Some(false)
-        })
-    }
-
-    /// A turned-on plugin gives release catalogs, so there is a Catalog.
-    pub(crate) fn catalog_available(kernel: &Kernel) -> bool {
-        !kernel.providers(Capability::Releases).is_empty()
-    }
-
-    async fn navigate(&self, route: Route) -> CoreResult<()> {
-        if route == Route::Catalog && !Self::catalog_available(&self.inner.kernel) {
-            return Err(CoreError::Invalid("no game catalog is turned on".into()));
-        }
-        match &route {
-            Route::GameDetail(game) => return self.open_game(game.clone()).await,
-            Route::Emulators => self.refresh_emulators().await,
-            Route::Plugin(plugin) => {
-                let manifest = self.inner.kernel.manifest(plugin)?;
-                // A service's blocks show on its page too.
-                if manifest.kind != PluginKind::Theme {
-                    self.refresh_emulator(plugin).await;
-                }
-                self.refresh_settings().await;
-            }
-            Route::Settings => {
-                self.vpn().refresh().await;
-                self.refresh_settings().await;
-            }
-            // Read once; a new catalog address reads them again. The Catalog opens at once and
-            // says it is loading until the read ends.
-            Route::Catalog if !self.library().has_catalogs() => {
-                self.push(route);
-                self.refresh_releases().await;
-                return Ok(());
-            }
-            Route::GameSettings(game) if self.library().snapshot().detail(game).is_none() => {
-                self.load_detail(game).await?
-            }
-            _ => {}
-        }
-        self.push(route);
-        Ok(())
-    }
-
-    pub(crate) fn push(&self, route: Route) {
-        {
-            let mut state = self.state();
-            // One plugin's page at a time: opening another replaces it.
-            if matches!(route, Route::Plugin(_)) && matches!(state.nav.last(), Some(Route::Plugin(_))) {
-                state.nav.pop();
-            }
-            if state.nav.last() != Some(&route) {
-                state.nav.push(route);
-            }
-        }
-        self.changed(Area::Navigation);
     }
 
     /// Activates every plugin with `capability`, skipping (with a notice) those that fail.
@@ -880,596 +611,10 @@ impl Core {
         for plugin in self.inner.kernel.providers(capability) {
             match self.inner.kernel.provided(&plugin).await {
                 Ok(provided) => out.push((plugin, provided)),
-                Err(e) => self.problem(e.to_string()),
+                Err(e) => self.notices().problem(e.to_string()),
             }
         }
         out
-    }
-
-    /// Searches the Catalog, and shows it.
-    async fn search(&self, text: String) -> CoreResult<()> {
-        if !self.library().has_catalogs() {
-            self.refresh_releases().await;
-        }
-        self.set_grid(true, |v| v.query = text)?;
-        self.push(Route::Catalog);
-        Ok(())
-    }
-
-    /// Changes the Library's or the Catalog's view, and goes back to its first page.
-    fn set_grid(&self, catalog: bool, change: impl FnOnce(&mut GridQuery)) -> CoreResult<()> {
-        {
-            let mut state = self.state();
-            let view = if catalog { &mut state.catalog_view } else { &mut state.library_view };
-            change(view);
-            view.shown = GRID_PAGE;
-        }
-        self.changed(Area::Navigation);
-        if catalog {
-            self.describe_catalog_page();
-        }
-        Ok(())
-    }
-
-    /// The next page of the Library or the Catalog.
-    fn more(&self, catalog: bool) -> CoreResult<()> {
-        {
-            let mut state = self.state();
-            let view = if catalog { &mut state.catalog_view } else { &mut state.library_view };
-            view.shown += GRID_PAGE;
-        }
-        self.changed(Area::Navigation);
-        if catalog {
-            self.describe_catalog_page();
-        }
-        Ok(())
-    }
-
-    /// Selects a game: a game the catalogs offer in the Catalog, any other on Home.
-    fn select(&self, game: &GameKey) {
-        let offered = self.library().snapshot().offer(game).is_some();
-        let mut state = self.state();
-        if offered {
-            state.catalog_selected = Some(game.clone());
-        } else {
-            state.selected = Some(game.clone());
-        }
-    }
-
-    async fn open_game(&self, game: GameKey) -> CoreResult<()> {
-        // A game a catalog offers: its download sheet names the VPN in use.
-        if self.vpn().only() && self.library().snapshot().offer(&game).is_some() {
-            self.vpn().refresh().await;
-        }
-        self.load_detail(&game).await?;
-        self.select(&game);
-        crate::disks::refresh(self);
-        self.push(Route::GameDetail(game));
-        Ok(())
-    }
-
-    /// Installed and available versions, and panels, for one emulator.
-    pub(crate) async fn refresh_emulator(&self, plugin: &PluginId) {
-        let kernel = &self.inner.kernel;
-        let Ok(provided) = kernel.provided(plugin).await else { return };
-        let mut emu = self.state().emulators.get(plugin).cloned().unwrap_or_default();
-        if let Some(installer) = &provided.installer {
-            match kernel.guard(plugin, "installer.installed", installer.installed()).await {
-                Ok(list) => {
-                    emu.own = list.iter().any(|v| v.own);
-                    emu.installed = list.into_iter().map(|v| v.version).collect();
-                }
-                Err(e) => self.problem(e.to_string()),
-            }
-            match kernel.guard(plugin, "installer.available", installer.available()).await {
-                Ok(list) => emu.available = list.into_iter().map(|v| v.version).collect(),
-                Err(e) => self.problem(e.to_string()),
-            }
-        }
-        if let Some(slots) = &provided.slots {
-            let request = SlotRequest { slot: SlotId::EmulatorPanel, game: None };
-            if let Ok(items) = kernel.guard(plugin, "slots.items", slots.items(&request)).await {
-                emu.panels = items;
-            }
-        }
-        self.state().emulators.insert(plugin.clone(), emu);
-    }
-
-    pub(crate) async fn refresh_emulators(&self) {
-        for plugin in self.inner.kernel.of_kind(PluginKind::Emulator) {
-            self.refresh_emulator(&plugin).await;
-        }
-    }
-
-    async fn refresh_settings(&self) {
-        let kernel = &self.inner.kernel;
-        let mut panels = Vec::new();
-        for (plugin, provided) in self.providers(Capability::Slots).await {
-            let slots = provided.slots.clone().expect("declared and checked at init");
-            let request = SlotRequest { slot: SlotId::SettingsPanel, game: None };
-            let Ok(items) = kernel.guard(&plugin, "slots.items", slots.items(&request)).await else { continue };
-            let items =
-                crate::order::sort_by_order(items.into_iter().map(|i| (i.id.clone(), i.order.clone(), i)).collect());
-            for item in items {
-                let scope = match &item.content {
-                    nexus_api::SlotContent::SettingsPanel { scope, .. } => scope.clone(),
-                    _ => ConfigScope::Emulator,
-                };
-                let schema = match &provided.configurator {
-                    Some(c) => {
-                        kernel.guard(&plugin, "configurator.schema", c.schema(&scope)).await.unwrap_or(Value::Null)
-                    }
-                    None => Value::Null,
-                };
-                let values = self.config_value(&plugin, &scope).await.unwrap_or(Value::Null);
-                panels.push(SettingsPanel { plugin: plugin.clone(), item, schema, values });
-            }
-        }
-        self.state().settings = panels;
-    }
-
-    /// Plans a download and queues it with the download manager. It stays saved until it
-    /// ends, so a crash resumes it.
-    async fn download(&self, plugin: &PluginId, request: DownloadRequest) -> CoreResult<()> {
-        let kernel = &self.inner.kernel;
-        let provided = kernel.provided(plugin).await?;
-        let downloader = require(plugin, Capability::Downloader, provided.downloader)?;
-        let plan = kernel.guard(plugin, "downloader.plan", downloader.plan(&request)).await?;
-        let record = DownloadRecord { plugin: plugin.clone(), request };
-        let key = record.key();
-        let saved = serde_json::to_value(&record).expect("records serialize");
-        if let Err(e) = kernel.config().set(&["app", "downloads", &key], saved) {
-            tracing::warn!(error = %e, "could not save download state");
-        }
-        // The manager removes the record and reports the end as an event.
-        let _ = self.inner.downloads.submit(plugin, plan, Some(key));
-        self.changed(Area::Downloads);
-        Ok(())
-    }
-
-    /// Re-runs downloads that were in progress when the app last stopped. Their part files
-    /// are still there, so each continues where it stopped.
-    fn resume_downloads(&self) {
-        let pending = self.inner.kernel.config().get(&["app", "downloads"]);
-        let Some(pending) = pending.as_object() else { return };
-        for (key, saved) in pending.clone() {
-            let Ok(record) = serde_json::from_value::<DownloadRecord>(saved) else {
-                let _ = self.inner.kernel.config().remove(&["app", "downloads", &key]);
-                continue;
-            };
-            tracing::info!(plugin_id = %record.plugin, request = ?record.request, "resuming an interrupted download");
-            let core = self.clone();
-            tokio::spawn(async move {
-                // Saved again under its own key, then removed when it ends.
-                let _ = core.inner.kernel.config().remove(&["app", "downloads", &key]);
-                if let Err(e) = core.download(&record.plugin, record.request).await {
-                    core.notice_opening(
-                        NoticeKind::Error,
-                        Route::Downloads,
-                        format!("Could not resume a download for {}: {e}", record.plugin),
-                    );
-                }
-            });
-        }
-    }
-
-    fn set_install(&self, plugin: &PluginId, record: Option<InstallRecord>, phase: InstallPhase, version: &str) {
-        let key = ["app", "installs", plugin.as_str()];
-        let saved = match record {
-            Some(record) => {
-                self.inner.kernel.config().set(&key, serde_json::to_value(record).expect("records serialize"))
-            }
-            None => self.inner.kernel.config().remove(&key),
-        };
-        if let Err(e) = saved {
-            tracing::warn!(error = %e, "could not save install state");
-        }
-        if let Some(emu) = self.state().emulators.get_mut(plugin) {
-            emu.busy = matches!(phase, InstallPhase::Downloading | InstallPhase::Installing);
-        }
-        self.inner.kernel.events().publish(Event::InstallChanged {
-            plugin: plugin.clone(),
-            version: version.into(),
-            state: phase,
-        });
-        self.changed(Area::Downloads);
-    }
-
-    /// The install workflow: plan, download, check, install. Each phase is saved, so a crash
-    /// resumes it at the next start.
-    async fn install(&self, plugin: &PluginId, version: Option<String>, from: Option<String>) -> CoreResult<()> {
-        let kernel = &self.inner.kernel;
-        let provided = kernel.provided(plugin).await?;
-        let installer = require(plugin, Capability::Installer, provided.installer.clone())?;
-        let downloader = require(plugin, Capability::Downloader, provided.downloader.clone())?;
-        let version = match version {
-            Some(v) => v,
-            None => kernel
-                .guard(plugin, "installer.available", installer.available())
-                .await?
-                .into_iter()
-                .next()
-                .map(|v| v.version)
-                .ok_or_else(|| CoreError::Invalid(format!("{plugin} has no version to install")))?,
-        };
-        self.state().emulators.entry(plugin.clone()).or_default();
-        let record = |phase| InstallRecord { version: version.clone(), from: from.clone(), phase };
-        self.set_install(plugin, Some(record(InstallPhase::Downloading)), InstallPhase::Downloading, &version);
-
-        let result: CoreResult<()> = async {
-            let request = DownloadRequest::EmulatorBuild { version: Some(version.clone()) };
-            let plan = kernel.guard(plugin, "downloader.plan", downloader.plan(&request)).await?;
-            let files = self.inner.downloads.run(plugin, plan).await?;
-            self.set_install(plugin, Some(record(InstallPhase::Installing)), InstallPhase::Installing, &version);
-            match &from {
-                Some(from) => {
-                    kernel.guard(plugin, "installer.update", installer.update(from, &version, &files)).await?
-                }
-                None => kernel.guard(plugin, "installer.install", installer.install(&version, &files)).await?,
-            };
-            Ok(())
-        }
-        .await;
-
-        match &result {
-            Ok(()) => self.set_install(plugin, None, InstallPhase::Installed, &version),
-            Err(e) => {
-                self.set_install(plugin, None, InstallPhase::Failed, &version);
-                self.notice_opening(
-                    NoticeKind::Error,
-                    Route::Plugin(plugin.clone()),
-                    format!("Could not install {plugin} {version}: {e}"),
-                );
-            }
-        }
-        self.refresh_emulator(plugin).await;
-        self.changed(Area::Downloads);
-        result
-    }
-
-    async fn update(&self, plugin: &PluginId) -> CoreResult<()> {
-        self.refresh_emulator(plugin).await;
-        let emu = self.state().emulators.get(plugin).cloned().unwrap_or_default();
-        let from =
-            emu.installed.last().cloned().ok_or_else(|| CoreError::Invalid(format!("{plugin} is not installed")))?;
-        let to = emu.update().ok_or_else(|| CoreError::Invalid(format!("{plugin} is up to date")))?;
-        self.install(plugin, Some(to), Some(from)).await
-    }
-
-    async fn uninstall_game(&self, game: &GameKey) -> CoreResult<()> {
-        let also;
-        let link;
-        if self.sessions().runs(game) {
-            return Err(CoreError::Invalid("Stop the game before you uninstall it".into()));
-        }
-        let installs = self.installs().snapshot();
-        let (folder, title) = {
-            let library = self.library().snapshot();
-            if installs.installing(&game.plugin) {
-                return Err(CoreError::Invalid("Wait until the install ends".into()));
-            }
-            let details = library.detail(game).map(|d| &d.details);
-            let folder = details.and_then(|d| d.folder.clone());
-            also = details.map(|d| d.also.clone()).unwrap_or_default();
-            // A store's game: the store removes it (Steam asks in its own dialog).
-            link = details.and_then(|d| Some((d.uninstall_link.clone()?, d.summary.platform.clone())));
-            (folder, library.title(game))
-        };
-        if let Some((link, platform)) = link {
-            let allowed = self.inner.kernel.manifest(&game.plugin)?.permissions.allows_link(&link);
-            if !allowed {
-                return Err(CoreError::PermissionDenied {
-                    plugin: game.plugin.clone(),
-                    action: format!("open {link}"),
-                });
-            }
-            let opening = link.clone();
-            crate::running::open_link(self, opening).await.map_err(CoreError::Invalid)?;
-            let store = crate::snapshot::Plugins::new(self.kernel()).system(&platform).name;
-            tracing::info!(%game, %link, "asked the store to uninstall");
-            self.notice(format!("{store} is uninstalling {title}: it leaves your Library when it's done"));
-            self.changed(Area::Library);
-            return Ok(());
-        }
-        let folder = folder.ok_or_else(|| CoreError::Invalid(format!("{title} has no folder to delete")))?;
-        let folders = game_folders(&self.inner.kernel, game)
-            .ok_or_else(|| CoreError::Invalid(format!("{title} has no folder to delete")))?;
-        folders.remove(&folder).await.map_err(|e| CoreError::Plugin { plugin: game.plugin.clone(), error: e })?;
-        // Its update and add-ons, in their own folders.
-        for other in &also {
-            if let Err(e) = folders.remove(other).await {
-                tracing::warn!(error = %e, folder = %other.path, "a folder of an uninstalled game stays");
-            }
-        }
-        self.library().forget_detail(game);
-        {
-            let mut state = self.state();
-            state.nav.retain(|r| r != &Route::GameDetail(game.clone()));
-            if state.nav.is_empty() {
-                state.nav.push(Route::Home);
-            }
-        }
-        self.refresh_library().await?;
-        self.notice(format!("Uninstalled {title}"));
-        self.changed(Area::Library);
-        Ok(())
-    }
-
-    async fn uninstall(&self, plugin: &PluginId, version: &str) -> CoreResult<()> {
-        let kernel = &self.inner.kernel;
-        let provided = kernel.provided(plugin).await?;
-        let installer = require(plugin, Capability::Installer, provided.installer)?;
-        kernel.guard(plugin, "installer.uninstall", installer.uninstall(version)).await?;
-        self.set_install(plugin, None, InstallPhase::Uninstalled, version);
-        self.refresh_emulator(plugin).await;
-        Ok(())
-    }
-
-    /// Re-runs installs that were in progress when the app last stopped.
-    async fn resume_installs(&self) {
-        let pending = self.inner.kernel.config().get(&["app", "installs"]);
-        let Some(pending) = pending.as_object() else { return };
-        for (plugin, saved) in pending.clone() {
-            let (Ok(plugin), Ok(record)) = (PluginId::new(plugin), serde_json::from_value::<InstallRecord>(saved))
-            else {
-                continue;
-            };
-            tracing::info!(plugin_id = %plugin, version = %record.version, "resuming an interrupted install");
-            let core = self.clone();
-            tokio::spawn(async move {
-                let _ = core.install(&plugin, Some(record.version), record.from).await;
-            });
-        }
-    }
-
-    async fn set_config(&self, plugin: &PluginId, scope: ConfigScope, value: Value) -> CoreResult<()> {
-        let kernel = &self.inner.kernel;
-        let provided = kernel.provided(plugin).await?;
-        if let Some(configurator) = &provided.configurator {
-            kernel.guard(plugin, "configurator.validate", configurator.validate(&scope, &value)).await?;
-        }
-        kernel
-            .config()
-            .set(&["plugins", plugin.as_str(), &crate::ConfigService::scope_key(&scope)], value)
-            .map_err(|e| CoreError::Io(e.to_string()))?;
-        if !self.state().settings.is_empty() {
-            self.refresh_settings().await;
-        }
-        // A new catalog address: the catalogs are read again.
-        if provided.releases.is_some() {
-            self.refresh_releases().await;
-        }
-        // A game's own settings: its panel shows the new value.
-        if let ConfigScope::Game(local) = &scope {
-            let game = GameKey::new(plugin.clone(), local.clone());
-            let provided = kernel.provided(plugin).await?;
-            let panel = self.game_settings(plugin, &provided, &game).await;
-            self.library().set_game_settings(&game, panel);
-        }
-        self.changed(Area::Plugins);
-        Ok(())
-    }
-
-    async fn run_action(&self, plugin: &PluginId, action: &str, game: Option<GameKey>, args: Value) -> CoreResult<()> {
-        // `host:` actions are the host's: a plugin's slot asks the host to do something.
-        if action == nexus_api::HOST_OPEN_SETTINGS {
-            return self.navigate(Route::Settings).await;
-        }
-        if action == HOST_INSTALL_GAME {
-            let source = serde_json::from_value(args)
-                .map_err(|e| CoreError::Invalid(format!("{HOST_INSTALL_GAME} needs a folder path: {e}")))?;
-            return self.install_game(plugin, source, None).await;
-        }
-        let kernel = &self.inner.kernel;
-        let provided = kernel.provided(plugin).await?;
-        let slots = require(plugin, Capability::Slots, provided.slots)?;
-        let local = game.as_ref().filter(|g| &g.plugin == plugin).map(|g| g.local.clone());
-        kernel.guard(plugin, "slots.run_action", slots.run_action(action, local.as_deref(), &args)).await?;
-        // The action may have changed what the plugin offers and shows.
-        if provided.releases.is_some() {
-            self.refresh_releases().await;
-        }
-        if self.state().nav.last() == Some(&Route::Plugin(plugin.clone())) {
-            self.refresh_emulator(plugin).await;
-        }
-        if let Some(game) = game.filter(|g| &g.plugin == plugin)
-            && self.state().nav.last() == Some(&Route::GameDetail(game.clone()))
-        {
-            self.open_game(game).await?;
-        }
-        self.changed(Area::Plugins);
-        Ok(())
-    }
-
-    async fn set_config_field(
-        &self,
-        plugin: &PluginId,
-        scope: ConfigScope,
-        key: String,
-        text: String,
-    ) -> CoreResult<()> {
-        let kernel = &self.inner.kernel;
-        let provided = kernel.provided(plugin).await?;
-        let schema = match &provided.configurator {
-            Some(c) => kernel.guard(plugin, "configurator.schema", c.schema(&scope)).await?,
-            None => Value::Null,
-        };
-        let value = crate::settings_schema::typed(&schema, &key, text)?;
-        let mut current = self.config_value(plugin, &scope).await?;
-        if !current.is_object() {
-            current = Value::Object(serde_json::Map::new());
-        }
-        current.as_object_mut().expect("an object").insert(key, value);
-        self.set_config(plugin, scope, current).await
-    }
-
-    async fn set_plugin_enabled(&self, plugin: &PluginId, enabled: bool) -> CoreResult<()> {
-        let kernel = &self.inner.kernel;
-        let manifest = kernel.manifest(plugin)?;
-        if manifest.kind == PluginKind::Theme {
-            return Err(CoreError::Invalid(format!("{} is a theme: switch themes instead", manifest.name)));
-        }
-        if !enabled && self.state().emulators.get(plugin).is_some_and(|e| e.busy) {
-            return Err(CoreError::Invalid(format!("{} is busy: turn it off when it is done", manifest.name)));
-        }
-        // The list of exceptions: plugins turned off, or for one made for other systems, on.
-        let key = if kernel.elsewhere(plugin) { "enabled_plugins" } else { "disabled_plugins" };
-        let mut listed: Vec<String> = kernel
-            .config()
-            .get(&["app", key])
-            .as_array()
-            .map(|ids| ids.iter().filter_map(Value::as_str).map(str::to_owned).collect())
-            .unwrap_or_default();
-        listed.retain(|id| id != plugin.as_str());
-        if enabled == kernel.elsewhere(plugin) {
-            listed.push(plugin.to_string());
-        }
-        kernel.config().set(&["app", key], serde_json::json!(listed)).map_err(|e| CoreError::Io(e.to_string()))?;
-        // The last catalog turned off: the Catalog goes, and Back passes where it was. Its
-        // offers go too, so turning one on reads them again.
-        if !Self::catalog_available(kernel) {
-            self.library().clear_catalogs();
-            let mut state = self.state();
-            state.nav.retain(|r| *r != Route::Catalog);
-            state.nav.dedup();
-            if state.nav.is_empty() {
-                state.nav.push(Route::Home);
-            }
-            state.catalog_grid.clear();
-        }
-        if enabled && kernel.of_kind(PluginKind::Emulator).contains(plugin) {
-            self.refresh_emulator(plugin).await;
-        }
-        // An emulator on or off: its console's catalog comes or goes, and with it the catalog's
-        // settings for that console.
-        if manifest.kind == PluginKind::Emulator && Self::catalog_available(kernel) {
-            self.refresh_releases().await;
-        }
-        self.refresh_settings().await;
-        self.refresh_library().await?;
-        self.changed(Area::Plugins);
-        Ok(())
-    }
-
-    fn set_folders(&self, name: &str, paths: &[std::path::PathBuf]) -> CoreResult<()> {
-        if !nexus_api::PathGrant::valid_name(name) {
-            return Err(CoreError::Invalid(format!("{name:?} is not a folder name")));
-        }
-        // `~` and `~/…` are the player's home folder, as a shell reads them.
-        let home = self.inner.kernel.host().home.clone();
-        let paths: Vec<std::path::PathBuf> = paths
-            .iter()
-            .map(|p| match (p.strip_prefix("~"), &home) {
-                (Ok(rest), Some(home)) if rest.as_os_str().is_empty() => home.clone(),
-                (Ok(rest), Some(home)) => home.join(rest),
-                _ => p.clone(),
-            })
-            .collect();
-        if let Some(relative) = paths.iter().find(|p| !p.is_absolute()) {
-            return Err(CoreError::Invalid(format!("{} is not a full path", relative.display())));
-        }
-        let config = self.inner.kernel.config();
-        let saved = if paths.is_empty() {
-            config.remove(&["app", "folders", name])
-        } else {
-            let list: Vec<Value> = paths.iter().map(|p| Value::from(p.to_string_lossy().into_owned())).collect();
-            config.set(&["app", "folders", name], Value::Array(list))
-        };
-        saved.map_err(|e| CoreError::Io(e.to_string()))?;
-        crate::disks::refresh(self);
-        self.changed(Area::Settings);
-        Ok(())
-    }
-
-    /// Runs [`Command::CheckUpdates`] every few hours while the app runs.
-    fn schedule_update_checks(&self) {
-        let weak = Arc::downgrade(&self.inner);
-        let clock = self.kernel().clock().clone();
-        tokio::spawn(async move {
-            clock.sleep(FIRST_UPDATE_CHECK).await;
-            loop {
-                let Some(inner) = weak.upgrade() else { return };
-                let core = Core { inner };
-                if core.prefs().auto_update {
-                    core.check_updates().await;
-                }
-                drop(core);
-                clock.sleep(UPDATE_CHECK_EVERY).await;
-            }
-        });
-    }
-
-    /// Looks for updates of every installed emulator, and installs them when automatic
-    /// updates are on. One whose game is running waits for it to close.
-    async fn check_updates(&self) {
-        for plugin in self.inner.kernel.of_kind(PluginKind::Emulator) {
-            let installs =
-                self.inner.kernel.manifest(&plugin).is_ok_and(|m| m.capabilities.contains(&Capability::Installer));
-            if !installs {
-                continue;
-            }
-            self.refresh_emulator(&plugin).await;
-            let emu = self.state().emulators.get(&plugin).cloned().unwrap_or_default();
-            if emu.installed.is_empty() || emu.own || emu.update().is_none() || !self.prefs().auto_update {
-                continue;
-            }
-            if self.plays(&plugin) {
-                tracing::info!(plugin_id = %plugin, "an update waits for the game to close");
-                self.state().pending_updates.insert(plugin);
-                continue;
-            }
-            if let Err(e) = self.update(&plugin).await {
-                self.problem(e.to_string());
-            }
-        }
-        self.changed(Area::Downloads);
-    }
-
-    /// One of the emulator's games is running.
-    fn plays(&self, plugin: &PluginId) -> bool {
-        self.sessions().plays(plugin)
-    }
-
-    /// A game closed: an update that waited for it installs now.
-    pub(crate) fn game_closed(&self, plugin: &PluginId) {
-        if self.plays(plugin) || !self.state().pending_updates.remove(plugin) {
-            return;
-        }
-        let (core, plugin) = (self.clone(), plugin.clone());
-        tokio::spawn(async move {
-            if let Err(e) = core.update(&plugin).await {
-                core.problem(e.to_string());
-            }
-            core.changed(Area::Downloads);
-        });
-    }
-
-    /// The game's emulator isn't installed: asks the player first. Returns whether it asked.
-    pub(crate) async fn ask_to_install(&self, game: &GameKey, provided: &Provided) -> CoreResult<bool> {
-        let kernel = &self.inner.kernel;
-        let (Some(installer), Some(downloader)) = (&provided.installer, &provided.downloader) else { return Ok(false) };
-        let plugin = &game.plugin;
-        if !kernel.guard(plugin, "installer.installed", installer.installed()).await?.is_empty() {
-            return Ok(false);
-        }
-        let version = kernel
-            .guard(plugin, "installer.available", installer.available())
-            .await?
-            .into_iter()
-            .next()
-            .map(|v| v.version)
-            .ok_or_else(|| CoreError::Invalid(format!("{plugin} has no version to install")))?;
-        let request = DownloadRequest::EmulatorBuild { version: Some(version.clone()) };
-        let size_bytes = match kernel.guard(plugin, "downloader.plan", downloader.plan(&request)).await {
-            Ok(plan) => plan.artifacts.iter().map(|a| a.size).sum::<Option<u64>>(),
-            Err(_) => None,
-        };
-        let emulator =
-            kernel.manifest(plugin).map(|m| m.emulator_name().to_owned()).unwrap_or_else(|_| plugin.to_string());
-        let title = self.library().snapshot().title(game);
-        self.state().install_prompt = Some(InstallPrompt { game: game.clone(), emulator, version, title, size_bytes });
-        self.changed(Area::Sessions);
-        Ok(true)
     }
 
     /// The game's folder on disk, through its plugin's folder grants. `None` before its
@@ -1505,11 +650,6 @@ impl Core {
         Some(crate::sessions::log_path(&self.inner.kernel.host().data_dir, game)).filter(|p| p.is_file())
     }
 
-    /// The emulator build `plugin` runs games on: its newest installed one.
-    pub(crate) fn build_of(&self, plugin: &PluginId) -> Option<String> {
-        self.state().emulators.get(plugin).and_then(|e| e.installed.last().cloned())
-    }
-
     /// The first library load of the run, with the store's art and details, is done.
     pub fn booted(&self) -> bool {
         self.library().booted()
@@ -1535,22 +675,6 @@ impl Core {
     /// The player's option values for a theme.
     pub fn theme_options(&self, theme: &PluginId) -> Value {
         self.inner.kernel.config().get(&["app", "theme-options", theme.as_str()])
-    }
-
-    fn set_theme_option(&self, key: String, value: String) -> CoreResult<()> {
-        let theme = self.state().theme.clone().ok_or_else(|| CoreError::Invalid("no theme is active".into()))?;
-        let mut options = self.theme_options(&theme);
-        if !options.is_object() {
-            options = Value::Object(serde_json::Map::new());
-        }
-        options.as_object_mut().expect("an object").insert(key, Value::String(value));
-        self.inner
-            .kernel
-            .config()
-            .set(&["app", "theme-options", theme.as_str()], options)
-            .map_err(|e| CoreError::Io(e.to_string()))?;
-        self.changed(Area::Settings);
-        Ok(())
     }
 
     /// Records the theme the UI shows, without saving it as the player's choice. The UI host
@@ -1596,7 +720,7 @@ impl Core {
                 }
                 let permissions = &kernel.manifest(plugin)?.permissions;
                 let request = nexus_api::HttpRequest::get(url.clone());
-                let response = crate::facades::send_checked(kernel.http().as_ref(), plugin, permissions, request)
+                let response = crate::facades::send_checked(self.ports().http.as_ref(), plugin, permissions, request)
                     .await
                     .map_err(|error| CoreError::Plugin { plugin: plugin.clone(), error })?;
                 if response.status == 200 {
@@ -1621,5 +745,49 @@ impl Core {
         self.preferences().save(Pref::Theme, Value::from(theme.as_str()))?;
         self.inner.kernel.events().publish(Event::ThemeChanged { from, to: theme });
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn round_trip(command: Command) {
+        let json = serde_json::to_string(&command).expect("a command serializes");
+        let back: Command = serde_json::from_str(&json).expect("a command deserializes");
+        assert_eq!(back, command, "{json}");
+    }
+
+    #[test]
+    fn commands_read_as_json_by_their_variant_names() {
+        let read = |json: &str| serde_json::from_str::<Command>(json).expect(json);
+        assert_eq!(read(r#"{"Navigate": "Settings"}"#), Command::Navigate(Route::Settings));
+        assert_eq!(read(r#""Back""#), Command::Back);
+        assert_eq!(
+            read(r#"{"Torrent": {"SeedDownloads": true}}"#),
+            Command::Torrent(crate::TorrentCmd::SeedDownloads(true))
+        );
+        assert_eq!(read(r#"{"Pref": ["sounds", false]}"#), Command::Pref(Pref::Sounds, Value::Bool(false)));
+    }
+
+    #[test]
+    fn every_kind_of_command_goes_to_json_and_back() {
+        let game = GameKey::new(PluginId::new("emu").unwrap(), "astro");
+        round_trip(Command::Navigate(Route::GameDetail(game.clone())));
+        round_trip(Command::Select(game.clone()));
+        round_trip(Command::GridColumns { grid: Grid::Catalog, columns: 6 });
+        round_trip(Command::SetConfig {
+            plugin: game.plugin.clone(),
+            scope: ConfigScope::Game("astro".into()),
+            value: serde_json::json!({ "fps": 60 }),
+        });
+        round_trip(Command::Session(crate::SessionCmd::Launch(game.clone())));
+        round_trip(Command::Torrent(crate::TorrentCmd::Act { id: "abc".into(), action: crate::TorrentAction::Pause }));
+        round_trip(Command::System(crate::system::SystemCommand::JoinWifi {
+            ssid: "home".into(),
+            password: Some("secret".into()),
+        }));
+        round_trip(Command::SetFolders { name: "games".into(), paths: vec!["/games".into()] });
+        round_trip(Command::ReportResult(None));
     }
 }

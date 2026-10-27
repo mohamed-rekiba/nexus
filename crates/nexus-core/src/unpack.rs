@@ -8,7 +8,8 @@ use std::path::{Component, Path, PathBuf};
 
 use nexus_api::ArchiveFormat;
 
-use crate::{CoreError, CoreResult, Kernel, SpawnCommand};
+use crate::downloads::DownloadPorts;
+use crate::{CoreError, CoreResult, SpawnCommand};
 
 /// The longest an AppImage may take to unpack itself.
 const EXTRACT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
@@ -148,7 +149,8 @@ pub(crate) fn unzip(archive: &Path, into: &Path, only_suffix: Option<&str>) -> C
 /// `may_run` says whether the plugin may run a program at a path in its data folder: an
 /// AppImage runs to unpack itself only with the plugin's process permission.
 pub(crate) async fn unpack(
-    kernel: &Kernel,
+    ports: &DownloadPorts,
+    platform: Option<nexus_api::Platform>,
     may_run: &(dyn Fn(&Path) -> bool + Sync),
     format: ArchiveFormat,
     archive: &Path,
@@ -159,7 +161,7 @@ pub(crate) async fn unpack(
     let staging = into.with_file_name(name);
     let _ = tokio::fs::remove_dir_all(&staging).await;
     tokio::fs::create_dir_all(&staging).await.map_err(failed)?;
-    let result = unpack_into(kernel, may_run, format, archive, &staging, into).await;
+    let result = unpack_into(ports, platform, may_run, format, archive, &staging, into).await;
     if let Err(e) = result {
         let _ = tokio::fs::remove_dir_all(&staging).await;
         return Err(e);
@@ -169,7 +171,8 @@ pub(crate) async fn unpack(
 }
 
 async fn unpack_into(
-    kernel: &Kernel,
+    ports: &DownloadPorts,
+    platform: Option<nexus_api::Platform>,
     may_run: &(dyn Fn(&Path) -> bool + Sync),
     format: ArchiveFormat,
     archive: &Path,
@@ -181,7 +184,7 @@ async fn unpack_into(
         ArchiveFormat::TarGz => blocking(move || untar_gz(&archive, &dir)).await,
         ArchiveFormat::Zip => blocking(move || unzip(&archive, &dir, None).map(|_| ())).await,
         ArchiveFormat::AppImageInZip => {
-            if kernel.host().platform != Some(nexus_api::Platform::Linux) {
+            if platform != Some(nexus_api::Platform::Linux) {
                 return Err(failed("AppImages run on Linux only"));
             }
             let found = {
@@ -209,8 +212,8 @@ async fn unpack_into(
                 log: None,
                 keep_running: false,
             };
-            let mut process = kernel.spawner().spawn(command).await.map_err(failed)?;
-            let exit = match kernel.clock().timeout(EXTRACT_TIMEOUT, process.wait()).await {
+            let mut process = ports.spawner.spawn(command).await.map_err(failed)?;
+            let exit = match ports.clock.timeout(EXTRACT_TIMEOUT, process.wait()).await {
                 Some(exit) => exit.map_err(failed)?,
                 None => {
                     let _ = process.kill().await;
