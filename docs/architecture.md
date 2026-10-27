@@ -89,8 +89,8 @@ theme callback ─▶ UiRequest::Core(Command) ─▶ Core::dispatch ─▶ subs
    `AppState` behind a mutex in `Core` (`app_state.rs`): navigation (`nav`, a stack of
    `Route`s), the selections and the grids, the install prompt and "How far did it get?", each
    emulator's builds, the Settings screen's panels, the machine's state, the stores' installs
-   and the theme on screen. `view::build` reads `Core::snapshot()`, one read per subsystem,
-   before it locks `AppState`.
+   and the theme on screen. `Core::snapshot()` reads each subsystem once, then copies
+   `AppState`.
 3. A change calls `Core::changed(area)`, or a subsystem's `Notifier`. It sends a `Change { area }` (the torrents, the
    catalogs, the installs, …) to `Core::changes()`, a broadcast for the core and its tests, and
    publishes `Event::StateChanged` on the `EventBus` (a `tokio::sync::broadcast` channel of
@@ -100,8 +100,9 @@ theme callback ─▶ UiRequest::Core(Command) ─▶ Core::dispatch ─▶ subs
    which asks for a render. An atomic flag keeps at most one event waiting on the UI thread.
 5. The shell renders at most once per `RENDER_GAP` (8 ms, a frame at 120 Hz). A burst of events
    or image loads renders once. Each render starts loading the images it asks for.
-6. `ThemeHost::render` calls `Core::view`, which runs `view::build` over the state and returns
-   an `AppView`. `bind::vm_values` turns it into Slint values, set on the theme's `Vm` global.
+6. `ThemeHost::render` calls `Core::view`. It takes a `Snapshot` (`Core::snapshot()`) and
+   runs `view::build` over it, which returns an `AppView`. `view::build` is pure: it takes no
+   lock and does no I/O, and reads only the snapshot (see [The view](#the-view)). `bind::vm_values` turns it into Slint values, set on the theme's `Vm` global.
    Lists are changed in place where the rows allow it, so row animations don't restart.
 
 Themes hold no state of their own. That is why a theme switch loses nothing: the new view tree
@@ -405,7 +406,8 @@ follow the same shape:
   `set_library`, `set_detail` or `set_catalogs`, with what other areas decide (the offer each
   installed game is) worked out first, so one change publishes it all.
 - A snapshot that the view reads on every render shares its data through `Arc` (the library's
-  records and offers), and a change copies it only while a snapshot is held.
+  records and offers, the torrents' downloads, the game installs), and a change copies it only
+  while a snapshot is held.
 - The subsystem never calls out while it holds its lock, and the core takes a subsystem's lock
   only when it doesn't hold `AppState`.
 
@@ -671,6 +673,33 @@ Emulator updates are separate: `schedule_update_checks` runs `check_updates` 60 
 and every 6 hours while automatic updates are on. An emulator whose game runs updates after the
 game closes. An own build never updates by itself.
 
+## The view
+
+`Core::view` builds the `AppView` in two parts:
+
+1. `Core::snapshot()` (`app.rs`) reads everything once: each subsystem's snapshot, a copy of
+   `AppState`, the plugins' manifests with which are on and how each is (`Plugins`), the
+   theme's option values, now by the core's clock, and what the view needs from the disk
+   (`Files`: which games' folders are there, the Game Hub game's log, the downloads' install
+   folders, the host folders' paths). `snapshot.rs` holds the `Snapshot` type and these reads.
+2. `view::build(&Snapshot)` turns it into view models. It takes no lock, does no I/O and keeps
+   no state; `Core::view` keeps the Catalog's grid as last shown afterwards.
+
+The view's rules live in pure modules over the snapshot, each with its own tests:
+
+- `ownership.rs` (`Ownership`): which installed game a Catalog offer is (by the download that
+  installed it, by title id, or by name on the same console), the release an offer's card shows,
+  and the game Play starts. Play on a card, the stores' installs and the library's reads ask it
+  too.
+- `grid_query.rs` (`GridQuery`): a grid's search, filters, sort (`Sort`, an enum) and pages, and
+  the games that answer it, with the filter chips. The prefetch and the stores' descriptions of
+  the Catalog's page ask it for the neighbours and the shown page.
+- `settings_schema.rs`: a plugin's JSON Schema read as the fields a panel shows, and as the
+  type of the text the player types into one (`Command::SetConfigField`).
+- `disks.rs` (`Disks`): each console's download folder and the free space there. The core reads
+  it again when a Game Hub opens, the catalogs are read, a folder changes, and a download starts
+  or ends; the Game Hub's "Not enough space" comes from it.
+
 ## Themes
 
 A theme owns presentation: layout, navigation, components, tokens, assets, motion and sound.
@@ -748,12 +777,17 @@ These shape the code; keep them in mind when changing it.
 
 - **One render per frame.** Each render rebuilds the whole `AppView` and rebinds it, so renders
   are coalesced: one pending flag for core events, and the shell's `RENDER_GAP` between renders.
-- **The Catalog grid is built only while the Catalog is on screen.** `view::build` keeps the
-  last grid in `AppState.catalog_grid`. On other screens `catalog_vm` reuses it instead of
-  searching and sorting every offer again. It is cleared when the last catalog plugin turns off.
+- **The Catalog grid is built only while the Catalog is on screen.** `Core::view` keeps the
+  last grid in `AppState.catalog_grid` (a `ShownGrid`, `grid_query.rs`), and the snapshot
+  carries it. On other screens `catalog_vm` reuses it instead of searching and sorting every
+  offer again. It is cleared when the last catalog plugin turns off.
+- **One `Ownership` a render.** The view builds the links between offers and installed games
+  once, and every card, grid and Game Hub asks it.
 - **Genre matching is cached.** `releases::genres_in` keeps each genre text it matched (up to
-  16,384 texts), since every view asks for every offer's genres and a catalog has few
-  distinct texts.
+  16,384 texts) on each thread, since every view asks for every offer's genres and a catalog
+  has few distinct texts. The cache is the thread's own, so the view takes no lock for it.
+- **Free space is read ahead.** The `Disks` read model holds each console's download folder and
+  the free space there; the view never asks the disk for it.
 - **Images.** Only cards on or near the screen ask for art. The shell's `ImageLoader` fetches 8
   and decodes 4 at once, off the UI thread, drops loads that left the screen (`StillWanted`),
   and keeps smaller JPEGs in `cache/thumbs`, so a warm start decodes small files.

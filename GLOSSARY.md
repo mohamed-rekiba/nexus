@@ -61,6 +61,10 @@ then its meta file.
 **Current build**: the downloaded build games start. The build before it stays for a rollback.
 Both are saved in the plugin's `versions.json`.
 
+**Disks** (`Disks`): each console's download folder and the free space on the disk that holds
+it, read ahead so the view doesn't ask the disk. The core reads them again when a Game Hub
+opens, the catalogs are read, a folder changes, and a download starts or ends.
+
 **Fact** (`Fact`): one thing a catalog says about a release: a kind, a label, a value and an
 optional page. Its `FactKind` tells the host what it is about, such as the publisher, the
 release date or a compatibility tier.
@@ -92,6 +96,10 @@ through an `InstallJob`.
 **Game record** (`GameRecord`): everything the core knows about one game, by its game key: the
 game as its plugin lists it, its badges, its details, a store's metadata, and for an installed
 game, the catalog's offer it is and that offer's cover. The library subsystem holds one per game.
+
+**Grid query** (`GridQuery`): a Library or Catalog grid's search, filters, sort and pages, and
+the games that answer it. Its sort is a `Sort`: `title`, `played`, `size`, `smallest`, `rating`,
+`release`, `compat` or `added`.
 
 **Hand-off** (`HandOff`): the fields of a download that another area writes: the unpack of its
 archives and the install from it. They change only through the torrents subsystem's
@@ -140,6 +148,10 @@ and folders with it.
 **Own build**: an emulator build the player built or installed, used instead of a downloaded
 one while the `own_build` setting is on. The host never updates it.
 
+**Ownership** (`Ownership`): which installed game a Catalog offer is: the game a download of
+it installed, else the game with one of its title ids, else the game of its name on the same
+console. It also picks the release an offer's card shows.
+
 **Phase rules** (`torrents::phase::next`): what the BitTorrent engine's stats mean for a
 download, and what the core does next: unpause, stop, finished or stopped. They exist once, in
 the core; the adapter and the fake decide nothing.
@@ -186,8 +198,13 @@ _Avoid_: process, run
 game the core resolved, watches it, carries out Stop and the window focus calls, and saves play
 time.
 
+**Settings schema**: a plugin's JSON Schema for a settings scope, read as the fields a panel
+shows and as the type of the text the player types (`settings_schema.rs`).
+
 **Snapshot**: a subsystem's state read whole, in one lock. Reading it changes nothing. The
-core's `Snapshot` holds one read of each subsystem, for the view.
+core's `Snapshot` (`Core::snapshot()`) holds one read of each subsystem, a copy of the state no
+subsystem owns, and what the view needs from the plugins and the disk. The view builds from it
+alone, with no lock and no I/O.
 
 **Subsystem**: one area of the core's state with its own lock, saved records and ports. The core
 sends it commands, reads its snapshot and turns its events into work. The torrents, the game
