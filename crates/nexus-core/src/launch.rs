@@ -19,6 +19,7 @@ use nexus_ui_api::NoticeKind;
 use serde_json::Value;
 
 use crate::app::Route;
+use crate::changes::Area;
 use crate::error::require;
 use crate::sessions::{NewSession, PLAYED_AT_LEAST, SessionCmd, log_path};
 use crate::{Core, CoreError, CoreResult, DirStorage, Kernel, ProcessExit, SpawnCommand, folders};
@@ -116,7 +117,7 @@ pub(crate) async fn launch(core: &Core, game: GameKey) -> CoreResult<()> {
     let provided = kernel.provided(&plugin).await?;
     let launcher = require(&plugin, Capability::Launcher, provided.launcher.clone())?;
     // A first play: the player agrees to the emulator's download before anything happens.
-    if core.ask_to_install(&game, &provided).await? {
+    if crate::emulator_builds::ask_to_install(core, &game, &provided).await? {
         return Ok(());
     }
     let config = merged_config(core, &game).await?;
@@ -131,14 +132,14 @@ pub(crate) async fn launch(core: &Core, game: GameKey) -> CoreResult<()> {
     let new = NewSession {
         game: game.clone(),
         title,
-        build: core.build_of(&plugin),
+        build: crate::emulator_builds::build_of(core, &plugin),
         command,
         log: log_path(&kernel.host().data_dir, &game),
         game_process: spec.game_process,
     };
     let started = core.sessions().start(claim, new).await?;
     let session = started.session;
-    core.push(Route::Running(session));
+    crate::navigation::push(core, Route::Running(session));
 
     let core = core.clone();
     tokio::spawn(async move {
@@ -197,7 +198,7 @@ async fn finish(
     }
     core.kernel().events().publish(Event::ProcessExited { session, game: game.clone(), exit });
     core.kernel().events().publish(Event::StateChanged);
-    core.game_closed(&game.plugin);
+    crate::emulator_builds::game_closed(core, &game.plugin);
 }
 
 /// "Can't start Astro Bot: firmware missing". A plugin's own words, without the error's kind.
@@ -236,6 +237,22 @@ fn crash_notice(title: &str, exit: &ExitInfo, played: Duration, log: &std::path:
     };
     let when = if played < EARLY_EXIT { "right after it started" } else { "with an error" };
     format!("{title} closed {when} ({how}). Its log: {}", log.display())
+}
+
+/// "Rate how it runs": asks "How far did it get?" for `game`, on the build it runs on.
+pub(crate) fn ask_result(core: &Core, game: GameKey) -> CoreResult<()> {
+    let build = crate::emulator_builds::build_of(core, &game.plugin);
+    core.state().result_prompt = Some((game, build));
+    core.changed(Area::Sessions);
+    Ok(())
+}
+
+/// The player's answer to "How far did it get?", or `None` for "Not now".
+pub(crate) fn report_result(core: &Core, level: Option<String>) -> CoreResult<()> {
+    let Some((game, build)) = core.state().result_prompt.take() else { return Ok(()) };
+    core.library().answer(&game, level.as_deref(), build.as_deref())?;
+    core.changed(Area::Sessions);
+    Ok(())
 }
 
 #[cfg(test)]

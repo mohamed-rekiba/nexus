@@ -483,3 +483,16 @@ pub(crate) async fn run(core: &Core, command: SystemCommand) -> CoreResult<()> {
     refresh(core).await;
     Ok(())
 }
+
+/// Looks for the launcher's update. Nexus OS brings the new launcher with its next update:
+/// then it looks for that too.
+pub(crate) async fn check_launcher_update(core: &Core) -> CoreResult<()> {
+    let found = core.launcher_update().check().await;
+    if matches!(found, crate::launcher_update::UpdateState::WithSystem { .. }) {
+        let core = core.clone();
+        tokio::spawn(async move {
+            let _ = run(&core, SystemCommand::CheckOsUpdate).await;
+        });
+    }
+    Ok(())
+}

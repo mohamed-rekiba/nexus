@@ -432,7 +432,7 @@ fn grid<'a>(
         if catalog { library.offers.iter().map(|o| &o.entry).collect() } else { library.library().collect() };
     // The Catalog's hidden games: out, but for the "Hidden" filter, which shows only them. With
     // the filter turned off in the catalog's settings, its chip goes and it doesn't apply.
-    let hidden_filter = catalog && crate::Core::hidden_filter_on(kernel);
+    let hidden_filter = catalog && crate::navigation::hidden_filter_on(kernel);
     let only_hidden = hidden_filter && view.hidden;
     // Hidden by the player in Nexus, or in the game's store (Steam's Hidden collection).
     let store_hidden =
@@ -1001,7 +1001,7 @@ fn catalog_vm(
             .collect()
     };
     CatalogVm {
-        available: crate::Core::catalog_available(kernel),
+        available: crate::navigation::catalog_available(kernel),
         games,
         sources,
         releases: shown_releases,
@@ -1139,7 +1139,9 @@ fn detail_vm(
     // Where the offer's downloads go, and the free space there. The console's folder may not
     // be there yet: the disk that holds it is the one the nearest folder above is on.
     let download_folder = offer
-        .and_then(|o| core.torrent_folder(&o.emulator, &o.releases[0].platform, "x", None).ok())
+        .and_then(|o| {
+            crate::release_downloads::torrent_folder(core, &o.emulator, &o.releases[0].platform, "x", None).ok()
+        })
         .and_then(|(_, folder)| folder.parent().map(std::path::Path::to_path_buf));
     let free = download_folder
         .as_ref()

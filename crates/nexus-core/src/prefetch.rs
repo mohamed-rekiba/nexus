@@ -18,61 +18,58 @@ const SCREENSHOTS_AFTER: Duration = Duration::from_millis(500);
 /// The most games beside the selection whose art is fetched.
 const MOST_NEIGHBOURS: usize = 6;
 
-impl Core {
-    /// Fetches the art around `game`, the game just selected, and stops the fetch for the last
-    /// selection.
-    pub(crate) fn prefetch_around(&self, game: &GameKey) {
-        let core = self.clone();
-        let game = game.clone();
-        let task = tokio::spawn(async move { core.prefetch(game).await });
-        if let Some(last) = self.library().prefetching(task.abort_handle()) {
-            last.abort();
-        }
+/// Fetches the art around `game`, the game just selected, and stops the fetch for the last
+/// selection.
+pub(crate) fn prefetch_around(core: &Core, game: &GameKey) {
+    let (this, game) = (core.clone(), game.clone());
+    let task = tokio::spawn(async move { prefetch(&this, game).await });
+    if let Some(last) = core.library().prefetching(task.abort_handle()) {
+        last.abort();
     }
+}
 
-    async fn prefetch(&self, game: GameKey) {
-        let clock = self.ports().clock.clone();
-        let rested = clock.now() + SCREENSHOTS_AFTER;
-        clock.sleep(NEIGHBOURS_AFTER).await;
-        let art: Vec<ImageRef> = {
-            let library = self.library().snapshot();
-            let (torrents, installs) = (self.torrents().snapshot(), self.installs().snapshot());
-            let state = self.state();
-            let kernel = &self.inner.kernel;
-            crate::view::neighbours(kernel, &state, &library, &torrents, &installs, &game, MOST_NEIGHBOURS)
-                .iter()
-                .flat_map(|key| {
-                    let art = library.art(key);
-                    [art.background, art.logo]
-                })
-                .flatten()
-                .map(|(plugin, image)| crate::view::image(&plugin, &image))
-                .collect()
-        };
-        for image in &art {
-            self.fetch_ahead(image).await;
-        }
-        clock.sleep_until(rested).await;
-        let shots = self.library().snapshot().art(&game).screenshots;
-        let shots: Vec<ImageRef> = shots.iter().map(|(plugin, image)| crate::view::image(plugin, image)).collect();
-        for image in &shots {
-            self.fetch_ahead(image).await;
-        }
+async fn prefetch(core: &Core, game: GameKey) {
+    let clock = core.ports().clock.clone();
+    let rested = clock.now() + SCREENSHOTS_AFTER;
+    clock.sleep(NEIGHBOURS_AFTER).await;
+    let art: Vec<ImageRef> = {
+        let library = core.library().snapshot();
+        let (torrents, installs) = (core.torrents().snapshot(), core.installs().snapshot());
+        let state = core.state();
+        let kernel = core.kernel();
+        crate::view::neighbours(kernel, &state, &library, &torrents, &installs, &game, MOST_NEIGHBOURS)
+            .iter()
+            .flat_map(|key| {
+                let art = library.art(key);
+                [art.background, art.logo]
+            })
+            .flatten()
+            .map(|(plugin, image)| crate::view::image(&plugin, &image))
+            .collect()
+    };
+    for image in &art {
+        fetch_ahead(core, image).await;
     }
+    clock.sleep_until(rested).await;
+    let shots = core.library().snapshot().art(&game).screenshots;
+    let shots: Vec<ImageRef> = shots.iter().map(|(plugin, image)| crate::view::image(plugin, image)).collect();
+    for image in &shots {
+        fetch_ahead(core, image).await;
+    }
+}
 
-    /// Fetches a web image into the image cache, once a run. Other images are local.
-    async fn fetch_ahead(&self, image: &ImageRef) {
-        let ImageRef::Url { url, .. } = image else { return };
-        if !self.library().first_fetch(url) {
-            return;
-        }
-        // A task of its own, which the next select doesn't stop: a stop while the image is
-        // being written would leave half a file in the cache.
-        let core = self.clone();
-        let image = image.clone();
-        let fetched = tokio::spawn(async move { core.image_bytes(&image).await }).await;
-        if let Ok(Err(error)) = fetched {
-            tracing::debug!(%url, %error, "could not fetch art ahead");
-        }
+/// Fetches a web image into the image cache, once a run. Other images are local.
+async fn fetch_ahead(core: &Core, image: &ImageRef) {
+    let ImageRef::Url { url, .. } = image else { return };
+    if !core.library().first_fetch(url) {
+        return;
+    }
+    // A task of its own, which the next select doesn't stop: a stop while the image is
+    // being written would leave half a file in the cache.
+    let core = core.clone();
+    let image = image.clone();
+    let fetched = tokio::spawn(async move { core.image_bytes(&image).await }).await;
+    if let Ok(Err(error)) = fetched {
+        tracing::debug!(%url, %error, "could not fetch art ahead");
     }
 }

@@ -118,286 +118,280 @@ fn console(kernel: &Kernel, emulator: &PluginId, platform: &str) -> String {
     if platform.is_empty() { console_of(kernel, emulator) } else { platform.to_owned() }
 }
 
-impl Core {
-    /// Runs the player's command on the catalogs' downloads.
-    pub(crate) async fn torrent(&self, command: TorrentCmd) -> CoreResult<()> {
-        match command {
-            TorrentCmd::Download { offer, release, folder } => {
-                self.torrents().set_download_error(None);
-                let started = self.download_release(&offer, &release, folder.as_deref()).await;
-                // The sheet that asked says why nothing downloads, and so does a notice, for
-                // when the player closed the sheet.
-                if let Err(e) = &started {
-                    self.torrents().set_download_error(Some((offer, e.to_string())));
-                    self.notices().problem(e.to_string());
-                }
-                started
+/// Runs the player's command on the catalogs' downloads.
+pub(crate) async fn torrent(core: &Core, command: TorrentCmd) -> CoreResult<()> {
+    match command {
+        TorrentCmd::Download { offer, release, folder } => {
+            core.torrents().set_download_error(None);
+            let started = download_release(core, &offer, &release, folder.as_deref()).await;
+            // The sheet that asked says why nothing downloads, and so does a notice, for
+            // when the player closed the sheet.
+            if let Err(e) = &started {
+                core.torrents().set_download_error(Some((offer, e.to_string())));
+                core.notices().problem(e.to_string());
             }
-            TorrentCmd::Act { id, action } => {
-                if let Some(store) = id.strip_prefix("store:") {
-                    return self.store_install_action(store, action).await;
-                }
-                if !self.torrents().has(&id) {
-                    return Err(CoreError::Invalid(format!("no download {id}")));
-                }
-                match action {
-                    // Not while the download's install reads its files.
-                    TorrentAction::DeleteFiles if self.installs().running_from(&id).is_some() => Ok(()),
-                    action => self.torrents().handle(TorrentCmd::Act { id, action }).await,
-                }
-            }
-            command @ TorrentCmd::SeedDownloads(_) => self.torrents().handle(command).await,
+            started
         }
-    }
-
-    /// What the torrents subsystem tells the rest of the core.
-    pub(crate) fn torrent_event(&self, event: TorrentEvent) {
-        match event {
-            TorrentEvent::Finished { id, title } => {
-                let waiting = self
-                    .torrents()
-                    .job(&id)
-                    .is_some_and(|j| j.hand_off.unpack.phase == crate::archives::UnpackPhase::Waiting);
-                if waiting {
-                    self.installs().unpack(&id, false);
-                }
-                self.notices().opening(
-                    nexus_ui_api::NoticeKind::Success,
-                    crate::Route::Downloads,
-                    format!("Download complete: {title}. Install it from Downloads."),
-                );
+        TorrentCmd::Act { id, action } => {
+            if let Some(store) = id.strip_prefix("store:") {
+                return store_install_action(core, store, action).await;
             }
-            TorrentEvent::Stopped { title } => self.notices().opening(
-                nexus_ui_api::NoticeKind::Error,
+            if !core.torrents().has(&id) {
+                return Err(CoreError::Invalid(format!("no download {id}")));
+            }
+            match action {
+                // Not while the download's install reads its files.
+                TorrentAction::DeleteFiles if core.installs().running_from(&id).is_some() => Ok(()),
+                action => core.torrents().handle(TorrentCmd::Act { id, action }).await,
+            }
+        }
+        command @ TorrentCmd::SeedDownloads(_) => core.torrents().handle(command).await,
+    }
+}
+
+/// What the torrents subsystem tells the rest of the core.
+pub(crate) fn torrent_event(core: &Core, event: TorrentEvent) {
+    match event {
+        TorrentEvent::Finished { id, title } => {
+            let waiting = core
+                .torrents()
+                .job(&id)
+                .is_some_and(|j| j.hand_off.unpack.phase == crate::archives::UnpackPhase::Waiting);
+            if waiting {
+                core.installs().unpack(&id, false);
+            }
+            core.notices().opening(
+                nexus_ui_api::NoticeKind::Success,
                 crate::Route::Downloads,
-                format!("Download stopped: {title}. Open Downloads to see why"),
-            ),
-            TorrentEvent::Problem(message) => self.notices().problem(message),
-            TorrentEvent::VpnsRead(vpns) => self.vpn().keep(vpns),
-            // Not in the VPN check: the catalogs' fetches would hold up the kill switch.
-            TorrentEvent::VpnBack => {
-                let core = self.clone();
-                tokio::spawn(async move { core.refresh_releases().await });
-            }
-        }
-    }
-
-    /// An action on the store's install `store` (`<plugin>:<release>`): only opening the store's
-    /// page; the store pauses and cancels its own.
-    async fn store_install_action(&self, store: &str, action: TorrentAction) -> CoreResult<()> {
-        let install = self
-            .state()
-            .store_installs
-            .iter()
-            .find(|(plugin, i)| format!("{plugin}:{}", i.release) == store)
-            .cloned()
-            .ok_or_else(|| CoreError::Invalid(format!("no install {store}")))?;
-        let (plugin, install) = install;
-        if action != TorrentAction::OpenStore {
-            return Err(CoreError::Invalid(format!("{} does that in its own Downloads", install.title)));
-        }
-        if !self.kernel().manifest(&plugin)?.permissions.allows_link(&install.open) {
-            return Err(CoreError::PermissionDenied { plugin, action: format!("open {}", install.open) });
-        }
-        let link = install.open.clone();
-        crate::running::open_link(self, link).await.map_err(CoreError::Invalid)
-    }
-
-    /// A release its store installs: the store's link opens (`steam://install/440`), if the
-    /// catalog plugin's manifest allows it, and the store takes it from there. Nothing downloads
-    /// here; the game shows in the Library once the store installed it.
-    async fn install_in_store(&self, offer: &GameKey, release: &nexus_api::Release) -> CoreResult<()> {
-        let plugin = &offer.plugin;
-        let allowed = self.kernel().manifest(plugin)?.permissions.allows_link(&release.store);
-        if !allowed {
-            return Err(CoreError::PermissionDenied {
-                plugin: plugin.clone(),
-                action: format!("open {}", release.store),
-            });
-        }
-        let link = release.store.clone();
-        crate::running::open_link(self, link).await.map_err(CoreError::Invalid)?;
-        let store = crate::view::system_of(self.kernel(), &release.platform).name;
-        tracing::info!(%offer, link = %release.store, "asked the store to install");
-        // The store writes its install down a moment later: its progress is read often for now.
-        self.state().store_watch_until = Some(self.ports().clock.now() + std::time::Duration::from_secs(60));
-        self.notices()
-            .info(format!("{store} is installing {}: it shows in your Library when it's done", release.title));
-        self.changed(Area::Downloads);
-        Ok(())
-    }
-
-    /// The player asked to download `release` of the offered game `offer`: the subsystem reads
-    /// the torrent's files, and waits for the player to start it.
-    async fn download_release(&self, offer: &GameKey, release: &str, folder: Option<&Path>) -> CoreResult<()> {
-        let found = self
-            .library()
-            .snapshot()
-            .offer(offer)
-            .cloned()
-            .ok_or_else(|| CoreError::Invalid(format!("no game {offer} in a catalog")))?;
-        let release = found
-            .releases
-            .iter()
-            .find(|r| r.id == release)
-            .cloned()
-            .ok_or_else(|| CoreError::Invalid(format!("no release {release} of {offer}")))?;
-        if !release.store.is_empty() {
-            return self.install_in_store(offer, &release).await;
-        }
-        let torrents = self.torrents();
-        if torrents.has(&release.id) {
-            return Ok(());
-        }
-        let chosen = folder.is_some();
-        if torrents.full() {
-            return Err(CoreError::Invalid(format!(
-                "Remove an old download first (at most {})",
-                crate::torrents::MAX_DOWNLOADS
-            )));
-        }
-        let (source, folder) = self.torrent_folder(&found.emulator, &release.platform, &release.id, folder)?;
-        // A picked folder may be on another disk than the one the Game Hub checked.
-        if chosen
-            && let (Some(size), Some(free)) = (release.size_bytes, free_at(self.ports().hardware.as_ref(), &folder))
-            && let Some(error) = no_room(size, free, "download folder")
-        {
-            return Err(CoreError::Invalid(error));
-        }
-        if let Some(parent) = folder.parent().filter(|_| chosen) {
-            save_folder(
-                self.kernel(),
-                "download_folder",
-                &console(self.kernel(), &found.emulator, &release.platform),
-                parent,
+                format!("Download complete: {title}. Install it from Downloads."),
             );
         }
-        torrents
-            .add(NewDownload {
-                id: release.id.clone(),
-                offer: offer.clone(),
-                emulator: found.emulator.clone(),
-                title: release.title.clone(),
-                version: release.version.clone(),
-                region: release.region.clone(),
-                magnet: release.torrent.clone(),
-                source,
-                folder,
-                total: release.size_bytes.unwrap_or(0),
-            })
-            .await
+        TorrentEvent::Stopped { title } => core.notices().opening(
+            nexus_ui_api::NoticeKind::Error,
+            crate::Route::Downloads,
+            format!("Download stopped: {title}. Open Downloads to see why"),
+        ),
+        TorrentEvent::Problem(message) => core.notices().problem(message),
+        TorrentEvent::VpnsRead(vpns) => core.vpn().keep(vpns),
+        // Not in the VPN check: the catalogs' fetches would hold up the kill switch.
+        TorrentEvent::VpnBack => {
+            let core = core.clone();
+            tokio::spawn(async move { crate::catalog_reads::refresh_releases(&core).await });
+        }
     }
+}
 
-    /// Where a download of `emulator`'s goes: in `chosen`, or else in the folder last picked
-    /// for the console, or else in the console's folder in the first packages folder. The
-    /// folder must be inside one of the emulator's packages folders, so its installer reads it.
-    pub(crate) fn torrent_folder(
-        &self,
-        emulator: &PluginId,
-        platform: &str,
-        id: &str,
-        chosen: Option<&Path>,
-    ) -> CoreResult<(HostPath, PathBuf)> {
-        let kernel = self.kernel();
-        let (at, folder) = folder_in(
-            kernel,
-            emulator,
-            PACKAGES_FOLDER,
-            &console(kernel, emulator, platform),
-            chosen,
+/// An action on the store's install `store` (`<plugin>:<release>`): only opening the store's
+/// page; the store pauses and cancels its own.
+async fn store_install_action(core: &Core, store: &str, action: TorrentAction) -> CoreResult<()> {
+    let install = core
+        .state()
+        .store_installs
+        .iter()
+        .find(|(plugin, i)| format!("{plugin}:{}", i.release) == store)
+        .cloned()
+        .ok_or_else(|| CoreError::Invalid(format!("no install {store}")))?;
+    let (plugin, install) = install;
+    if action != TorrentAction::OpenStore {
+        return Err(CoreError::Invalid(format!("{} does that in its own Downloads", install.title)));
+    }
+    if !core.kernel().manifest(&plugin)?.permissions.allows_link(&install.open) {
+        return Err(CoreError::PermissionDenied { plugin, action: format!("open {}", install.open) });
+    }
+    let link = install.open.clone();
+    crate::running::open_link(core, link).await.map_err(CoreError::Invalid)
+}
+
+/// A release its store installs: the store's link opens (`steam://install/440`), if the
+/// catalog plugin's manifest allows it, and the store takes it from there. Nothing downloads
+/// here; the game shows in the Library once the store installed it.
+async fn install_in_store(core: &Core, offer: &GameKey, release: &nexus_api::Release) -> CoreResult<()> {
+    let plugin = &offer.plugin;
+    let allowed = core.kernel().manifest(plugin)?.permissions.allows_link(&release.store);
+    if !allowed {
+        return Err(CoreError::PermissionDenied { plugin: plugin.clone(), action: format!("open {}", release.store) });
+    }
+    let link = release.store.clone();
+    crate::running::open_link(core, link).await.map_err(CoreError::Invalid)?;
+    let store = crate::view::system_of(core.kernel(), &release.platform).name;
+    tracing::info!(%offer, link = %release.store, "asked the store to install");
+    // The store writes its install down a moment later: its progress is read often for now.
+    core.state().store_watch_until = Some(core.ports().clock.now() + std::time::Duration::from_secs(60));
+    core.notices().info(format!("{store} is installing {}: it shows in your Library when it's done", release.title));
+    core.changed(Area::Downloads);
+    Ok(())
+}
+
+/// The player asked to download `release` of the offered game `offer`: the subsystem reads
+/// the torrent's files, and waits for the player to start it.
+async fn download_release(core: &Core, offer: &GameKey, release: &str, folder: Option<&Path>) -> CoreResult<()> {
+    let found = core
+        .library()
+        .snapshot()
+        .offer(offer)
+        .cloned()
+        .ok_or_else(|| CoreError::Invalid(format!("no game {offer} in a catalog")))?;
+    let release = found
+        .releases
+        .iter()
+        .find(|r| r.id == release)
+        .cloned()
+        .ok_or_else(|| CoreError::Invalid(format!("no release {release} of {offer}")))?;
+    if !release.store.is_empty() {
+        return install_in_store(core, offer, &release).await;
+    }
+    let torrents = core.torrents();
+    if torrents.has(&release.id) {
+        return Ok(());
+    }
+    let chosen = folder.is_some();
+    if torrents.full() {
+        return Err(CoreError::Invalid(format!(
+            "Remove an old download first (at most {})",
+            crate::torrents::MAX_DOWNLOADS
+        )));
+    }
+    let (source, folder) = torrent_folder(core, &found.emulator, &release.platform, &release.id, folder)?;
+    // A picked folder may be on another disk than the one the Game Hub checked.
+    if chosen
+        && let (Some(size), Some(free)) = (release.size_bytes, free_at(core.ports().hardware.as_ref(), &folder))
+        && let Some(error) = no_room(size, free, "download folder")
+    {
+        return Err(CoreError::Invalid(error));
+    }
+    if let Some(parent) = folder.parent().filter(|_| chosen) {
+        save_folder(
+            core.kernel(),
             "download_folder",
-            "packages folder",
-        )?;
-        let name = format!("torrent-{id}");
-        Ok((at.join(&name).map_err(|e| CoreError::Invalid(e.to_string()))?, folder.join(name)))
+            &console(core.kernel(), &found.emulator, &release.platform),
+            parent,
+        );
     }
+    torrents
+        .add(NewDownload {
+            id: release.id.clone(),
+            offer: offer.clone(),
+            emulator: found.emulator.clone(),
+            title: release.title.clone(),
+            version: release.version.clone(),
+            region: release.region.clone(),
+            magnet: release.torrent.clone(),
+            source,
+            folder,
+            total: release.size_bytes.unwrap_or(0),
+        })
+        .await
+}
 
-    /// Runs the player's command on game installs.
-    pub(crate) async fn game_install(&self, command: GameInstallCmd) -> CoreResult<()> {
-        match command {
-            GameInstallCmd::Download { id, folder } => {
-                if !self.torrents().has(&id) {
-                    return Err(CoreError::Invalid(format!("no download {id}")));
-                }
-                self.install_download(&id, folder.as_deref()).await
+/// Where a download of `emulator`'s goes: in `chosen`, or else in the folder last picked
+/// for the console, or else in the console's folder in the first packages folder. The
+/// folder must be inside one of the emulator's packages folders, so its installer reads it.
+pub(crate) fn torrent_folder(
+    core: &Core,
+    emulator: &PluginId,
+    platform: &str,
+    id: &str,
+    chosen: Option<&Path>,
+) -> CoreResult<(HostPath, PathBuf)> {
+    let kernel = core.kernel();
+    let (at, folder) = folder_in(
+        kernel,
+        emulator,
+        PACKAGES_FOLDER,
+        &console(kernel, emulator, platform),
+        chosen,
+        "download_folder",
+        "packages folder",
+    )?;
+    let name = format!("torrent-{id}");
+    Ok((at.join(&name).map_err(|e| CoreError::Invalid(e.to_string()))?, folder.join(name)))
+}
+
+/// Runs the player's command on game installs.
+pub(crate) async fn game_install(core: &Core, command: GameInstallCmd) -> CoreResult<()> {
+    match command {
+        GameInstallCmd::Download { id, folder } => {
+            if !core.torrents().has(&id) {
+                return Err(CoreError::Invalid(format!("no download {id}")));
             }
-            GameInstallCmd::Package { plugin, source } => self.install_game(&plugin, source, None).await,
-            command => self.installs().handle(command).await,
+            install_download(core, &id, folder.as_deref()).await
         }
+        GameInstallCmd::Package { plugin, source } => install_game(core, &plugin, source, None).await,
+        command => core.installs().handle(command).await,
     }
+}
 
-    /// Starts installing `source` with the plugin's game installer, into the game folder `into`
-    /// (`None`: the plugin's choice).
-    pub(crate) async fn install_game(
-        &self,
-        plugin: &PluginId,
-        source: HostPath,
-        into: Option<HostPath>,
-    ) -> CoreResult<()> {
-        let kernel = self.kernel();
-        let provided = kernel.provided(plugin).await?;
-        let installer = crate::error::require(plugin, nexus_api::Capability::GameInstaller, provided.game_installer)?;
-        let folders = crate::app::plugin_folders(kernel, plugin)
-            .ok_or_else(|| CoreError::Invalid(format!("{plugin} has no manifest")))?;
-        let id = self.inner.downloads.next_id();
-        self.installs().begin(NewInstall { id, plugin: plugin.clone(), source, into, installer, folders }).await
-    }
+/// Starts installing `source` with the plugin's game installer, into the game folder `into`
+/// (`None`: the plugin's choice).
+pub(crate) async fn install_game(
+    core: &Core,
+    plugin: &PluginId,
+    source: HostPath,
+    into: Option<HostPath>,
+) -> CoreResult<()> {
+    let kernel = core.kernel();
+    let provided = kernel.provided(plugin).await?;
+    let installer = crate::error::require(plugin, nexus_api::Capability::GameInstaller, provided.game_installer)?;
+    let folders = crate::app::plugin_folders(kernel, plugin)
+        .ok_or_else(|| CoreError::Invalid(format!("{plugin} has no manifest")))?;
+    let id = core.inner.downloads.next_id();
+    core.installs().begin(NewInstall { id, plugin: plugin.clone(), source, into, installer, folders }).await
+}
 
-    /// What the game installs subsystem tells the rest of the core.
-    pub(crate) async fn install_event(&self, event: InstallEvent) {
-        match event {
-            InstallEvent::Installed => {
-                if let Err(e) = Box::pin(self.dispatch(crate::Command::Library(crate::LibraryCmd::Refresh))).await {
-                    tracing::warn!(error = %e, "library refresh after an install failed");
-                }
-            }
-            InstallEvent::Failed(error) => self.notices().opening(
-                nexus_ui_api::NoticeKind::Error,
-                crate::Route::Downloads,
-                format!("The install failed: {error}"),
-            ),
-            InstallEvent::Unpacked { plugin, source, into, title } => {
-                if let Err(e) = self.install_game(&plugin, source, into).await {
-                    self.notices().opening(
-                        nexus_ui_api::NoticeKind::Error,
-                        crate::Route::Downloads,
-                        format!("{title} couldn't install: {e}"),
-                    );
-                }
+/// What the game installs subsystem tells the rest of the core.
+pub(crate) async fn install_event(core: &Core, event: InstallEvent) {
+    match event {
+        InstallEvent::Installed => {
+            if let Err(e) = Box::pin(core.dispatch(crate::Command::Library(crate::LibraryCmd::Refresh))).await {
+                tracing::warn!(error = %e, "library refresh after an install failed");
             }
         }
+        InstallEvent::Failed(error) => core.notices().opening(
+            nexus_ui_api::NoticeKind::Error,
+            crate::Route::Downloads,
+            format!("The install failed: {error}"),
+        ),
+        InstallEvent::Unpacked { plugin, source, into, title } => {
+            if let Err(e) = install_game(core, &plugin, source, into).await {
+                core.notices().opening(
+                    nexus_ui_api::NoticeKind::Error,
+                    crate::Route::Downloads,
+                    format!("{title} couldn't install: {e}"),
+                );
+            }
+        }
     }
+}
 
-    /// The player pressed Install on the install sheet, with the game folder they picked
-    /// (`None` for the one the sheet shows). The archives unpack first. Why it doesn't start
-    /// stays on the download, for the sheet.
-    async fn install_download(&self, id: &str, folder: Option<&Path>) -> CoreResult<()> {
-        self.installs().set_install_error(id, String::new());
-        let started = self.start_install(id, folder).await;
-        if let Err(e) = &started {
-            self.installs().set_install_error(id, e.to_string());
-        }
-        started
+/// The player pressed Install on the install sheet, with the game folder they picked
+/// (`None` for the one the sheet shows). The archives unpack first. Why it doesn't start
+/// stays on the download, for the sheet.
+async fn install_download(core: &Core, id: &str, folder: Option<&Path>) -> CoreResult<()> {
+    core.installs().set_install_error(id, String::new());
+    let started = start_install(core, id, folder).await;
+    if let Err(e) = &started {
+        core.installs().set_install_error(id, e.to_string());
     }
+    started
+}
 
-    async fn start_install(&self, id: &str, folder: Option<&Path>) -> CoreResult<()> {
-        let job = self.torrents().job(id).ok_or_else(|| CoreError::Invalid(format!("no download {id}")))?;
-        if job.state != TorrentState::Complete {
-            return Ok(());
-        }
-        let kernel = self.kernel();
-        let (into, path) = install_folder(kernel, &job.emulator, folder)?;
-        if let Some(free) = free_at(self.ports().hardware.as_ref(), &path)
-            && let Some(error) = no_room(job.total, free, "game folder")
-        {
-            return Err(CoreError::Invalid(error));
-        }
-        if folder.is_some() {
-            save_folder(kernel, "install_folder", &console_of(kernel, &job.emulator), &path);
-        }
-        if let Some((plugin, source)) = self.installs().install_download(id, into.clone()) {
-            self.install_game(&plugin, source, Some(into)).await?;
-        }
-        Ok(())
+async fn start_install(core: &Core, id: &str, folder: Option<&Path>) -> CoreResult<()> {
+    let job = core.torrents().job(id).ok_or_else(|| CoreError::Invalid(format!("no download {id}")))?;
+    if job.state != TorrentState::Complete {
+        return Ok(());
     }
+    let kernel = core.kernel();
+    let (into, path) = install_folder(kernel, &job.emulator, folder)?;
+    if let Some(free) = free_at(core.ports().hardware.as_ref(), &path)
+        && let Some(error) = no_room(job.total, free, "game folder")
+    {
+        return Err(CoreError::Invalid(error));
+    }
+    if folder.is_some() {
+        save_folder(kernel, "install_folder", &console_of(kernel, &job.emulator), &path);
+    }
+    if let Some((plugin, source)) = core.installs().install_download(id, into.clone()) {
+        install_game(core, &plugin, source, Some(into)).await?;
+    }
+    Ok(())
 }
