@@ -10,7 +10,7 @@ host_api = "^0.1"
 platforms = ["linux", "macos", "windows"]
 # The console it plays: it gets that console's catalog.
 console = "PS4"
-capabilities = ["catalog", "downloader", "installer", "configurator", "launcher", "compatibility", "slots", "controllers", "game_installer"]
+capabilities = ["catalog", "downloader", "installer", "configurator", "launcher", "compatibility", "slots", "game_installer"]
 # What the install sheet says this emulator installs from.
 install_note = "Installs a PS4 game from its folder or from PS4 packages (.pkg), with its update and DLC. Installing checks that it holds a game, not that its files are genuine, and never runs them."
 

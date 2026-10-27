@@ -109,12 +109,8 @@ pub enum Capability {
     Configurator,
     Launcher,
     Compatibility,
-    Saves,
-    Controllers,
-    Shaders,
     Slots,
     GameInstaller,
-    LaunchMiddleware,
     /// Describes games from a store's catalog: art, rating, genres, description. See
     /// [`crate::Metadata`].
     Metadata,

@@ -4,8 +4,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::{
-    Capability, Catalog, Compatibility, Configurator, Controllers, Downloader, Files, GameInstaller, Installer,
-    LaunchMiddleware, Launcher, PluginContext, PluginManifest, PluginResult, Saves, Shaders, Slots,
+    Capability, Catalog, Compatibility, Configurator, Downloader, Files, GameInstaller, Installer, Launcher,
+    PluginContext, PluginManifest, PluginResult, Slots,
 };
 
 /// What every plugin has, with code or a theme: its manifest and its shutdown.
@@ -86,12 +86,8 @@ pub struct Provided {
     pub configurator: Option<Arc<dyn Configurator>>,
     pub launcher: Option<Arc<dyn Launcher>>,
     pub compatibility: Option<Arc<dyn Compatibility>>,
-    pub saves: Option<Arc<dyn Saves>>,
-    pub controllers: Option<Arc<dyn Controllers>>,
-    pub shaders: Option<Arc<dyn Shaders>>,
     pub slots: Option<Arc<dyn Slots>>,
     pub game_installer: Option<Arc<dyn GameInstaller>>,
-    pub launch_middleware: Vec<Arc<LaunchMiddleware>>,
     pub metadata: Option<Arc<dyn crate::Metadata>>,
     pub releases: Option<Arc<dyn crate::Releases>>,
     pub network: Option<Arc<dyn crate::NetworkSettings>>,
@@ -121,12 +117,8 @@ impl Provided {
             (Capability::Configurator, self.configurator.is_some()),
             (Capability::Launcher, self.launcher.is_some()),
             (Capability::Compatibility, self.compatibility.is_some()),
-            (Capability::Saves, self.saves.is_some()),
-            (Capability::Controllers, self.controllers.is_some()),
-            (Capability::Shaders, self.shaders.is_some()),
             (Capability::Slots, self.slots.is_some()),
             (Capability::GameInstaller, self.game_installer.is_some()),
-            (Capability::LaunchMiddleware, !self.launch_middleware.is_empty()),
             (Capability::Metadata, self.metadata.is_some()),
             (Capability::Releases, self.releases.is_some()),
             (Capability::Network, self.network.is_some()),

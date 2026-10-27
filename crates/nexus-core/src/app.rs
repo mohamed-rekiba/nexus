@@ -89,8 +89,6 @@ pub enum Command {
     ShowGame(SessionId),
     /// The PS button while a game runs: from the game to the launcher, or back to the game.
     ToggleFocus,
-    /// Deletes the emulator's compiled shaders for a game.
-    ClearShaderCache(GameKey),
     SetConfig {
         plugin: PluginId,
         scope: ConfigScope,
@@ -333,7 +331,6 @@ pub(crate) struct Detail {
     pub compat_page: String,
     pub actions: Vec<SlotVm>,
     pub sections: Vec<SlotVm>,
-    pub shaders: Option<nexus_api::ShaderCacheInfo>,
     /// The game's own settings, when its emulator has any.
     pub settings: Option<SettingsPanelVm>,
 }
@@ -346,7 +343,6 @@ pub(crate) struct EmulatorState {
     pub available: Vec<String>,
     pub busy: bool,
     pub panels: Vec<SlotVm>,
-    pub controllers: Vec<nexus_api::ControllerProfile>,
 }
 
 /// The Library's search, filters and sort.
@@ -861,7 +857,6 @@ impl Core {
                 crate::launch::toggle_focus(self).await;
                 Ok(())
             }
-            Command::ClearShaderCache(game) => self.clear_shader_cache(game).await,
             Command::SetConfig { plugin, scope, value } => self.set_config(&plugin, scope, value).await,
             Command::SetConfigField { plugin, scope, key, value } => {
                 self.set_config_field(&plugin, scope, key, value).await
@@ -1554,12 +1549,6 @@ impl Core {
                 Err(e) => self.problem(e.to_string()),
             }
         }
-        if let Some(shaders) = &provided.shaders {
-            match kernel.guard(&plugin, "shaders.cache", shaders.cache(&game.local)).await {
-                Ok(info) => detail.shaders = Some(info),
-                Err(e) => self.problem(e.to_string()),
-            }
-        }
         if let Some(slots) = &provided.slots {
             for slot in [SlotId::GameAction, SlotId::GameDetailSection, SlotId::GameBadge] {
                 let request = SlotRequest { slot, game: Some(game.local.clone()) };
@@ -1601,12 +1590,6 @@ impl Core {
             }
             match kernel.guard(plugin, "installer.available", installer.available()).await {
                 Ok(list) => emu.available = list.into_iter().map(|v| v.version).collect(),
-                Err(e) => self.problem(e.to_string()),
-            }
-        }
-        if let Some(controllers) = &provided.controllers {
-            match kernel.guard(plugin, "controllers.profiles", controllers.profiles()).await {
-                Ok(profiles) => emu.controllers = profiles,
                 Err(e) => self.problem(e.to_string()),
             }
         }
@@ -1895,19 +1878,6 @@ impl Core {
                 let _ = core.install(&plugin, Some(record.version), record.from).await;
             });
         }
-    }
-
-    async fn clear_shader_cache(&self, game: GameKey) -> CoreResult<()> {
-        let kernel = &self.inner.kernel;
-        let provided = kernel.provided(&game.plugin).await?;
-        let shaders = require(&game.plugin, Capability::Shaders, provided.shaders)?;
-        kernel.guard(&game.plugin, "shaders.clear_cache", shaders.clear_cache(&game.local)).await?;
-        let info = kernel.guard(&game.plugin, "shaders.cache", shaders.cache(&game.local)).await?;
-        if let Some(detail) = self.state().details.get_mut(&game) {
-            detail.shaders = Some(info);
-        }
-        self.changed(Area::Library);
-        Ok(())
     }
 
     async fn set_config(&self, plugin: &PluginId, scope: ConfigScope, value: Value) -> CoreResult<()> {

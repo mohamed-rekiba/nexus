@@ -1,63 +1,20 @@
-//! Launching games: the plugin prepares a spec, launch middleware may change or stop it, the
-//! host checks permissions, spawns the process and watches it.
+//! Launching games: the plugin prepares a spec, the host checks permissions, spawns the process
+//! and watches it.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_trait::async_trait;
 use nexus_api::{
-    Capability, ConfigScope, Endpoint, Event, ExitInfo, GameKey, LaunchArg, LaunchMiddleware, LaunchRequest,
-    LaunchSpec, Location, Middleware, Next, Order, Permissions, PluginError, PluginId, PluginResult, SessionId,
+    Capability, ConfigScope, Event, ExitInfo, GameKey, LaunchArg, LaunchSpec, Location, Permissions, PluginError,
+    PluginId, SessionId,
 };
 use serde_json::Value;
 
 use crate::app::{Route, Session};
 use crate::changes::Area;
 use crate::error::require;
-use crate::order::sort_by_order;
 use crate::{Core, CoreError, CoreResult, DirStorage, Kernel, ProcessExit, SpawnCommand, folders, running};
-
-/// Wraps one plugin's middleware so its calls get the plugin's guard and span.
-struct Guarded {
-    plugin: PluginId,
-    kernel: Kernel,
-    inner: Arc<LaunchMiddleware>,
-}
-
-#[async_trait]
-impl Middleware<LaunchRequest, LaunchSpec> for Guarded {
-    fn name(&self) -> &str {
-        self.inner.name()
-    }
-
-    fn order(&self) -> Order {
-        self.inner.order()
-    }
-
-    async fn call(
-        &self,
-        request: LaunchRequest,
-        next: Next<'_, LaunchRequest, LaunchSpec>,
-    ) -> PluginResult<LaunchSpec> {
-        // `next` runs the rest of the chain inside this guard; each link adds its own.
-        self.kernel.guard(&self.plugin, "launch_middleware", self.inner.call(request, next)).await.map_err(
-            |e| match e {
-                CoreError::Plugin { error, .. } => error,
-                other => PluginError::Other(other.to_string()),
-            },
-        )
-    }
-}
-
-struct Done;
-
-#[async_trait]
-impl Endpoint<LaunchRequest, LaunchSpec> for Done {
-    async fn call(&self, request: LaunchRequest) -> PluginResult<LaunchSpec> {
-        Ok(request.spec)
-    }
-}
 
 /// Emulator settings with the game's own settings on top.
 async fn merged_config(core: &Core, game: &GameKey) -> CoreResult<Value> {
@@ -69,22 +26,6 @@ async fn merged_config(core: &Core, game: &GameKey) -> CoreResult<Value> {
         config = game_config;
     }
     Ok(config)
-}
-
-async fn middleware_chain(core: &Core) -> Vec<Arc<LaunchMiddleware>> {
-    let kernel = core.kernel();
-    let mut links = Vec::new();
-    for plugin in kernel.providers(Capability::LaunchMiddleware) {
-        let Ok(provided) = kernel.provided(&plugin).await else { continue };
-        for inner in provided.launch_middleware {
-            let id = format!("{plugin}:{}", inner.name());
-            let order = inner.order();
-            let link: Arc<LaunchMiddleware> =
-                Arc::new(Guarded { plugin: plugin.clone(), kernel: kernel.clone(), inner });
-            links.push((id, order, link));
-        }
-    }
-    sort_by_order(links)
 }
 
 /// The real paths of a checked spec.
@@ -242,12 +183,6 @@ pub(crate) async fn launch(core: &Core, game: GameKey) -> CoreResult<()> {
     }
     let config = merged_config(core, &game).await?;
     let spec = kernel.guard(&plugin, "launcher.prepare", launcher.prepare(&game.local, &config)).await?;
-
-    let chain = middleware_chain(core).await;
-    let spec = Next::new(&chain, &Done)
-        .run(LaunchRequest { game: game.clone(), spec })
-        .await
-        .map_err(|error| CoreError::Plugin { plugin: plugin.clone(), error })?;
 
     let manifest = kernel.manifest(&plugin)?;
     if !manifest.permissions.allows_program(&spec.program) {

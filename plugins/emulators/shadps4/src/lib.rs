@@ -222,7 +222,6 @@ impl CodePlugin for ShadPlugin {
             launcher: Some(shad.clone()),
             compatibility: Some(emu.clone()),
             game_installer: Some(shad),
-            controllers: Some(Arc::new(emu.controls())),
             slots: Some(emu),
             ..Provided::default()
         })

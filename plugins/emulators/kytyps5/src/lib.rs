@@ -486,7 +486,6 @@ impl CodePlugin for KytyPlugin {
             launcher: Some(kyty.clone()),
             compatibility: Some(emu.clone()),
             game_installer: Some(kyty),
-            controllers: Some(Arc::new(emu.controls())),
             slots: Some(emu),
             ..Provided::default()
         })

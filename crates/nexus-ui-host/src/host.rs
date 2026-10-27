@@ -600,7 +600,8 @@ impl ThemeHost {
         )?;
         callback("launch", Box::new(move |a| game(a, 0).map(Command::Launch).and_then(core)))?;
         callback("stop", Box::new(move |a| core(Command::Stop(SessionId(int(a, 0))))))?;
-        callback("clear-shader-cache", Box::new(move |a| game(a, 0).map(Command::ClearShaderCache).and_then(core)))?;
+        // The contract keeps the callback, but no plugin reports a shader cache to clear.
+        callback("clear-shader-cache", Box::new(|_| None))?;
         callback("pause-download", Box::new(move |a| core(Command::PauseDownload(JobId(int(a, 0))))))?;
         callback("resume-download", Box::new(move |a| core(Command::ResumeDownload(JobId(int(a, 0))))))?;
         callback("cancel-download", Box::new(move |a| core(Command::CancelDownload(JobId(int(a, 0))))))?;

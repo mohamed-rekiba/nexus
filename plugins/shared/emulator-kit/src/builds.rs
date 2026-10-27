@@ -352,9 +352,7 @@ fn action(id: &str, label: String, style: ActionStyle) -> SlotItem {
 #[async_trait]
 impl<F: Flavor> Downloader for BuildManager<F> {
     async fn plan(&self, request: &DownloadRequest) -> PluginResult<DownloadPlan> {
-        let DownloadRequest::EmulatorBuild { version } = request else {
-            return Err(PluginError::Unsupported(format!("{} downloads its own builds only", F::NAME)));
-        };
+        let DownloadRequest::EmulatorBuild { version } = request;
         let builds = self.builds().await?;
         let (release, asset) = match version {
             Some(tag) => builds.into_iter().find(|(r, _)| &r.tag == tag),

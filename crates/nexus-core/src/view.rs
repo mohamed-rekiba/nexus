@@ -1135,7 +1135,8 @@ fn detail_vm(core: &Core, kernel: &Kernel, state: &AppState, key: &GameKey) -> O
         facts: details.facts.clone(),
         played_secs: stats.secs,
         last_played_days: (stats.count > 0).then(|| crate::launch::days_since(stats.last)),
-        shader_cache: d.shaders.as_ref().map(|s| ShaderCacheVm { entries: s.entries, size_bytes: s.size_bytes }),
+        // No plugin reports a shader cache: the plugin API has no seam for one.
+        shader_cache: None,
         releases: offer
             .map(|o| {
                 let today = crate::releases::today();
@@ -1772,14 +1773,7 @@ fn emulators_vm(kernel: &Kernel, state: &AppState, statuses: &BTreeMap<PluginId,
                 available: emu.available,
                 busy: emu.busy,
                 panels: emu.panels,
-                controllers: emu
-                    .controllers
-                    .iter()
-                    .map(|c| match &c.device_hint {
-                        Some(device) => format!("{} ({device})", c.name),
-                        None => c.name.clone(),
-                    })
-                    .collect(),
+                controllers: controllers(kernel.manifest(&id).ok()),
                 plugin: id,
             }
         })
@@ -1985,6 +1979,17 @@ fn theme_chain(kernel: &crate::Kernel, theme: &PluginId) -> Vec<ThemeManifest> {
         chain.push(manifest);
     }
     chain
+}
+
+/// What an emulator's games play with: a controller, and the keyboard when the manifest lists
+/// its keys (`[[keymap]]`). None for an emulator that lists no keys.
+fn controllers(manifest: Option<&nexus_api::PluginManifest>) -> Vec<String> {
+    match manifest {
+        Some(m) if !m.keymap.is_empty() => {
+            vec!["Controller (DualSense, DualShock 4, Xbox and most others)".into(), "Keyboard".into()]
+        }
+        _ => Vec::new(),
+    }
 }
 
 fn status_text(status: Option<&PluginStatus>) -> String {
