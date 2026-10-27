@@ -526,6 +526,8 @@ pub(crate) struct Inner {
     /// The desktop was asked what it is missing, at the first game of this run.
     pub desktop_checked: std::sync::atomic::AtomicBool,
     pub changes: Changes,
+    /// Held while the catalogs are read: see [`Core::refresh_releases`].
+    pub reading_catalogs: tokio::sync::Mutex<()>,
 }
 
 /// The app. Cheap to clone; every clone is the same app.
@@ -637,6 +639,7 @@ impl Core {
                 stops: Mutex::new(HashMap::new()),
                 desktop_checked: Default::default(),
                 changes: Changes::new(),
+                reading_catalogs: tokio::sync::Mutex::new(()),
             }),
         };
         core.clean_up_game_installs();

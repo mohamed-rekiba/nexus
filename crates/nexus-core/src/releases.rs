@@ -414,6 +414,9 @@ impl Core {
     /// groups the releases. Then asks each for its Catalog buttons (`catalog.action`): after the
     /// catalogs, so the plugin knows which consoles they are for.
     pub(crate) async fn refresh_releases(&self) {
+        // One read at a time. Two at once could end in the wrong order: a read that began
+        // before a catalog changed would then put its old copies over the new ones.
+        let _reading = self.inner.reading_catalogs.lock().await;
         let kernel = self.kernel();
         let emulators = consoles(kernel);
         let mut copies = Vec::new();
