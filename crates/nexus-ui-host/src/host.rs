@@ -749,9 +749,12 @@ impl ThemeHost {
         )?;
         callback("confirm-install", Box::new(move |_| core(Command::ConfirmInstall)))?;
         callback("cancel-install", Box::new(move |_| core(Command::CancelInstall)))?;
-        callback("dismiss-notices", Box::new(move |_| core(Command::DismissNotices)))?;
-        callback("dismiss-notice", Box::new(move |a| core(Command::DismissNotice(int(a, 0)))))?;
-        callback("open-notice", Box::new(move |a| core(Command::OpenNotice(int(a, 0)))))?;
+        callback("dismiss-notices", Box::new(move |_| core(Command::Notice(nexus_core::NoticeCmd::DismissAll))))?;
+        callback(
+            "dismiss-notice",
+            Box::new(move |a| core(Command::Notice(nexus_core::NoticeCmd::Dismiss(int(a, 0))))),
+        )?;
+        callback("open-notice", Box::new(move |a| core(Command::Notice(nexus_core::NoticeCmd::Open(int(a, 0))))))?;
         callback("refresh-library", Box::new(move |_| core(Command::RefreshLibrary)))?;
         callback("play-sound", Box::new(move |a| Some(UiRequest::PlaySound(arg(a, 0)))))?;
         callback("quit", Box::new(move |_| Some(UiRequest::Quit)))?;

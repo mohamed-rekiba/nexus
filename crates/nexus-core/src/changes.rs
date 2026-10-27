@@ -85,4 +85,10 @@ impl Notifier {
         self.changes.publish(area);
         self.bus.publish(Event::StateChanged);
     }
+
+    /// Only the core's readers learn that `area` changed. For a change that comes with
+    /// another one, which tells the app.
+    pub(crate) fn noted(&self, area: Area) {
+        self.changes.publish(area);
+    }
 }

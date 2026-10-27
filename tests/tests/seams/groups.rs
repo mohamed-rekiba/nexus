@@ -116,7 +116,7 @@ fn of_quick_selections_only_the_last_loads_its_details() {
     host.dispatch(Command::RefreshLibrary);
     // The first game was selected, and its details failed, as the library loaded. The two
     // selections below are of the other games.
-    host.dispatch(Command::DismissNotices);
+    host.dispatch(Command::Notice(nexus_core::NoticeCmd::DismissAll));
     let core = host.core().clone();
     host.rt
         .block_on(async {

@@ -119,7 +119,7 @@ fn the_default_theme_on_a_real_library() {
     let stats = serde_json::json!({ "secs": 4 * 3600 + 6 * 60, "count": 2, "last": now });
     host.core().kernel().config().set(&["app", "playtime", &first], stats).unwrap();
     host.dispatch(Command::Select(first.parse().unwrap()));
-    host.dispatch(Command::DismissNotices);
+    host.dispatch(Command::Notice(nexus_core::NoticeCmd::DismissAll));
 
     shoot(&mut host, &window, &out.join("new-home.png"));
     key(&mut host, Key::DownArrow);

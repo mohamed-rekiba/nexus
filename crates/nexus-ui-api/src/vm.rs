@@ -946,7 +946,7 @@ impl NoticeKind {
 /// One notice: "Download complete: Astro Bot. Install it from Downloads."
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct NoticeVm {
-    /// Names the notice for `Command::DismissNotice` and `Command::OpenNotice`.
+    /// Names the notice for `NoticeCmd::Dismiss` and `NoticeCmd::Open`.
     pub id: u64,
     pub text: String,
     pub kind: NoticeKind,

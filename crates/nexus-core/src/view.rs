@@ -656,7 +656,7 @@ fn grid_vm(kernel: &Kernel, state: &AppState, torrents: &TorrentsSnapshot, catal
 }
 
 /// What clicking `notice` opens, for example "Open Downloads"; empty for nothing.
-fn notice_opens(kernel: &Kernel, notice: &crate::app::Notice) -> String {
+fn notice_opens(kernel: &Kernel, notice: &crate::notices::Notice) -> String {
     match &notice.route {
         Some(Route::Downloads) => "Open Downloads".into(),
         Some(Route::Catalog) => "Open the Catalog".into(),
@@ -670,12 +670,12 @@ fn notice_opens(kernel: &Kernel, notice: &crate::app::Notice) -> String {
 }
 
 /// The cover of the game `notice` is about.
-fn notice_art(state: &AppState, notice: &crate::app::Notice) -> Option<ImageRef> {
+fn notice_art(state: &AppState, notice: &crate::notices::Notice) -> Option<ImageRef> {
     let game = notice.game.as_ref()?;
     state.library.iter().find(|e| &e.key == game).and_then(|e| cover_of(state, e))
 }
 
-fn notice_vm(kernel: &Kernel, state: &AppState, notice: &crate::app::Notice) -> NoticeVm {
+fn notice_vm(kernel: &Kernel, state: &AppState, notice: &crate::notices::Notice) -> NoticeVm {
     NoticeVm {
         id: notice.id,
         text: notice.message.clone(),
@@ -690,6 +690,7 @@ pub(crate) fn build(core: &Core) -> AppView {
     let jobs = core.inner.downloads.jobs();
     let statuses = kernel.statuses();
     let torrents = core.torrents().snapshot();
+    let notices = core.notices().snapshot();
     let mut state = core.state();
 
     let route = state.nav.last().cloned().unwrap_or(Route::Home);
@@ -735,8 +736,8 @@ pub(crate) fn build(core: &Core) -> AppView {
             _ => None,
         },
         running: running_vm(kernel, &state, &route),
-        notices: state.notices.iter().map(|n| n.message.clone()).collect(),
-        notice_cards: state.notices.iter().map(|n| notice_vm(kernel, &state, n)).collect(),
+        notices: notices.iter().map(|n| n.message.clone()).collect(),
+        notice_cards: notices.iter().map(|n| notice_vm(kernel, &state, n)).collect(),
         install_prompt: state.install_prompt.as_ref().map(|p| InstallPromptVm {
             plugin: p.game.plugin.clone(),
             emulator: p.emulator.clone(),
@@ -746,8 +747,8 @@ pub(crate) fn build(core: &Core) -> AppView {
         }),
         boot: boot_vm(core, kernel, &state),
         task: state.task.clone(),
-        notice_opens: state.notices.last().map(|n| notice_opens(kernel, n)).unwrap_or_default(),
-        notice_art: state.notices.last().and_then(|n| notice_art(&state, n)),
+        notice_opens: notices.last().map(|n| notice_opens(kernel, n)).unwrap_or_default(),
+        notice_art: notices.last().and_then(|n| notice_art(&state, n)),
         system: system_vm(kernel, &state),
         result_prompt: state.result_prompt.as_ref().map(|(key, _)| {
             state

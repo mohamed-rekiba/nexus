@@ -139,10 +139,8 @@ pub enum Command {
     SetStartAtLogin(bool),
     /// The UI host finished swapping to this theme.
     ThemeSwitched(PluginId),
-    /// Closes every notice.
-    DismissNotices,
-    /// Closes the notice with this id (`NoticeVm::id`); the others stay.
-    DismissNotice(u64),
+    /// The notices: close one or all, or open what one is about.
+    Notice(crate::NoticeCmd),
     /// Looks for emulator updates and, if automatic updates are on, installs them. An update
     /// for an emulator whose game is running waits until the game closes. The core runs this
     /// every few hours by itself.
@@ -153,8 +151,6 @@ pub enum Command {
     FinishWelcome,
     /// The monitor the launcher goes on, by name; `None` for the one it is on.
     SetMonitor(Option<String>),
-    /// The notice with this id was clicked: open what it is about, and dismiss it.
-    OpenNotice(u64),
     /// Reads the newest release of the launcher (`app.update_repo`).
     CheckLauncherUpdate,
     /// Downloads the newer launcher the check found, for the next start.
@@ -436,10 +432,6 @@ pub(crate) struct AppState {
     pub describing: Option<(usize, usize)>,
     /// The store has been asked about every game of the library.
     pub described: bool,
-    /// What the player is told, newest last: at most `MAX_NOTICES`.
-    pub notices: Vec<Notice>,
-    /// The id the next notice gets.
-    pub next_notice: u64,
     pub loading: bool,
     pub install_prompt: Option<InstallPrompt>,
     /// Emulators with an update that waits for their game to close.
@@ -495,6 +487,7 @@ pub(crate) struct Inner {
     pub changes: Changes,
     /// The catalogs' downloads.
     pub torrents: crate::torrents::TorrentsSubsystem,
+    pub notices: crate::notices::NoticesSubsystem,
     /// Held while the catalogs are read: see [`Core::refresh_releases`].
     pub reading_catalogs: tokio::sync::Mutex<()>,
 }
@@ -503,42 +496,6 @@ pub(crate) struct Inner {
 #[derive(Clone)]
 pub struct Core {
     pub(crate) inner: Arc<Inner>,
-}
-
-/// A short message for the player, until it is dismissed.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Notice {
-    pub id: u64,
-    pub message: String,
-    pub kind: NoticeKind,
-    /// Where the notice's subject is, for the player to open.
-    pub route: Option<Route>,
-    /// The game the notice is about: its card shows the game's art.
-    pub game: Option<GameKey>,
-}
-
-impl AppState {
-    /// Shows the player `message`. Clicking it opens `route`, when there is one. The oldest
-    /// notice goes when there are more than `MAX_NOTICES`.
-    pub(crate) fn post_notice(
-        &mut self,
-        kind: NoticeKind,
-        message: String,
-        route: Option<Route>,
-        game: Option<GameKey>,
-    ) {
-        // Only a problem is a warning in the log: "Download complete" is news.
-        if kind == NoticeKind::Error {
-            tracing::warn!(%message, "notice");
-        } else {
-            tracing::info!(%message, kind = kind.as_str(), "notice");
-        }
-        self.next_notice += 1;
-        self.notices.push(Notice { id: self.next_notice, message, kind, route, game });
-        if self.notices.len() > nexus_ui_api::MAX_NOTICES {
-            self.notices.remove(0);
-        }
-    }
 }
 
 impl Core {
@@ -572,8 +529,6 @@ impl Core {
             login_error: None,
             describing: None,
             described: false,
-            notices: Vec::new(),
-            next_notice: 0,
             loading: false,
             install_prompt: None,
             pending_updates: BTreeSet::new(),
@@ -611,6 +566,8 @@ impl Core {
                 Notifier::new(changes.clone(), kernel.events().clone()),
                 events,
             );
+            let notices =
+                crate::notices::NoticesSubsystem::new(Notifier::new(changes.clone(), kernel.events().clone()));
             Inner {
                 kernel,
                 state: Mutex::new(state),
@@ -620,6 +577,7 @@ impl Core {
                 desktop_checked: Default::default(),
                 changes,
                 torrents,
+                notices,
                 reading_catalogs: tokio::sync::Mutex::new(()),
             }
         });
@@ -687,6 +645,11 @@ impl Core {
         &self.inner.torrents
     }
 
+    /// The notices.
+    pub(crate) fn notices(&self) -> &crate::notices::NoticesSubsystem {
+        &self.inner.notices
+    }
+
     pub(crate) fn state(&self) -> MutexGuard<'_, AppState> {
         self.inner.state.lock().unwrap_or_else(|p| p.into_inner())
     }
@@ -704,11 +667,9 @@ impl Core {
         self.inner.kernel.events().publish(Event::StateChanged);
     }
 
-    /// Posts a notice. The change that goes with it publishes [`Event::StateChanged`]; this
-    /// says only that the notices changed.
+    /// Posts a notice. The change that goes with it publishes [`Event::StateChanged`].
     fn post(&self, kind: NoticeKind, message: String, route: Option<Route>, game: Option<GameKey>) {
-        self.state().post_notice(kind, message, route, game);
-        self.inner.changes.publish(Area::Notices);
+        self.notices().post(kind, message, route, game);
     }
 
     /// A notice of the default kind, `Info`.
@@ -733,8 +694,7 @@ impl Core {
 
     /// Shows the player a problem outside the core, such as a theme's logic failing.
     pub fn report(&self, message: String) {
-        self.state().post_notice(NoticeKind::Error, message, None, None);
-        self.changed(Area::Notices);
+        self.notices().report(message);
     }
 
     /// The view models for the current state.
@@ -977,16 +937,11 @@ impl Core {
                 Ok(())
             }
             Command::System(command) => crate::system::run(self, command).await,
-            Command::DismissNotices => {
-                self.state().notices.clear();
-                self.changed(Area::Notices);
-                Ok(())
-            }
-            Command::DismissNotice(id) => {
-                self.state().notices.retain(|n| n.id != id);
-                self.changed(Area::Notices);
-                Ok(())
-            }
+            Command::Notice(crate::NoticeCmd::Open(id)) => match self.notices().take(id).and_then(|n| n.route) {
+                Some(route) => self.navigate(route).await,
+                None => Ok(()),
+            },
+            Command::Notice(command) => self.notices().handle(command),
             Command::CheckLauncherUpdate => {
                 use crate::launcher_update::{UpdateState, check};
                 self.state().launcher_update = UpdateState::Checking;
@@ -1015,21 +970,6 @@ impl Core {
                 self.state().launcher_update = done.unwrap_or_else(|e| UpdateState::Failed(e.to_string()));
                 self.changed(Area::LauncherUpdate);
                 Ok(())
-            }
-            Command::OpenNotice(id) => {
-                let route = {
-                    let mut state = self.state();
-                    let route = state.notices.iter().find(|n| n.id == id).and_then(|n| n.route.clone());
-                    state.notices.retain(|n| n.id != id);
-                    route
-                };
-                match route {
-                    Some(route) => self.navigate(route).await,
-                    None => {
-                        self.changed(Area::Notices);
-                        Ok(())
-                    }
-                }
             }
             Command::CheckUpdates => {
                 self.check_updates().await;

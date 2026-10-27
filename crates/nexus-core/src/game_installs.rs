@@ -317,14 +317,6 @@ impl Core {
                     }
                     job.error.clone_from(&error);
                     job.installed = result.as_ref().ok().cloned();
-                    if let Some(error) = error {
-                        state.post_notice(
-                            nexus_ui_api::NoticeKind::Error,
-                            format!("The install failed: {error}"),
-                            Some(crate::Route::Downloads),
-                            None,
-                        );
-                    }
                     break;
                 }
                 (job.work.clone(), job.plugin.clone())
@@ -338,8 +330,13 @@ impl Core {
             }
             cleaned = work;
         }
-        if phase == GamePhase::Failed {
-            self.inner.changes.publish(Area::Notices);
+        // A failed job shows with its notice: the change below tells the app of both.
+        if let Some(error) = error {
+            self.notice_opening(
+                nexus_ui_api::NoticeKind::Error,
+                crate::Route::Downloads,
+                format!("The install failed: {error}"),
+            );
         }
         self.changed(Area::Installs);
     }
