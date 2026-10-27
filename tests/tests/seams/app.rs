@@ -34,6 +34,8 @@ struct FakeEmu {
     latest: Arc<Mutex<String>>,
     /// Its launch hands the game over to a process with this text in its command line.
     game_process: Option<String>,
+    /// A game its launcher won't start, and why.
+    refuses: Option<(&'static str, &'static str)>,
 }
 
 impl FakeEmu {
@@ -48,6 +50,7 @@ impl FakeEmu {
             broken_catalog: false,
             latest: Arc::new(Mutex::new("1.0".into())),
             game_process: None,
+            refuses: None,
         }
     }
 
@@ -130,7 +133,6 @@ impl Downloader for FakeEmu {
                     }],
                 })
             }
-            _ => Err(PluginError::Unsupported("only builds".into())),
         }
     }
 }
@@ -165,6 +167,11 @@ impl Launcher for FakeEmu {
     async fn prepare(&self, game: &str, config: &serde_json::Value) -> PluginResult<LaunchSpec> {
         let installed = self.installed().await?;
         let build = installed.last().ok_or_else(|| PluginError::Precondition("install the emulator first".into()))?;
+        if let Some((refused, why)) = self.refuses
+            && refused == game
+        {
+            return Err(PluginError::Precondition(why.into()));
+        }
         let mut env = BTreeMap::new();
         if let Some(scale) = config.get("scale") {
             env.insert("EMU_SCALE".into(), scale.to_string().into());
@@ -217,7 +224,7 @@ fn emu_plugin_with(plugin_id: &str, emu: FakeEmu, permissions: &str) -> StubPlug
 /// if it has one.
 fn emu_plugin_named(plugin_id: &str, names: &str, emu: FakeEmu, permissions: &str) -> StubPlugin {
     StubPlugin::from_toml(&format!(
-        "id = \"{plugin_id}\"\nkind = \"emulator\"\n{names}\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"{plugin_id}\"\nkind = \"emulator\"\n{names}\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          capabilities = [\"catalog\", \"downloader\", \"installer\", \"launcher\", \"slots\"]\n[permissions]\n{permissions}\n"
     ))
     .provides(move |ctx| {
@@ -1195,62 +1202,18 @@ async fn a_program_outside_the_process_allowlist_is_not_spawned() {
     assert!(t.spawner.spawned().is_empty());
 }
 
-struct AddEnv;
-#[async_trait]
-impl Middleware<LaunchRequest, LaunchSpec> for AddEnv {
-    fn name(&self) -> &str {
-        "add-env"
-    }
-    async fn call(
-        &self,
-        mut request: LaunchRequest,
-        next: Next<'_, LaunchRequest, LaunchSpec>,
-    ) -> PluginResult<LaunchSpec> {
-        request.spec.env.insert("GAMEMODE".into(), "1".into());
-        next.run(request).await
-    }
-}
-
-struct NeedFirmware;
-#[async_trait]
-impl Middleware<LaunchRequest, LaunchSpec> for NeedFirmware {
-    fn name(&self) -> &str {
-        "need-firmware"
-    }
-    fn order(&self) -> Order {
-        Order::priority(10)
-    }
-    async fn call(
-        &self,
-        request: LaunchRequest,
-        next: Next<'_, LaunchRequest, LaunchSpec>,
-    ) -> PluginResult<LaunchSpec> {
-        if request.spec.args.contains(&"G1".into()) {
-            return Err(PluginError::Precondition("firmware missing".into()));
-        }
-        next.run(request).await
-    }
-}
-
 #[tokio::test]
-async fn launch_middleware_can_change_the_spec_or_stop_the_launch() {
+async fn a_launcher_s_precondition_stops_the_launch_and_says_why() {
     let host = FakeHost::new();
     let mut emu = FakeEmu::new(vec!["A", "B"]);
     emu.build_sha = host.http().serve(&emu.build_url, vec![7u8; 10]);
-    let tools = StubPlugin::from_toml(
-        "id = \"tools\"\nkind = \"emulator\"\nname = \"Tools\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
-         capabilities = [\"launch_middleware\"]\nactivation = \"eager\"",
-    )
-    .provides(|_| {
-        Ok(Provided { launch_middleware: vec![Arc::new(AddEnv), Arc::new(NeedFirmware)], ..Provided::default() })
-    });
-    let t = host.plugin(emu_plugin("emu-a", emu)).plugin(tools).boot_core().await;
+    emu.refuses = Some(("G1", "firmware missing"));
+    let t = host.plugin(emu_plugin("emu-a", emu)).boot_core().await;
     install(&t.core).await;
 
     let mut events = t.core.events();
     t.core.dispatch(Command::Launch(key("emu-a:G0"))).await.unwrap();
     let process = t.spawner.wait_for(1).await;
-    assert_eq!(process.command.env.get("GAMEMODE").map(String::as_str), Some("1"));
     // One game runs at a time: close this one first.
     process.exit(0);
     while !matches!(events.next().await, Some(Event::ProcessExited { .. })) {}
@@ -1314,7 +1277,7 @@ async fn settings_are_checked_by_the_plugin_before_they_are_stored() {
         }
     }
     let plugin = StubPlugin::from_toml(
-        "id = \"cfg\"\nkind = \"emulator\"\nname = \"Cfg\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\ncapabilities = [\"configurator\"]",
+        "id = \"cfg\"\nkind = \"emulator\"\nname = \"Cfg\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\ncapabilities = [\"configurator\"]",
     )
     .provides(|_| Ok(Provided { configurator: Some(Arc::new(Strict)), ..Provided::default() }));
     let t = FakeHost::new().plugin(plugin).boot_core().await;
@@ -1374,7 +1337,7 @@ async fn a_plugin_s_own_requests_follow_redirects_only_inside_its_allowlist() {
     let http: Arc<Mutex<Option<Arc<dyn HttpClient>>>> = Arc::default();
     let slot = http.clone();
     let plugin = StubPlugin::from_toml(
-        "id = \"web\"\nkind = \"emulator\"\nname = \"W\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"web\"\nkind = \"emulator\"\nname = \"W\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          [permissions]\nnetwork = [\"*.builds.example\"]",
     )
     .provides(move |ctx| {

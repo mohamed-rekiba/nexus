@@ -24,7 +24,7 @@ fn archive(prefix: &str, suffix: &str) -> Option<PathBuf> {
 }
 
 /// Serves `file` as the only asset of release `tag` at `api`, and boots `plugin` on `platform`.
-async fn host(file: &Path, api: &str, tag: &str, platform: Platform, plugin: nexus_api::PluginByKind) -> TestCore {
+async fn host(file: &Path, api: &str, tag: &str, platform: Platform, plugin: nexus_api::PluginBox) -> TestCore {
     let host = FakeHost::new().platform(Some(platform));
     let name = file.file_name().unwrap().to_string_lossy().into_owned();
     let url = format!("https://github.com/x/releases/download/{tag}/{name}");
@@ -52,8 +52,7 @@ fn executable(path: &Path) -> bool {
 
 async fn install_kyty(file: PathBuf, platform: Platform) -> (TestCore, PathBuf) {
     let tag = "KytyPS5-2026-10-16-d7974dc";
-    let test =
-        host(&file, emu_kyty::RELEASES, tag, platform, nexus_api::PluginByKind::emulator(emu_kyty::KytyPlugin)).await;
+    let test = host(&file, emu_kyty::RELEASES, tag, platform, nexus_api::PluginBox::code(emu_kyty::KytyPlugin)).await;
     let plugin = PluginId::new("emu-kyty").unwrap();
     let dir = build(&test, "emu-kyty", tag);
     // The fake spawner doesn't run the build's test run: it prints a banner where each
@@ -97,14 +96,9 @@ async fn the_real_kyty_windows_build_unpacks_with_its_exe_at_the_top() {
 async fn the_real_shadps4_windows_build_unpacks_its_exe() {
     let Some(file) = archive("shadps4-win64", ".zip") else { return };
     let tag = "v.0.20.0";
-    let test = host(
-        &file,
-        emu_shadps4::RELEASES,
-        tag,
-        Platform::Windows,
-        nexus_api::PluginByKind::emulator(emu_shadps4::ShadPlugin),
-    )
-    .await;
+    let test =
+        host(&file, emu_shadps4::RELEASES, tag, Platform::Windows, nexus_api::PluginBox::code(emu_shadps4::ShadPlugin))
+            .await;
     let plugin = PluginId::new("emu-shadps4").unwrap();
     test.spawner.prints(&build(&test, "emu-shadps4", tag).join("shadPS4.exe"), b"shadPS4 v0.20.0\n");
     test.core.dispatch(Command::InstallEmulator { plugin, version: None }).await.unwrap();
@@ -115,14 +109,9 @@ async fn the_real_shadps4_windows_build_unpacks_its_exe() {
 async fn the_real_shadps4_linux_zip_gives_up_its_appimage_to_run() {
     let Some(file) = archive("shadps4-linux", ".zip") else { return };
     let tag = "v.0.20.0";
-    let test = host(
-        &file,
-        emu_shadps4::RELEASES,
-        tag,
-        Platform::Linux,
-        nexus_api::PluginByKind::emulator(emu_shadps4::ShadPlugin),
-    )
-    .await;
+    let test =
+        host(&file, emu_shadps4::RELEASES, tag, Platform::Linux, nexus_api::PluginBox::code(emu_shadps4::ShadPlugin))
+            .await;
     test.spawner.prints(&build(&test, "emu-shadps4", tag).join("squashfs-root/AppRun"), b"shadPS4 v0.20.0\n");
     let core = test.core.clone();
     let install = tokio::spawn(async move {

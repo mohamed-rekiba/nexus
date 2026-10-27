@@ -29,7 +29,7 @@ fn art_store() -> nexus_testkit::StubPlugin {
         }
     }
     nexus_testkit::StubPlugin::from_toml(
-        "id = \"store\"\nkind = \"service\"\nname = \"store\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"store\"\nkind = \"service\"\nname = \"store\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          capabilities = [\"metadata\"]\n[permissions]\nnetwork = [\"art.example\"]",
     )
     .provides(|_| Ok(nexus_api::Provided { metadata: Some(std::sync::Arc::new(Art)), ..Default::default() }))

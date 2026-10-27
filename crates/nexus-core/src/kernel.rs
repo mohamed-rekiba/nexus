@@ -10,9 +10,9 @@ use std::time::Duration;
 
 use futures::future::BoxFuture;
 use nexus_api::{
-    Activation, Capability, ContextParts, EmulatorPlugin, Event, Files, HostInfo, Logger, Platform, PluginByKind,
-    PluginContext, PluginId, PluginKind, PluginManifest, PluginResult, Provided, Runtime, ServicePlugin,
-    ServiceRegistry, SystemPlugin, ThemePlugin, VpnGate,
+    Activation, Capability, CodePlugin, ContextParts, Event, Files, HostInfo, Logger, Platform, PluginBox,
+    PluginContext, PluginId, PluginKind, PluginManifest, PluginResult, Provided, Runtime, ServiceRegistry, ThemePlugin,
+    VpnGate,
 };
 use tokio::sync::Mutex;
 
@@ -111,11 +111,11 @@ pub trait Loader: Send + Sync {
     fn accepts(&self, manifest: &PluginManifest) -> bool;
 
     /// `dir` is the folder holding the manifest.
-    fn load(&self, manifest: &PluginManifest, dir: &Path) -> Result<PluginByKind, String>;
+    fn load(&self, manifest: &PluginManifest, dir: &Path) -> Result<PluginBox, String>;
 }
 
 enum Source {
-    Code(PluginByKind),
+    Code(PluginBox),
     Dir(PathBuf),
 }
 
@@ -184,16 +184,16 @@ impl KernelBuilder {
     }
 
     /// A built-in, in-process plugin.
-    pub fn plugin(self, plugin: PluginByKind) -> Self {
+    pub fn plugin(self, plugin: PluginBox) -> Self {
         self.code(plugin, Origin::BuiltIn)
     }
 
     /// An in-process plugin treated as third-party: for tests.
-    pub fn third_party(self, plugin: PluginByKind) -> Self {
+    pub fn third_party(self, plugin: PluginBox) -> Self {
         self.code(plugin, Origin::ThirdParty)
     }
 
-    fn code(mut self, plugin: PluginByKind, origin: Origin) -> Self {
+    fn code(mut self, plugin: PluginBox, origin: Origin) -> Self {
         let manifest = plugin.manifest();
         self.candidates.push(Candidate {
             name: manifest.id.to_string(),
@@ -316,25 +316,17 @@ struct Record {
     state: Mutex<State>,
 }
 
-/// What a service may provide: it adds to games, and runs none.
-const SERVICE_CAPABILITIES: [Capability; 4] =
-    [Capability::Metadata, Capability::Releases, Capability::Slots, Capability::Configurator];
-
-/// A loaded plugin's code, by kind.
+/// A loaded plugin's code: a plugin with an init, or a theme.
 enum Code {
-    Emulator(Arc<dyn EmulatorPlugin>),
-    Service(Arc<dyn ServicePlugin>),
+    Init(Arc<dyn CodePlugin>),
     Theme(Arc<dyn ThemePlugin>),
-    System(Arc<dyn SystemPlugin>),
 }
 
-impl From<PluginByKind> for Code {
-    fn from(plugin: PluginByKind) -> Self {
+impl From<PluginBox> for Code {
+    fn from(plugin: PluginBox) -> Self {
         match plugin {
-            PluginByKind::Emulator(p) => Self::Emulator(Arc::from(p)),
-            PluginByKind::Service(p) => Self::Service(Arc::from(p)),
-            PluginByKind::Theme(p) => Self::Theme(Arc::from(p)),
-            PluginByKind::System(p) => Self::System(Arc::from(p)),
+            PluginBox::Code(p) => Self::Init(Arc::from(p)),
+            PluginBox::Theme(p) => Self::Theme(Arc::from(p)),
         }
     }
 }
@@ -342,10 +334,8 @@ impl From<PluginByKind> for Code {
 impl Code {
     fn as_plugin(&self) -> &dyn nexus_api::Plugin {
         match self {
-            Self::Emulator(p) => p.as_ref(),
-            Self::Service(p) => p.as_ref(),
+            Self::Init(p) => p.as_ref(),
             Self::Theme(p) => p.as_ref(),
-            Self::System(p) => p.as_ref(),
         }
     }
 
@@ -464,7 +454,7 @@ impl Kernel {
         for id in resolution.order {
             let Some(candidate) = valid.remove(&id) else { continue };
             let manifest = candidate.manifest.clone().expect("validated above");
-            let (plugin, dir): (PluginByKind, Option<PathBuf>) = match candidate.source {
+            let (plugin, dir): (PluginBox, Option<PathBuf>) = match candidate.source {
                 Source::Code(plugin) => (plugin, None),
                 Source::Dir(dir) => match loaders.iter().find(|l| l.accepts(&manifest)) {
                     Some(loader) => match loader.load(&manifest, &dir) {
@@ -481,12 +471,10 @@ impl Kernel {
                     }
                 },
             };
-            if plugin.kind() != manifest.kind {
-                let error = LoadError::Invalid(format!(
-                    "the manifest says {:?}, but the code is of kind {:?}",
-                    manifest.kind,
-                    plugin.kind()
-                ));
+            if plugin.is_theme() != (manifest.kind == PluginKind::Theme) {
+                let code = if plugin.is_theme() { "a theme" } else { "code with an init" };
+                let error =
+                    LoadError::Invalid(format!("the manifest says {:?}, but the plugin is {code}", manifest.kind));
                 reject(&mut report, Some(id), candidate.name, error);
                 continue;
             }
@@ -746,15 +734,7 @@ impl Kernel {
             let result = match &record.plugin {
                 // A theme has no init: its files are read on demand.
                 Code::Theme(_) => Ok(Provided::default()),
-                Code::Emulator(code) => {
-                    Self::init_code(plugin, record, code.init(self.context_for(record)), code.as_ref(), host, clock)
-                        .await
-                }
-                Code::Service(code) => {
-                    Self::init_code(plugin, record, code.init(self.context_for(record)), code.as_ref(), host, clock)
-                        .await
-                }
-                Code::System(code) => {
+                Code::Init(code) => {
                     Self::init_code(plugin, record, code.init(self.context_for(record)), code.as_ref(), host, clock)
                         .await
                 }
@@ -803,7 +783,7 @@ impl Kernel {
     pub fn theme_files(&self, plugin: &PluginId) -> CoreResult<Arc<dyn Files>> {
         match &self.record(plugin)?.plugin {
             Code::Theme(theme) => Ok(theme.files()),
-            Code::Emulator(_) | Code::Service(_) | Code::System(_) => {
+            Code::Init(_) => {
                 Err(CoreError::PluginUnavailable { plugin: plugin.clone(), reason: "it is not a theme".into() })
             }
         }
@@ -955,15 +935,10 @@ fn validate(host: &HostConfig, manifest: &PluginManifest, origin: Origin) -> Res
     if origin == Origin::ThirdParty && manifest.runtime == Runtime::Native {
         return Err(LoadError::Invalid("third-party plugins must be data-only".into()));
     }
+    // The kind governs privileges only: any plugin with code may provide the data capabilities.
     let system = manifest.kind == PluginKind::System;
-    for c in &manifest.capabilities {
-        let systems = Capability::SYSTEM.contains(c);
-        if system && !systems && *c != Capability::Configurator {
-            return Err(LoadError::Invalid(format!("a system plugin can't provide {c:?}: it runs no games")));
-        }
-        if !system && systems {
-            return Err(LoadError::Invalid(format!("only a system plugin can provide {c:?}")));
-        }
+    if let Some(c) = manifest.capabilities.iter().find(|c| !system && Capability::SYSTEM.contains(c)) {
+        return Err(LoadError::Invalid(format!("only a system plugin can provide {c:?}")));
     }
     let process = &manifest.permissions;
     if !system && !(process.long_running.is_empty() && process.polkit.is_empty()) {
@@ -972,20 +947,24 @@ fn validate(host: &HostConfig, manifest: &PluginManifest, origin: Origin) -> Res
     if let Some(rule) = process.long_running.iter().chain(&process.polkit).find(|r| !process.process.contains(r)) {
         return Err(LoadError::Invalid(format!("{rule} must also be in permissions.process")));
     }
-    match (manifest.kind, &manifest.runtime) {
-        (PluginKind::Emulator, Runtime::Data) => Err(LoadError::Invalid("an emulator plugin needs code".into())),
-        (PluginKind::Theme, _) if !manifest.capabilities.contains(&Capability::Theme) => {
-            Err(LoadError::Invalid("a theme plugin must declare the `theme` capability".into()))
-        }
-        (PluginKind::Emulator, _) if manifest.capabilities.contains(&Capability::Theme) => {
-            Err(LoadError::Invalid("an emulator plugin can't provide a theme".into()))
-        }
-        (PluginKind::Service, Runtime::Data) => Err(LoadError::Invalid("a service plugin needs code".into())),
-        (PluginKind::System, Runtime::Data) => Err(LoadError::Invalid("a system plugin needs code".into())),
-        (PluginKind::Service, _) => match manifest.capabilities.iter().find(|c| !SERVICE_CAPABILITIES.contains(c)) {
-            Some(c) => Err(LoadError::Invalid(format!("a service plugin can't provide {c:?}: it runs no games"))),
-            None => Ok(()),
-        },
-        _ => Ok(()),
+    let theme = manifest.kind == PluginKind::Theme;
+    let a_kind = match manifest.kind {
+        PluginKind::Emulator => "an emulator",
+        PluginKind::Service => "a service",
+        PluginKind::Theme => "a theme",
+        PluginKind::System => "a system",
+    };
+    if theme && manifest.capabilities.iter().any(|c| *c != Capability::Theme) {
+        return Err(LoadError::Invalid("a theme plugin provides only the `theme` capability: it has no init".into()));
     }
+    if theme && !manifest.capabilities.contains(&Capability::Theme) {
+        return Err(LoadError::Invalid("a theme plugin must declare the `theme` capability".into()));
+    }
+    if !theme && manifest.capabilities.contains(&Capability::Theme) {
+        return Err(LoadError::Invalid(format!("{a_kind} plugin can't provide a theme")));
+    }
+    if !theme && manifest.runtime == Runtime::Data {
+        return Err(LoadError::Invalid(format!("{a_kind} plugin needs code")));
+    }
+    Ok(())
 }

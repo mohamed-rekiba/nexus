@@ -50,7 +50,7 @@ impl Plugin for PcPlugin {
 }
 
 #[async_trait]
-impl EmulatorPlugin for PcPlugin {
+impl CodePlugin for PcPlugin {
     async fn init(&self, ctx: PluginContext) -> PluginResult<Provided> {
         let host = ctx.services().get::<HostInfo>();
         let platform = host.as_ref().and_then(|h| h.platform).or_else(Platform::current).unwrap_or(Platform::Linux);
@@ -67,7 +67,7 @@ impl EmulatorPlugin for PcPlugin {
     }
 }
 
-inventory::submit! { PluginFactory::emulator(|| Box::new(PcPlugin)) }
+inventory::submit! { PluginFactory::code(|| Box::new(PcPlugin)) }
 
 struct Pc {
     ctx: PluginContext,

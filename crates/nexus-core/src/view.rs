@@ -249,12 +249,12 @@ pub(crate) fn played_game(state: &AppState, torrents: &TorrentsSnapshot, key: &G
     offer.and_then(|o| installed_game(state, &owned, o)).map(|g| g.key.clone()).unwrap_or_else(|| key.clone())
 }
 
-/// A catalog's Steam data for `key`: an offer's own, or for an installed game, the offer's it
+/// A catalog's store data for `key`: an offer's own, or for an installed game, the offer's it
 /// is.
-fn steam_for(state: &AppState, key: &GameKey) -> Option<(PluginId, nexus_api::GameMetadata)> {
+fn release_metadata(state: &AppState, key: &GameKey) -> Option<(PluginId, nexus_api::GameMetadata)> {
     let offer_key = state.installed_offers.get(key).unwrap_or(key);
     let offer = state.offers.iter().find(|o| &o.entry.key == offer_key)?;
-    crate::releases::steam_of(offer).map(|s| (offer.entry.key.plugin.clone(), crate::releases::steam_metadata(s)))
+    crate::releases::metadata_of(offer).map(|m| (offer.entry.key.plugin.clone(), m.clone()))
 }
 
 /// Whether `key`'s game can be uninstalled: its folder is known, isn't a whole player's folder,
@@ -367,15 +367,15 @@ fn genres_of(state: &AppState, key: &GameKey) -> Vec<String> {
 }
 
 /// The fixed genres of a game a catalog offers (see [`crate::releases::GENRES`]), from its
-/// releases' genre words, a store's genres and Steam's.
+/// releases' genre words, a store's genres and its releases' store data.
 fn offer_genres(state: &AppState, offer: &crate::releases::Offer) -> Vec<String> {
     let store = state.meta.get(&offer.entry.key).map(|(_, m)| &m.genres);
-    let steam = crate::releases::steam_of(offer).map(|s| &s.genres);
+    let release = crate::releases::metadata_of(offer).map(|m| &m.genres);
     let words: Vec<&str> = offer
         .releases
         .iter()
-        .map(|r| r.genre.as_str())
-        .chain(store.into_iter().chain(steam).flatten().map(String::as_str))
+        .map(|r| r.fact_text(nexus_api::FactKind::Genre))
+        .chain(store.into_iter().chain(release).flatten().map(String::as_str))
         .collect();
     crate::releases::genres_in(&words).into_iter().map(str::to_owned).collect()
 }
@@ -439,7 +439,8 @@ fn grid<'a>(kernel: &Kernel, state: &'a AppState, torrents: &TorrentsSnapshot, c
             // Every word in one release: its title, title ids, publisher, region and version.
             Some(o) => o.releases.iter().any(|r| {
                 let ids = std::iter::once(r.title_id.as_str()).chain(r.title_ids.iter().map(String::as_str));
-                let fields = [e.summary.title.as_str(), &r.title, &r.publisher, publisher, &r.region, &r.version];
+                let own = r.fact_text(nexus_api::FactKind::Publisher);
+                let fields = [e.summary.title.as_str(), &r.title, own, publisher, &r.region, &r.version];
                 has_words(&words, fields.into_iter().chain(ids))
             }),
             None => has_words(&words, [e.summary.title.as_str(), title_id, publisher]),
@@ -858,7 +859,7 @@ pub(crate) fn best_release<'a>(
             has.as_ref().is_some_and(|v| *v == version_key(&r.version)),
             downloaded,
             !r.torrent.is_empty(),
-            r.steam.is_some() || !r.image_urls.is_empty(),
+            r.metadata.is_some() || !r.image_urls.is_empty(),
             version_key(&r.version),
             r.seeders.unwrap_or(0),
         )
@@ -990,11 +991,11 @@ pub(crate) struct HubArt {
 }
 
 /// A game's background, logo and screenshots: from the store's catalog, then a catalog's
-/// Steam data, then (the background) the game's own details, when they are in.
+/// release's store data, then (the background) the game's own details, when they are in.
 pub(crate) fn hub_art(state: &AppState, key: &GameKey) -> HubArt {
-    let steam = steam_for(state, key);
+    let release = release_metadata(state, key);
     let metas: Vec<&(PluginId, nexus_api::GameMetadata)> =
-        state.meta.get(key).into_iter().chain(steam.as_ref()).collect();
+        state.meta.get(key).into_iter().chain(release.as_ref()).collect();
     let art = |field: fn(&nexus_api::GameMetadata) -> Option<&nexus_api::ImageSource>| {
         metas.iter().find_map(|(plugin, m)| field(m).map(|c| image(plugin, c)))
     };
@@ -1034,9 +1035,9 @@ fn detail_vm(
     let name = manifest.map(|m| m.emulator_name().to_owned()).unwrap_or_default();
     let stats = crate::launch::play_stats(kernel, key);
     let meta = state.meta.get(key);
-    // A catalog's Steam data fills in, field by field, what the store's catalog leaves out.
-    let steam = steam_for(state, key);
-    let metas: Vec<&(PluginId, nexus_api::GameMetadata)> = meta.into_iter().chain(steam.as_ref()).collect();
+    // A release's store data fills in, field by field, what the store's catalog leaves out.
+    let release = release_metadata(state, key);
+    let metas: Vec<&(PluginId, nexus_api::GameMetadata)> = meta.into_iter().chain(release.as_ref()).collect();
     let text = |field: fn(&nexus_api::GameMetadata) -> &String| {
         metas.iter().map(|(_, m)| field(m)).find(|t| !t.is_empty()).cloned().unwrap_or_default()
     };
@@ -1082,7 +1083,7 @@ fn detail_vm(
             None => format!("Installed locally. Launches with the {name} emulator."),
         },
     };
-    let protondb = offer.map(crate::releases::protondb).unwrap_or_default();
+    let compatibility = offer.map(crate::releases::compatibility).unwrap_or_default();
     // Where the offer's downloads go, and the free space there. The console's folder may not
     // be there yet: the disk that holds it is the one the nearest folder above is on.
     let download_folder = offer
@@ -1129,8 +1130,8 @@ fn detail_vm(
         age_rating: meta.map(|(_, m)| m.age_rating.clone()).unwrap_or_default(),
         screenshots: shown.screenshots,
         store_url: text(|m| &m.store_url),
-        protondb: protondb.0,
-        protondb_url: protondb.1,
+        protondb: compatibility.0,
+        protondb_url: compatibility.1,
         this_pc,
         pc_warning,
         your_result: core.your_result(key).unwrap_or_default(),
@@ -1151,7 +1152,8 @@ fn detail_vm(
         facts: details.facts.clone(),
         played_secs: stats.secs,
         last_played_days: (stats.count > 0).then(|| crate::launch::days_since(stats.last)),
-        shader_cache: d.shaders.as_ref().map(|s| ShaderCacheVm { entries: s.entries, size_bytes: s.size_bytes }),
+        // No plugin reports a shader cache: the plugin API has no seam for one.
+        shader_cache: None,
         releases: offer
             .map(|o| {
                 let today = crate::releases::today();
@@ -1186,7 +1188,7 @@ fn detail_vm(
                         description: r.description.clone(),
                         system: crate::releases::system_label(&r.system).into(),
                         not_here: crate::releases::not_here(&r.system, kernel.host().platform),
-                        warning: crate::releases::warning(r).into(),
+                        warning: r.install_warning.clone().unwrap_or_default(),
                         no_room: no_room(r),
                         download: torrents.jobs.get(&r.id).map(|j| j.state.as_str().to_owned()).unwrap_or_default(),
                         download_progress: torrents
@@ -1788,14 +1790,7 @@ fn emulators_vm(kernel: &Kernel, state: &AppState, statuses: &BTreeMap<PluginId,
                 available: emu.available,
                 busy: emu.busy,
                 panels: emu.panels,
-                controllers: emu
-                    .controllers
-                    .iter()
-                    .map(|c| match &c.device_hint {
-                        Some(device) => format!("{} ({device})", c.name),
-                        None => c.name.clone(),
-                    })
-                    .collect(),
+                controllers: controllers(kernel.manifest(&id).ok()),
                 plugin: id,
             }
         })
@@ -2003,6 +1998,17 @@ fn theme_chain(kernel: &crate::Kernel, theme: &PluginId) -> Vec<ThemeManifest> {
     chain
 }
 
+/// What an emulator's games play with: a controller, and the keyboard when the manifest lists
+/// its keys (`[[keymap]]`). None for an emulator that lists no keys.
+fn controllers(manifest: Option<&nexus_api::PluginManifest>) -> Vec<String> {
+    match manifest {
+        Some(m) if !m.keymap.is_empty() => {
+            vec!["Controller (DualSense, DualShock 4, Xbox and most others)".into(), "Keyboard".into()]
+        }
+        _ => Vec::new(),
+    }
+}
+
 fn status_text(status: Option<&PluginStatus>) -> String {
     match status {
         Some(PluginStatus::Active) => "active".into(),
@@ -2027,8 +2033,12 @@ mod tests {
 
     #[test]
     fn a_build_names_its_program_once() {
-        assert_eq!(build_label("KytyPS5", "KytyPS5-2026-10-21-e2dd48a"), "KytyPS5-2026-10-21-e2dd48a");
-        assert_eq!(build_label("KytyPS5", "kytyps5-2026-10-21-e2dd48a"), "kytyps5-2026-10-21-e2dd48a", "in any case");
+        assert_eq!(build_label("OrbitEmu", "OrbitEmu-2026-10-21-e2dd48a"), "OrbitEmu-2026-10-21-e2dd48a");
+        assert_eq!(
+            build_label("OrbitEmu", "orbitemu-2026-10-21-e2dd48a"),
+            "orbitemu-2026-10-21-e2dd48a",
+            "in any case"
+        );
         assert_eq!(build_label("shadPS4", "v.0.20.0"), "shadPS4 v.0.20.0");
         assert_eq!(build_label("Emu", "1.0"), "Emu 1.0");
         assert_eq!(
@@ -2036,7 +2046,7 @@ mod tests {
             "shadPS4 · Your own build · 0.3",
             "words, not a version"
         );
-        assert_eq!(build_label("KytyPS5", ""), "", "none installed");
+        assert_eq!(build_label("OrbitEmu", ""), "", "none installed");
     }
 
     #[test]

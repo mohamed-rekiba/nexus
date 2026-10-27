@@ -7,17 +7,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::{HostPath, PluginResult, RelPath};
 
+/// What the host asks a [`Downloader`] to plan. One kind for now; others come when a plugin
+/// needs them.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DownloadRequest {
     /// An emulator build. `None` means the newest one.
-    EmulatorBuild {
-        version: Option<String>,
-    },
-    Firmware,
-    GameAssets {
-        game: String,
-    },
+    EmulatorBuild { version: Option<String> },
 }
 
 /// The files a download needs. The host fetches them, resumes them, checks them and writes
@@ -92,7 +88,7 @@ pub struct DownloadedArtifact {
     pub unpacked: Option<RelPath>,
 }
 
-/// Plans downloads of emulator builds, firmware and game files.
+/// Plans downloads of emulator builds.
 #[async_trait]
 pub trait Downloader: Send + Sync {
     async fn plan(&self, request: &DownloadRequest) -> PluginResult<DownloadPlan>;

@@ -100,8 +100,8 @@ fn the_default_theme_on_a_real_library() {
         }
         h.first_run()
             .home(&home)
-            .built_in(nexus_api::PluginByKind::emulator(emu_kyty::KytyPlugin))
-            .built_in(nexus_api::PluginByKind::service(playstation_store::PlayStationStore))
+            .built_in(nexus_api::PluginBox::code(emu_kyty::KytyPlugin))
+            .built_in(nexus_api::PluginBox::code(playstation_store::PlayStationStore))
     });
     host.dispatch(Command::SetFolders { name: "games".into(), paths: vec![games] });
     host.ui.set_clock("9:38 PM".into());

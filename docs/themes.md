@@ -54,7 +54,7 @@ id = "fixture-grid"
 kind = "theme"
 name = "Fixture grid"
 version = "0.1.0"
-host_api = "^0.1"
+host_api = "^0.2"
 capabilities = ["theme"]
 
 [runtime]

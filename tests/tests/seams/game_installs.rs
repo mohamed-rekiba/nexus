@@ -9,7 +9,7 @@ use nexus_api::*;
 use nexus_core::{Area, Clock, Command};
 use nexus_testkit::{FakeHost, StubPlugin, TestCore};
 
-const MANIFEST: &str = "id = \"emu-g\"\nkind = \"emulator\"\nname = \"G\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+const MANIFEST: &str = "id = \"emu-g\"\nkind = \"emulator\"\nname = \"G\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
     capabilities = [\"catalog\", \"slots\", \"game_installer\"]\n\
     [[permissions.filesystem]]\nfolder = \"packages\"\n\
     [[permissions.filesystem]]\nfolder = \"games\"\nwrite = true\n";

@@ -1,63 +1,20 @@
-//! Launching games: the plugin prepares a spec, launch middleware may change or stop it, the
-//! host checks permissions, spawns the process and watches it.
+//! Launching games: the plugin prepares a spec, the host checks permissions, spawns the process
+//! and watches it.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_trait::async_trait;
 use nexus_api::{
-    Capability, ConfigScope, Endpoint, Event, ExitInfo, GameKey, LaunchArg, LaunchMiddleware, LaunchRequest,
-    LaunchSpec, Location, Middleware, Next, Order, Permissions, PluginError, PluginId, PluginResult, SessionId,
+    Capability, ConfigScope, Event, ExitInfo, GameKey, LaunchArg, LaunchSpec, Location, Permissions, PluginError,
+    PluginId, SessionId,
 };
 use serde_json::Value;
 
 use crate::app::{Route, Session};
 use crate::changes::Area;
 use crate::error::require;
-use crate::order::sort_by_order;
 use crate::{Core, CoreError, CoreResult, DirStorage, Kernel, ProcessExit, SpawnCommand, folders, running};
-
-/// Wraps one plugin's middleware so its calls get the plugin's guard and span.
-struct Guarded {
-    plugin: PluginId,
-    kernel: Kernel,
-    inner: Arc<LaunchMiddleware>,
-}
-
-#[async_trait]
-impl Middleware<LaunchRequest, LaunchSpec> for Guarded {
-    fn name(&self) -> &str {
-        self.inner.name()
-    }
-
-    fn order(&self) -> Order {
-        self.inner.order()
-    }
-
-    async fn call(
-        &self,
-        request: LaunchRequest,
-        next: Next<'_, LaunchRequest, LaunchSpec>,
-    ) -> PluginResult<LaunchSpec> {
-        // `next` runs the rest of the chain inside this guard; each link adds its own.
-        self.kernel.guard(&self.plugin, "launch_middleware", self.inner.call(request, next)).await.map_err(
-            |e| match e {
-                CoreError::Plugin { error, .. } => error,
-                other => PluginError::Other(other.to_string()),
-            },
-        )
-    }
-}
-
-struct Done;
-
-#[async_trait]
-impl Endpoint<LaunchRequest, LaunchSpec> for Done {
-    async fn call(&self, request: LaunchRequest) -> PluginResult<LaunchSpec> {
-        Ok(request.spec)
-    }
-}
 
 /// Emulator settings with the game's own settings on top.
 async fn merged_config(core: &Core, game: &GameKey) -> CoreResult<Value> {
@@ -69,22 +26,6 @@ async fn merged_config(core: &Core, game: &GameKey) -> CoreResult<Value> {
         config = game_config;
     }
     Ok(config)
-}
-
-async fn middleware_chain(core: &Core) -> Vec<Arc<LaunchMiddleware>> {
-    let kernel = core.kernel();
-    let mut links = Vec::new();
-    for plugin in kernel.providers(Capability::LaunchMiddleware) {
-        let Ok(provided) = kernel.provided(&plugin).await else { continue };
-        for inner in provided.launch_middleware {
-            let id = format!("{plugin}:{}", inner.name());
-            let order = inner.order();
-            let link: Arc<LaunchMiddleware> =
-                Arc::new(Guarded { plugin: plugin.clone(), kernel: kernel.clone(), inner });
-            links.push((id, order, link));
-        }
-    }
-    sort_by_order(links)
 }
 
 /// The real paths of a checked spec.
@@ -243,12 +184,6 @@ pub(crate) async fn launch(core: &Core, game: GameKey) -> CoreResult<()> {
     let config = merged_config(core, &game).await?;
     let spec = kernel.guard(&plugin, "launcher.prepare", launcher.prepare(&game.local, &config)).await?;
 
-    let chain = middleware_chain(core).await;
-    let spec = Next::new(&chain, &Done)
-        .run(LaunchRequest { game: game.clone(), spec })
-        .await
-        .map_err(|error| CoreError::Plugin { plugin: plugin.clone(), error })?;
-
     let manifest = kernel.manifest(&plugin)?;
     if !manifest.permissions.allows_program(&spec.program) {
         return Err(CoreError::PermissionDenied { plugin, action: format!("run {}", spec.program) });
@@ -376,9 +311,27 @@ pub(crate) fn cant_start(core: &Core, game: &GameKey, error: &CoreError) -> Stri
         .unwrap_or_else(|| game.local.clone());
     let reason = match error {
         CoreError::Plugin { error: PluginError::Precondition(why) | PluginError::NotFound(why), .. } => why.clone(),
+        CoreError::Plugin { plugin, error: PluginError::OwnBuildMissing { has_downloaded, folder, program } } => {
+            let page = core.kernel().manifest(plugin).map(|m| m.name.clone()).unwrap_or_else(|_| plugin.to_string());
+            own_build_missing(&page, folder, program, *has_downloaded)
+        }
         other => other.to_string(),
     };
     format!("Can't start {title}: {reason}")
+}
+
+/// Why a game with own build on doesn't start: `page` is the emulator's page, `folder` the
+/// host folder for the build, `program` its name on the PATH. A downloaded build is the
+/// likely way out, so with one the words say so first.
+fn own_build_missing(page: &str, folder: &str, program: &str, has_downloaded: bool) -> String {
+    let fix = if has_downloaded {
+        format!(
+            "turn off Own build on the {page} page to play with the downloaded build, or map the {folder} folder, or put {program} on your PATH"
+        )
+    } else {
+        format!("map the {folder} folder on the {page} page, or put {program} on your PATH")
+    };
+    format!("Own build is on, but your build isn't there: {fix}")
 }
 
 /// "Astro Bot closed right after it started (code 1). Its log: …".
@@ -428,4 +381,20 @@ pub(crate) async fn toggle_focus(core: &Core) {
 pub(crate) fn game_in_front(core: &Core) -> bool {
     let state = core.state();
     !state.sessions.is_empty() && state.game_in_front
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn own_build_missing_says_how_out() {
+        assert_eq!(
+            super::own_build_missing("PS9", "emu-build", "emu", false),
+            "Own build is on, but your build isn't there: map the emu-build folder on the PS9 page, or put emu on your PATH"
+        );
+        assert_eq!(
+            super::own_build_missing("PS9", "emu-build", "emu", true),
+            "Own build is on, but your build isn't there: turn off Own build on the PS9 page to play with the downloaded build, or map the emu-build folder, or put emu on your PATH",
+            "with a downloaded build, turning own build off comes first"
+        );
+    }
 }

@@ -2,7 +2,7 @@ id = "default"
 kind = "theme"
 name = "Default"
 version = "0.3.0"
-host_api = "^0.1"
+host_api = "^0.2"
 capabilities = ["theme"]
 activation = "eager"
 

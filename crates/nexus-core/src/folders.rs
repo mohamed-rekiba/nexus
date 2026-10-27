@@ -301,16 +301,16 @@ pub(crate) fn resolve(
 
 #[cfg(test)]
 mod tests {
-    /// Steam's library list: each library's path, a Windows one with its backslashes doubled.
+    /// A store's library list: each library's path, a Windows one with its backslashes doubled.
     #[test]
     fn a_list_file_gives_each_value_of_its_key() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("libraryfolders.vdf");
-        let text = "\"libraryfolders\"\n{\n\t\"0\"\n\t{\n\t\t\"path\"\t\t\"/home/p/.local/share/Steam\"\n\t\t\"label\"\t\t\"\"\n\t}\n\
-                    \t\"1\"\n\t{\n\t\t\"path\"\t\t\"D:\\\\Steam \\\"Games\\\"\"\n\t}\n}\n";
+        let text = "\"libraryfolders\"\n{\n\t\"0\"\n\t{\n\t\t\"path\"\t\t\"/home/p/.local/share/Store\"\n\t\t\"label\"\t\t\"\"\n\t}\n\
+                    \t\"1\"\n\t{\n\t\t\"path\"\t\t\"D:\\\\Store \\\"Games\\\"\"\n\t}\n}\n";
         std::fs::write(&file, text).unwrap();
         let paths: Vec<_> = super::listed_folders(&file, "path").into_iter().map(|p| p.display().to_string()).collect();
-        assert_eq!(paths, ["/home/p/.local/share/Steam", r#"D:\Steam "Games""#]);
+        assert_eq!(paths, ["/home/p/.local/share/Store", r#"D:\Store "Games""#]);
         assert!(super::listed_folders(&dir.path().join("missing.vdf"), "path").is_empty());
     }
 }

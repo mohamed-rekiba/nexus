@@ -15,7 +15,7 @@ fn the_catalog_s_view_builds_and_binds_in_time() {
     let mut host = composed(|h| {
         h.plugin(games_on("emu-kyty", "PS5", vec!["Alpha"]).console("PS5"))
             .plugin(games_on("emu-shadps4", "PS4", vec!["Beta"]).console("PS4"))
-            .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+            .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
     host.dispatch(Command::RefreshLibrary);

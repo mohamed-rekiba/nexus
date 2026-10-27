@@ -128,20 +128,10 @@ pub trait Flavor: Send + Sync + 'static {
     }
 }
 
-/// Own build is on, but it isn't there. `page`: the console's page; `folder`: the host folder
-/// for your own build; `program`: its name on your PATH. A downloaded build is the likely way
-/// out, so with one the message says so first.
-// TODO(step 8): a typed precondition (`OwnBuildMissing { has_downloaded }`) that the core
-// words, once the plugin API can carry it.
-pub fn own_build_missing(page: &str, folder: &str, program: &str, has_downloaded: bool) -> PluginError {
-    let fix = if has_downloaded {
-        format!(
-            "turn off Own build on the {page} page to play with the downloaded build, or map the {folder} folder, or put {program} on your PATH"
-        )
-    } else {
-        format!("map the {folder} folder on the {page} page, or put {program} on your PATH")
-    };
-    PluginError::Precondition(format!("Own build is on, but your build isn't there: {fix}"))
+/// Own build is on, but it isn't there. `folder`: the host folder for your own build;
+/// `program`: its name on your PATH. The host words it.
+pub fn own_build_missing(folder: &str, program: &str, has_downloaded: bool) -> PluginError {
+    PluginError::OwnBuildMissing { has_downloaded, folder: folder.into(), program: program.into() }
 }
 
 fn path(p: impl Into<String>) -> PluginResult<RelPath> {
@@ -242,7 +232,7 @@ impl<F: Flavor> BuildManager<F> {
             let Some(program) = self.own_program().await else {
                 let own = self.flavor.own_build();
                 let downloaded = !self.versions.installed().await?.is_empty();
-                return Err(own_build_missing(F::CONSOLE, own.folder, own.system, downloaded));
+                return Err(own_build_missing(own.folder, own.system, downloaded));
             };
             // It writes its data next to itself; from PATH, into the plugin's folder. Mapped as
             // the program itself, its folder is above the mapping: the host runs it there.
@@ -352,9 +342,7 @@ fn action(id: &str, label: String, style: ActionStyle) -> SlotItem {
 #[async_trait]
 impl<F: Flavor> Downloader for BuildManager<F> {
     async fn plan(&self, request: &DownloadRequest) -> PluginResult<DownloadPlan> {
-        let DownloadRequest::EmulatorBuild { version } = request else {
-            return Err(PluginError::Unsupported(format!("{} downloads its own builds only", F::NAME)));
-        };
+        let DownloadRequest::EmulatorBuild { version } = request;
         let builds = self.builds().await?;
         let (release, asset) = match version {
             Some(tag) => builds.into_iter().find(|(r, _)| &r.tag == tag),
@@ -737,21 +725,17 @@ mod tests {
     async fn own_build_on_without_one_says_how_out() {
         let t = test();
         t.own_build(true).await;
-        let missing = t.builds.run().await.unwrap_err();
-        assert_eq!(
-            missing,
-            PluginError::Precondition(
-                "Own build is on, but your build isn't there: map the emu-build folder on the PS9 page, or put emu on your PATH".into()
-            )
-        );
+        let missing = |has_downloaded| PluginError::OwnBuildMissing {
+            has_downloaded,
+            folder: "emu-build".into(),
+            program: "emu".into(),
+        };
+        assert_eq!(t.builds.run().await.unwrap_err(), missing(false));
         t.unpack("v1", true);
-        let missing = t.builds.run().await.unwrap_err();
         assert_eq!(
-            missing,
-            PluginError::Precondition(
-                "Own build is on, but your build isn't there: turn off Own build on the PS9 page to play with the downloaded build, or map the emu-build folder, or put emu on your PATH".into()
-            ),
-            "with a downloaded build, turning own build off comes first"
+            t.builds.run().await.unwrap_err(),
+            missing(true),
+            "with a downloaded build, turning own build off is a way out"
         );
         assert!(t.builds.installed().await.unwrap().iter().all(|v| !v.own));
     }

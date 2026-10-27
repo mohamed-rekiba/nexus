@@ -4,11 +4,11 @@
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use nexus_api::schemars::JsonSchema;
+use nexus_api::schemars::{JsonSchema, SchemaGenerator};
 use nexus_api::serde::Serialize;
 use nexus_api::serde::de::DeserializeOwned;
 use nexus_api::serde_json::{self, Value};
-use nexus_api::{ConfigScope, ConfigStore, Platform, PluginError, PluginResult};
+use nexus_api::{ConfigScope, ConfigStore, Configurator, Platform, PluginError, PluginResult, async_trait};
 
 /// The stored field that turns your own build on. Both emulators name it so.
 pub const OWN_BUILD: &str = "own_build";
@@ -106,6 +106,35 @@ fn over<S: Settings>(base: S, fields: &Value, skip_null: bool) -> S {
         }
     }
     serde_json::from_value(Value::Object(merged)).unwrap_or(base)
+}
+
+/// The default settings capability of a plugin with a settings type: the schema of `S` and of
+/// its per-game settings, their defaults, and the checks they read with.
+#[async_trait]
+impl<S: Settings> Configurator for SettingsStore<S> {
+    async fn schema(&self, scope: &ConfigScope) -> PluginResult<Value> {
+        let schema = match scope {
+            ConfigScope::Emulator => SchemaGenerator::default().into_root_schema_for::<S>(),
+            ConfigScope::Game(_) => SchemaGenerator::default().into_root_schema_for::<S::Game>(),
+        };
+        Ok(serde_json::to_value(schema)?)
+    }
+
+    async fn defaults(&self, scope: &ConfigScope) -> PluginResult<Value> {
+        Ok(match scope {
+            ConfigScope::Emulator => serde_json::to_value(SettingsStore::defaults(self))?,
+            ConfigScope::Game(_) => serde_json::to_value(S::Game::default())?,
+        })
+    }
+
+    async fn validate(&self, scope: &ConfigScope, value: &Value) -> PluginResult<()> {
+        match scope {
+            ConfigScope::Emulator => SettingsStore::validate(self, value),
+            ConfigScope::Game(_) => serde_json::from_value::<S::Game>(value.clone())
+                .map(|_| ())
+                .map_err(|e| PluginError::InvalidInput(e.to_string())),
+        }
+    }
 }
 
 #[cfg(test)]

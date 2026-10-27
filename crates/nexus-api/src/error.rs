@@ -2,7 +2,8 @@ use serde::{Deserialize, Serialize};
 
 /// An error a plugin returns, or the host reports about a plugin call.
 ///
-/// Every variant carries text only.
+/// Most variants carry text. A typed precondition carries data, and the host words it for the
+/// player, so a plugin doesn't name the host's screens.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "detail", rename_all = "snake_case")]
 pub enum PluginError {
@@ -21,6 +22,11 @@ pub enum PluginError {
     /// Something must happen first, for example installing an emulator version.
     #[error("precondition failed: {0}")]
     Precondition(String),
+    /// The player's own build of the emulator is turned on, but it isn't there: not in the
+    /// host folder `folder` (the manifest's grant), and `program` isn't on the `PATH`.
+    /// `has_downloaded`: a downloaded build is installed, so turning own build off plays.
+    #[error("your own build isn't there: map the {folder} folder or put {program} on your PATH")]
+    OwnBuildMissing { has_downloaded: bool, folder: String, program: String },
     #[error("plugin call timed out after {0} ms")]
     Timeout(u64),
     #[error("plugin panicked: {0}")]

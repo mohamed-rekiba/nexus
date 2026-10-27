@@ -6,7 +6,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use nexus_api::schemars::SchemaGenerator;
 use nexus_api::serde_json::{self, Value};
 use nexus_api::{
     ArtworkKind, Catalog, CompatInfo, CompatLevel, Compatibility, ConfigScope, Configurator, GAMES_FOLDER, GameDetails,
@@ -21,7 +20,6 @@ use crate::controls::Controls;
 use crate::games::{self, Console, GameIndex};
 use crate::host::Host;
 use crate::installs::{self, Format};
-use crate::settings::Settings;
 
 /// A community compatibility list.
 pub struct CompatList {
@@ -166,29 +164,15 @@ impl<F: Flavor> Compatibility for ConsoleEmulator<F> {
 #[async_trait]
 impl<F: Flavor> Configurator for ConsoleEmulator<F> {
     async fn schema(&self, scope: &ConfigScope) -> PluginResult<Value> {
-        let schema = match scope {
-            ConfigScope::Emulator => SchemaGenerator::default().into_root_schema_for::<F::Settings>(),
-            ConfigScope::Game(_) => {
-                SchemaGenerator::default().into_root_schema_for::<<F::Settings as Settings>::Game>()
-            }
-        };
-        Ok(serde_json::to_value(schema)?)
+        Configurator::schema(self.builds.settings(), scope).await
     }
 
     async fn defaults(&self, scope: &ConfigScope) -> PluginResult<Value> {
-        Ok(match scope {
-            ConfigScope::Emulator => serde_json::to_value(self.builds.settings().defaults())?,
-            ConfigScope::Game(_) => serde_json::to_value(<F::Settings as Settings>::Game::default())?,
-        })
+        Configurator::defaults(self.builds.settings(), scope).await
     }
 
     async fn validate(&self, scope: &ConfigScope, value: &Value) -> PluginResult<()> {
-        match scope {
-            ConfigScope::Emulator => self.builds.settings().validate(value),
-            ConfigScope::Game(_) => serde_json::from_value::<<F::Settings as Settings>::Game>(value.clone())
-                .map(|_| ())
-                .map_err(|e| nexus_api::PluginError::InvalidInput(e.to_string())),
-        }
+        Configurator::validate(self.builds.settings(), scope, value).await
     }
 }
 

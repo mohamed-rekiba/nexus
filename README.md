@@ -572,7 +572,7 @@ transitions cuts). Third-party plugins are themes only: they are data, and run n
 - Retail packages don't install: their keys are on the console. Only unsigned PS5 packages,
   exFAT images and PS4 fake packages do.
 - Nexus doesn't notice a game it didn't start.
-- KytyPS5 and shadPS4 don't provide the shader cache screen.
+- No emulator reports its shader cache: the plugin API has no seam for one.
 - shadPS4's own build shows no version on its page.
 - The PC library shows the games in `PC/` of a game folder, not games installed elsewhere by
   other launchers (Heroic, Lutris). Steam's games show through the Steam plugin.

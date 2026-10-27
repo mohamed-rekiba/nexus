@@ -2,7 +2,7 @@ id = "emu-pc"
 kind = "emulator"
 name = "PC"
 version = "0.1.0"
-host_api = "^0.1"
+host_api = "^0.2"
 platforms = ["linux", "macos", "windows"]
 # The console it plays: it gets that console's catalog.
 console = "PC"

@@ -58,7 +58,7 @@ fn the_d_pad_moves_the_selection_and_the_buttons_open_and_go_back() {
 fn the_shoulder_button_goes_to_the_next_section_and_the_guide_button_home() {
     let mut host = composed(|h| {
         h.plugin(games("emu-a", vec!["Alpha", "Beta", "Gamma"]))
-            .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+            .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
     host.dispatch(Command::RefreshLibrary);

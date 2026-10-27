@@ -26,7 +26,7 @@ fn the_default_theme_is_complete_and_compiles() {
 fn every_default_screen_renders() {
     let mut host = composed(|h| {
         h.plugin(games("emu-a", vec!["Alpha", "Beta"]))
-            .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+            .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
     host.dispatch(Command::RefreshLibrary);
@@ -67,7 +67,7 @@ export component Card inherits Rectangle {
     let mut host = composed(|h| {
         h.discover(dir.path())
             .plugin(games("emu-kyty", vec!["Alpha", "Beta", "Gamma"]).console("PS5"))
-            .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+            .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.switch(&id("child")).expect("the child theme loads");
     // A catalog with three games.
@@ -190,7 +190,7 @@ fn a_screen_that_exports_the_wrong_name_is_refused_with_the_file_named() {
 #[test]
 fn the_default_settings_screen_maps_a_folder_through_the_host() {
     let plugin = nexus_testkit::StubPlugin::from_toml(
-        "id = \"pc\"\nkind = \"emulator\"\nname = \"PC games\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"pc\"\nkind = \"emulator\"\nname = \"PC games\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          [[permissions.filesystem]]\nfolder = \"games\"",
     );
     let mut host = composed(|h| h.plugin(plugin));
@@ -256,7 +256,7 @@ export component HomeScreen inherits Rectangle {
 fn the_default_settings_screen_edits_a_folder_with_the_keys() {
     use slint::platform::{Key, WindowEvent};
     let plugin = nexus_testkit::StubPlugin::from_toml(
-        "id = \"pc\"\nkind = \"emulator\"\nname = \"PC games\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"pc\"\nkind = \"emulator\"\nname = \"PC games\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          [[permissions.filesystem]]\nfolder = \"games\"",
     );
     let mut host = composed(|h| h.plugin(plugin));

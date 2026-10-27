@@ -33,7 +33,7 @@
 use std::collections::HashSet;
 
 use nexus_api::serde_json;
-use nexus_api::{Release, ReleaseList, SteamInfo};
+use nexus_api::{Fact, FactKind, GameMetadata, ImageSource, Release, ReleaseList};
 
 use crate::info_hash;
 use crate::sources::{ForumFacts, Forums};
@@ -208,25 +208,76 @@ fn texts(items: &Option<Vec<String>>) -> Vec<String> {
     items.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty()).collect()
 }
 
-/// A topic's Steam data. `None` when it has no app id: Steam didn't have the game.
-fn steam(topic: &Topic) -> Option<SteamInfo> {
+/// A topic's Steam data as a store's catalog gives it: Steam's words, the library portrait as
+/// the cover, the hero art (else the header) as the background, and the store page. `None`
+/// when it has no app id: Steam didn't have the game.
+fn steam(topic: &Topic) -> Option<GameMetadata> {
     let steam = topic.steam.as_ref()?;
     let app_id = steam.appid?;
     let assets = steam.assets.clone().unwrap_or_default();
-    Some(SteamInfo {
-        app_id,
-        short: text(&steam.short),
+    let url = |value: &Option<String>| Some(address(value)).filter(|u| !u.is_empty()).map(ImageSource::Url);
+    let (developers, publishers) = (texts(&steam.developers), texts(&steam.publishers));
+    Some(GameMetadata {
+        description: text(&steam.short),
+        publisher: developers.first().or(publishers.first()).cloned().unwrap_or_default(),
         genres: texts(&steam.genres),
         release: steam_date(&text(&steam.release)).unwrap_or_default(),
-        developers: texts(&steam.developers),
-        publishers: texts(&steam.publishers),
-        header: address(&steam.header),
-        screenshots: texts(&steam.shots).into_iter().filter(|url| url.starts_with("https://")).collect(),
-        portrait: address(&assets.portrait),
-        hero: address(&assets.hero),
-        logo: address(&assets.logo),
-        protondb: text(&steam.protondb).to_ascii_lowercase(),
+        cover: url(&assets.portrait).or_else(|| url(&steam.header)),
+        background: url(&assets.hero).or_else(|| url(&steam.header)),
+        logo: url(&assets.logo),
+        screenshots: texts(&steam.shots)
+            .into_iter()
+            .filter(|url| url.starts_with("https://"))
+            .map(ImageSource::Url)
+            .collect(),
+        store_url: format!("https://store.steampowered.com/app/{app_id}/"),
+        ..GameMetadata::default()
     })
+}
+
+/// ProtonDB's tier for a Windows game packed with Wine that Steam has, with its ProtonDB page.
+/// `None` for any other game, and when ProtonDB has no tier.
+fn protondb(topic: &Topic, wine_packed: bool) -> Option<Fact> {
+    let steam = topic.steam.as_ref().filter(|_| wine_packed)?;
+    let app_id = steam.appid?;
+    let tier = Some(text(&steam.protondb).to_ascii_lowercase()).filter(|t| !t.is_empty())?;
+    let url = format!("https://www.protondb.com/app/{app_id}");
+    Some(Fact { url, ..Fact::new(FactKind::Compatibility, "ProtonDB", tier) })
+}
+
+/// Whether a topic is a Windows game packed with Wine: its own field says so, else its forum,
+/// else a `[Wine]` tag in its title.
+pub(crate) fn packed_with_wine(topic: &Topic, forum: Option<&ForumFacts>) -> bool {
+    let title = text(&topic.title);
+    topic.wine_packed.unwrap_or_else(|| forum.is_some_and(|f| f.wine) || tags(&title).iter().any(|t| t == "wine"))
+}
+
+/// Why a release may not install: a PS5 package, which only the console can install (KytyPS5
+/// installs debug packages). `None` for any other.
+fn install_warning(info: &GameInfo, title: &str, platform: &str) -> Option<String> {
+    (platform == "PS5" && is_package(info, title))
+        .then(|| "Retail PS5 packages can't be installed; pick a folder, an archive or an exFAT image".to_owned())
+}
+
+/// The topic's game facts, in the order the Game Hub lists them, and its genre words and
+/// ProtonDB tier, which it shows elsewhere. Only the facts the topic has.
+fn facts(topic: &Topic, info: &GameInfo, genre: String, wine_packed: bool) -> Vec<Fact> {
+    let released =
+        Some(scalar(&info.release_date)).filter(|d| !d.is_empty()).unwrap_or_else(|| scalar(&info.release_year));
+    let facts = [
+        (FactKind::Publisher, "Publisher", text(&info.publisher)),
+        (FactKind::Developer, "Developer", text(&info.developer)),
+        (FactKind::ReleaseDate, "Release date", released),
+        (FactKind::Players, "Players", players(&text(&info.multiplayer))),
+        (FactKind::Update, "Update", text(&info.release_update)),
+        (FactKind::Format, "Format", text(&info.format)),
+        (FactKind::Firmware, "Minimum firmware", text(&info.minimum_firmware)),
+        (FactKind::InterfaceLanguages, "Interface languages", text(&info.interface_languages)),
+        (FactKind::AudioLanguages, "Audio languages", text(&info.audio_languages)),
+        (FactKind::Genre, "Genre", genre),
+    ];
+    let facts = facts.into_iter().filter(|(_, _, value)| !value.is_empty());
+    facts.map(|(kind, label, value)| Fact::new(kind, label, value)).chain(protondb(topic, wine_packed)).collect()
 }
 
 /// A PKG release: its game info's format, or a tag in its title, says `pkg` or `fpkg`.
@@ -287,14 +338,14 @@ fn platform(info: &GameInfo, title: &str, title_id: &str) -> String {
 }
 
 /// What a topic says it is for in its own fields, as the collector's published files write
-/// them: its console (`platform`: `PS5`, `PS4` or `PC`), the system a PC release is for
-/// (`system`), and whether it is packed with Wine (`wine_packed`). `None` for a field it doesn't
-/// have.
-fn declared(topic: &Topic) -> (Option<String>, Option<String>, Option<bool>) {
+/// them: its console (`platform`: `PS5`, `PS4` or `PC`) and the system a PC release is for
+/// (`system`). `None` for a field it doesn't have. Its `wine_packed` is read by
+/// [`packed_with_wine`].
+fn declared(topic: &Topic) -> (Option<String>, Option<String>) {
     let platform = text(&topic.platform).to_ascii_uppercase();
     let platform = ["PS5", "PS4", "PC"].contains(&platform.as_str()).then_some(platform);
     let system = Some(text(&topic.system).to_ascii_lowercase()).filter(|s| !s.is_empty());
-    (platform, system, topic.wine_packed)
+    (platform, system)
 }
 
 /// Reads a catalog file. Any part that doesn't read fails the whole file. `forums` says what
@@ -346,7 +397,7 @@ pub fn releases(file: &CatalogFile, forums: &Forums) -> Result<ReleaseList, Stri
 pub fn release(id: i64, topic: &Topic, forum: Option<&ForumFacts>) -> Result<Option<Release>, String> {
     let none = GameInfo::default();
     let info = topic.game_info.as_ref().unwrap_or(&none);
-    let (own_platform, own_system, own_wine) = declared(topic);
+    let (own_platform, own_system) = declared(topic);
     let title = text(&topic.title);
     let named = text(&info.name);
     let name = clean_name(if named.is_empty() { &title } else { &named });
@@ -388,11 +439,10 @@ pub fn release(id: i64, topic: &Topic, forum: Option<&ForumFacts>) -> Result<Opt
         .map(text)
         .find(|date| !date.is_empty())
         .unwrap_or_default();
+    let wine_packed = packed_with_wine(topic, forum);
     Ok(Some(Release {
         id: hash,
         topic: id.to_string(),
-        system,
-        platform,
         title_ids: all_ids.iter().skip(1).cloned().collect(),
         title_id,
         title: name,
@@ -402,24 +452,14 @@ pub fn release(id: i64, topic: &Topic, forum: Option<&ForumFacts>) -> Result<Opt
         added,
         description: text(&info.release_summary),
         torrent: magnet,
-        steam: steam(topic),
-        wine_packed: own_wine
-            .unwrap_or_else(|| forum.is_some_and(|f| f.wine) || tags(&title).iter().any(|t| t == "wine")),
-        package: is_package(info, &title),
+        metadata: steam(topic),
+        install_warning: install_warning(info, &title, &platform),
+        facts: facts(topic, info, genre, wine_packed),
+        system,
+        platform,
         seeders: topic.seeders,
         leechers: topic.leechers,
         counted_at: text(&topic.peers_observed),
-        genre,
-        developer: text(&info.developer),
-        publisher: text(&info.publisher),
-        release_date: scalar(&info.release_date),
-        release_year: scalar(&info.release_year),
-        update: text(&info.release_update),
-        players: players(&text(&info.multiplayer)),
-        minimum_firmware: text(&info.minimum_firmware),
-        interface_languages: text(&info.interface_languages),
-        audio_languages: text(&info.audio_languages),
-        format: text(&info.format),
         image_urls: texts(&info.image_urls).into_iter().filter(|url| url.starts_with("https://")).collect(),
         ..Release::default()
     }))
@@ -432,7 +472,22 @@ mod tests {
 
     /// Reads a catalog file with the forums of the bundled catalog sources.
     fn read(bytes: &[u8]) -> Result<ReleaseList, String> {
-        super::read(bytes, &crate::sources::read(crate::BUNDLED_SOURCES).unwrap().forums())
+        super::read(bytes, &forums())
+    }
+
+    fn forums() -> Forums {
+        crate::sources::read(crate::BUNDLED_SOURCES).unwrap().forums()
+    }
+
+    /// Whether each topic of a catalog file is packed with Wine, its forum found as [`releases`]
+    /// finds it.
+    fn wine(bytes: &[u8]) -> Vec<bool> {
+        let file: CatalogFile = serde_json::from_slice(bytes).unwrap();
+        let forums = forums();
+        let file_forum = forums.named(file.source.as_deref(), file.platform.as_deref());
+        let topics = file.topics.unwrap_or_default();
+        let forum = |t: &Topic| forums.named(t.source.as_deref(), t.platform.as_deref()).or(file_forum);
+        topics.iter().map(|t| packed_with_wine(t, forum(t))).collect()
     }
 
     fn file(topics: Value) -> Vec<u8> {
@@ -487,28 +542,40 @@ mod tests {
             (astro.seeders, astro.leechers, astro.counted_at.as_str()),
             (Some(7), Some(2), "2026-10-07T14:07:32Z")
         );
-        assert_eq!(astro.genre, "Action, Platformer");
-        assert_eq!((astro.developer.as_str(), astro.publisher.as_str()), ("Team Asobi", "Sony"));
-        assert_eq!((astro.release_date.as_str(), astro.release_year.as_str()), ("2024-09-06", "2024"));
-        assert_eq!((astro.update.as_str(), astro.players.as_str()), ("v01.05", "Single player"));
-        assert_eq!(astro.minimum_firmware, "5.xx");
+        let facts: Vec<(FactKind, &str, &str)> =
+            astro.facts.iter().map(|f| (f.kind, f.label.as_str(), f.value.as_str())).collect();
         assert_eq!(
-            (astro.interface_languages.as_str(), astro.audio_languages.as_str()),
-            ("English, Russian", "English")
+            facts,
+            [
+                (FactKind::Publisher, "Publisher", "Sony"),
+                (FactKind::Developer, "Developer", "Team Asobi"),
+                (FactKind::ReleaseDate, "Release date", "2024-09-06"),
+                (FactKind::Players, "Players", "Single player"),
+                (FactKind::Update, "Update", "v01.05"),
+                (FactKind::Format, "Format", "exfat"),
+                (FactKind::Firmware, "Minimum firmware", "5.xx"),
+                (FactKind::InterfaceLanguages, "Interface languages", "English, Russian"),
+                (FactKind::AudioLanguages, "Audio languages", "English"),
+                (FactKind::Genre, "Genre", "Action, Platformer"),
+            ],
+            "in the Game Hub's order, a date before a year"
         );
-        assert_eq!(astro.format, "exfat");
         assert_eq!(astro.image_urls, ["https://i1.imageban.ru/out/cover.jpg"], "only https:// addresses");
         let bolt = &list.releases[1];
         assert_eq!((bolt.seeders, bolt.leechers, bolt.counted_at.as_str()), (None, None, ""), "no count");
-        assert_eq!((bolt.players.as_str(), bolt.release_year.as_str()), ("Multiplayer", "2020"), "a year as a number");
-        assert_eq!(list.releases[2].players, "2x", "the catalog's own words");
+        assert_eq!(
+            (bolt.fact_text(FactKind::Players), bolt.fact_text(FactKind::ReleaseDate)),
+            ("Multiplayer", "2020"),
+            "a year as a number, when there is no date"
+        );
+        assert_eq!(list.releases[2].fact_text(FactKind::Players), "2x", "the catalog's own words");
     }
 
     #[test]
     fn a_release_written_before_the_game_facts_still_reads() {
         let old = serde_json::json!({ "id": "abc", "title": "Astro", "platform": "PS5", "torrent": MAGNET });
         let release: Release = serde_json::from_value(old).unwrap();
-        assert_eq!((release.seeders, release.genre.as_str()), (None, ""));
+        assert_eq!((release.seeders, release.facts.as_slice()), (None, &[][..]));
         assert!(release.image_urls.is_empty());
     }
 
@@ -538,7 +605,7 @@ mod tests {
     #[test]
     fn a_topic_keeps_its_steam_data_and_says_when_it_is_packed_with_wine() {
         let art = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/504230";
-        let list = read(&file(serde_json::json!([
+        let bytes = file(serde_json::json!([
             { "id": "1", "title": "Celeste (v1.4.0.0) [amd64] [Wine]", "magnet": MAGNET, "game_info": {},
               "steam": { "appid": 504230, "name": "Celeste", "short": "Help Madeline survive.", "genres": ["Action", "Indie"],
                 "release": "Jan 25, 2018", "developers": ["Maddy Makes Games"], "publishers": ["Maddy Makes Games Inc."],
@@ -549,32 +616,48 @@ mod tests {
             { "id": "2", "title": "Unknown Game [Wine]", "magnet": "magnet:?xt=urn:btih:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
               "game_info": {}, "steam": { "appid": null, "checked_at": "2026-10-14T00:00:00Z" } },
             { "id": "3", "title": "Tux Racer [Native]", "magnet": "magnet:?xt=urn:btih:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "game_info": {} },
-        ])))
-        .unwrap();
+        ]));
+        let list = read(&bytes).unwrap();
+        assert_eq!(wine(&bytes), [true, true, false], "a native Linux game isn't packed with Wine");
         let celeste = &list.releases[0];
-        assert!(celeste.wine_packed);
-        let steam = celeste.steam.as_ref().expect("the Steam data");
-        assert_eq!(steam.app_id, 504_230);
-        assert_eq!(steam.short, "Help Madeline survive.");
+        let steam = celeste.metadata.as_ref().expect("the Steam data");
+        let image = |file: &str| Some(ImageSource::Url(format!("{art}/{file}")));
+        assert_eq!(steam.description, "Help Madeline survive.");
         assert_eq!(steam.genres, ["Action", "Indie"]);
         assert_eq!(steam.release, "2018-01-25", "Steam's date as YYYY-MM-DD");
+        assert_eq!(steam.publisher, "Maddy Makes Games", "the developer first");
+        assert_eq!(steam.screenshots, [image("ss_1.jpg").unwrap()], "only https:// addresses");
         assert_eq!(
-            (steam.developers.as_slice(), steam.publishers.as_slice()),
-            (["Maddy Makes Games".to_owned()].as_slice(), ["Maddy Makes Games Inc.".to_owned()].as_slice())
+            (steam.cover.clone(), steam.background.clone(), steam.logo.clone()),
+            (image("library_600x900_2x.jpg"), image("library_hero.jpg"), None)
         );
-        assert_eq!(steam.header, format!("{art}/header.jpg"));
-        assert_eq!(steam.screenshots, [format!("{art}/ss_1.jpg")], "only https:// addresses");
+        assert_eq!(steam.store_url, "https://store.steampowered.com/app/504230/");
+        let tier = celeste.fact(FactKind::Compatibility).expect("ProtonDB's tier for a game packed with Wine");
         assert_eq!(
-            (steam.portrait.as_str(), steam.hero.as_str(), steam.logo.as_str()),
-            (format!("{art}/library_600x900_2x.jpg").as_str(), format!("{art}/library_hero.jpg").as_str(), "")
+            (tier.label.as_str(), tier.value.as_str(), tier.url.as_str()),
+            ("ProtonDB", "platinum", "https://www.protondb.com/app/504230")
         );
-        assert_eq!(steam.protondb, "platinum");
-        assert!(list.releases[1].wine_packed);
-        assert_eq!(list.releases[1].steam, None, "Steam has no such game");
-        assert!(!list.releases[2].wine_packed, "a native Linux game");
-        assert_eq!(list.releases[2].steam, None);
+        assert_eq!(list.releases[1].metadata, None, "Steam has no such game");
+        assert_eq!(list.releases[1].fact(FactKind::Compatibility), None);
+        assert_eq!(list.releases[2].metadata, None);
         assert_eq!(steam_date("25 Jan, 2018").as_deref(), Some("2018-01-25"));
         assert_eq!(steam_date("Coming soon"), None);
+    }
+
+    /// A game Steam has that isn't packed with Wine has no ProtonDB tier; one with only a
+    /// header has it as its cover and background.
+    #[test]
+    fn a_native_game_on_steam_has_no_protondb_tier() {
+        let list = read(&file(serde_json::json!([
+            { "id": "1", "title": "Tux Racer [Native]", "magnet": MAGNET, "game_info": {},
+              "steam": { "appid": 7, "header": "https://x.example/header.jpg", "protondb": "gold" } },
+        ])))
+        .unwrap();
+        let tux = &list.releases[0];
+        assert_eq!(tux.fact(FactKind::Compatibility), None);
+        let header = Some(ImageSource::Url("https://x.example/header.jpg".into()));
+        let steam = tux.metadata.as_ref().unwrap();
+        assert_eq!((steam.cover.clone(), steam.background.clone()), (header.clone(), header));
     }
 
     /// A catalog of one forum, as its collector writes it: `source` and `platform` say what
@@ -592,19 +675,20 @@ mod tests {
             serde_json::json!([{ "id": "1", "title": "Warcraft I: Remastered (2024) (v.1.0.0.2762) [RUS + ENG + 9 / ENG] [663.1 MB]",
                 "magnet": MAGNET, "game_info": null, date: "2026-10-19T11:06:33+00:00", "size_bytes": 695_312_589 }])
         };
-        let wine = read(&forum("https://xyz.net/forum/viewforum.php?f=2059", "wine", topic("added_at"))).unwrap();
-        let r = &wine.releases[0];
+        let wine_file = forum("https://xyz.net/forum/viewforum.php?f=2059", "wine", topic("added_at"));
+        let wine_list = read(&wine_file).unwrap();
+        let r = &wine_list.releases[0];
         assert_eq!((r.platform.as_str(), r.system.as_str()), ("PC", "linux"));
-        assert!(r.wine_packed, "every release of the Wine forum is packed with Wine");
+        assert_eq!(wine(&wine_file), [true], "every release of the Wine forum is packed with Wine");
         assert_eq!(r.title, "Warcraft I: Remastered");
         assert_eq!(r.added, "2026-10-19T11:06:33+00:00");
         assert_eq!(r.size_bytes, Some(695_312_589), "the exact size, not the title's 663.1 MB");
 
-        let native =
-            read(&forum("https://xyz.net/forum/viewforum.php?f=1992", "linux", topic("registered_at"))).unwrap();
+        let native_file = forum("https://xyz.net/forum/viewforum.php?f=1992", "linux", topic("registered_at"));
+        let native = read(&native_file).unwrap();
         let r = &native.releases[0];
         assert_eq!((r.platform.as_str(), r.system.as_str()), ("PC", "linux"));
-        assert!(!r.wine_packed, "a native Linux game");
+        assert_eq!(wine(&native_file), [false], "a native Linux game");
         assert_eq!(r.added, "2026-10-19T11:06:33+00:00");
 
         let ps4 = read(&forum("https://xyz.net/forum/viewforum.php?f=973", "ps4", topic("added_at"))).unwrap();
@@ -618,10 +702,11 @@ mod tests {
                 "magnet": format!("magnet:?xt=urn:btih:{}", hash.to_string().repeat(40)),
                 "source": format!("https://xyz.net/forum/viewforum.php?f={forum}") })
         };
-        let list = read(&file(serde_json::json!([topic("1", 'a', "1992"), topic("2", 'b', "2059")]))).unwrap();
-        let systems: Vec<_> =
-            list.releases.iter().map(|r| (r.platform.as_str(), r.system.as_str(), r.wine_packed)).collect();
-        assert_eq!(systems, [("PC", "linux", false), ("PC", "linux", true)], "native Linux, then Wine");
+        let bytes = file(serde_json::json!([topic("1", 'a', "1992"), topic("2", 'b', "2059")]));
+        let list = read(&bytes).unwrap();
+        let systems: Vec<_> = list.releases.iter().map(|r| (r.platform.as_str(), r.system.as_str())).collect();
+        assert_eq!(systems, [("PC", "linux"), ("PC", "linux")]);
+        assert_eq!(wine(&bytes), [false, true], "native Linux, then Wine");
     }
 
     #[test]
@@ -634,22 +719,22 @@ mod tests {
             topic
         };
         let pc = |wine: bool| serde_json::json!({ "platform": "PC", "system": "linux", "wine_packed": wine });
-        let list = read(&file(serde_json::json!([
+        let bytes = file(serde_json::json!([
             // The fields win over the topic's forum (the PS5 forum) and over the title's tags.
             topic("1", 'a', "[PS4] Racer", serde_json::json!({ "platform": "PS4" })),
             topic("2", 'b', "Celeste [Wine]", pc(false)),
             topic("3", 'c', "Quake", pc(true)),
             // A field it doesn't have comes from the forum.
             topic("4", 'd', "Astro", serde_json::json!({})),
-        ])))
-        .unwrap();
-        let read: Vec<_> =
-            list.releases.iter().map(|r| (r.platform.as_str(), r.system.as_str(), r.wine_packed)).collect();
-        assert_eq!(read, [("PS4", "", false), ("PC", "linux", false), ("PC", "linux", true), ("PS5", "", false)]);
+        ]));
+        let list = read(&bytes).unwrap();
+        let read: Vec<_> = list.releases.iter().map(|r| (r.platform.as_str(), r.system.as_str())).collect();
+        assert_eq!(read, [("PS4", ""), ("PC", "linux"), ("PC", "linux"), ("PS5", "")]);
+        assert_eq!(wine(&bytes), [false, false, true, false]);
     }
 
     #[test]
-    fn a_pkg_release_says_it_is_a_package() {
+    fn a_ps5_pkg_release_says_it_can_t_install() {
         let topic = |id: u32, title: &str, format: &str| {
             serde_json::json!({ "id": id.to_string(), "title": title,
                 "magnet": format!("magnet:?xt=urn:btih:{}", id.to_string().repeat(40)),
@@ -660,10 +745,17 @@ mod tests {
             topic(2, "[PS5] Bolt [EUR / v1.00 / PKG]", ""),
             topic(3, "[PS5] Comet [EUR]", "exfat"),
             topic(4, "[PS5] Drift [EUR]", "compressed folder(7z)"),
+            topic(5, "[PS4] Racer [EUR / pkg]", ""),
         ])))
         .unwrap();
-        let packages: Vec<_> = list.releases.iter().map(|r| (r.title.as_str(), r.package)).collect();
-        assert_eq!(packages, [("Astro", true), ("Bolt", true), ("Comet", false), ("Drift", false)]);
+        let warned: Vec<_> =
+            list.releases.iter().map(|r| (r.title.as_str(), r.install_warning.as_deref().unwrap_or(""))).collect();
+        let why = "Retail PS5 packages can't be installed; pick a folder, an archive or an exFAT image";
+        assert_eq!(
+            warned,
+            [("Astro", why), ("Bolt", why), ("Comet", ""), ("Drift", ""), ("Racer", "")],
+            "a PS5 package, by its format or its title; a PS4 package installs"
+        );
     }
 
     #[test]

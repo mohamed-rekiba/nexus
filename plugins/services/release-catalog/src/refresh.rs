@@ -1036,11 +1036,18 @@ mod tests {
         let fresh = list.releases.iter().find(|r| r.version.is_empty() && r.title == "Astro").expect("the new release");
         assert_eq!((fresh.seeders, fresh.leechers), (Some(5), Some(9)), "the forum list's counts");
         assert_eq!(fresh.counted_at, "2026-10-07T14:07:32Z");
-        assert_eq!((fresh.title_id.as_str(), fresh.genre.as_str()), ("PPSA01234", "Action, Platformer"));
-        assert_eq!((fresh.developer.as_str(), fresh.publisher.as_str()), ("Team Asobi", "Sony"));
-        assert_eq!((fresh.release_year.as_str(), fresh.players.as_str()), ("2024", "Single player"));
+        use nexus_api::FactKind;
+        assert_eq!((fresh.title_id.as_str(), fresh.fact_text(FactKind::Genre)), ("PPSA01234", "Action, Platformer"));
+        assert_eq!(
+            (fresh.fact_text(FactKind::Developer), fresh.fact_text(FactKind::Publisher)),
+            ("Team Asobi", "Sony")
+        );
+        assert_eq!(
+            (fresh.fact_text(FactKind::ReleaseDate), fresh.fact_text(FactKind::Players)),
+            ("2024", "Single player")
+        );
         assert_eq!(fresh.image_urls, ["https://i1.imageban.ru/out/astro.jpg"]);
-        assert_eq!(fresh.format, "", "the format is about one upload: not borrowed");
+        assert_eq!(fresh.fact(FactKind::Format), None, "the format is about one upload: not borrowed");
         let astro = list.releases.iter().find(|r| r.version == "v01.05").unwrap();
         assert_eq!((astro.seeders, astro.leechers), (Some(42), Some(3)));
     }

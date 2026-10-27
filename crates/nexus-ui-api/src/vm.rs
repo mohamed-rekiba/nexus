@@ -280,7 +280,7 @@ pub struct GameDetailVm {
     /// The game's page in a store, or empty.
     pub store_url: String,
     /// For a Windows game packed with Wine that the catalog found on Steam: ProtonDB's tier,
-    /// such as `gold` (see [`nexus_api::SteamInfo::protondb`]). Empty for none.
+    /// such as `gold` (a release's [`nexus_api::FactKind::Compatibility`] fact). Empty for none.
     pub protondb: String,
     /// The game's ProtonDB page, for the same games; empty for none.
     pub protondb_url: String,

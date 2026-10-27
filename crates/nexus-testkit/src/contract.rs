@@ -43,22 +43,12 @@ pub async fn emulator(test: &TestCore, plugin: &PluginId) {
             "contract compatibility: unknown game must fail"
         );
     }
-    if let Some(saves) = &provided.saves {
-        let game = first_game.as_deref().expect("contract saves: needs a catalog game");
-        saves.list(game).await.unwrap_or_else(|e| panic!("contract saves: list({game}): {e}"));
-    }
-    if let Some(controllers) = &provided.controllers {
-        let profiles = controllers.profiles().await.unwrap_or_else(|e| panic!("contract controllers: profiles: {e}"));
-        let ids: BTreeSet<&str> = profiles.iter().map(|p| p.id.as_str()).collect();
-        assert_eq!(ids.len(), profiles.len(), "contract controllers: profile ids are unique");
-        assert!(
-            profiles.iter().all(|p| !p.id.is_empty() && !p.name.is_empty()),
-            "contract controllers: empty id or name"
-        );
-    }
-    if let Some(shaders) = &provided.shaders {
-        shaders_contract(shaders.as_ref(), first_game.as_deref()).await;
-    }
+    let buttons: BTreeSet<&str> = manifest.keymap.iter().map(|k| k.button.as_str()).collect();
+    assert_eq!(buttons.len(), manifest.keymap.len(), "contract keymap: each button once");
+    assert!(
+        manifest.keymap.iter().all(|k| !k.button.is_empty() && !k.keys.is_empty()),
+        "contract keymap: empty button or keys"
+    );
     if let Some(slots) = &provided.slots {
         slots_contract(slots.as_ref(), first_game.as_deref()).await;
     }
@@ -129,16 +119,6 @@ async fn configurator_contract(configurator: &dyn Configurator, game: Option<&st
             "contract configurator: garbage is InvalidInput"
         );
     }
-}
-
-async fn shaders_contract(shaders: &dyn Shaders, game: Option<&str>) {
-    let game = game.expect("contract shaders: needs a catalog game");
-    shaders.cache(game).await.unwrap_or_else(|e| panic!("contract shaders: cache({game}): {e}"));
-    assert!(shaders.cache("__no_such_game__").await.is_err(), "contract shaders: an unknown game must fail");
-    shaders.clear_cache(game).await.unwrap_or_else(|e| panic!("contract shaders: clear_cache({game}): {e}"));
-    let after = shaders.cache(game).await.expect("cache");
-    assert_eq!((after.entries, after.size_bytes), (0, 0), "contract shaders: a clear empties the cache");
-    shaders.clear_cache(game).await.expect("contract shaders: clearing an empty cache is fine");
 }
 
 async fn slots_contract(slots: &dyn Slots, game: Option<&str>) {

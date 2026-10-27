@@ -74,29 +74,15 @@ fn the_desktop_grid_reflows_at_its_compact_breakpoint() {
     assert!(y(&compact, "Gamma") > y(&compact, "Alpha"), "compact: the third game wraps");
 }
 
+/// An emulator whose manifest lists its keyboard keys plays with a controller or the keyboard.
 #[test]
-fn default_theme_shows_the_shader_cache_and_controller_profiles_and_clears_the_cache() {
-    let shaders = tempfile::tempdir().unwrap();
-    let cache = shaders.path().join("G0");
-    std::fs::create_dir_all(&cache).unwrap();
-    std::fs::write(cache.join("a.spv"), vec![0u8; 1_500_000]).unwrap();
-    std::fs::write(cache.join("b.spv"), vec![0u8; 500_000]).unwrap();
-    let mut host = composed(|h| h.plugin(games_with_shaders("emu-a", vec!["Alpha"], cache.clone())));
+fn default_theme_shows_the_controllers_of_an_emulator_with_keyboard_keys() {
+    let mut host = composed(|h| h.plugin(games_with_keys("emu-a", vec!["Alpha"])));
     host.ui.start().unwrap();
     host.dispatch(Command::RefreshLibrary);
-
-    host.dispatch(Command::OpenGame("emu-a:G0".parse().unwrap()));
-    let shown = host.first("shader-cache").accessible_value().unwrap_or_default();
-    assert_eq!(shown.as_str(), "Shader cache: 2 shaders, 2.0 MB");
-
-    host.first("Clear").invoke_accessible_default_action();
-    host.pump();
-    let shown = host.first("shader-cache").accessible_value().unwrap_or_default();
-    assert_eq!(shown.as_str(), "Shader cache: 0 shaders, 0.0 MB");
-    assert!(!cache.exists());
 
     // The controllers are on the emulator's page.
     host.dispatch(Command::Navigate(nexus_core::Route::Plugin("emu-a".parse().unwrap())));
     let profiles = host.first("controllers:emu-a").accessible_value().unwrap_or_default();
-    assert_eq!(profiles.as_str(), "Controllers: DualSense (DualSense), Keyboard and mouse");
+    assert_eq!(profiles.as_str(), "Controllers: Controller (DualSense, DualShock 4, Xbox and most others), Keyboard");
 }

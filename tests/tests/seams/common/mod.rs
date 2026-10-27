@@ -103,7 +103,7 @@ fn quiet_testing_backend() {
 /// Like [`composed`], for a test that set its own Slint platform.
 pub fn composed_on_current_platform(build: impl FnOnce(FakeHost) -> FakeHost) -> Composed {
     let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-    let host = build(FakeHost::new().built_in(nexus_api::PluginByKind::theme(theme_default::DefaultTheme)));
+    let host = build(FakeHost::new().built_in(nexus_api::PluginBox::theme(theme_default::DefaultTheme)));
     let test = rt.block_on(host.boot_core());
     let requests: Rc<RefCell<Vec<UiRequest>>> = Rc::default();
     let sink = requests.clone();
@@ -249,7 +249,7 @@ pub fn write_theme(parent: &Path, theme_id: &str, theme_section: &str, files: &[
     std::fs::write(
         dir.join("theme.toml"),
         format!(
-            "id = \"{theme_id}\"\nkind = \"theme\"\nname = \"{theme_id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+            "id = \"{theme_id}\"\nkind = \"theme\"\nname = \"{theme_id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
              capabilities = [\"theme\"]\n[runtime]\ntype = \"data\"\n[theme]\nui_api = \"^0.1\"\n{theme_section}\n"
         ),
     )
@@ -398,7 +398,7 @@ fn catalog(
         _ => "",
     };
     StubPlugin::from_toml(&format!(
-        "id = \"{plugin_id}\"\nkind = \"emulator\"\nname = \"{plugin_id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"{plugin_id}\"\nkind = \"emulator\"\nname = \"{plugin_id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          capabilities = [\"catalog\", \"slots\"]\n{system}[requires]\n{requires}"
     ))
     .provides(move |_| {
@@ -427,7 +427,7 @@ pub fn offering_emulator(requires: &str) -> StubPlugin {
         }
     }
     StubPlugin::from_toml(&format!(
-        "id = \"emu-kyty\"\nkind = \"emulator\"\nname = \"PS5\"\nemulator = \"KytyPS5\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"emu-kyty\"\nkind = \"emulator\"\nname = \"PS5\"\nemulator = \"KytyPS5\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          console = \"PS5\"\n\
          capabilities = [\"catalog\", \"launcher\"]\n[permissions]\nprocess = [\"bin/*\"]\n\
          [[permissions.filesystem]]\nfolder = \"packages\"\n[requires]\n{requires}"
@@ -463,7 +463,7 @@ pub fn playable_games(plugin_id: &str, titles: Vec<&'static str>) -> StubPlugin 
 /// Like [`playable_games`], with `more` added to its manifest.
 pub fn playable_games_with(plugin_id: &str, titles: Vec<&'static str>, more: &str) -> StubPlugin {
     StubPlugin::from_toml(&format!(
-        "id = \"{plugin_id}\"\nkind = \"emulator\"\nname = \"{plugin_id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"{plugin_id}\"\nkind = \"emulator\"\nname = \"{plugin_id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          capabilities = [\"catalog\", \"slots\", \"launcher\"]\n[permissions]\nprocess = [\"bin/*\"]\n{more}"
     ))
     .provides(move |_| {
@@ -494,7 +494,7 @@ pub fn tested_games(plugin_id: &str, titles: Vec<&'static str>) -> StubPlugin {
         }
     }
     StubPlugin::from_toml(&format!(
-        "id = \"{plugin_id}\"\nkind = \"emulator\"\nname = \"{plugin_id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"{plugin_id}\"\nkind = \"emulator\"\nname = \"{plugin_id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          capabilities = [\"catalog\", \"slots\", \"compatibility\"]"
     ))
     .provides(move |_| {
@@ -508,60 +508,29 @@ pub fn tested_games(plugin_id: &str, titles: Vec<&'static str>) -> StubPlugin {
     })
 }
 
-/// Like [`playable_games`], with a shader cache in `shaders` (one file per entry, cleared by
-/// deleting the folder) and two controller profiles.
-pub fn games_with_shaders(plugin_id: &str, titles: Vec<&'static str>, shaders: std::path::PathBuf) -> StubPlugin {
+/// Like [`playable_games`], with keyboard keys in its manifest (`[[keymap]]`).
+pub fn games_with_keys(plugin_id: &str, titles: Vec<&'static str>) -> StubPlugin {
     StubPlugin::from_toml(&format!(
-        "id = \"{plugin_id}\"\nkind = \"emulator\"\nname = \"{plugin_id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
-         capabilities = [\"catalog\", \"slots\", \"launcher\", \"shaders\", \"controllers\"]\n[permissions]\nprocess = [\"bin/*\"]"
+        "id = \"{plugin_id}\"\nkind = \"emulator\"\nname = \"{plugin_id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
+         capabilities = [\"catalog\", \"slots\", \"launcher\"]\n[permissions]\nprocess = [\"bin/*\"]\n\
+         [[keymap]]\nbutton = \"Cross\"\nkeys = \"J\""
     ))
     .provides(move |_| {
         let games = Arc::new(Games { titles: titles.clone(), platform: "PS4", details_fail: false, quiet: false });
-        let extras = Arc::new(Extras { shaders: shaders.clone() });
         Ok(Provided {
             catalog: Some(games.clone()),
             slots: Some(games),
             launcher: Some(Arc::new(Play)),
-            shaders: Some(extras.clone()),
-            controllers: Some(extras),
             ..Provided::default()
         })
     })
-}
-
-struct Extras {
-    shaders: std::path::PathBuf,
-}
-
-#[async_trait]
-impl Shaders for Extras {
-    async fn cache(&self, _game: &str) -> PluginResult<ShaderCacheInfo> {
-        let files: Vec<_> = std::fs::read_dir(&self.shaders).map(|d| d.flatten().collect()).unwrap_or_default();
-        let size_bytes = files.iter().map(|f| f.metadata().map(|m| m.len()).unwrap_or(0)).sum();
-        Ok(ShaderCacheInfo { entries: files.len() as u64, size_bytes })
-    }
-
-    async fn clear_cache(&self, _game: &str) -> PluginResult<()> {
-        let _ = std::fs::remove_dir_all(&self.shaders);
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl Controllers for Extras {
-    async fn profiles(&self) -> PluginResult<Vec<ControllerProfile>> {
-        Ok(vec![
-            ControllerProfile { id: "pad".into(), name: "DualSense".into(), device_hint: Some("DualSense".into()) },
-            ControllerProfile { id: "keys".into(), name: "Keyboard and mouse".into(), device_hint: None },
-        ])
-    }
 }
 
 /// Like [`playable_games`], with an emulator to install first: no build is installed, and
 /// version 1.0 is a 300 MB download.
 pub fn games_needing_an_emulator(plugin_id: &str, titles: Vec<&'static str>) -> StubPlugin {
     StubPlugin::from_toml(&format!(
-        "id = \"{plugin_id}\"\nkind = \"emulator\"\nname = \"Emu\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"{plugin_id}\"\nkind = \"emulator\"\nname = \"Emu\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          capabilities = [\"catalog\", \"slots\", \"launcher\", \"installer\", \"downloader\"]\n\
          [permissions]\nprocess = [\"bin/*\"]\nnetwork = [\"builds.example\"]"
     ))
@@ -591,7 +560,7 @@ pub fn console_emulator(
 ) -> StubPlugin {
     StubPlugin::from_toml(&format!(
         "id = \"{plugin_id}\"\nkind = \"emulator\"\nname = \"{name}\"\nemulator = \"{emulator}\"\n\
-         version = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+         version = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          capabilities = [\"catalog\", \"launcher\", \"installer\", \"downloader\"]\n\
          [permissions]\nprocess = [\"bin/*\"]\nnetwork = [\"builds.example\"]"
     ))
@@ -684,7 +653,7 @@ pub fn store(
     delay: std::time::Duration,
 ) -> StubPlugin {
     StubPlugin::from_toml(&format!(
-        "id = \"{plugin_id}\"\nkind = \"service\"\nname = \"{plugin_id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"{plugin_id}\"\nkind = \"service\"\nname = \"{plugin_id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          capabilities = [\"metadata\"]\n[permissions]\nnetwork = [\"art.example\"]"
     ))
     .provides(move |_| {
@@ -761,7 +730,7 @@ pub fn slow_installer() -> StubPlugin {
         }
     }
     StubPlugin::from_toml(
-        "id = \"emu-kyty\"\nkind = \"emulator\"\nname = \"PS5\"\nemulator = \"KytyPS5\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"emu-kyty\"\nkind = \"emulator\"\nname = \"PS5\"\nemulator = \"KytyPS5\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          console = \"PS5\"\n\
          capabilities = [\"catalog\", \"game_installer\"]\n\
          [[permissions.filesystem]]\nfolder = \"packages\"\n\

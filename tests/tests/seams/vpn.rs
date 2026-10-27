@@ -35,7 +35,7 @@ fn emulator() -> StubPlugin {
         }
     }
     StubPlugin::from_toml(
-        "id = \"emu-kyty\"\nkind = \"emulator\"\nname = \"KytyPS5\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"emu-kyty\"\nkind = \"emulator\"\nname = \"KytyPS5\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          console = \"PS5\"\n\
          capabilities = [\"catalog\"]\n\
          [[permissions.filesystem]]\nfolder = \"packages\"\n",
@@ -70,7 +70,7 @@ async fn setup_on(build: impl FnOnce(FakeHost) -> FakeHost) -> Setup {
     let t = build(FakeHost::new())
         .home(home.path())
         .plugin(emulator())
-        .built_in(PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .boot_core()
         .await;
     t.http.serve("https://xyz.dev/c/ps5.json", catalog());

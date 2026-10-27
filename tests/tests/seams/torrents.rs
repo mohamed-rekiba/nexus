@@ -48,7 +48,7 @@ fn emulator(sources: Arc<Mutex<Vec<HostPath>>>) -> StubPlugin {
         }
     }
     StubPlugin::from_toml(
-        "id = \"emu-kyty\"\nkind = \"emulator\"\nname = \"KytyPS5\"\nversion = \"1.0.0\"\nhost_api = \"^0.1\"\n\
+        "id = \"emu-kyty\"\nkind = \"emulator\"\nname = \"KytyPS5\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
          console = \"PS5\"\n\
          install_note = \"Installs from a folder.\"\n\
          capabilities = [\"catalog\", \"game_installer\"]\n\
@@ -100,7 +100,7 @@ async fn setup_plugin(
     let t = build(FakeHost::new())
         .home(home.path())
         .plugin(plugin)
-        .built_in(PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .boot_core()
         .await;
     t.http.serve(URL, catalog(&format!("magnet:?xt=urn:btih:{hash}")));
@@ -536,10 +536,10 @@ async fn downloaded(
     let t = build(FakeHost::new(), home.path())
         .home(home.path())
         .platform(Some(Platform::Linux))
-        .built_in(PluginByKind::emulator(emu_shadps4::ShadPlugin))
-        .built_in(PluginByKind::emulator(emu_kyty::KytyPlugin))
-        .built_in(PluginByKind::emulator(emu_pc::PcPlugin))
-        .built_in(PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(PluginBox::code(emu_shadps4::ShadPlugin))
+        .built_in(PluginBox::code(emu_kyty::KytyPlugin))
+        .built_in(PluginBox::code(emu_pc::PcPlugin))
+        .built_in(PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .boot_core()
         .await;
     let catalog = serde_json::json!({ "complete": true, "translation": { "language": "en" }, "topic_count": 1,

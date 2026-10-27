@@ -53,7 +53,7 @@ fn base() -> String {
 /// on or off.
 async fn boot_with(refresh: bool, pvc: String) -> TestCore {
     let t = FakeHost::new()
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .boot_core()
         .await;
     serve(&t, refresh, pvc).await;
@@ -276,7 +276,7 @@ async fn a_refresh_that_can_t_keep_its_copy_is_no_change_and_backs_off() {
     // KytyPS5, so the core itself reads the catalogs again on each change.
     let t = FakeHost::new()
         .plugin(offering_emulator(""))
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .boot_core()
         .await;
     // A folder where the meta file goes: the copy is written, its meta file is not.
@@ -294,7 +294,7 @@ async fn a_refresh_that_can_t_keep_its_copy_is_no_change_and_backs_off() {
 async fn a_new_base_copy_keeps_the_refreshed_releases_until_its_own_refresh_works() {
     // A failed refresh tries again after a second here, not five minutes.
     let plugin = release_catalog::ReleaseCatalog::default().retry_after(std::time::Duration::from_secs(1));
-    let t = FakeHost::new().built_in(nexus_api::PluginByKind::service(plugin)).boot_core().await;
+    let t = FakeHost::new().built_in(nexus_api::PluginBox::code(plugin)).boot_core().await;
     serve(&t, true, PVC_ANSWER.to_owned()).await;
     let mut events = t.core.events();
     list(&t).await;
@@ -415,7 +415,7 @@ async fn the_meta_file_names_the_refreshed_copy_it_goes_with_and_older_copies_go
 async fn in_a_long_session_the_refresh_runs_again_once_the_copy_is_old_with_no_ask() {
     // A copy is fresh for a second here, not six hours.
     let plugin = release_catalog::ReleaseCatalog::fresh_for(std::time::Duration::from_secs(1));
-    let t = FakeHost::new().built_in(nexus_api::PluginByKind::service(plugin)).boot_core().await;
+    let t = FakeHost::new().built_in(nexus_api::PluginBox::code(plugin)).boot_core().await;
     serve(&t, true, PVC_ANSWER.to_owned()).await;
     let mut events = t.core.events();
     list(&t).await;
@@ -445,7 +445,7 @@ async fn in_a_long_session_the_refresh_runs_again_once_the_copy_is_old_with_no_a
 async fn the_refresh_task_ends_when_the_plugin_is_turned_off() {
     // A copy is fresh for a second here, so the task would refresh each second.
     let plugin = release_catalog::ReleaseCatalog::fresh_for(std::time::Duration::from_secs(1));
-    let t = FakeHost::new().built_in(nexus_api::PluginByKind::service(plugin)).boot_core().await;
+    let t = FakeHost::new().built_in(nexus_api::PluginBox::code(plugin)).boot_core().await;
     serve(&t, true, PVC_ANSWER.to_owned()).await;
     // A reference to the catalogs that outlives the plugin.
     let provided = t.core.kernel().provided(&id("release-catalog")).await.unwrap();
@@ -579,7 +579,7 @@ async fn where_downloads_can_t_be_bound_to_a_vpn_the_page_says_why_the_refresh_r
 async fn boot_waiting_for_the_vpn(refresh: bool) -> TestCore {
     let t = FakeHost::new()
         .plugin(offering_emulator(""))
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .boot_core()
         .await;
     t.network.down("wg-se");
@@ -651,7 +651,7 @@ async fn offers_once(t: &TestCore, count: usize) -> Vec<String> {
 async fn a_slow_forum_still_gives_the_catalog_at_once_and_the_refresh_comes_after() {
     let t = FakeHost::new()
         .plugin(offering_emulator(""))
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .boot_core()
         .await;
     // The grid is current while the Catalog is the screen.
@@ -699,7 +699,7 @@ fn pc_list(rows: &[(&str, u32, char)]) -> String {
 /// and each forum's feed and forum list. The Wine forum list is served only with `wine`.
 async fn boot_pc(wine: bool) -> TestCore {
     let t = FakeHost::new()
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .boot_core()
         .await;
     let sources = serde_json::json!({ "pc": { "platform": "PC", "forums": [
@@ -775,7 +775,7 @@ fn notices(t: &TestCore) -> Vec<(String, String)> {
 async fn a_refresh_that_adds_releases_says_how_many_and_the_first_copy_says_nothing() {
     let t = FakeHost::new()
         .plugin(offering_emulator(""))
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .boot_core()
         .await;
     // The grid is current while the Catalog is the screen.
@@ -798,7 +798,7 @@ async fn a_refresh_that_adds_releases_says_how_many_and_the_first_copy_says_noth
 /// refresh on or off.
 async fn on_the_catalog(refresh: bool) -> TestCore {
     let t = FakeHost::new()
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .plugin(games_on("emu-kyty", "PS5", vec![]).console("PS5"))
         .boot_core()
         .await;
@@ -854,7 +854,7 @@ async fn the_catalog_s_refresh_button_runs_refresh_now_and_says_refreshing_then_
 #[tokio::test]
 async fn the_catalog_says_why_its_refresh_did_not_run() {
     let t = FakeHost::new()
-        .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
+        .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .plugin(games_on("emu-kyty", "PS5", vec![]).console("PS5"))
         .boot_core()
         .await;
