@@ -263,6 +263,12 @@ pub(crate) async fn ask_to_install(core: &Core, game: &GameKey, provided: &Provi
     Ok(true)
 }
 
+/// An install or update of `plugin` is under way: it moves the emulator's files and the games'
+/// saves, so no game starts and the emulator isn't turned off until it is done.
+pub(crate) fn busy(core: &Core, plugin: &PluginId) -> bool {
+    core.state().emulators.get(plugin).is_some_and(|e| e.busy)
+}
+
 /// The emulator build `plugin` runs games on: its newest installed one.
 pub(crate) fn build_of(core: &Core, plugin: &PluginId) -> Option<String> {
     core.state().emulators.get(plugin).and_then(|e| e.installed.last().cloned())

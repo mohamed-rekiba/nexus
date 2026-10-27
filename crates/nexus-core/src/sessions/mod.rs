@@ -16,6 +16,7 @@
 //! and [`Area::Sessions`] on the core's change signal. It never calls out while it holds its
 //! lock, and never calls into the core.
 
+mod ending;
 mod playtime;
 mod watch;
 
@@ -29,6 +30,7 @@ use nexus_api::{Event, GameKey, PluginId, SessionId};
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
+pub(crate) use self::ending::{Ending, outcome};
 pub(crate) use self::playtime::{PLAYED_AT_LEAST, PlayTimes, days_between, now_secs};
 use crate::changes::{Area, Notifier};
 use crate::config::ConfigService;
