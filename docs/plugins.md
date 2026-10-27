@@ -693,14 +693,41 @@ Themes render each item with the accessible label `<plugin-id>:<item-id>`, such 
 
 ## Shared code: emulator-kit
 
-`plugins/shared/emulator-kit` is a library, not a plugin. Like a plugin, it reaches the host only
-through `PluginContext`. Its modules:
+`plugins/shared/emulator-kit` is a library, not a plugin. A console emulator describes itself,
+and the kit runs the rest:
+
+- A `Flavor` describes the emulator's builds: its release source, which asset fits this system,
+  the archive format, where the program is in a build, the test run, where your own build may
+  be, and two hooks. `on_switch` runs when the current build changes, and `on_leave_own` runs
+  when your own build gives way to an official one. KytyPS5 moves its saves and caches in
+  them; shadPS4 needs neither.
+- The `BuildManager` runs the flow over a flavor. It is the plugin's `Downloader` and
+  `Installer`, gives the build panel's buttons (use your own build, switch to official builds,
+  check for new builds, go back) and runs their actions. It also picks the program a game
+  starts, and checks your own build is there first.
+- A `ConsoleSpec` describes the console: its games, package formats, compatibility list (the
+  parser is the real plug point), keyboard keys and game page section. The `ConsoleEmulator`
+  over a spec and a flavor is the plugin's `Catalog`, `Compatibility`, `Configurator` and
+  `Slots`, and lists its packages to install (`candidates`).
+- The plugin's settings type implements `Settings`. The kit reads the stored settings over
+  this system's defaults, for both emulators.
+
+The plugin keeps its settings type, its launch arguments and its game installs. Its `lib.rs`
+holds the flavor, the settings and the launch arguments.
+
+The kit never takes the whole `PluginContext`. It takes the narrow facades in `Host`
+(`Host::of(&ctx)`): storage, folders, programs, HTTP, settings and the log. So its unit tests
+run on in-memory doubles of those alone.
 
 | Module | What it does |
 |---|---|
+| `builds` | `Flavor` and `BuildManager`: official builds, your own build, and the own-build message |
+| `console` | `ConsoleSpec` and `ConsoleEmulator`: games, compatibility, settings and the emulator's page |
+| `settings` | The `Settings` trait, and the stored settings over this system's defaults |
+| `host` | `Host`, the narrow facades the kit takes |
 | `github` | GitHub releases as the REST API returns them |
-| `cache` | JSON from the web, kept in storage for a time, and the last copy when the web is down |
-| `versions` | Builds in `builds/<tag>`, the current one and the one before it, in `versions.json` |
+| `cache` | JSON from the web, kept in storage for a time, and the last copy when the web is down. Only GitHub's API gets GitHub's `Accept` header |
+| `versions` | Builds in `builds/<tag>`, the current one and the one before it, in `versions.json`, changed under one lock |
 | `games` | Installed PS5 and PS4 games in a host folder, up to three folders down; `GameIndex`, `compat_badge` |
 | `compat` | The community compatibility lists, by title id |
 | `controls` | A console's keyboard keys: `Controls { keys }` is a `Controllers` and gives `keyboard_panel()` |
