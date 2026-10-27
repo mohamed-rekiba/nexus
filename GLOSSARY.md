@@ -69,6 +69,11 @@ opens, the catalogs are read, a folder changes, and a download starts or ends.
 or "Mar 12, 2024" for a date. The core builds it when it builds the view (`display.rs`); the
 view model keeps the fact too, for the core's tests.
 
+**Ending** (`Ending`, `outcome`, nexus-core `sessions/ending.rs`): what a game's end means for the
+player: the notice it earns, if any, and whether the core asks "How far did it get?". One pure
+rule decides both. A game the player stopped is no crash, and the question is asked once for
+each build.
+
 **Fact** (`Fact`): one thing a catalog says about a release: a kind, a label, a value and an
 optional page. Its `FactKind` tells the host what it is about, such as the publisher, the
 release date or a compatibility tier.
@@ -107,6 +112,10 @@ through an `InstallJob`.
 **Game record** (`GameRecord`): everything the core knows about one game, by its game key: the
 game as its plugin lists it, its badges, its details, a store's metadata, and for an installed
 game, the catalog's offer it is and that offer's cover. The library subsystem holds one per game.
+
+**Game words** (`GameWords`, nexus-core `game_words.rs`): the description, developer and genres a
+game's page says. The game's own words come first; the layers of store data fill in what they
+leave out.
 
 **Grid filter** (`GridFilter`): a filter the player turns on or off among a grid's systems:
 "In-game" (`ingame`), "Installed" (`installed`) or "Hidden" (`hidden`).
