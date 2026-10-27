@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 470" width="1100" height="470" font-family="system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
+  <title id="t">How data flows one way in Nexus</title>
+  <desc id="d">Six numbered steps. 1: a theme calls Host.command. 2: Core::dispatch routes the command. 3: a subsystem or flow changes its state. 4: Core::changed publishes Event::StateChanged. 5: AppShell asks for a render. 6: Core::view builds a Snapshot, view::build makes an AppView, bind::vm_values writes the Vm, and the theme draws it.</desc>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#2563a8"/></marker>
+    <style>
+      .box { fill: #eaf1fb; stroke: #2563a8; stroke-width: 1.5; }
+      .name { font-size: 15px; font-weight: 600; fill: #12315a; }
+      .sub { font-size: 12.5px; fill: #3c5a82; }
+      .code { font-family: ui-monospace, 'DejaVu Sans Mono', Menlo, Consolas, monospace; font-size: 12.5px; fill: #12315a; }
+      .edge { stroke: #2563a8; stroke-width: 1.6; fill: none; }
+      .num { fill: #2563a8; }
+      .numt { font-size: 13px; font-weight: 700; fill: #ffffff; }
+      .cap { font-size: 14px; fill: #333; }
+      .leg { font-size: 12.5px; fill: #444; }
+    </style>
+  </defs>
+  <rect width="1100" height="470" fill="#ffffff"/>
+
+  <!-- row 1: the command goes in -->
+  <rect class="box" x="40" y="60" width="210" height="92" rx="12"/>
+  <text class="name" x="145" y="88" text-anchor="middle">Theme (Slint)</text>
+  <text class="code" x="145" y="110" text-anchor="middle">Host.command</text>
+  <text class="sub" x="145" y="130" text-anchor="middle">name and JSON args</text>
+
+  <rect class="box" x="320" y="60" width="210" height="92" rx="12"/>
+  <text class="name" x="425" y="88" text-anchor="middle">Core router</text>
+  <text class="code" x="425" y="110" text-anchor="middle">Core::dispatch</text>
+  <text class="sub" x="425" y="130" text-anchor="middle">one owner for each command</text>
+
+  <rect class="box" x="600" y="60" width="210" height="92" rx="12"/>
+  <text class="name" x="705" y="88" text-anchor="middle">Subsystem or flow</text>
+  <text class="sub" x="705" y="110" text-anchor="middle">changes its own state,</text>
+  <text class="sub" x="705" y="128" text-anchor="middle">calls plugins and ports</text>
+
+  <rect class="box" x="880" y="60" width="190" height="92" rx="12"/>
+  <text class="name" x="975" y="88" text-anchor="middle">Change signal</text>
+  <text class="code" x="975" y="110" text-anchor="middle">Core::changed</text>
+  <text class="code" x="975" y="128" text-anchor="middle">Event::StateChanged</text>
+
+  <!-- row 2: the view comes back -->
+  <rect class="box" x="880" y="270" width="190" height="92" rx="12"/>
+  <text class="name" x="975" y="298" text-anchor="middle">App shell</text>
+  <text class="code" x="975" y="320" text-anchor="middle">on_core_changed</text>
+  <text class="sub" x="975" y="340" text-anchor="middle">renders every 8 ms at most</text>
+
+  <rect class="box" x="600" y="270" width="210" height="92" rx="12"/>
+  <text class="name" x="705" y="298" text-anchor="middle">View, built pure</text>
+  <text class="code" x="705" y="320" text-anchor="middle">Core::snapshot</text>
+  <text class="code" x="705" y="338" text-anchor="middle">view::build → AppView</text>
+
+  <rect class="box" x="320" y="270" width="210" height="92" rx="12"/>
+  <text class="name" x="425" y="298" text-anchor="middle">Binding</text>
+  <text class="code" x="425" y="320" text-anchor="middle">bind::vm_values</text>
+  <text class="sub" x="425" y="340" text-anchor="middle">AppView fields → Vm</text>
+
+  <rect class="box" x="40" y="270" width="210" height="92" rx="12"/>
+  <text class="name" x="145" y="298" text-anchor="middle">Theme (Slint)</text>
+  <text class="code" x="145" y="320" text-anchor="middle">Vm</text>
+  <text class="sub" x="145" y="340" text-anchor="middle">draws; holds no state</text>
+
+  <!-- edges -->
+  <path class="edge" marker-end="url(#a)" d="M250 106 L320 106"/>
+  <path class="edge" marker-end="url(#a)" d="M530 106 L600 106"/>
+  <path class="edge" marker-end="url(#a)" d="M810 106 L880 106"/>
+  <path class="edge" marker-end="url(#a)" d="M975 152 L975 270"/>
+  <path class="edge" marker-end="url(#a)" d="M880 316 L810 316"/>
+  <path class="edge" marker-end="url(#a)" d="M600 316 L530 316"/>
+  <path class="edge" marker-end="url(#a)" d="M320 316 L250 316"/>
+  <path class="edge" marker-end="url(#a)" d="M145 270 L145 152"/>
+
+  <!-- numbered steps -->
+  <circle class="num" cx="50" cy="60" r="12"/><text class="numt" x="50" y="65" text-anchor="middle">1</text>
+  <circle class="num" cx="330" cy="60" r="12"/><text class="numt" x="330" y="65" text-anchor="middle">2</text>
+  <circle class="num" cx="610" cy="60" r="12"/><text class="numt" x="610" y="65" text-anchor="middle">3</text>
+  <circle class="num" cx="890" cy="60" r="12"/><text class="numt" x="890" y="65" text-anchor="middle">4</text>
+  <circle class="num" cx="890" cy="270" r="12"/><text class="numt" x="890" y="275" text-anchor="middle">5</text>
+  <circle class="num" cx="610" cy="270" r="12"/><text class="numt" x="610" y="275" text-anchor="middle">6</text>
+
+  <text class="cap" x="550" y="410" text-anchor="middle">The theme sends a command, the core changes its state, and the theme draws a new view of that state.</text>
+  <text class="cap" x="550" y="432" text-anchor="middle">Core::snapshot reads the state once. view::build takes no lock and reads no disk.</text>
+  <circle class="num" cx="47" cy="455" r="7"/>
+  <text class="leg" x="62" y="459">a step, in order</text>
+  <rect x="220" y="448" width="14" height="14" rx="3" class="box"/>
+  <text class="leg" x="242" y="460">a part of the flow</text>
+</svg>
