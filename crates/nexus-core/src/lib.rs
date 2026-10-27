@@ -38,6 +38,7 @@ mod plugin_settings;
 mod ports;
 mod preferences;
 mod prefetch;
+mod process;
 mod programs;
 mod release_downloads;
 mod releases;

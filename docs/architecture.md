@@ -307,6 +307,9 @@ only the ports it names.
 | `Archives` | `NoArchives` | `archives::HostArchives` | `FakeArchives` |
 | `Clock` | `TokioClock` (real; the app keeps it) | `TokioClock` | `FakeClock` |
 
+- `TokioSpawner` and `GroupTree`, the two stand-ins that run real programs, are in
+  `crates/nexus-core/src/process.rs`; `ports.rs` holds the traits and the stand-ins that do
+  nothing.
 - `TokioSpawner` starts each game as the leader of its own process group on Unix; on Windows
   the "group" is the process and its children. `terminate` asks it to close (SIGTERM, or
   `taskkill` without `/F`); `kill` ends the group.
