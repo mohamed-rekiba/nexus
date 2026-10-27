@@ -41,7 +41,7 @@ fn the_catalog_s_view_builds_and_binds_in_time() {
     }
     eprintln!("ui.render() (view and bind) {:?} each", started.elapsed() / runs);
     let started = Instant::now();
-    host.dispatch(Command::CatalogSort("rating".into()));
+    host.dispatch(Command::CatalogSort(nexus_core::Sort::Rating));
     host.dispatch(Command::CatalogSearch("the".into()));
     eprintln!("a sort and a search: {:?}", started.elapsed());
 }

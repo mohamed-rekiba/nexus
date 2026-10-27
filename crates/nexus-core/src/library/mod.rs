@@ -119,7 +119,7 @@ pub enum LibraryCmd {
     /// metadata and the games' details in the background.
     Refresh,
     /// Hides a game the Catalog offers, or shows it again. Hidden games leave the Catalog, but
-    /// for the "Hidden" filter (`HIDDEN_FILTER`). Kept in the config.
+    /// for the "Hidden" filter (`GridFilter::Hidden`). Kept in the config.
     Hide { game: GameKey, hidden: bool },
 }
 

@@ -387,7 +387,7 @@ fn alpha_and_bolt_on_the_catalog() -> Composed {
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.resize(1600.0, 900.0);
     host.dispatch(Command::Navigate(nexus_core::Route::Catalog));
-    host.dispatch(Command::CatalogSort("title".into()));
+    host.dispatch(Command::CatalogSort(nexus_core::Sort::Title));
     host.settle();
     host
 }

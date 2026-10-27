@@ -5,7 +5,6 @@
 //! same way.
 
 use std::collections::{BTreeMap, HashMap};
-use std::str::FromStr;
 
 use nexus_api::{CompatLevel, GameKey};
 use nexus_ui_api::{FilterVm, LibraryVm};
@@ -15,24 +14,48 @@ use crate::library::{Entry, LibrarySnapshot};
 use crate::ownership::Ownership;
 use crate::releases::Offer;
 use crate::sessions::PlayTimes;
-use crate::{CoreError, CoreResult};
 
 /// How many more games a Library or Catalog page shows each time.
 pub const GRID_PAGE: usize = 60;
 
-/// The Catalog's "In-game" filter, among the systems: `Command::CatalogSystem` with this id.
-pub const INGAME_FILTER: &str = "ingame";
+/// A filter the player turns on or off, shown among a grid's systems. Its text, for a theme, is
+/// its chip's id: its name in lower case.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GridFilter {
+    /// "In-game": only games that reach gameplay. The Catalog's only.
+    InGame,
+    /// "Installed": in the Catalog, the offers of the games the player has.
+    Installed,
+    /// "Hidden": only the games the player hid; else the Catalog leaves them out.
+    Hidden,
+}
 
-/// The Catalog's "Installed" filter, among the systems: `Command::CatalogSystem` with this id.
-pub const INSTALLED_FILTER: &str = "installed";
+impl GridFilter {
+    /// Its chip's id.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            GridFilter::InGame => "ingame",
+            GridFilter::Installed => "installed",
+            GridFilter::Hidden => "hidden",
+        }
+    }
+}
 
-/// The Catalog's "Hidden" filter, among the systems: only the games the player hid.
-pub const HIDDEN_FILTER: &str = "hidden";
+/// A press on one of a grid's system chips: a system (a platform label, such as `PS5`), or a
+/// filter, which the press turns on or off. It reads and writes as the chip's id: `"PS5"`,
+/// `"ingame"`.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+pub enum SystemChoice {
+    Filter(GridFilter),
+    System(String),
+}
 
 /// How a grid is sorted. Its text, for a theme, is its name in lower case.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum Sort {
+pub enum Sort {
     #[default]
     Title,
     /// Last played first.
@@ -50,9 +73,11 @@ pub(crate) enum Sort {
 }
 
 impl Sort {
+    #[cfg(test)]
     const ALL: [Sort; 8] =
         [Sort::Title, Sort::Played, Sort::Size, Sort::Smallest, Sort::Rating, Sort::Release, Sort::Compat, Sort::Added];
 
+    /// Its name, as a theme reads and sends it.
     pub fn as_str(self) -> &'static str {
         match self {
             Sort::Title => "title",
@@ -64,17 +89,6 @@ impl Sort {
             Sort::Compat => "compat",
             Sort::Added => "added",
         }
-    }
-}
-
-impl FromStr for Sort {
-    type Err = CoreError;
-
-    fn from_str(text: &str) -> CoreResult<Self> {
-        Sort::ALL
-            .into_iter()
-            .find(|s| s.as_str() == text)
-            .ok_or_else(|| CoreError::Invalid(format!("no sort {text:?}")))
     }
 }
 
@@ -117,20 +131,19 @@ impl GridQuery {
         Self { grid: Grid::Catalog, sort: Sort::Added, ..Self::library() }
     }
 
-    /// A system, or `INGAME_FILTER`, `INSTALLED_FILTER` or `HIDDEN_FILTER` to turn "In-game",
-    /// "Installed" or "Hidden" on or off; `None` clears them all.
-    pub fn set_system(&mut self, system: Option<String>) {
-        match system.as_deref() {
-            Some(INGAME_FILTER) => self.ingame = !self.ingame,
-            Some(INSTALLED_FILTER) => self.installed = !self.installed,
-            Some(HIDDEN_FILTER) => self.hidden = !self.hidden,
+    /// A system, or a filter to turn on or off; `None` clears the system and every filter.
+    pub fn set_system(&mut self, choice: Option<SystemChoice>) {
+        match choice {
+            Some(SystemChoice::System(system)) => self.system = Some(system),
+            Some(SystemChoice::Filter(GridFilter::InGame)) => self.ingame = !self.ingame,
+            Some(SystemChoice::Filter(GridFilter::Installed)) => self.installed = !self.installed,
+            Some(SystemChoice::Filter(GridFilter::Hidden)) => self.hidden = !self.hidden,
             None => {
                 self.system = None;
                 self.ingame = false;
                 self.installed = false;
                 self.hidden = false;
             }
-            Some(_) => self.system = system,
         }
     }
 
@@ -343,14 +356,19 @@ fn games<'a>(query: &GridQuery, data: &GridData<'a>) -> GridGames<'a> {
     // result to filter by.
     let only_ingame = catalog && query.ingame;
     if catalog && (ingame > 0 || query.ingame) {
-        systems.push(FilterVm { id: INGAME_FILTER.into(), label: "In-game".into(), count: ingame, on: query.ingame });
+        systems.push(FilterVm {
+            id: GridFilter::InGame.as_str().into(),
+            label: "In-game".into(),
+            count: ingame,
+            on: query.ingame,
+        });
     }
     // The Catalog's offers of the games the player has.
     let installed = |e: &Entry| offers.get(&e.key).is_some_and(|o| owned.installed_game(o).is_some());
     let installed_count = if catalog { searched.iter().filter(|e| installed(e)).count() } else { 0 };
     if installed_count > 0 || (catalog && query.installed) {
         systems.push(FilterVm {
-            id: INSTALLED_FILTER.into(),
+            id: GridFilter::Installed.as_str().into(),
             label: "Installed".into(),
             count: installed_count,
             on: query.installed,
@@ -358,7 +376,7 @@ fn games<'a>(query: &GridQuery, data: &GridData<'a>) -> GridGames<'a> {
     }
     if hidden_filter && (hidden_count > 0 || query.hidden) {
         systems.push(FilterVm {
-            id: HIDDEN_FILTER.into(),
+            id: GridFilter::Hidden.as_str().into(),
             label: "Hidden".into(),
             count: hidden_count,
             on: query.hidden,
@@ -498,21 +516,33 @@ mod tests {
     #[test]
     fn a_sort_is_one_of_its_names() {
         for sort in Sort::ALL {
-            assert_eq!(sort.as_str().parse::<Sort>().unwrap(), sort);
             let json = serde_json::to_value(sort).unwrap();
             assert_eq!(json, sort.as_str(), "a theme sends the same name");
+            assert_eq!(serde_json::from_value::<Sort>(json).unwrap(), sort);
         }
-        assert_eq!("newest".parse::<Sort>().unwrap_err().to_string(), "no sort \"newest\"");
+        let unknown = serde_json::from_value::<Sort>("newest".into()).unwrap_err().to_string();
+        assert!(unknown.starts_with("unknown variant `newest`"), "{unknown}");
+    }
+
+    #[test]
+    fn a_system_chip_reads_as_its_id() {
+        let choice = |id: &str| serde_json::from_value::<SystemChoice>(id.into()).unwrap();
+        for filter in [GridFilter::InGame, GridFilter::Installed, GridFilter::Hidden] {
+            assert_eq!(choice(filter.as_str()), SystemChoice::Filter(filter));
+            assert_eq!(serde_json::to_value(SystemChoice::Filter(filter)).unwrap(), filter.as_str());
+        }
+        assert_eq!(choice("PS5"), SystemChoice::System("PS5".into()));
+        assert_eq!(serde_json::to_value(SystemChoice::System("PS5".into())).unwrap(), "PS5");
     }
 
     #[test]
     fn the_filter_chips_turn_on_and_off_and_none_clears_them() {
         let mut query = GridQuery::catalog();
-        query.set_system(Some("PS5".into()));
-        query.set_system(Some(INGAME_FILTER.into()));
-        query.set_system(Some(HIDDEN_FILTER.into()));
+        query.set_system(Some(SystemChoice::System("PS5".into())));
+        query.set_system(Some(SystemChoice::Filter(GridFilter::InGame)));
+        query.set_system(Some(SystemChoice::Filter(GridFilter::Hidden)));
         assert_eq!((query.system.as_deref(), query.ingame, query.hidden), (Some("PS5"), true, true));
-        query.set_system(Some(INGAME_FILTER.into()));
+        query.set_system(Some(SystemChoice::Filter(GridFilter::InGame)));
         assert!(!query.ingame, "a second press turns it off");
         query.set_system(None);
         assert_eq!(query, GridQuery::catalog());
@@ -543,10 +573,10 @@ mod tests {
         );
         let mut query = GridQuery::catalog();
         assert_eq!(keys(&library, &query), ["a"]);
-        query.set_system(Some(HIDDEN_FILTER.into()));
+        query.set_system(Some(SystemChoice::Filter(GridFilter::Hidden)));
         assert_eq!(keys(&library, &query), ["b"]);
         let chips = over(&library, &PlayTimes::default(), |data| query.games(data).systems);
-        let hidden = chips.iter().find(|c| c.id == HIDDEN_FILTER).expect("the Hidden chip");
+        let hidden = chips.iter().find(|c| c.id == GridFilter::Hidden.as_str()).expect("the Hidden chip");
         assert_eq!((hidden.count, hidden.on), (1, true));
     }
 

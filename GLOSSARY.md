@@ -108,6 +108,9 @@ through an `InstallJob`.
 game as its plugin lists it, its badges, its details, a store's metadata, and for an installed
 game, the catalog's offer it is and that offer's cover. The library subsystem holds one per game.
 
+**Grid filter** (`GridFilter`): a filter the player turns on or off among a grid's systems:
+"In-game" (`ingame`), "Installed" (`installed`) or "Hidden" (`hidden`).
+
 **Grid query** (`GridQuery`): a Library or Catalog grid's search, filters, sort and pages, and
 the games that answer it. Its sort is a `Sort`: `title`, `played`, `size`, `smallest`, `rating`,
 `release`, `compat` or `added`.
@@ -229,6 +232,9 @@ alone, with no lock and no I/O.
 sends it commands, reads its snapshot and turns its events into work. The torrents, the game
 installs, the library, the preferences, the running games, the notices, the VPN setting and
 the launcher's update are subsystems.
+
+**System choice** (`SystemChoice`): a press on a grid's system chip, as `LibrarySystem` and
+`CatalogSystem` carry it: a system, such as `PS5`, or a grid filter. It reads as the chip's id.
 
 **Test run**: a new build runs once with `--help` before it becomes current. A build that fails
 it is removed.

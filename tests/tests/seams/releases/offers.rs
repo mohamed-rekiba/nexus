@@ -31,7 +31,7 @@ async fn the_catalog_lists_one_game_per_title_id_newest_first_with_its_badges() 
     assert_eq!(t.core.view().home.library.query, "", "the Library keeps its own search");
 
     t.core.dispatch(Command::CatalogSearch(String::new())).await.unwrap();
-    t.core.dispatch(Command::CatalogSort("title".into())).await.unwrap();
+    t.core.dispatch(Command::CatalogSort(nexus_core::Sort::Title)).await.unwrap();
     let titles: Vec<String> = t.core.view().catalog.games.games.iter().map(|c| c.title.clone()).collect();
     assert_eq!(titles, ["Alpha", "Quest", "Racer"]);
 }

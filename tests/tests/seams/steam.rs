@@ -370,7 +370,11 @@ async fn the_catalog_shows_the_player_s_steam_library_with_hidden_games_under_hi
     let chips: Vec<_> = s.test.core.view().catalog.games.systems.into_iter().map(|f| f.label).collect();
     assert!(chips.contains(&"Steam".to_owned()), "{chips:?}");
 
-    s.test.core.dispatch(Command::CatalogSystem(Some("hidden".into()))).await.unwrap();
+    s.test
+        .core
+        .dispatch(Command::CatalogSystem(Some(nexus_core::SystemChoice::Filter(nexus_core::GridFilter::Hidden))))
+        .await
+        .unwrap();
     assert_eq!(catalog(&s), [("Steam app 2500".to_owned(), vec![])], "Hidden shows it, by its number");
 }
 

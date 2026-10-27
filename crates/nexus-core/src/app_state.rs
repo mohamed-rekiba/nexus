@@ -124,4 +124,12 @@ impl AppState {
             disks: Default::default(),
         }
     }
+
+    /// The search, filters and sort of `grid`.
+    pub fn grid_view(&mut self, grid: Grid) -> &mut GridQuery {
+        match grid {
+            Grid::Library => &mut self.library_view,
+            Grid::Catalog => &mut self.catalog_view,
+        }
+    }
 }

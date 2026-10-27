@@ -6,7 +6,7 @@ use nexus_api::{Capability, GameKey, PluginKind};
 
 use crate::app::{Core, Grid, Route};
 use crate::changes::Area;
-use crate::grid_query::{GRID_PAGE, GridQuery, Sort};
+use crate::grid_query::{GRID_PAGE, GridQuery};
 use crate::library::DetailState;
 use crate::{CoreError, CoreResult, Kernel};
 
@@ -80,35 +80,31 @@ pub(crate) async fn search(core: &Core, text: String) -> CoreResult<()> {
     if !core.library().has_catalogs() {
         crate::catalog_reads::refresh_releases(core).await;
     }
-    set_grid(core, true, |v| v.query = text)?;
+    set_grid(core, Grid::Catalog, |v| v.query = text)?;
     push(core, Route::Catalog);
     Ok(())
 }
 
 /// Changes the Library's or the Catalog's view, and goes back to its first page.
-pub(crate) fn set_grid(core: &Core, catalog: bool, change: impl FnOnce(&mut GridQuery)) -> CoreResult<()> {
+pub(crate) fn set_grid(core: &Core, grid: Grid, change: impl FnOnce(&mut GridQuery)) -> CoreResult<()> {
     {
         let mut state = core.state();
-        let view = if catalog { &mut state.catalog_view } else { &mut state.library_view };
+        let view = state.grid_view(grid);
         change(view);
         view.shown = GRID_PAGE;
     }
     core.changed(Area::Navigation);
-    if catalog {
+    if grid == Grid::Catalog {
         crate::catalog_reads::describe_catalog_page(core);
     }
     Ok(())
 }
 
 /// The next page of the Library or the Catalog.
-pub(crate) fn more(core: &Core, catalog: bool) -> CoreResult<()> {
-    {
-        let mut state = core.state();
-        let view = if catalog { &mut state.catalog_view } else { &mut state.library_view };
-        view.shown += GRID_PAGE;
-    }
+pub(crate) fn more(core: &Core, grid: Grid) -> CoreResult<()> {
+    core.state().grid_view(grid).shown += GRID_PAGE;
     core.changed(Area::Navigation);
-    if catalog {
+    if grid == Grid::Catalog {
         crate::catalog_reads::describe_catalog_page(core);
     }
     Ok(())
@@ -184,12 +180,6 @@ pub(crate) async fn select_game(core: &Core, game: GameKey) -> CoreResult<()> {
 pub(crate) async fn open_game_anew(core: &Core, game: GameKey) -> CoreResult<()> {
     core.torrents().set_download_error(None);
     open_game(core, game).await
-}
-
-/// Sorts the Library or the Catalog: one of the sorts they know.
-pub(crate) fn sort(core: &Core, catalog: bool, sort: String) -> CoreResult<()> {
-    let sort: Sort = sort.parse()?;
-    set_grid(core, catalog, |v| v.sort = sort)
 }
 
 /// How many columns a grid shows.

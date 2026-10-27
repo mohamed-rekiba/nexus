@@ -65,15 +65,18 @@ async fn the_library_has_no_in_game_filter_and_sorts_by_rating_and_release() {
     // The player's own result: Beta reaches gameplay. The Library has no "In-game" chip, and
     // the filter, if it was on before, doesn't hide the player's games.
     t.core.kernel().config().set(&["app", "results", "emu-a:G1"], "ingame".into()).unwrap();
-    t.core.dispatch(Command::LibrarySystem(Some(nexus_core::INGAME_FILTER.into()))).await.unwrap();
+    t.core
+        .dispatch(Command::LibrarySystem(Some(nexus_core::SystemChoice::Filter(nexus_core::GridFilter::InGame))))
+        .await
+        .unwrap();
     let chips = t.core.view().home.library.systems;
-    assert!(chips.iter().all(|f| f.id != nexus_core::INGAME_FILTER), "{chips:?}");
+    assert!(chips.iter().all(|f| f.id != nexus_core::GridFilter::InGame.as_str()), "{chips:?}");
     assert_eq!(titles(&t).len(), 3);
 
     // Top rated first; a game the store doesn't rate goes last.
-    t.core.dispatch(Command::LibrarySort("rating".into())).await.unwrap();
+    t.core.dispatch(Command::LibrarySort(nexus_core::Sort::Rating)).await.unwrap();
     assert_eq!(titles(&t), ["Beta", "Alpha", "Gamma"]);
-    t.core.dispatch(Command::LibrarySort("compat".into())).await.unwrap();
+    t.core.dispatch(Command::LibrarySort(nexus_core::Sort::Compat)).await.unwrap();
     assert_eq!(titles(&t)[0], "Beta", "the game that runs best first");
 }
 

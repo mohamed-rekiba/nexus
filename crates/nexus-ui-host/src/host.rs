@@ -685,7 +685,7 @@ pub fn vm_text(instance: &ComponentInstance, name: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use nexus_core::{Command, LibraryCmd, SessionCmd, TorrentAction, TorrentCmd};
+    use nexus_core::{Command, GridFilter, LibraryCmd, SessionCmd, Sort, SystemChoice, TorrentAction, TorrentCmd};
 
     use super::command;
 
@@ -693,6 +693,12 @@ mod tests {
     fn a_command_reads_by_its_name_and_its_json_args() {
         assert_eq!(command("Back", ""), Ok(Command::Back));
         assert_eq!(command("LibrarySystem", "null"), Ok(Command::LibrarySystem(None)));
+        // The chips' ids and the sorts' names, as the default theme sends them.
+        let ps5 = Some(SystemChoice::System("PS5".into()));
+        assert_eq!(command("LibrarySystem", "\"PS5\""), Ok(Command::LibrarySystem(ps5)));
+        let ingame = Some(SystemChoice::Filter(GridFilter::InGame));
+        assert_eq!(command("CatalogSystem", "\"ingame\""), Ok(Command::CatalogSystem(ingame)));
+        assert_eq!(command("CatalogSort", "\"played\""), Ok(Command::CatalogSort(Sort::Played)));
         assert_eq!(command("Library", "\"Refresh\""), Ok(Command::Library(LibraryCmd::Refresh)));
         let key: nexus_api::GameKey = "emu:astro".parse().unwrap();
         assert_eq!(command("Session", r#"{"Launch":"emu:astro"}"#), Ok(Command::Session(SessionCmd::Launch(key))));

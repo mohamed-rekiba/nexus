@@ -147,21 +147,21 @@ pub enum Command {
     ReportResult(Option<String>),
     /// The Library's search text.
     LibrarySearch(String),
-    /// The Library's system (a platform label, such as `PS5`), or every system. `INGAME_FILTER`
-    /// turns the "In-game" filter on or off instead; `None` clears both.
-    LibrarySystem(Option<String>),
+    /// The Library's system (a platform label, such as `PS5`), or a filter to turn on or off;
+    /// `None` clears the system and every filter.
+    LibrarySystem(Option<crate::SystemChoice>),
     /// The Library's genre, or every genre.
     LibraryGenre(Option<String>),
     /// How the Library is sorted: `title`, `played`, `size` (largest first), `smallest`,
     /// `rating`, `release` (newest first), `compat` or `added`.
-    LibrarySort(String),
+    LibrarySort(crate::Sort),
     /// The Library shows its next page of games ([`crate::GRID_PAGE`] more).
     LibraryMore,
     /// The Catalog's search text, system, genre and sort, as the Library's.
     CatalogSearch(String),
-    CatalogSystem(Option<String>),
+    CatalogSystem(Option<crate::SystemChoice>),
     CatalogGenre(Option<String>),
-    CatalogSort(String),
+    CatalogSort(crate::Sort),
     /// The Catalog shows its next page of games.
     CatalogMore,
     /// How many columns a grid shows, so the core knows the games above and below the
@@ -540,16 +540,16 @@ impl Core {
             Command::Select(game) => navigation::select_game(self, game).await,
             Command::OpenGame(game) => navigation::open_game_anew(self, game).await,
             Command::Search(text) => navigation::search(self, text).await,
-            Command::LibrarySearch(text) => navigation::set_grid(self, false, |v| v.query = text),
-            Command::LibrarySystem(system) => navigation::set_grid(self, false, |v| v.set_system(system)),
-            Command::LibraryGenre(genre) => navigation::set_grid(self, false, |v| v.genre = genre),
-            Command::LibrarySort(sort) => navigation::sort(self, false, sort),
-            Command::LibraryMore => navigation::more(self, false),
-            Command::CatalogSearch(text) => navigation::set_grid(self, true, |v| v.query = text),
-            Command::CatalogSystem(system) => navigation::set_grid(self, true, |v| v.set_system(system)),
-            Command::CatalogGenre(genre) => navigation::set_grid(self, true, |v| v.genre = genre),
-            Command::CatalogSort(sort) => navigation::sort(self, true, sort),
-            Command::CatalogMore => navigation::more(self, true),
+            Command::LibrarySearch(text) => navigation::set_grid(self, Grid::Library, |v| v.query = text),
+            Command::LibrarySystem(system) => navigation::set_grid(self, Grid::Library, |v| v.set_system(system)),
+            Command::LibraryGenre(genre) => navigation::set_grid(self, Grid::Library, |v| v.genre = genre),
+            Command::LibrarySort(sort) => navigation::set_grid(self, Grid::Library, |v| v.sort = sort),
+            Command::LibraryMore => navigation::more(self, Grid::Library),
+            Command::CatalogSearch(text) => navigation::set_grid(self, Grid::Catalog, |v| v.query = text),
+            Command::CatalogSystem(system) => navigation::set_grid(self, Grid::Catalog, |v| v.set_system(system)),
+            Command::CatalogGenre(genre) => navigation::set_grid(self, Grid::Catalog, |v| v.genre = genre),
+            Command::CatalogSort(sort) => navigation::set_grid(self, Grid::Catalog, |v| v.sort = sort),
+            Command::CatalogMore => navigation::more(self, Grid::Catalog),
             Command::GridColumns { grid, columns } => navigation::set_columns(self, grid, columns),
             Command::Library(crate::LibraryCmd::Refresh) => library_reads::refresh_library(self).await,
             Command::Library(command) => self.library().handle(command),

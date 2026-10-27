@@ -74,10 +74,13 @@ async fn an_installed_game_matches_its_offer_by_name_on_the_same_console_and_has
         "the PS4 game of the same name is another game"
     );
     let systems = t.core.view().catalog.games.systems;
-    let chip = systems.iter().find(|s| s.id == nexus_core::INSTALLED_FILTER).expect("an Installed chip");
+    let chip = systems.iter().find(|s| s.id == nexus_core::GridFilter::Installed.as_str()).expect("an Installed chip");
     assert_eq!((chip.label.as_str(), chip.count, chip.on), ("Installed", 1, false));
 
-    t.core.dispatch(Command::CatalogSystem(Some(nexus_core::INSTALLED_FILTER.into()))).await.unwrap();
+    t.core
+        .dispatch(Command::CatalogSystem(Some(nexus_core::SystemChoice::Filter(nexus_core::GridFilter::Installed))))
+        .await
+        .unwrap();
     let shown: Vec<(String, String)> = cards(&t).into_iter().map(|(title, platform, _)| (title, platform)).collect();
     assert_eq!(shown, [("Alpha".to_owned(), "PS5".to_owned())], "only the installed game");
     t.core.dispatch(Command::CatalogSystem(None)).await.unwrap();
@@ -276,13 +279,13 @@ async fn the_catalog_sorts_by_size_smallest_first_by_compatibility_and_by_the_ca
     drift.as_object_mut().unwrap().remove("size_bytes");
     let t = offering("emu-kyty", "PS5", serde_json::json!([astro, bolt, comet, drift]), false).await;
 
-    t.core.dispatch(Command::CatalogSort("smallest".into())).await.unwrap();
+    t.core.dispatch(Command::CatalogSort(nexus_core::Sort::Smallest)).await.unwrap();
     assert_eq!(titles(&t), ["Bolt", "Comet", "Astro", "Drift"], "smallest first, no size last");
-    t.core.dispatch(Command::CatalogSort("size".into())).await.unwrap();
+    t.core.dispatch(Command::CatalogSort(nexus_core::Sort::Size)).await.unwrap();
     assert_eq!(titles(&t), ["Astro", "Comet", "Bolt", "Drift"], "largest first");
-    t.core.dispatch(Command::CatalogSort("release".into())).await.unwrap();
+    t.core.dispatch(Command::CatalogSort(nexus_core::Sort::Release)).await.unwrap();
     assert_eq!(titles(&t), ["Bolt", "Comet", "Astro", "Drift"], "newest release date first, a year counts");
-    t.core.dispatch(Command::CatalogSort("compat".into())).await.unwrap();
+    t.core.dispatch(Command::CatalogSort(nexus_core::Sort::Compat)).await.unwrap();
     assert_eq!(t.core.view().catalog.games.sort, "compat");
 }
 
@@ -432,8 +435,9 @@ async fn a_hidden_game_leaves_the_catalog_and_the_hidden_filter_shows_it() {
     catalogs_fetched(&t.core).await;
     let titles =
         |t: &TestCore| -> Vec<String> { t.core.view().catalog.games.games.iter().map(|g| g.title.clone()).collect() };
-    let hidden_chip =
-        |t: &TestCore| t.core.view().catalog.games.systems.into_iter().find(|s| s.id == nexus_core::HIDDEN_FILTER);
+    let hidden_chip = |t: &TestCore| {
+        t.core.view().catalog.games.systems.into_iter().find(|s| s.id == nexus_core::GridFilter::Hidden.as_str())
+    };
     assert_eq!(titles(&t), ["Astro", "Bolt", "Comet"]);
     assert!(hidden_chip(&t).is_none(), "no Hidden chip while nothing is hidden");
     let bolt: nexus_api::GameKey =
@@ -448,7 +452,10 @@ async fn a_hidden_game_leaves_the_catalog_and_the_hidden_filter_shows_it() {
     assert_eq!((chip.label.as_str(), chip.count, chip.on), ("Hidden", 1, false));
     assert_eq!(t.core.kernel().config().get(&["app", "hidden_games"]), serde_json::json!([bolt.to_string()]));
 
-    t.core.dispatch(Command::CatalogSystem(Some(nexus_core::HIDDEN_FILTER.into()))).await.unwrap();
+    t.core
+        .dispatch(Command::CatalogSystem(Some(nexus_core::SystemChoice::Filter(nexus_core::GridFilter::Hidden))))
+        .await
+        .unwrap();
     assert_eq!(titles(&t), ["Bolt"], "the Hidden chip shows only the hidden games");
     assert!(t.core.view().catalog.games.games[0].hidden);
 
