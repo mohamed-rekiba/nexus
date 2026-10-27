@@ -151,10 +151,8 @@ pub enum Command {
     FinishWelcome,
     /// The monitor the launcher goes on, by name; `None` for the one it is on.
     SetMonitor(Option<String>),
-    /// Reads the newest release of the launcher (`app.update_repo`).
-    CheckLauncherUpdate,
-    /// Downloads the newer launcher the check found, for the next start.
-    DownloadLauncherUpdate,
+    /// The launcher's own update: look for one, or download it.
+    LauncherUpdate(crate::LauncherUpdateCmd),
     /// "Rate how it runs": asks "How far did it get?" for this game.
     AskResult(GameKey),
     /// The player's answer to "How far did it get?" after playing: `ingame`, `menus`,
@@ -422,8 +420,6 @@ pub(crate) struct AppState {
     pub result_prompt: Option<(GameKey, Option<String>)>,
     /// This PC, once the check ran.
     pub hardware: Option<crate::Specs>,
-    /// The launcher's own update.
-    pub launcher_update: crate::launcher_update::UpdateState,
     /// The machine's settings, from the system plugins.
     pub system: crate::system::SystemState,
     /// Why the system refused the last change to "Start at login".
@@ -488,6 +484,7 @@ pub(crate) struct Inner {
     /// The catalogs' downloads.
     pub torrents: crate::torrents::TorrentsSubsystem,
     pub notices: crate::notices::NoticesSubsystem,
+    pub launcher_update: crate::launcher_update::LauncherUpdateSubsystem,
     /// Held while the catalogs are read: see [`Core::refresh_releases`].
     pub reading_catalogs: tokio::sync::Mutex<()>,
 }
@@ -524,7 +521,6 @@ impl Core {
             catalog_view: LibraryView::catalog(),
             result_prompt: None,
             hardware: None,
-            launcher_update: crate::launcher_update::UpdateState::Idle,
             system: Default::default(),
             login_error: None,
             describing: None,
@@ -568,6 +564,18 @@ impl Core {
             );
             let notices =
                 crate::notices::NoticesSubsystem::new(Notifier::new(changes.clone(), kernel.events().clone()));
+            let launcher_update = crate::launcher_update::LauncherUpdateSubsystem::new(
+                crate::launcher_update::LauncherUpdatePorts {
+                    http: kernel.http().clone(),
+                    desktop: kernel.desktop().clone(),
+                },
+                crate::launcher_update::ThisLauncher {
+                    data_dir: kernel.host().data_dir.clone(),
+                    install: kernel.host().install,
+                },
+                kernel.config().clone(),
+                Notifier::new(changes.clone(), kernel.events().clone()),
+            );
             Inner {
                 kernel,
                 state: Mutex::new(state),
@@ -578,6 +586,7 @@ impl Core {
                 changes,
                 torrents,
                 notices,
+                launcher_update,
                 reading_catalogs: tokio::sync::Mutex::new(()),
             }
         });
@@ -648,6 +657,11 @@ impl Core {
     /// The notices.
     pub(crate) fn notices(&self) -> &crate::notices::NoticesSubsystem {
         &self.inner.notices
+    }
+
+    /// The launcher's own update.
+    pub(crate) fn launcher_update(&self) -> &crate::launcher_update::LauncherUpdateSubsystem {
+        &self.inner.launcher_update
     }
 
     pub(crate) fn state(&self) -> MutexGuard<'_, AppState> {
@@ -942,16 +956,10 @@ impl Core {
                 None => Ok(()),
             },
             Command::Notice(command) => self.notices().handle(command),
-            Command::CheckLauncherUpdate => {
-                use crate::launcher_update::{UpdateState, check};
-                self.state().launcher_update = UpdateState::Checking;
-                self.changed(Area::LauncherUpdate);
-                let found = check(self, env!("CARGO_PKG_VERSION"), self.kernel().host().install).await;
+            Command::LauncherUpdate(crate::LauncherUpdateCmd::Check) => {
+                let found = self.launcher_update().check().await;
                 // Nexus OS brings the new launcher with its next update: look for that now.
-                let with_system = matches!(found, UpdateState::WithSystem { .. });
-                self.state().launcher_update = found;
-                self.changed(Area::LauncherUpdate);
-                if with_system {
+                if matches!(found, crate::launcher_update::UpdateState::WithSystem { .. }) {
                     let core = self.clone();
                     tokio::spawn(async move {
                         let _ = crate::system::run(&core, crate::system::SystemCommand::CheckOsUpdate).await;
@@ -959,18 +967,7 @@ impl Core {
                 }
                 Ok(())
             }
-            Command::DownloadLauncherUpdate => {
-                use crate::launcher_update::{UpdateState, update};
-                let UpdateState::Available { version, asset } = self.state().launcher_update.clone() else {
-                    return Err(CoreError::Invalid("no launcher update to download".into()));
-                };
-                self.state().launcher_update = UpdateState::Downloading { version: version.clone() };
-                self.changed(Area::LauncherUpdate);
-                let done = update(self, &version, &asset, self.kernel().host().install).await;
-                self.state().launcher_update = done.unwrap_or_else(|e| UpdateState::Failed(e.to_string()));
-                self.changed(Area::LauncherUpdate);
-                Ok(())
-            }
+            Command::LauncherUpdate(command) => self.launcher_update().handle(command).await,
             Command::CheckUpdates => {
                 self.check_updates().await;
                 Ok(())

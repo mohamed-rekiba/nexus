@@ -691,6 +691,7 @@ pub(crate) fn build(core: &Core) -> AppView {
     let statuses = kernel.statuses();
     let torrents = core.torrents().snapshot();
     let notices = core.notices().snapshot();
+    let launcher_update = core.launcher_update().snapshot();
     let mut state = core.state();
 
     let route = state.nav.last().cloned().unwrap_or(Route::Home);
@@ -729,7 +730,7 @@ pub(crate) fn build(core: &Core) -> AppView {
         detail: detail_game.and_then(|key| detail_vm(core, kernel, &state, &torrents, &key)),
         catalog,
         downloads: downloads_vm(kernel, jobs, &state, &torrents),
-        settings: settings_vm(core, &state),
+        settings: settings_vm(core, &state, &launcher_update),
         emulators: emulators_vm(kernel, &state, &statuses),
         plugin_page: match &route {
             Route::Plugin(plugin) => plugin_page_vm(kernel, &state, &statuses, plugin),
@@ -1592,12 +1593,11 @@ fn system_vm(kernel: &crate::Kernel, state: &AppState) -> nexus_ui_api::SystemVm
     }
 }
 
-fn launcher_update_vm(core: &Core, update: &crate::launcher_update::UpdateState) -> nexus_ui_api::LauncherUpdateVm {
-    use crate::launcher_update::{UpdateState, repo};
-    let current = env!("CARGO_PKG_VERSION").to_owned();
-    let off = repo(core).is_none();
-    let (state, version, text) = match update {
-        _ if off => ("off", String::new(), "Updates are off: no release repo is set".to_owned()),
+fn launcher_update_vm(update: &crate::launcher_update::LauncherUpdateSnapshot) -> nexus_ui_api::LauncherUpdateVm {
+    use crate::launcher_update::UpdateState;
+    let current = update.current.to_owned();
+    let (state, version, text) = match &update.state {
+        _ if update.off => ("off", String::new(), "Updates are off: no release repo is set".to_owned()),
         UpdateState::Off => ("off", String::new(), "Updates are off: no release repo is set".to_owned()),
         UpdateState::Idle => ("idle", String::new(), "Check for a newer Nexus".to_owned()),
         UpdateState::Checking => ("checking", String::new(), "Checking…".to_owned()),
@@ -1619,11 +1619,14 @@ fn launcher_update_vm(core: &Core, update: &crate::launcher_update::UpdateState)
         }
         UpdateState::Failed(why) => ("failed", String::new(), format!("Couldn't update: {why}")),
     };
-    let method = core.kernel().host().install.method().to_owned();
-    nexus_ui_api::LauncherUpdateVm { state: state.into(), current, version, text, method }
+    nexus_ui_api::LauncherUpdateVm { state: state.into(), current, version, text, method: update.method.to_owned() }
 }
 
-fn settings_vm(core: &Core, state: &AppState) -> SettingsVm {
+fn settings_vm(
+    core: &Core,
+    state: &AppState,
+    launcher_update: &crate::launcher_update::LauncherUpdateSnapshot,
+) -> SettingsVm {
     let kernel = core.kernel();
     let manifests: Vec<_> = kernel
         .of_kind(PluginKind::Emulator)
@@ -1655,7 +1658,7 @@ fn settings_vm(core: &Core, state: &AppState) -> SettingsVm {
         None => Vec::new(),
     };
     SettingsVm {
-        launcher_update: launcher_update_vm(core, &state.launcher_update),
+        launcher_update: launcher_update_vm(launcher_update),
         hardware,
         panels: state.settings.clone(),
         themes,

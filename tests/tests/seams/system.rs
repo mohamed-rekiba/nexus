@@ -306,7 +306,7 @@ async fn on_nexus_os_a_staged_update_says_restart_and_a_newer_launcher_asks_the_
     assert!(vm.os_update_text.contains("Restart") && vm.os_update_text.contains("2026.10.24"), "{}", vm.os_update_text);
 
     t.core.kernel().config().set(&["app", "update_repo"], "owner/nexus".into()).unwrap();
-    t.core.dispatch(Command::CheckLauncherUpdate).await.unwrap();
+    t.core.dispatch(Command::LauncherUpdate(nexus_core::LauncherUpdateCmd::Check)).await.unwrap();
     // The check runs in a task of its own.
     t.clock.run_until_idle().await;
     assert_eq!(system.read(|m| m.os_checks), 1, "the OS looks for the update that brings it");

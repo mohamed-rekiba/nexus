@@ -48,6 +48,7 @@ pub use config::ConfigService;
 pub use downloads::{Job, JobPhase};
 pub use error::{CoreError, CoreResult, LoadError};
 pub use kernel::{BootReport, HostConfig, Kernel, KernelBuilder, Loader, Origin, PluginInfo, PluginStatus, Rejection};
+pub use launcher_update::LauncherUpdateCmd;
 pub use notices::NoticeCmd;
 pub use ports::{ArchiveError, Escape};
 pub use ports::{

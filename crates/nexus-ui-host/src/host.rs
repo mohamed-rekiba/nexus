@@ -767,8 +767,14 @@ impl ThemeHost {
             Box::new(move |a| game(a, 0).and_then(|g| core(Command::Navigate(Route::GameSettings(g))))),
         )?;
         callback("restart", Box::new(move |_| Some(UiRequest::Restart)))?;
-        callback("check-launcher-update", Box::new(move |_| core(Command::CheckLauncherUpdate)))?;
-        callback("download-launcher-update", Box::new(move |_| core(Command::DownloadLauncherUpdate)))?;
+        callback(
+            "check-launcher-update",
+            Box::new(move |_| core(Command::LauncherUpdate(nexus_core::LauncherUpdateCmd::Check))),
+        )?;
+        callback(
+            "download-launcher-update",
+            Box::new(move |_| core(Command::LauncherUpdate(nexus_core::LauncherUpdateCmd::Download))),
+        )?;
         let system = |c: SystemCommand| Some(UiRequest::Core(Command::System(c)));
         callback("refresh-system", Box::new(move |_| system(SystemCommand::Refresh)))?;
         callback("scan-wifi", Box::new(move |_| system(SystemCommand::ScanWifi)))?;
