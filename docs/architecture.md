@@ -16,7 +16,7 @@ crate can't use what it doesn't depend on. Inside the binary a small kernel load
 four kinds: emulators, services, themes and system plugins.
 
 ```
-plugins (emulators, services)  ──▶ nexus-api
+plugins with code              ──▶ nexus-api
 themes (theme.toml + .slint)   ──▶ nexus-ui-api ──▶ nexus-api
 nexus-core                     ──▶ nexus-api, nexus-ui-api
 nexus-ui-host (Slint)          ──▶ nexus-core, nexus-ui-api
@@ -29,22 +29,24 @@ nexus-app (the binary)         ──▶ nexus-ui-host, nexus-core, every built-
   VPNs, libmpv, gamepads, audio). The core reaches them through ports (see [Ports](#ports)).
 - The workspace denies `unsafe_code`. A few modules of `nexus-app` allow it, each with its
   reason on the same line: `clock.rs`, `desktop.rs` (Win32), `disk.rs`, `gamepad.rs`,
-  `gpu_probe.rs`, `libarchive.rs`, `processes.rs` (Windows), `trailer.rs` and `vpn.rs`.
+  `gpu_probe.rs`, `libarchive.rs`, `processes.rs` (Windows) and `trailer.rs`. So does the
+  system plugin's `vpn.rs` (`getifaddrs`).
 
 ### The crates
 
 | Crate | Owns |
 | --- | --- |
 | `crates/nexus-api` | The plugin API. The plugin traits, `PluginManifest`, `Capability`, `Provided`, `PluginContext` and its facades (`ConfigStore`, `Storage`, `Folders`, `Programs`, `HttpClient`, `Logger`, `EventSink`, `ServiceRegistry`), `RelPath` and `HostPath`, plans (`DownloadPlan`, `LaunchSpec`), slots, `Event`, `VpnGate`. Semver-versioned: a manifest's `host_api` must match `API_VERSION`, which is set by hand with the API, not from Nexus's version. |
-| `crates/nexus-core` | The kernel and the app. Plugin lifecycle and registry (`Kernel`), the event bus (`EventBus`), settings (`ConfigService`), the ports bundle (`Ports`), the app router and its commands (`Core`, `Command`), the state no subsystem owns (`AppState`), the subsystems (`torrents/`, `game_installs/`, `library/`, `sessions/`) and the flows over them, view building (`view.rs`), HTTP downloads, unpacking, launches, VPN rules, catalogs, "This PC", the launcher update, and the port traits. |
+| `crates/nexus-core` | The kernel and the app. Plugin lifecycle and registry (`Kernel`), the event bus (`EventBus`), settings (`ConfigService`), the ports bundle (`Ports`), the app router and its commands (`Core`, `Command`), the state no subsystem owns (`AppState`), the subsystems (`torrents/`, `game_installs/`, `library/`, `sessions/`, `preferences.rs`, `notices.rs`, `vpn.rs`, `launcher_update.rs`) and the flows over them, view building (`view.rs`), HTTP downloads, unpacking, launches, VPN rules, catalogs, "This PC", the launcher update, and the port traits. |
 | `crates/nexus-ui-api` | The theme contract. View models (`vm.rs`: `AppView` and the rest), the theme manifest (`ThemeManifest`), design tokens, and `contract/types.slint` with the `Vm` and `Host` globals. No toolkit code. |
 | `crates/nexus-ui-host` | `ThemeSet` (finds themes, resolves `extends`), `ThemeHost`: compiles a theme with `slint-interpreter`, binds the view models, turns gamepad buttons into keys, and swaps themes. `AppShell` (`shell.rs`) owns the `ThemeHost` on the UI thread: it routes the theme's requests, coalesces renders, loads images (`loader.rs`) and runs the tick, through its `Platform` port. |
 | `crates/nexus-app` | The binary. The wiring (`main.rs`), the command line (`args.rs`), the launcher's update at startup (`update.rs`), the shell's platform (`platform.rs`), and the system adapters: `desktop.rs`, `processes.rs` (a running game's processes), `torrents.rs` (librqbit), `archives.rs` and `libarchive.rs`, `hardware.rs` and `gpu_probe.rs` (Vulkan), `trailer.rs` (libmpv), `gamepad.rs` (gilrs), `audio.rs` (rodio), `http.rs` (reqwest), `disk.rs`, `clock.rs`. |
-| `crates/nexus-testkit` | `FakeHost` (a real core over a temporary data folder), `FakeClock`, `StubPlugin`, fakes for every port, `FakePlatform` (the app shell's platform), `SpanRecorder`, `ThemeDriver` (drives a shown theme through its accessible labels and keys), `FakeCatalog`, `FakeStore`, `FakeService` and `FakeEmulator` (plugins built from a few choices), and `contract::emulator`, the capability contract checks. |
+| `crates/nexus-testkit` | `FakeHost` (a real core over a temporary data folder), `FakeClock`, `StubPlugin`, fakes for every port, `FakePlatform` (the app shell's platform), `SpanRecorder`, `ThemeDriver` (drives a shown theme through its accessible labels and keys), `FakeCatalog`, `FakeStore`, `FakeService` and `FakeEmulator` (plugins built from a few choices), `MemStorage` (a plugin's data folder in memory), and the contract checks: `contract::emulator` for the capabilities and `contract::archives` for the `Archives` adapters. |
 | `plugins/emulators/*` | `emu-kyty` (KytyPS5, PS5), `emu-shadps4` (shadPS4, PS4), `emu-pc` (PC games), `emu-steam` (the games Steam installed, Linux). |
 | `plugins/services/*` | `playstation-store` (store art and details) and `release-catalog` (the Catalog's releases). |
 | `plugins/themes/default` | The built-in theme, id `default`. A crate only so its files are embedded in the binary. |
-| `plugins/shared/emulator-kit` | Code the emulators share: GitHub releases, build folders, game scans, package readers, install jobs. A library, not a plugin. |
+| `plugins/system/host` | `system-host`, id `system` ("This PC"): the machine's network, VPNs, Bluetooth, sound, power and Nexus OS's updates and install. |
+| `plugins/shared/emulator-kit` | Code the emulators share. A console emulator describes itself and the kit runs the rest: a `Flavor` for its builds, which the `BuildManager` installs, updates and rolls back, and a `ConsoleSpec` for its games, compatibility list and page, which the `ConsoleEmulator` serves. Also game scans, package readers and install jobs. It reaches the host only through the narrow facades in `Host`. A library, not a plugin. |
 | `tests/` | The seam tests (see [Tests](#tests)). |
 
 A plugin's id, not its folder or crate, names its data folder and its saved settings. Moving
@@ -80,8 +82,9 @@ Host.command ───▶ UiRequest::Core(Command) ─▶ Core::dispatch ─▶ 
 
 1. A theme calls a `Host` callback. `Host.command(name, args)` carries a core `Command` as its
    variant's name and its payload as JSON; `ThemeHost::wire` reads it with `serde`, with no
-   code per command, into `UiRequest::Core`. The other callbacks are things only the app can do (`SwitchTheme`, `PlaySound`, `OpenUrl`,
-   `OpenPath`, `Quit`, `Restart`, `LogOut`, `Trailer`, `Render`). `AppShell::on_request`
+   code per command, into `UiRequest::Core`. The other callbacks are things only the app can
+   do (`SwitchTheme`, `PlaySound`, `OpenUrl`, `OpenPath`, `Quit`, `Restart`, `LogOut`,
+   `Trailer`, `Render`). `AppShell::on_request`
    carries it out: a command goes to the runtime, the rest to the `Platform`.
 2. `Core::dispatch` routes the command, one line per command, to the subsystem or the flow
    that owns it (see [Subsystems](#subsystems)). Each subsystem keeps its own state behind its
@@ -92,10 +95,11 @@ Host.command ───▶ UiRequest::Core(Command) ─▶ Core::dispatch ─▶ 
    emulator's builds, the Settings screen's panels, the machine's state, the stores' installs
    and the theme on screen. `Core::snapshot()` reads each subsystem once, then copies
    `AppState`.
-3. A change calls `Core::changed(area)`, or a subsystem's `Notifier`. It sends a `Change { area }` (the torrents, the
-   catalogs, the installs, …) to `Core::changes()`, a broadcast for the core and its tests, and
-   publishes `Event::StateChanged` on the `EventBus` (a `tokio::sync::broadcast` channel of
-   1024; a reader that falls behind skips the oldest). Plugins see neither the change nor its
+3. A change calls `Core::changed(area)`, or a subsystem's `Notifier`. It sends a
+   `Change { area }` (the torrents, the catalogs, the installs, …) to `Core::changes()`, a
+   broadcast for the core and its tests, and publishes `Event::StateChanged` on the
+   `EventBus` (a `tokio::sync::broadcast` channel of 1024; a reader that falls behind skips
+   the oldest). Plugins see neither the change nor its
    area.
 4. The app reads every event from `core.events()` and calls `AppShell::on_core_changed` for it,
    which asks for a render. An atomic flag keeps at most one event waiting on the UI thread.
@@ -103,8 +107,9 @@ Host.command ───▶ UiRequest::Core(Command) ─▶ Core::dispatch ─▶ 
    or image loads renders once. Each render starts loading the images it asks for.
 6. `ThemeHost::render` calls `Core::view`. It takes a `Snapshot` (`Core::snapshot()`) and
    runs `view::build` over it, which returns an `AppView`. `view::build` is pure: it takes no
-   lock and does no I/O, and reads only the snapshot (see [The view](#the-view)). `bind::vm_values` turns it into Slint values with one `serde` converter (`values.rs`):
-   each field is a `Vm` property or a struct field of the same name, kebab-cased, and the
+   lock and does no I/O, and reads only the snapshot (see [The view](#the-view)).
+   `bind::vm_values` turns it into Slint values with one `serde` converter (`values.rs`): each
+   field is a `Vm` property or a struct field of the same name, kebab-cased, and the
    fields `nexus_ui_api::mark` names become images, colors, `has-` flags or kept card lists.
    The display text (sizes, dates, durations) is built in the core, in `display.rs`, when the
    view is built.
@@ -151,11 +156,11 @@ fails with `LoadError::CapabilityMismatch`.
 | `catalog` | `Catalog` (the installed games) | all four emulators |
 | `downloader` | `Downloader` (plans emulator downloads) | KytyPS5, shadPS4 |
 | `installer` | `Installer` (installs builds) | KytyPS5, shadPS4 |
-| `configurator` | `Configurator` (settings schemas) | KytyPS5, shadPS4, release-catalog |
-| `launcher` | `Launcher` (`prepare` a `LaunchSpec`) | all three emulators |
+| `configurator` | `Configurator` (settings schemas) | KytyPS5, shadPS4, PC, release-catalog |
+| `launcher` | `Launcher` (`prepare` a `LaunchSpec`) | all four emulators |
 | `compatibility` | `Compatibility` | KytyPS5, shadPS4 |
-| `game_installer` | `GameInstaller` | all three emulators |
-| `slots` | `Slots` (badges, actions, sections as data) | all three emulators, release-catalog |
+| `game_installer` | `GameInstaller` | KytyPS5, shadPS4, PC |
+| `slots` | `Slots` (badges, actions, sections as data) | all four emulators, release-catalog |
 | `metadata` | `Metadata` (store art and details) | playstation-store, Steam |
 | `releases` | `Releases` (what the Catalog offers) | release-catalog, Steam |
 | `theme` | (`ThemePlugin::files`) | themes only |
@@ -246,10 +251,12 @@ plugin is on, there is no Catalog: `Route::Catalog` is refused and leaves the na
 - `storage`: the plugin's own folder, `plugins/<id>/` in the data folder (`DirStorage`). A
   `RelPath` is always relative, with no `.` or `..`, and a symlink that leads out is refused.
 - `folders`: named host folders (`HostFolders`). A manifest asks for names in
-  `permissions.filesystem` (`folder`, `write`, `default`, `default_on`, `title`, `help`). The
-  player maps each name to real folders, saved under `app.folders.<name>`; until then the
-  grant's default applies. A plugin addresses a file with a `HostPath` (folder name, root
-  index, `RelPath`). The host refuses names the manifest doesn't ask for, writes without
+  `permissions.filesystem` (`folder`, `write`, `default`, `default_on`, `title`, `help`,
+  `listed_in`). The player maps each name to real folders, saved under `app.folders.<name>`;
+  until then the grant's default applies, plus the folders a file in it lists (`listed_in`, a
+  `ListedFolders`, read by the host in `folders.rs`: Steam's `steamapps/libraryfolders.vdf`
+  names its libraries on other drives). A plugin addresses a file with a `HostPath` (folder
+  name, root index, `RelPath`). The host refuses names the manifest doesn't ask for, writes without
   `write = true`, and symlinks out. Two names are shared by every plugin and shown once in
   Settings: `games` (`~/Games`) and `packages` (`~/Downloads`).
 - `programs`: find and briefly run the programs `permissions.process` allows: a path pattern in
@@ -333,6 +340,11 @@ only the ports it names.
   `HostArchives` and `FakeArchives`.
 - Calls into `Windows`, `LoginSession`, `Opener`, `ProcessTree` and `Network` run in
   `spawn_blocking`.
+- `Clock` is the core's time: `now`, `sleep` and `interval`, and on `dyn Clock`, `sleep_until`
+  and `timeout`. Every timer of the core runs on it: the pollers, the game watcher, the
+  plugin calls' timeouts (`Kernel::guard`), the select settle, the prefetch, the update checks.
+  No other code in `nexus-core` uses `tokio::time`. `TokioSpawner` runs real programs, so it
+  keeps real time (`TokioClock`) whatever clock the kernel has.
 
 The app shell has a port of its own, `Platform` (`nexus-ui-host/src/shell.rs`): it runs work
 off the UI thread, wakes the shell, opens links and paths (the app's adapter uses
@@ -340,11 +352,6 @@ off the UI thread, wakes the shell, opens links and paths (the app's adapter use
 trailers, reads the local time, and asks the window system about monitors and focus. The app
 plugs in `platform::SystemPlatform`; tests plug in `FakePlatform`, which records each call and
 runs the work only when the test says.
-- `Clock` is the core's time: `now`, `sleep` and `interval`, and on `dyn Clock`, `sleep_until`
-  and `timeout`. Every timer of the core runs on it: the pollers, the game watcher, the
-  plugin calls' timeouts (`Kernel::guard`), the select settle, the prefetch, the update checks.
-  No other code in `nexus-core` uses `tokio::time`. `TokioSpawner` runs real programs, so it
-  keeps real time (`TokioClock`) whatever clock the kernel has.
 
 ## State that persists
 
@@ -375,13 +382,6 @@ subsystem's), `update_repo` (the launcher update's). The other one-value setting
 Downloaded games are not in the data folder: they go to the player's `packages` folders and are
 installed into the `games` folders.
 
-## Subsystems
-
-`Core` is splitting into subsystems, one for each area of its state. The torrents
-(`crates/nexus-core/src/torrents/mod.rs`), the game installs
-(`crates/nexus-core/src/game_installs/mod.rs`), the library
-(`crates/nexus-core/src/library/mod.rs`), the running games
-(`crates/nexus-core/src/sessions/mod.rs`, see [Launches and the game
 Which folder a download or an install uses is decided in one place,
 `HostFolders::place` (`crates/nexus-core/src/folders.rs`). A caller names a `Purpose`
 (`Download` or `Install`) and a console. `place` returns the console's folder: the folder the
@@ -395,9 +395,17 @@ through `Kernel::host_folders`, for the core. The download flow (`release_downlo
 console's folder. The view's snapshot and the disks read model ask `place` for the same folder,
 so the Game Hub and the download agree. The rules have unit tests in `folders.rs`.
 
-watcher](#launches-and-the-game-watcher)), the notices (`notices.rs`), the VPN setting
-(`vpn.rs`) and the launcher's update (`launcher_update.rs`) are subsystems; the other areas
-follow the same shape:
+## Subsystems
+
+`Core`'s state is split into subsystems, one for each area. The torrents
+(`crates/nexus-core/src/torrents/mod.rs`), the game installs
+(`crates/nexus-core/src/game_installs/mod.rs`), the library
+(`crates/nexus-core/src/library/mod.rs`), the running games
+(`crates/nexus-core/src/sessions/mod.rs`, see [Launches and the game
+watcher](#launches-and-the-game-watcher)), the preferences (`preferences.rs`), the notices
+(`notices.rs`), the VPN setting (`vpn.rs`) and the launcher's update (`launcher_update.rs`) are
+the subsystems. What none of them owns stays in `AppState`, which is not a subsystem. Each
+subsystem has the same shape:
 
 - A subsystem owns its state behind its own lock, and its saved records (the torrents:
   `app.torrents` and `app.seed_downloads`). Nothing else takes that lock or writes those keys.
@@ -407,9 +415,10 @@ follow the same shape:
   (`downloads.rs`) takes its ports the same way, with the plugins' permissions read once.
 - The core sends it commands (`handle(TorrentCmd)`) and reads it whole (`snapshot()`). A read
   changes nothing. `Command` nests each subsystem's commands: `Command::Torrent(TorrentCmd)`,
-  `Command::Notice(NoticeCmd)`, `Command::Vpn(VpnCmd)`,
-  `Command::LauncherUpdate(LauncherUpdateCmd)`. A subsystem's command type derives `serde`'s
-  `Serialize` and `Deserialize`.
+  `Command::GameInstall(GameInstallCmd)`, `Command::Library(LibraryCmd)`,
+  `Command::Session(SessionCmd)`, `Command::Pref(Pref, Value)`, `Command::Notice(NoticeCmd)`,
+  `Command::Vpn(VpnCmd)`, `Command::LauncherUpdate(LauncherUpdateCmd)`. A subsystem's command
+  type derives `serde`'s `Serialize` and `Deserialize`.
 - It publishes its changes with its area on the core's one change signal, through a
   `Notifier`. `Core::changes()` is the merge of every subsystem's changes.
 - What other areas must do about it goes out as events (`TorrentEvent`), which the core turns
@@ -449,8 +458,8 @@ of its range, and a value of the wrong type is refused. "Start at login" asks th
 `LoginSession` port first. The core reads them typed, through `Core::prefs()`. The theme and
 the PC the hardware notice was for are prefs the core sets; a command can't. The VPN setting
 (`app.vpn_only`, `app.vpn`) and the launcher's release repo (`app.update_repo`) are not prefs:
-their own subsystems own them. The config is
-the subsystem's store: it keeps no copy of its own, so a setting can't drift from what is saved.
+their own subsystems own them. The config is the subsystem's store: it keeps no copy of its
+own, so a setting can't drift from what is saved.
 
 ## Downloads and torrents
 
@@ -490,9 +499,10 @@ persistence with fastresume in `torrents/resume/`.
 **Unpack.** When a download completes, the torrents subsystem finds its archive sets
 (`crates/nexus-core/src/archives.rs`), and the game installs unpack them through the `Archives`
 port (`game_installs/unpacking.rs`) into `unpacked/<folder>/<name>/` in the download, through a
-`.part` folder. The unpack state is the download's hand-off, saved with the download. The app's `HostArchives` lists each archive first, and the core's
-archive plan refuses passwords, paths out of the folder and archives bigger than the free
-space, then the adapter writes. Its readers are `zip`, `tar` with `flate2`, `sevenz-rust2`, and libarchive loaded at run time for
+`.part` folder. The unpack state is the download's hand-off, saved with the download. The
+app's `HostArchives` lists each archive first, and the core's archive plan refuses passwords,
+paths out of the folder and archives bigger than the free space, then the adapter writes. Its
+readers are `zip`, `tar` with `flate2`, `sevenz-rust2`, and libarchive loaded at run time for
 RAR and the rest. Details: [reference/archives-and-pc-games.md](reference/archives-and-pc-games.md).
 
 ## Game installs
@@ -566,16 +576,17 @@ shows ends the session with a notice, and no play time; Stop before it shows end
 nothing played.
 
 Stop asks the game's processes to close, waits up to `stop_grace` (4 s) for them, and kills what
-is left. When the game exits, the core's
-`finish` ends the session (`SessionsSubsystem::end`, which saves play time under `app.playtime`
-for sessions of 3 s or more), posts a notice with the log for a crash the player didn't cause, may ask how far the game got, brings the launcher back
-when "Back to the launcher" is on, calls `Launcher::on_exit`, publishes `Event::ProcessExited`,
+is left. When the game exits, the core's `finish` ends the session (`SessionsSubsystem::end`,
+which saves play time under `app.playtime` for sessions of 3 s or more), posts a notice with
+the log for a crash the player didn't cause, may ask how far the game got, brings the launcher
+back when "Back to the launcher" is on, calls `Launcher::on_exit`, publishes `Event::ProcessExited`,
 and runs an emulator update that waited for the game.
 
 While the game's window is in front, or the launcher's window doesn't have focus, `ThemeHost`
 drops every pad button but a hold of the PS (Guide) button, which sends `SessionCmd::Stop` for
 each running game, at once; a tap does nothing while a game runs. With no game running, a tap
-opens Home and a hold opens the power menu. Per-system details: [reference/desktop.md](reference/desktop.md).
+opens Home and a hold opens the power menu. Per-system details:
+[reference/desktop.md](reference/desktop.md).
 
 ## Library, metadata and catalogs
 
@@ -590,10 +601,10 @@ and the offers through `Arc`, and answers the queries the view and the core ask:
 `offer`, `hidden` and `result`.
 
 It asks no plugin. The core's flows read the plugins (`library_reads.rs`, and the catalog
-reads in `catalog_reads.rs`) and hand it the answers, because a read crosses areas: the emulators' builds,
-notices and the selection. It owns `app.hidden_games`, `app.game_art` and `app.results` (with
-`app.result_builds` and `app.result_skipped`), and reads them from the config each time, so a
-value set there shows at once.
+reads in `catalog_reads.rs`) and hand it the answers, because a read crosses areas: the
+emulators' builds, notices and the selection. It owns `app.hidden_games`, `app.game_art` and
+`app.results` (with `app.result_builds` and `app.result_skipped`), and reads them from the
+config each time, so a value set there shows at once.
 
 **Library.** `Command::Library(LibraryCmd::Refresh)` lists every `Catalog` plugin's games,
 sorts them by title, reads their `game.badge` slots and selects the first game. The first load
@@ -651,11 +662,12 @@ sound and Bluetooth controls only when it's the whole screen. The view model is 
 (`VpnSubsystem`). The rule reads `app.vpn_only` and `app.vpn`, holds the `Network` port (a
 system plugin's `vpn` replaces the app's once one provides it) and notes when a plugin waits.
 The ports bundle makes the rule at boot, before any plugin starts; the kernel gives it to each
-plugin as its `VpnGate`, and the VPN and torrents subsystems share it. The VPN subsystem owns the two settings, the VPN list for the
-view and the last connect error, and runs `Command::Vpn(VpnCmd)`: the setting, the picked VPN,
-and connecting, disconnecting and adding VPNs. After each of those it awaits the torrents' kill
-switch. The torrents subsystem's `torrents/vpn.rs` applies the rule to the downloads. While
-`app.vpn_only` is on, the subsystem binds the torrent port to the VPN's interface (`Torrents::route`) before a download talks to
+plugin as its `VpnGate`, and the VPN and torrents subsystems share it. The VPN subsystem owns
+the two settings, the VPN list for the view and the last connect error, and runs
+`Command::Vpn(VpnCmd)`: the setting, the picked VPN, and connecting, disconnecting and adding
+VPNs. After each of those it awaits the torrents' kill switch. The torrents subsystem's
+`torrents/vpn.rs` applies the rule to the downloads. While `app.vpn_only` is on, the subsystem
+binds the torrent port to the VPN's interface (`Torrents::route`) before a download talks to
 the swarm. Without that VPN a download waits (`waiting_vpn`).
 
 The kill switch: while a download runs or waits, the subsystem's watch task checks the VPN every
@@ -675,7 +687,7 @@ supported; on Windows the setting is unavailable.
 ## The launcher's update
 
 `crates/nexus-core/src/launcher_update.rs`. The `LauncherUpdateSubsystem` takes the
-`HttpTransport` and `Desktop` ports, the data folder and the kind of install, and owns
+`HttpTransport` and `LoginSession` ports, the data folder and the kind of install, and owns
 `app.update_repo`. On `LauncherUpdateCmd::Check` it reads `latest.json` from the latest
 release of `app.update_repo` (default `mohamed-rekiba/nexus`), following redirects only to
 GitHub's hosts. A higher version is an update. On Nexus OS the core then looks for a system
@@ -726,8 +738,9 @@ The contract lives in `crates/nexus-ui-api`:
 - `contract/types.slint`: the `Vm` global (everything to show, the `AppView` field for field),
   the `Host` global (`command` for the core's commands, and the app's own callbacks) and the
   `Json` helpers. It is written by hand, for theme authors; a drift test in nexus-ui-host fails
-  when it and the view models name other fields. The host serves it; a theme never ships a copy. It also generates `tokens.slint`
-  (`Tokens`), `assets.slint` (`Assets`) and `options.slint` (`Options`).
+  when it and the view models name other fields. The host serves it; a theme never ships a
+  copy. It also generates `tokens.slint` (`Tokens`), `assets.slint` (`Assets`) and
+  `options.slint` (`Options`).
 - Screens (`ScreenId`): one file and component each, such as `screens/home.slint` exporting
   `HomeScreen`. The root is `shell.slint` exporting `Shell`.
 - Components (`ComponentId`): card, button, list item, progress bar, dialog, and the three slot
@@ -768,17 +781,19 @@ keyboard's (the default theme's on-screen keyboard opens for a controller only).
    and restarts if there is one.
 3. A tokio runtime starts. `Kernel::builder` gets the ports, `built_in_plugins()`, the two
    `discover` folders, and `boot()`s.
-4. `Core::start` splits the ports bundle per subsystem, starts the subsystems, builds the
-   `AppState`, spawns the download manager, removes work folders a
-   crash left (`GameInstallsSubsystem::clean_up`), restores saved torrents, resumes installs and plan
-   downloads, schedules emulator update checks, reads the hardware once in the background, and
-   starts `watch_catalogs`.
+4. `Core::start` builds the `AppState`, spawns the download manager, splits the ports bundle
+   per subsystem and starts the subsystems. It then removes work folders a crash left
+   (`GameInstallsSubsystem::clean_up`), takes a system plugin's VPNs (`adopt_vpn`), restores
+   saved torrents, resumes installs and plan downloads, schedules emulator update checks and
+   the machine's settings' refresh, reads the hardware once in the background, and starts
+   `watch_catalogs` and the stores' installs watch (`watch_store_installs`).
 5. `--folder` mappings apply as `Command::SetFolders`. `quit_on_signal` is spawned.
 6. `AppShell::new` makes the `ThemeHost`, which collects the themes; `start_with` shows the
    chosen theme or `default`.
 7. Old thumbnails are swept, and the gamepad thread, the core event task and the 250 ms tick
    start.
-8. `Command::Library(LibraryCmd::Refresh)` is dispatched, the first render runs, and Slint's event loop runs.
+8. `Command::Library(LibraryCmd::Refresh)` is dispatched, the first render runs, and Slint's
+   event loop runs.
 
 The event loop ends on Quit, Restart, or a signal: Ctrl-C, SIGTERM or SIGHUP quit the same way
 as the Quit button, and a second signal exits at once (code 130). Then the timer and the UI state
@@ -842,8 +857,9 @@ Four seams, from the highest:
    which checks `done` after each change in that area, or with `FakeClock::run_until_idle`,
    and for a timer with `advance`. No seam test sleeps; the screenshot tests move Slint's
    time themselves.
-2. **Capability contracts**: `nexus_testkit::contract::emulator`, run on KytyPS5, shadPS4, PC
-   and the testkit's `FakeEmulator`.
+2. **Capability contracts**: `nexus_testkit::contract::emulator`, run on KytyPS5, shadPS4, PC,
+   Steam and the testkit's `FakeEmulator`. `contract::archives` runs the same refusal checks
+   on the app's `HostArchives` and on `FakeArchives`.
 3. **The composed host**: the core and the `AppShell` the app ships, on Slint's testing backend
    (`i-slint-backend-testing`, pinned with Slint), with `FakePlatform` and the core's
    `FakeClock`: theme completeness, inheritance, switching and rollback, slots, gamepad,
@@ -851,8 +867,9 @@ Four seams, from the highest:
    only the app carries out). `Composed::pump` hands the theme's requests to the shell, runs
    the work it started and hands the core's events to it, then has the shell render what
    waits (`AppShell::flush`). Each render starts its image loads, as in the app; they run with
-   the next work, or when the test calls `load_images`. A test drives the theme through `ThemeDriver`, by accessible labels, keys and
-   clicks, and checks the view through `core.view()`, not the `Vm` globals.
+   the next work, or when the test calls `load_images`. A test drives the theme through
+   `ThemeDriver`, by accessible labels, keys and clicks, and checks the view through
+   `core.view()`, not the `Vm` globals.
 4. **The desktop adapter against real windows** (`crates/nexus-app/tests/desktop.rs`). It opens
    windows, so it runs only with `NEXUS_DESKTOP_TESTS=1`.
 
