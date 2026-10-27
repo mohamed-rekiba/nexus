@@ -1,6 +1,6 @@
 [package]
 name = "emulator-kit"
-description = "Shared code for the emulator plugins, not a plugin: GitHub releases, cached JSON, build folders, game folders, compatibility lists, keyboard keys, and the PS5 package and exFAT readers. Depends on nexus-api, tokio and the vendored Kraken decoder."
+description = "Shared code for the emulator plugins, not a plugin: the build manager and console emulator over a flavor, GitHub releases, cached JSON, build folders, game folders, compatibility lists, keyboard keys, and the PS5 package and exFAT readers. Depends on nexus-api, tokio and the vendored Kraken decoder."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

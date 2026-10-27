@@ -898,21 +898,82 @@ pub enum ArchiveKind {
 /// How far an unpack is: `done` of `total` bytes written.
 pub type UnpackProgress = Arc<dyn Fn(u64, u64) + Send + Sync>;
 
+/// How an entry's path gets out of the unpack folder.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Escape {
+    /// Its path is absolute or climbs out with `..`.
+    Leaves,
+    /// It is a link whose target is absolute or climbs out with `..`.
+    LinksOut,
+    /// A link already on the disk sits where it would go.
+    ThroughLink,
+    /// Once the links on the disk are followed, its path is outside the folder.
+    LeavesThroughLink,
+}
+
+/// Why an archive didn't unpack. The core shows its text; an adapter picks a fallback reader
+/// by its variant, never by its text.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum ArchiveError {
+    #[error("This archive needs a password, which Nexus can't ask for")]
+    Password,
+    /// An entry's name, as the archive spells it, and how it gets out of the folder.
+    #[error("{}", escape_text(.entry, *.how))]
+    Escapes { entry: String, how: Escape },
+    /// The bytes the unpack needs, spare included, and the bytes the disk has.
+    #[error("This archive needs {} free, and the disk has {}", gigabytes(*.needed), gigabytes(*.free))]
+    NoRoom { needed: u64, free: u64 },
+    /// The reader can't read this archive: a format, a feature or a codec it lacks. Another
+    /// reader may.
+    #[error("{0}")]
+    Unsupported(String),
+    /// A library or program the archive needs isn't installed. The text says what to install.
+    #[error("{0}")]
+    Missing(String),
+    /// The archive is damaged, cut short, or changed while it was unpacked.
+    #[error("{0}")]
+    Corrupt(String),
+    /// Reading the parts or writing the folder failed.
+    #[error("{0}")]
+    Io(String),
+    #[error("The unpacking was cancelled")]
+    Cancelled,
+}
+
+fn escape_text(entry: &str, how: Escape) -> String {
+    match how {
+        Escape::Leaves => format!("{entry} leaves the folder"),
+        Escape::LinksOut => format!("{entry} links out of the folder"),
+        Escape::ThroughLink => format!("{entry} would write through a link"),
+        Escape::LeavesThroughLink => format!("{entry} leaves the folder through a link"),
+    }
+}
+
+fn gigabytes(bytes: u64) -> String {
+    format!("{:.1} GB", bytes as f64 / 1e9)
+}
+
 /// Unpacking archives. The work is blocking, so an adapter runs it off the async runtime.
+///
+/// An adapter lists the archive with its format readers, hands the listing to
+/// [`crate::plan_unpack`], and writes only what the plan holds. The safety rules live in the
+/// plan, so every adapter refuses the same archives.
 #[async_trait]
 pub trait Archives: Send + Sync {
-    /// Unpacks the archive cut into `parts` (in order) into the empty folder `into`. Before it
-    /// writes anything it refuses an archive that needs a password, an entry whose path leaves
-    /// `into` (an absolute path, `..`, or a link that points out), and an archive bigger than
-    /// the free space. It stops with an error soon after `cancel` is set.
+    /// Unpacks the archive cut into `parts` (in order) into the empty folder `into`, on a disk
+    /// with `free` bytes (`None` when the disk doesn't say). Before it writes anything it
+    /// refuses an archive that needs a password, an entry whose path leaves `into` (an absolute
+    /// path, `..`, or a link that points out), and an archive bigger than the free space. It
+    /// stops with [`ArchiveError::Cancelled`] soon after `cancel` is set.
     async fn unpack(
         &self,
         kind: ArchiveKind,
         parts: &[PathBuf],
         into: &Path,
+        free: Option<u64>,
         progress: UnpackProgress,
         cancel: Arc<AtomicBool>,
-    ) -> PluginResult<()>;
+    ) -> Result<(), ArchiveError>;
 }
 
 /// A host that can't unpack archives. The default until the app plugs in a real one.
@@ -925,10 +986,11 @@ impl Archives for NoArchives {
         _kind: ArchiveKind,
         _parts: &[PathBuf],
         _into: &Path,
+        _free: Option<u64>,
         _progress: UnpackProgress,
         _cancel: Arc<AtomicBool>,
-    ) -> PluginResult<()> {
-        Err(nexus_api::PluginError::Unsupported("this build of Nexus can't unpack archives".into()))
+    ) -> Result<(), ArchiveError> {
+        Err(ArchiveError::Unsupported("this build of Nexus can't unpack archives".into()))
     }
 }
 

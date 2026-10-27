@@ -8,3 +8,7 @@ Rust, so the archives adapter's tests read these through libarchive's RAR reader
 `game.tar.xz`, `game.tar.bz2`, `game.tar.zst` and `bzip2.7z` were made for these tests with
 bsdtar and 7-Zip from two small files, `Game/eboot.bin` ("elf") and `Game/data.bin` ("data"):
 they test the formats libarchive reads for the adapter.
+
+`crypted.zip` (ZipCrypto) and `crypted-header.7z` (AES, with the listing encrypted too) were
+made with Info-ZIP's `zip -P` and 7-Zip's `-mhe=on` from `Game/eboot.bin` ("elf"): they test
+that an archive with a password is refused, by the zip reader and by libarchive.

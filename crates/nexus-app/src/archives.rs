@@ -1,17 +1,20 @@
 //! The host's archives port: unpacking the archives a download holds, off the async runtime.
 //!
-//! Each archive is read twice. The first pass lists it and refuses, before anything is
-//! written: an entry that needs a password, a path that leaves the folder (absolute, `..`, or
-//! a link that points out), and an archive bigger than the free space. The second pass writes,
-//! checks each path again on the disk (nothing is written through a link), reports progress and
-//! stops soon after a cancel.
+//! Each archive is read twice. The first pass lists it with a format reader, and the core's
+//! plan ([`plan_unpack`]) refuses before anything is written: an entry that needs a password,
+//! a path that leaves the folder (absolute, `..`, or a link that points out), and an archive
+//! bigger than the free space. The second pass writes the plan's entries only, checks each
+//! path again on the disk (nothing is written through a link), reports progress and stops soon
+//! after a cancel.
 //!
 //! Readers: `zip` for zip archives and GOG installers (a script with a zip at its end), `tar`
 //! and `flate2` for tar and tar.gz, `sevenz-rust2` for 7z (a split 7z is one stream cut into
 //! parts, read as one), and libarchive for RAR and the rest (see `libarchive.rs`). A RAR, or a
-//! script installer's archive, that libarchive can't read goes to `unar` (The Unarchiver) when
-//! it is installed: a RAR 5 with a dictionary bigger than libarchive takes.
+//! script installer's archive, that libarchive can't read ([`ArchiveError::Unsupported`]) goes
+//! to `unar` (The Unarchiver) when it is installed: a RAR 5 with a dictionary bigger than
+//! libarchive takes.
 
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -19,8 +22,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use async_trait::async_trait;
-use nexus_api::{PluginError, PluginResult};
-use nexus_core::{ArchiveKind, Archives, UnpackProgress, inside, link_stays_inside, stays_inside};
+use nexus_core::{
+    ArchiveEntry, ArchiveError, ArchiveKind, Archives, EntryKind, Escape, Plan, Planned, UnpackProgress, plan_unpack,
+    room, stays_inside,
+};
 
 /// How much is copied between two progress reports and cancel checks.
 const PIECE: usize = 1024 * 1024;
@@ -34,42 +39,24 @@ impl Archives for HostArchives {
         kind: ArchiveKind,
         parts: &[PathBuf],
         into: &Path,
+        free: Option<u64>,
         progress: UnpackProgress,
         cancel: Arc<AtomicBool>,
-    ) -> PluginResult<()> {
+    ) -> Result<(), ArchiveError> {
         let (parts, into) = (parts.to_vec(), into.to_path_buf());
-        let work = Work { into, progress, cancel, done: 0, total: 0 };
+        let work = Work { into, free, progress, cancel, done: 0, total: 0 };
         match tokio::task::spawn_blocking(move || unpack(kind, &parts, work)).await {
-            Ok(result) => result.map_err(PluginError::Other),
-            Err(e) => Err(PluginError::Other(format!("the unpacking stopped: {e}"))),
+            Ok(result) => result,
+            Err(e) => Err(ArchiveError::Io(format!("the unpacking stopped: {e}"))),
         }
     }
-}
-
-/// What an entry is.
-#[derive(Debug, PartialEq)]
-enum Item {
-    File,
-    Folder,
-    /// A link to its target, from the link's folder.
-    Link(PathBuf),
-    /// Another name for an entry, from the archive's top.
-    HardLink(PathBuf),
-    /// Something to leave out: a device, a pipe.
-    Other,
-}
-
-/// One entry of an archive, checked: its path is inside the folder.
-#[derive(Debug)]
-struct Entry {
-    path: PathBuf,
-    size: u64,
-    item: Item,
 }
 
 /// An unpack in progress.
 struct Work {
     into: PathBuf,
+    /// The free bytes on the disk when the unpack began; `None` when it doesn't say.
+    free: Option<u64>,
     progress: UnpackProgress,
     cancel: Arc<AtomicBool>,
     done: u64,
@@ -77,96 +64,121 @@ struct Work {
 }
 
 impl Work {
-    fn check_cancel(&self) -> Result<(), String> {
-        if self.cancel.load(Ordering::Acquire) { Err("The unpacking was cancelled".into()) } else { Ok(()) }
+    fn check_cancel(&self) -> Result<(), ArchiveError> {
+        if self.cancel.load(Ordering::Acquire) { Err(ArchiveError::Cancelled) } else { Ok(()) }
     }
 
-    /// Where an entry goes, after checking on the disk that nothing on the way is a link.
-    fn place(&self, path: &Path) -> Result<PathBuf, String> {
-        let out = self.into.join(path);
+    /// Where a planned entry goes, after checking on the disk that nothing on the way is a link.
+    fn place(&self, entry: &Planned) -> Result<PathBuf, ArchiveError> {
+        let escapes = |how| ArchiveError::Escapes { entry: entry.name.clone(), how };
+        let out = self.into.join(&entry.path);
         if std::fs::symlink_metadata(&out).is_ok_and(|m| m.file_type().is_symlink()) {
-            return Err(format!("{} would write through a link", path.display()));
+            return Err(escapes(Escape::ThroughLink));
         }
-        if !stays_inside(&out, &self.into).map_err(|e| e.to_string())? {
-            return Err(format!("{} leaves the folder through a link", path.display()));
+        if !stays_inside(&out, &self.into).map_err(|e| ArchiveError::Io(e.to_string()))? {
+            return Err(escapes(Escape::LeavesThroughLink));
         }
         if let Some(parent) = out.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", path.display()))?;
+            std::fs::create_dir_all(parent).map_err(|e| io(&entry.path, e))?;
         }
         Ok(out)
     }
 
-    /// Writes `reader` into the file at `path`, reporting progress as it goes.
-    fn write(&mut self, path: &Path, reader: &mut dyn Read) -> Result<(), String> {
-        let out = self.place(path)?;
-        let mut file = File::create(&out).map_err(|e| format!("{}: {e}", path.display()))?;
+    /// Writes `reader` into the file `entry`, reporting progress as it goes.
+    fn write(&mut self, entry: &Planned, reader: &mut dyn Read) -> Result<(), ArchiveError> {
+        let out = self.place(entry)?;
+        let mut file = File::create(&out).map_err(|e| io(&entry.path, e))?;
         let mut buffer = vec![0; PIECE];
         loop {
             self.check_cancel()?;
-            let n = reader.read(&mut buffer).map_err(|e| read_error(path, &e.to_string()))?;
+            let n = reader.read(&mut buffer).map_err(|e| read_failed(&entry.path, e))?;
             if n == 0 {
                 break;
             }
-            file.write_all(&buffer[..n]).map_err(|e| format!("{}: {e}", path.display()))?;
+            file.write_all(&buffer[..n]).map_err(|e| io(&entry.path, e))?;
             self.done += n as u64;
             (self.progress)(self.done, self.total);
         }
         Ok(())
     }
 
-    fn folder(&self, path: &Path) -> Result<(), String> {
-        let out = self.place(path)?;
-        std::fs::create_dir_all(out).map_err(|e| format!("{}: {e}", path.display()))
+    fn folder(&self, entry: &Planned) -> Result<(), ArchiveError> {
+        let out = self.place(entry)?;
+        std::fs::create_dir_all(out).map_err(|e| io(&entry.path, e))
     }
 
-    /// Another name for the entry at `target` (from the folder's top), which the listing checked.
-    fn hard_link(&self, path: &Path, target: &Path) -> Result<(), String> {
-        let out = self.place(path)?;
-        std::fs::hard_link(self.into.join(target), out).map_err(|e| format!("{}: {e}", path.display()))
+    /// Another name for the entry at `target` (from the folder's top), which the plan checked.
+    fn hard_link(&self, entry: &Planned, target: &Path) -> Result<(), ArchiveError> {
+        let out = self.place(entry)?;
+        std::fs::hard_link(self.into.join(target), out).map_err(|e| io(&entry.path, e))
     }
 
     /// The file's Unix mode from the archive, so a program stays a program. Nothing on Windows.
-    fn mode(&self, path: &Path, mode: u32) -> Result<(), String> {
+    fn mode(&self, path: &Path, mode: u32) -> Result<(), ArchiveError> {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             let perms = std::fs::Permissions::from_mode(mode & 0o777);
-            std::fs::set_permissions(self.into.join(path), perms).map_err(|e| format!("{}: {e}", path.display()))?;
+            std::fs::set_permissions(self.into.join(path), perms).map_err(|e| io(path, e))?;
         }
         #[cfg(not(unix))]
         let _ = (path, mode);
         Ok(())
     }
 
-    /// A link the listing checked, made only where links are files of their own.
-    fn link(&self, path: &Path, target: &Path) -> Result<(), String> {
-        let out = self.place(path)?;
+    /// A link the plan checked, made only where links are files of their own.
+    fn link(&self, entry: &Planned, target: &Path) -> Result<(), ArchiveError> {
+        let out = self.place(entry)?;
         #[cfg(unix)]
-        std::os::unix::fs::symlink(target, out).map_err(|e| format!("{}: {e}", path.display()))?;
+        std::os::unix::fs::symlink(target, out).map_err(|e| io(&entry.path, e))?;
         #[cfg(not(unix))]
         let _ = (out, target);
         Ok(())
     }
-}
 
-fn read_error(path: &Path, e: &str) -> String {
-    format!("{} couldn't be read: {e}", path.display())
-}
-
-/// The error for an archive that needs a password.
-pub(crate) fn password() -> String {
-    "This archive needs a password, which Nexus can't ask for".into()
-}
-
-/// A checked entry, or why the archive is refused.
-fn entry(name: &str, size: u64, item: Item) -> Result<Entry, String> {
-    let path = inside(Path::new(name)).ok_or_else(|| format!("{name} leaves the folder"))?;
-    if let Item::Link(target) = &item
-        && !link_stays_inside(&path, target)
-    {
-        return Err(format!("{name} links out of the folder"));
+    /// Writes one planned entry whose data, for a file, is `data`.
+    fn put(&mut self, entry: &Planned, data: &mut dyn Read) -> Result<(), ArchiveError> {
+        match &entry.kind {
+            EntryKind::Folder => self.folder(entry),
+            EntryKind::File => self.write(entry, data),
+            EntryKind::Link(target) => self.link(entry, target),
+            EntryKind::HardLink(target) => self.hard_link(entry, target),
+            EntryKind::Other => Ok(()),
+        }
     }
-    Ok(Entry { path, size, item })
+}
+
+/// A file in the folder that couldn't be written.
+fn io(path: &Path, e: std::io::Error) -> ArchiveError {
+    ArchiveError::Io(format!("{}: {e}", path.display()))
+}
+
+/// An archive a Rust reader couldn't read: damaged, or cut short.
+fn read_error(path: &Path, e: &dyn std::fmt::Display) -> ArchiveError {
+    ArchiveError::Corrupt(format!("{} couldn't be read: {e}", path.display()))
+}
+
+/// An entry's data that couldn't be read. libarchive's errors carry their [`ArchiveError`],
+/// which keeps its kind, so an archive libarchive can't read still goes to unar.
+fn read_failed(path: &Path, e: std::io::Error) -> ArchiveError {
+    let inner = e.get_ref().and_then(|inner| inner.downcast_ref::<ArchiveError>());
+    match inner {
+        Some(ArchiveError::Unsupported(why)) => {
+            ArchiveError::Unsupported(format!("{} couldn't be read: {why}", path.display()))
+        }
+        Some(ArchiveError::Corrupt(why)) => read_error(path, why),
+        Some(other) => other.clone(),
+        None => read_error(path, &e),
+    }
+}
+
+/// The error for an archive the second pass doesn't find as the first one listed it.
+fn changed() -> ArchiveError {
+    ArchiveError::Corrupt("the archive changed while it was unpacked".into())
+}
+
+fn no_parts() -> ArchiveError {
+    ArchiveError::Io("an archive with no parts".into())
 }
 
 /// Which reader unpacks an archive.
@@ -177,43 +189,39 @@ enum Via {
     Libarchive,
 }
 
-fn unpack(kind: ArchiveKind, parts: &[PathBuf], work: Work) -> Result<(), String> {
-    let again = Work {
-        into: work.into.clone(),
-        progress: work.progress.clone(),
-        cancel: work.cancel.clone(),
-        done: 0,
-        total: 0,
-    };
-    let error = match unpack_set(kind, parts, work) {
+fn unpack(kind: ArchiveKind, parts: &[PathBuf], mut work: Work) -> Result<(), ArchiveError> {
+    let error = match unpack_set(kind, parts, &mut work) {
         Ok(()) => return Ok(()),
         Err(e) => e,
     };
-    // A RAR libarchive can't read: unar may. Not one it refused for a password or a path.
-    let unreadable = error.starts_with("the archive couldn't be read") || error.contains(" couldn't be read: ");
-    if !matches!(kind, ArchiveKind::Rar | ArchiveKind::Script) || !unreadable || again.cancel.load(Ordering::Acquire) {
+    // A RAR or script installer's archive libarchive can't read: unar may. Not one it refused
+    // for a password, a path or the room.
+    let ArchiveError::Unsupported(why) = &error else { return Err(error) };
+    if !matches!(kind, ArchiveKind::Rar | ArchiveKind::Script) || work.cancel.load(Ordering::Acquire) {
         return Err(error);
     }
     let Some(tools) = Unar::find() else {
         let by_hand = if kind == ArchiveKind::Script { ", or run the installer by hand" } else { "" };
-        return Err(format!("{error}. Install unar to unpack it{by_hand}"));
+        return Err(ArchiveError::Missing(format!("{why}. Install unar to unpack it{by_hand}")));
     };
     // What libarchive wrote before it stopped.
-    std::fs::remove_dir_all(&again.into)
-        .and_then(|()| std::fs::create_dir_all(&again.into))
-        .map_err(|e| e.to_string())?;
-    tools.unpack(kind, parts, again)
+    std::fs::remove_dir_all(&work.into)
+        .and_then(|()| std::fs::create_dir_all(&work.into))
+        .map_err(|e| io(&work.into, e))?;
+    work.done = 0;
+    work.total = 0;
+    tools.unpack(kind, parts, work)
 }
 
-fn unpack_set(kind: ArchiveKind, parts: &[PathBuf], mut work: Work) -> Result<(), String> {
-    let first = parts.first().ok_or("an archive with no parts")?;
+fn unpack_set(kind: ArchiveKind, parts: &[PathBuf], work: &mut Work) -> Result<(), ArchiveError> {
+    let first = parts.first().ok_or_else(no_parts)?;
     // The Rust readers first; libarchive for the rest, and for a 7z with a codec
     // `sevenz-rust2` isn't built with.
-    let (reader, entries) = match kind {
+    let (reader, listing) = match kind {
         ArchiveKind::Zip | ArchiveKind::Gog => (Via::Zip, zip_entries(first)?),
         ArchiveKind::Tar | ArchiveKind::TarGz => (Via::Tar, tar_entries(kind, first)?),
         ArchiveKind::SevenZ => match seven_entries(parts)? {
-            Some(entries) => (Via::SevenZ, entries),
+            Some(listing) => (Via::SevenZ, listing),
             None => (Via::Libarchive, lib_entries(kind, parts)?),
         },
         ArchiveKind::Rar
@@ -224,13 +232,13 @@ fn unpack_set(kind: ArchiveKind, parts: &[PathBuf], mut work: Work) -> Result<()
         | ArchiveKind::Cab
         | ArchiveKind::Script => (Via::Libarchive, lib_entries(kind, parts)?),
     };
-    work.total = entries.iter().filter(|e| e.item == Item::File).map(|e| e.size).sum();
-    crate::disk::room(work.total, crate::disk::free_bytes(&work.into))?;
+    let plan = plan_unpack(listing, &work.into, work.free)?;
+    work.total = plan.total;
     match reader {
-        Via::Zip => zip_write(first, &mut work),
-        Via::Tar => tar_write(kind, first, &mut work),
-        Via::SevenZ => seven_write(parts, &mut work),
-        Via::Libarchive => lib_write(kind, parts, &entries, &mut work),
+        Via::Zip => zip_write(first, &plan, work),
+        Via::Tar => tar_write(kind, first, &plan, work),
+        Via::SevenZ => seven_write(parts, &plan, work),
+        Via::Libarchive => lib_write(kind, parts, &plan, work),
     }?;
     (work.progress)(work.total, work.total);
     Ok(())
@@ -238,56 +246,49 @@ fn unpack_set(kind: ArchiveKind, parts: &[PathBuf], mut work: Work) -> Result<()
 
 // Zip, and GOG installers: the reader finds a zip's start from its end, past a script before it.
 
-fn open_zip(path: &Path) -> Result<zip::ZipArchive<File>, String> {
-    let file = File::open(path).map_err(|e| read_error(path, &e.to_string()))?;
-    zip::ZipArchive::new(file).map_err(|e| read_error(path, &e.to_string()))
+fn open_zip(path: &Path) -> Result<zip::ZipArchive<File>, ArchiveError> {
+    let file = File::open(path).map_err(|e| io(path, e))?;
+    zip::ZipArchive::new(file).map_err(|e| read_error(path, &e))
 }
 
-fn zip_entries(path: &Path) -> Result<Vec<Entry>, String> {
+fn zip_entries(path: &Path) -> Result<Vec<ArchiveEntry>, ArchiveError> {
     let mut zip = open_zip(path)?;
     let mut out = Vec::new();
     for i in 0..zip.len() {
-        let mut file = zip.by_index_raw(i).map_err(|e| read_error(path, &e.to_string()))?;
-        if file.encrypted() {
-            return Err(password());
-        }
-        let name = file.name().map_err(|e| read_error(path, &e.to_string()))?.into_owned();
-        let item = if file.is_dir() {
-            Item::Folder
-        } else if file.is_symlink() {
+        let mut file = zip.by_index_raw(i).map_err(|e| read_error(path, &e))?;
+        let name = file.name().map_err(|e| read_error(path, &e))?.into_owned();
+        let encrypted = file.encrypted();
+        let kind = if file.is_dir() {
+            EntryKind::Folder
+        } else if file.is_symlink() && !encrypted {
             let mut target = String::new();
             // A raw entry: a link's target is stored, or the reader can't read it.
-            file.read_to_string(&mut target).map_err(|e| read_error(path, &e.to_string()))?;
-            Item::Link(target.into())
+            file.read_to_string(&mut target).map_err(|e| read_error(path, &e))?;
+            EntryKind::Link(target.into())
         } else {
-            Item::File
+            EntryKind::File
         };
-        out.push(entry(&name, file.size(), item)?);
+        out.push(ArchiveEntry { encrypted, ..ArchiveEntry::new(name, file.size(), kind) });
     }
     Ok(out)
 }
 
-fn zip_write(path: &Path, work: &mut Work) -> Result<(), String> {
+fn zip_write(path: &Path, plan: &Plan, work: &mut Work) -> Result<(), ArchiveError> {
     let mut zip = open_zip(path)?;
-    for i in 0..zip.len() {
+    if zip.len() != plan.entries.len() {
+        return Err(changed());
+    }
+    for (i, entry) in plan.entries.iter().enumerate() {
         work.check_cancel()?;
-        let mut file = zip.by_index(i).map_err(|e| read_error(path, &e.to_string()))?;
-        let name = file.name().map_err(|e| read_error(path, &e.to_string()))?.into_owned();
-        let rel = inside(Path::new(&name)).ok_or_else(|| format!("{name} leaves the folder"))?;
-        if file.is_dir() {
-            work.folder(&rel)?;
-        } else if file.is_symlink() {
-            let mut target = String::new();
-            file.read_to_string(&mut target).map_err(|e| read_error(&rel, &e.to_string()))?;
-            if !link_stays_inside(&rel, Path::new(&target)) {
-                return Err(format!("{name} links out of the folder"));
-            }
-            work.link(&rel, Path::new(&target))?;
-        } else {
-            work.write(&rel, &mut file)?;
-            if let Some(mode) = file.unix_mode() {
-                work.mode(&rel, mode)?;
-            }
+        let mut file = zip.by_index(i).map_err(|e| read_error(path, &e))?;
+        if *file.name().map_err(|e| read_error(path, &e))? != *entry.name {
+            return Err(changed());
+        }
+        work.put(entry, &mut file)?;
+        if entry.kind == EntryKind::File
+            && let Some(mode) = file.unix_mode()
+        {
+            work.mode(&entry.path, mode)?;
         }
     }
     Ok(())
@@ -295,72 +296,60 @@ fn zip_write(path: &Path, work: &mut Work) -> Result<(), String> {
 
 // Tar and tar.gz.
 
-fn open_tar(kind: ArchiveKind, path: &Path) -> Result<tar::Archive<Box<dyn Read>>, String> {
-    let file = File::open(path).map_err(|e| read_error(path, &e.to_string()))?;
+fn open_tar(kind: ArchiveKind, path: &Path) -> Result<tar::Archive<Box<dyn Read>>, ArchiveError> {
+    let file = File::open(path).map_err(|e| io(path, e))?;
     let reader: Box<dyn Read> =
         if kind == ArchiveKind::TarGz { Box::new(flate2::read::GzDecoder::new(file)) } else { Box::new(file) };
     Ok(tar::Archive::new(reader))
 }
 
-/// A tar entry's checked path and what it is; `None` for the archive's own `./`.
-fn tar_entry(e: &tar::Entry<'_, Box<dyn Read>>) -> Result<Option<Entry>, String> {
-    let path = e.path().map_err(|err| err.to_string())?.into_owned();
-    if path.components().all(|c| c == std::path::Component::CurDir) {
-        return Ok(None);
-    }
-    let name = path.to_string_lossy().into_owned();
+/// A tar entry as the archive lists it.
+fn tar_entry(path: &Path, e: &tar::Entry<'_, Box<dyn Read>>) -> Result<ArchiveEntry, ArchiveError> {
+    let name = e.path().map_err(|err| read_error(path, &err))?.to_string_lossy().into_owned();
     let kind = e.header().entry_type();
     let size = e.header().size().unwrap_or(0);
-    let target = || -> Result<PathBuf, String> {
-        Ok(e.link_name().map_err(|err| err.to_string())?.unwrap_or_default().into_owned())
+    let target = || -> Result<PathBuf, ArchiveError> {
+        Ok(e.link_name().map_err(|err| read_error(path, &err))?.unwrap_or_default().into_owned())
     };
-    if kind.is_hard_link() {
-        // A hard link names another entry from the archive's top.
-        let path = inside(&path).ok_or_else(|| format!("{name} leaves the folder"))?;
-        let target = inside(&target()?).ok_or_else(|| format!("{name} links out of the folder"))?;
-        return Ok(Some(Entry { path, size, item: Item::HardLink(target) }));
-    }
-    let item = if kind.is_dir() {
-        Item::Folder
+    let kind = if kind.is_hard_link() {
+        EntryKind::HardLink(target()?)
+    } else if kind.is_dir() {
+        EntryKind::Folder
     } else if kind.is_file() {
-        Item::File
+        EntryKind::File
     } else if kind.is_symlink() {
-        Item::Link(target()?)
+        EntryKind::Link(target()?)
     } else {
-        Item::Other
+        EntryKind::Other
     };
-    entry(&name, size, item).map(Some)
+    Ok(ArchiveEntry::new(name, size, kind))
 }
 
-fn tar_entries(kind: ArchiveKind, path: &Path) -> Result<Vec<Entry>, String> {
+fn tar_entries(kind: ArchiveKind, path: &Path) -> Result<Vec<ArchiveEntry>, ArchiveError> {
     let mut tar = open_tar(kind, path)?;
     let mut out = Vec::new();
-    for e in tar.entries().map_err(|e| read_error(path, &e.to_string()))? {
-        let e = e.map_err(|e| read_error(path, &e.to_string()))?;
-        if let Some(entry) = tar_entry(&e)? {
-            out.push(entry);
-        }
+    for e in tar.entries().map_err(|e| read_error(path, &e))? {
+        let e = e.map_err(|e| read_error(path, &e))?;
+        out.push(tar_entry(path, &e)?);
     }
     Ok(out)
 }
 
-fn tar_write(kind: ArchiveKind, path: &Path, work: &mut Work) -> Result<(), String> {
+fn tar_write(kind: ArchiveKind, path: &Path, plan: &Plan, work: &mut Work) -> Result<(), ArchiveError> {
     let mut tar = open_tar(kind, path)?;
-    for e in tar.entries().map_err(|e| read_error(path, &e.to_string()))? {
+    let mut planned = plan.entries.iter();
+    for e in tar.entries().map_err(|e| read_error(path, &e))? {
         work.check_cancel()?;
-        let mut e = e.map_err(|e| read_error(path, &e.to_string()))?;
-        let Some(checked) = tar_entry(&e)? else { continue };
-        match &checked.item {
-            Item::Folder => work.folder(&checked.path)?,
-            Item::File => {
-                work.write(&checked.path, &mut e)?;
-                if let Ok(mode) = e.header().mode() {
-                    work.mode(&checked.path, mode)?;
-                }
-            }
-            Item::HardLink(target) => work.hard_link(&checked.path, target)?,
-            Item::Link(target) => work.link(&checked.path, target)?,
-            Item::Other => {}
+        let mut e = e.map_err(|e| read_error(path, &e))?;
+        let entry = planned.next().ok_or_else(changed)?;
+        if tar_entry(path, &e)?.name != entry.name {
+            return Err(changed());
+        }
+        work.put(entry, &mut e)?;
+        if entry.kind == EntryKind::File
+            && let Ok(mode) = e.header().mode()
+        {
+            work.mode(&entry.path, mode)?;
         }
     }
     Ok(())
@@ -376,11 +365,11 @@ struct Joined {
 }
 
 impl Joined {
-    fn open(paths: &[PathBuf]) -> Result<Self, String> {
+    fn open(paths: &[PathBuf]) -> Result<Self, ArchiveError> {
         let mut parts = Vec::new();
         for path in paths {
-            let file = File::open(path).map_err(|e| read_error(path, &e.to_string()))?;
-            let len = file.metadata().map_err(|e| read_error(path, &e.to_string()))?.len();
+            let file = File::open(path).map_err(|e| io(path, e))?;
+            let len = file.metadata().map_err(|e| io(path, e))?.len();
             parts.push((file, len));
         }
         let len = parts.iter().map(|(_, l)| l).sum();
@@ -417,12 +406,22 @@ impl Seek for Joined {
     }
 }
 
-fn open_seven(parts: &[PathBuf]) -> Result<sevenz_rust2::ArchiveReader<Joined>, String> {
+/// A `sevenz-rust2` error as an archive error: a password, a codec it is built without, or a
+/// damaged archive.
+fn seven_error(e: sevenz_rust2::Error, damaged: impl FnOnce(sevenz_rust2::Error) -> ArchiveError) -> ArchiveError {
+    match e {
+        sevenz_rust2::Error::PasswordRequired | sevenz_rust2::Error::MaybeBadPassword(_) => ArchiveError::Password,
+        sevenz_rust2::Error::UnsupportedCompressionMethod(method) => {
+            ArchiveError::Unsupported(format!("the 7z reader is built without {method}"))
+        }
+        e => damaged(e),
+    }
+}
+
+fn open_seven(parts: &[PathBuf]) -> Result<sevenz_rust2::ArchiveReader<Joined>, ArchiveError> {
     let name = parts.first().map(|p| p.as_path()).unwrap_or(Path::new("archive"));
-    sevenz_rust2::ArchiveReader::new(Joined::open(parts)?, sevenz_rust2::Password::empty()).map_err(|e| match e {
-        sevenz_rust2::Error::PasswordRequired | sevenz_rust2::Error::MaybeBadPassword(_) => password(),
-        e => read_error(name, &e.to_string()),
-    })
+    sevenz_rust2::ArchiveReader::new(Joined::open(parts)?, sevenz_rust2::Password::empty())
+        .map_err(|e| seven_error(e, |e| read_error(name, &e)))
 }
 
 /// Whether a 7z entry is a link: its attributes carry a Unix mode in the high 16 bits.
@@ -443,57 +442,56 @@ const SEVEN_ELSEWHERE: [&[u8]; 7] = [
 ];
 
 /// A 7z's entries, or `None` when one uses a codec this reader lacks.
-fn seven_entries(parts: &[PathBuf]) -> Result<Option<Vec<Entry>>, String> {
-    let mut reader = open_seven(parts)?;
+fn seven_entries(parts: &[PathBuf]) -> Result<Option<Vec<ArchiveEntry>>, ArchiveError> {
+    let mut reader = match open_seven(parts) {
+        Ok(reader) => reader,
+        // A codec this reader lacks in the listing itself, such as the AES of an encrypted one.
+        Err(ArchiveError::Unsupported(_)) => return Ok(None),
+        Err(e) => return Err(e),
+    };
     let files = reader.archive().files.clone();
     let mut out = Vec::new();
     let mut links = Vec::new();
     for file in &files {
         let mut methods = Vec::new();
+        let mut encrypted = false;
         if file.has_stream {
             if reader.file_compression_methods(&file.name, &mut methods).is_err()
                 || methods.iter().any(|m| SEVEN_ELSEWHERE.contains(&m.id()))
             {
                 return Ok(None);
             }
-            if methods.contains(&sevenz_rust2::EncoderMethod::AES256_SHA256) {
-                return Err(password());
-            }
+            encrypted = methods.contains(&sevenz_rust2::EncoderMethod::AES256_SHA256);
         }
-        if seven_is_link(file) {
+        if seven_is_link(file) && !encrypted {
             links.push(file.name.clone());
             continue;
         }
-        let item = if file.is_directory { Item::Folder } else { Item::File };
-        out.push(entry(&file.name, file.size, item)?);
+        let kind = if file.is_directory { EntryKind::Folder } else { EntryKind::File };
+        out.push(ArchiveEntry { encrypted, ..ArchiveEntry::new(&file.name, file.size, kind) });
     }
     // A link's target is its contents.
     for name in links {
-        let target = reader.read_file(&name).map_err(|e| read_error(Path::new(&name), &e.to_string()))?;
-        out.push(entry(&name, 0, Item::Link(String::from_utf8_lossy(&target).into_owned().into()))?);
+        let target = reader.read_file(&name).map_err(|e| read_error(Path::new(&name), &e))?;
+        out.push(ArchiveEntry::new(&name, 0, EntryKind::Link(String::from_utf8_lossy(&target).into_owned().into())));
     }
     Ok(Some(out))
 }
 
-fn seven_write(parts: &[PathBuf], work: &mut Work) -> Result<(), String> {
+fn seven_write(parts: &[PathBuf], plan: &Plan, work: &mut Work) -> Result<(), ArchiveError> {
     let mut reader = open_seven(parts)?;
+    // The reader gives the entries block by block, not in the listing's order: each is found
+    // by its name.
+    let planned: HashMap<&str, &Planned> = plan.entries.iter().map(|e| (e.name.as_str(), e)).collect();
     let mut failure = None;
     let result = reader.for_each_entries(|file, data| {
-        let step = (|| {
+        let step = (|| -> Result<(), ArchiveError> {
             work.check_cancel()?;
-            let rel = inside(Path::new(&file.name)).ok_or_else(|| format!("{} leaves the folder", file.name))?;
-            if file.is_directory {
-                work.folder(&rel)
-            } else if seven_is_link(file) {
-                let mut target = String::new();
-                data.read_to_string(&mut target).map_err(|e| read_error(&rel, &e.to_string()))?;
-                if !link_stays_inside(&rel, Path::new(&target)) {
-                    return Err(format!("{} links out of the folder", file.name));
-                }
-                work.link(&rel, Path::new(&target))
-            } else {
-                work.write(&rel, data)
-            }
+            let entry = planned.get(file.name.as_str()).ok_or_else(changed)?;
+            work.put(entry, data)?;
+            // The next entry's data follows this one's in the block: read past what wasn't used.
+            std::io::copy(data, &mut std::io::sink()).map_err(|e| read_error(&entry.path, &e))?;
+            Ok(())
         })();
         match step {
             Ok(()) => Ok(true),
@@ -506,22 +504,19 @@ fn seven_write(parts: &[PathBuf], work: &mut Work) -> Result<(), String> {
     if let Some(e) = failure {
         return Err(e);
     }
-    result.map_err(|e| match e {
-        sevenz_rust2::Error::PasswordRequired | sevenz_rust2::Error::MaybeBadPassword(_) => password(),
-        e => format!("the 7z archive couldn't be read: {e}"),
-    })
+    result.map_err(|e| seven_error(e, |e| ArchiveError::Corrupt(format!("the 7z archive couldn't be read: {e}"))))
 }
 
 // Through libarchive: RAR, tar.xz, tar.bz2, tar.zst, ISO, cab, and 7z with other codecs. It
 // reads a set's parts as one stream, in the order given.
 
-fn lib_api(kind: ArchiveKind) -> Result<&'static crate::libarchive::Api, String> {
+fn lib_api(kind: ArchiveKind) -> Result<&'static crate::libarchive::Api, ArchiveError> {
     crate::libarchive::api().ok_or_else(|| {
-        format!(
+        ArchiveError::Missing(format!(
             "{} archives need libarchive, which isn't here: install {}",
             serde_name(kind),
             crate::libarchive::install_hint()
-        )
+        ))
     })
 }
 
@@ -531,56 +526,38 @@ fn serde_name(kind: ArchiveKind) -> String {
 }
 
 /// libarchive on the archive cut into `parts`; a script installer's from its end.
-fn lib_open(kind: ArchiveKind, parts: &[PathBuf]) -> Result<crate::libarchive::Reader, String> {
+fn lib_open(kind: ArchiveKind, parts: &[PathBuf]) -> Result<crate::libarchive::Reader, ArchiveError> {
     let api = lib_api(kind)?;
     if kind != ArchiveKind::Script {
         return crate::libarchive::Reader::open(api, parts);
     }
-    let script = parts.first().ok_or("an archive with no parts")?;
+    let script = parts.first().ok_or_else(no_parts)?;
     let offset =
-        nexus_core::embedded_archive(script).ok_or_else(|| read_error(script, "it doesn't say its archive's size"))?;
+        nexus_core::embedded_archive(script).ok_or_else(|| read_error(script, &"it doesn't say its archive's size"))?;
     crate::libarchive::Reader::open_at(api, script, offset)
 }
 
-fn lib_entries(kind: ArchiveKind, parts: &[PathBuf]) -> Result<Vec<Entry>, String> {
-    use crate::libarchive::Kind;
+fn lib_entries(kind: ArchiveKind, parts: &[PathBuf]) -> Result<Vec<ArchiveEntry>, ArchiveError> {
     let mut reader = lib_open(kind, parts)?;
     let mut out = Vec::new();
-    while let Some(header) = reader.next()? {
-        if header.encrypted {
-            return Err(password());
-        }
-        out.push(match header.kind {
-            Kind::HardLink(target) => {
-                let target = inside(&target).ok_or_else(|| format!("{} links out of the folder", header.path))?;
-                let path =
-                    inside(Path::new(&header.path)).ok_or_else(|| format!("{} leaves the folder", header.path))?;
-                Entry { path, size: header.size, item: Item::HardLink(target) }
-            }
-            Kind::File => entry(&header.path, header.size, Item::File)?,
-            Kind::Folder => entry(&header.path, header.size, Item::Folder)?,
-            Kind::Link(target) => entry(&header.path, header.size, Item::Link(target))?,
-            Kind::Other => entry(&header.path, header.size, Item::Other)?,
-        });
+    while let Some(entry) = reader.next()? {
+        out.push(entry);
         reader.skip()?;
     }
     Ok(out)
 }
 
-fn lib_write(kind: ArchiveKind, parts: &[PathBuf], entries: &[Entry], work: &mut Work) -> Result<(), String> {
+fn lib_write(kind: ArchiveKind, parts: &[PathBuf], plan: &Plan, work: &mut Work) -> Result<(), ArchiveError> {
     let mut reader = lib_open(kind, parts)?;
-    // The second pass reads the entries the first one checked, in the same order.
-    for checked in entries {
+    // The second pass reads the entries the first one listed, in the same order.
+    for entry in &plan.entries {
         work.check_cancel()?;
-        if reader.next()?.is_none() {
-            return Err("the archive changed while it was unpacked".into());
+        if reader.next()?.is_none_or(|header| header.name != entry.name) {
+            return Err(changed());
         }
-        match &checked.item {
-            Item::Folder => work.folder(&checked.path)?,
-            Item::File => work.write(&checked.path, &mut reader)?,
-            Item::Link(target) => work.link(&checked.path, target)?,
-            Item::HardLink(target) => work.hard_link(&checked.path, target)?,
-            Item::Other => reader.skip()?,
+        match entry.kind {
+            EntryKind::Other => reader.skip()?,
+            _ => work.put(entry, &mut reader)?,
         }
     }
     Ok(())
@@ -595,8 +572,8 @@ struct Unar {
     unar: PathBuf,
 }
 
-/// Files' Unix modes, by their paths in the folder.
-type Modes = Vec<(PathBuf, u32)>;
+/// The Unix modes of the listing's files, by their place in the listing.
+type Modes = Vec<(usize, u32)>;
 
 /// A file removed when it goes out of scope.
 struct Scratch(PathBuf);
@@ -614,16 +591,18 @@ impl Unar {
         Some(Self { lsar: which("lsar")?, unar: which("unar")? })
     }
 
-    fn unpack(&self, kind: ArchiveKind, parts: &[PathBuf], mut work: Work) -> Result<(), String> {
-        let first = parts.first().ok_or("an archive with no parts")?;
+    fn unpack(&self, kind: ArchiveKind, parts: &[PathBuf], mut work: Work) -> Result<(), ArchiveError> {
+        let first = parts.first().ok_or_else(no_parts)?;
         let scratch = if kind == ArchiveKind::Script { Some(copy_out(first, &mut work)?) } else { None };
-        let archive = scratch.as_ref().map_or(first.as_path(), |s| s.0.as_path());
-        let (entries, modes) = self.entries(archive)?;
-        work.total = entries.iter().filter(|e| e.item == Item::File).map(|e| e.size).sum();
+        let archive = scratch.as_ref().map_or(first.as_path(), |(s, _)| s.0.as_path());
+        // The copy takes room on the same disk.
+        let free = work.free.map(|free| free.saturating_sub(scratch.as_ref().map_or(0, |(_, size)| *size)));
+        let (listing, modes) = self.entries(archive)?;
+        let plan = plan_unpack(listing, &work.into, free)?;
+        work.total = plan.total;
         work.done = 0;
-        crate::disk::room(work.total, crate::disk::free_bytes(&work.into))?;
-        let sizes: std::collections::HashMap<String, u64> =
-            entries.iter().map(|e| (e.path.to_string_lossy().into_owned(), e.size)).collect();
+        let sizes: HashMap<String, u64> =
+            plan.entries.iter().map(|e| (e.path.to_string_lossy().into_owned(), e.size)).collect();
         // `-D`: the entries as the archive has them; `-nr`: an archive inside stays packed.
         let mut child = std::process::Command::new(&self.unar)
             .args(["-f", "-D", "-nr", "-o"])
@@ -633,8 +612,8 @@ impl Unar {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()
-            .map_err(|e| format!("unar: {e}"))?;
-        let stdout = child.stdout.take().ok_or("unar: no output")?;
+            .map_err(|e| ArchiveError::Io(format!("unar: {e}")))?;
+        let stdout = child.stdout.take().ok_or_else(|| ArchiveError::Io("unar: no output".into()))?;
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             use std::io::BufRead;
@@ -657,7 +636,7 @@ impl Unar {
                 let _ = child.wait();
                 return work.check_cancel();
             }
-            if let Some(status) = child.try_wait().map_err(|e| format!("unar: {e}"))? {
+            if let Some(status) = child.try_wait().map_err(|e| ArchiveError::Io(format!("unar: {e}")))? {
                 break status;
             }
             std::thread::sleep(std::time::Duration::from_millis(100));
@@ -667,85 +646,83 @@ impl Unar {
             if let Some(mut stderr) = child.stderr.take() {
                 let _ = stderr.read_to_string(&mut errors);
             }
-            return Err(format!("unar couldn't unpack {}: {}", first.display(), errors.trim()));
+            return Err(ArchiveError::Corrupt(format!("unar couldn't unpack {}: {}", first.display(), errors.trim())));
         }
         // unar leaves a program's flag off.
-        for (path, mode) in modes {
-            work.mode(&path, mode)?;
+        for (i, mode) in modes {
+            work.mode(&plan.entries[i].path, mode)?;
         }
         Ok(())
     }
 
-    /// The archive's entries, checked as every reader's are, and the Unix modes it keeps.
-    fn entries(&self, archive: &Path) -> Result<(Vec<Entry>, Modes), String> {
+    /// The archive's entries as lsar lists them, and the Unix modes it keeps.
+    fn entries(&self, archive: &Path) -> Result<(Vec<ArchiveEntry>, Modes), ArchiveError> {
         use nexus_api::serde_json::Value;
         let out = std::process::Command::new(&self.lsar)
             .args(["-j", "-jss", "-nr"])
             .arg(archive)
             .stdin(std::process::Stdio::null())
             .output()
-            .map_err(|e| format!("lsar: {e}"))?;
+            .map_err(|e| ArchiveError::Io(format!("lsar: {e}")))?;
         if !out.status.success() {
-            return Err(read_error(archive, String::from_utf8_lossy(&out.stdout).trim()));
+            return Err(read_error(archive, &String::from_utf8_lossy(&out.stdout).trim()));
         }
-        let listing: Value =
-            nexus_api::serde_json::from_slice(&out.stdout).map_err(|e| read_error(archive, &e.to_string()))?;
+        let listing: Value = nexus_api::serde_json::from_slice(&out.stdout).map_err(|e| read_error(archive, &e))?;
         let mut entries = Vec::new();
         let mut modes = Vec::new();
-        for e in listing["lsarContents"].as_array().ok_or_else(|| read_error(archive, "lsar listed nothing"))? {
-            let name = e["XADFileName"].as_str().ok_or_else(|| read_error(archive, "an entry with no name"))?;
-            if e["XADIsEncrypted"].as_u64().unwrap_or(0) != 0 {
-                return Err(password());
-            }
+        for e in listing["lsarContents"].as_array().ok_or_else(|| read_error(archive, &"lsar listed nothing"))? {
+            let name = e["XADFileName"].as_str().ok_or_else(|| read_error(archive, &"an entry with no name"))?;
             let size = e["XADFileSize"].as_u64().unwrap_or(0);
-            let item = if e["XADIsDirectory"].as_u64().unwrap_or(0) != 0 {
-                Item::Folder
+            let kind = if e["XADIsDirectory"].as_u64().unwrap_or(0) != 0 {
+                EntryKind::Folder
             } else if e["XADIsLink"].as_u64().unwrap_or(0) != 0 {
-                Item::Link(e["XADLinkDestination"].as_str().unwrap_or_default().into())
+                EntryKind::Link(e["XADLinkDestination"].as_str().unwrap_or_default().into())
             } else {
-                Item::File
+                EntryKind::File
             };
-            let entry = entry(name, size, item)?;
             // A RAR 5 made on Unix keeps the file's mode.
-            if entry.item == Item::File
+            if kind == EntryKind::File
                 && e["RAR5OS"].as_u64() == Some(1)
                 && let Some(attributes) = e["RAR5Attributes"].as_u64()
             {
-                modes.push((entry.path.clone(), attributes as u32));
+                modes.push((entries.len(), attributes as u32));
             }
-            entries.push(entry);
+            let encrypted = e["XADIsEncrypted"].as_u64().unwrap_or(0) != 0;
+            entries.push(ArchiveEntry { encrypted, ..ArchiveEntry::new(name, size, kind) });
         }
         Ok((entries, modes))
     }
 }
 
 /// Copies a script installer's archive out of it, beside the unpack folder: unar reads only a
-/// whole file.
-fn copy_out(script: &Path, work: &mut Work) -> Result<Scratch, String> {
+/// whole file. Returns the copy and its size.
+fn copy_out(script: &Path, work: &mut Work) -> Result<(Scratch, u64), ArchiveError> {
     let offset =
-        nexus_core::embedded_archive(script).ok_or_else(|| read_error(script, "it doesn't say its archive's size"))?;
-    let mut file = File::open(script).map_err(|e| read_error(script, &e.to_string()))?;
-    let size = file.metadata().map_err(|e| read_error(script, &e.to_string()))?.len() - offset;
-    crate::disk::room(size, crate::disk::free_bytes(&work.into))?;
-    file.seek(SeekFrom::Start(offset)).map_err(|e| read_error(script, &e.to_string()))?;
+        nexus_core::embedded_archive(script).ok_or_else(|| read_error(script, &"it doesn't say its archive's size"))?;
+    let mut file = File::open(script).map_err(|e| io(script, e))?;
+    let size = file.metadata().map_err(|e| io(script, e))?.len() - offset;
+    room(size, work.free)?;
+    file.seek(SeekFrom::Start(offset)).map_err(|e| io(script, e))?;
     let scratch = Scratch(work.into.with_extension("archive"));
-    let mut out = File::create(&scratch.0).map_err(|e| format!("{}: {e}", scratch.0.display()))?;
+    let mut out = File::create(&scratch.0).map_err(|e| io(&scratch.0, e))?;
     let mut buffer = vec![0; PIECE];
     loop {
         work.check_cancel()?;
-        let n = file.read(&mut buffer).map_err(|e| read_error(script, &e.to_string()))?;
+        let n = file.read(&mut buffer).map_err(|e| read_error(script, &e))?;
         if n == 0 {
             break;
         }
-        out.write_all(&buffer[..n]).map_err(|e| format!("{}: {e}", scratch.0.display()))?;
+        out.write_all(&buffer[..n]).map_err(|e| io(&scratch.0, e))?;
     }
-    Ok(scratch)
+    Ok((scratch, size))
 }
 
 #[cfg(test)]
 mod tests {
     use std::io::Write;
     use std::sync::Mutex;
+
+    use nexus_testkit::contract::{self, ArchiveFixture, Sample};
 
     use super::*;
 
@@ -757,8 +734,12 @@ mod tests {
         dir
     }
 
+    fn testdata() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata")
+    }
+
     /// Unpacks into `<dir>/out`, and returns the last progress it reported.
-    fn run(kind: ArchiveKind, parts: &[PathBuf], dir: &Path) -> Result<(u64, u64), String> {
+    fn run(kind: ArchiveKind, parts: &[PathBuf], dir: &Path) -> Result<(u64, u64), ArchiveError> {
         let into = dir.join("out");
         std::fs::create_dir_all(&into).unwrap();
         let last = Arc::new(Mutex::new((0, 0)));
@@ -766,9 +747,13 @@ mod tests {
             let last = last.clone();
             Arc::new(move |done, total| *last.lock().unwrap() = (done, total))
         };
-        let work = Work { into, progress, cancel: Arc::new(AtomicBool::new(false)), done: 0, total: 0 };
+        let work = Work { into, free: None, progress, cancel: Arc::new(AtomicBool::new(false)), done: 0, total: 0 };
         unpack(kind, parts, work)?;
         Ok(*last.lock().unwrap())
+    }
+
+    fn nothing_in(folder: &Path) -> bool {
+        std::fs::read_dir(folder).unwrap().next().is_none()
     }
 
     fn zip_of(entries: &[(&str, &[u8])]) -> Vec<u8> {
@@ -792,6 +777,40 @@ mod tests {
         seven.finish().unwrap().into_inner()
     }
 
+    /// Real zip files for the archives contract, written as each sample says, hostile names
+    /// and all.
+    struct Zips;
+
+    impl ArchiveFixture for Zips {
+        fn archive(&self, dir: &Path, entries: &[Sample]) -> (ArchiveKind, Vec<PathBuf>) {
+            let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+            let options = zip::write::SimpleFileOptions::default();
+            for entry in entries {
+                match entry {
+                    Sample::File(name, bytes) => {
+                        zip.start_file(name, options).unwrap();
+                        zip.write_all(bytes).unwrap();
+                    }
+                    Sample::Link(name, target) => zip.add_symlink(name, target, options).unwrap(),
+                }
+            }
+            let path = dir.join("contract.zip");
+            std::fs::write(&path, zip.finish().unwrap().into_inner()).unwrap();
+            (ArchiveKind::Zip, vec![path])
+        }
+
+        fn locked(&self, dir: &Path) -> Option<(ArchiveKind, Vec<PathBuf>)> {
+            let path = dir.join("crypted.zip");
+            std::fs::copy(testdata().join("crypted.zip"), &path).unwrap();
+            Some((ArchiveKind::Zip, vec![path]))
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_host_keeps_the_archives_contract() {
+        contract::archives(&HostArchives, &Zips).await;
+    }
+
     #[test]
     fn a_zip_unpacks_its_files_and_folders_with_progress() {
         let dir = folder("zip");
@@ -811,10 +830,58 @@ mod tests {
         let dir = folder("escape");
         std::fs::write(dir.join("bad.zip"), zip_of(&[("good.txt", b"ok"), ("../evil.txt", b"no")])).unwrap();
         let refused = run(ArchiveKind::Zip, &[dir.join("bad.zip")], &dir).unwrap_err();
-        assert!(refused.contains("leaves the folder"), "{refused}");
+        assert_eq!(refused, ArchiveError::Escapes { entry: "../evil.txt".into(), how: Escape::Leaves });
+        assert_eq!(refused.to_string(), "../evil.txt leaves the folder");
         assert!(!dir.join("out/good.txt").exists(), "nothing written");
         assert!(!dir.join("evil.txt").exists());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn an_encrypted_zip_or_7z_is_refused_before_anything_is_written() {
+        let dir = folder("crypted-zip");
+        let refused = run(ArchiveKind::Zip, &[testdata().join("crypted.zip")], &dir).unwrap_err();
+        assert_eq!(refused, ArchiveError::Password);
+        assert!(nothing_in(&dir.join("out")), "nothing written");
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        if crate::libarchive::api().is_none() {
+            eprintln!("SKIPPED: no libarchive with RAR 5 on this computer");
+            return;
+        }
+        // A 7z whose listing itself is encrypted: `sevenz-rust2` is built without AES, so it
+        // goes to libarchive, which says it saw encryption.
+        let seven = folder("crypted-7z");
+        let refused = run(ArchiveKind::SevenZ, &[testdata().join("crypted-header.7z")], &seven).unwrap_err();
+        assert_eq!(refused, ArchiveError::Password);
+        assert!(nothing_in(&seven.join("out")), "nothing written");
+        std::fs::remove_dir_all(&seven).unwrap();
+    }
+
+    #[test]
+    fn libarchive_says_password_for_an_archive_whose_listing_is_encrypted() {
+        if crate::libarchive::api().is_none() {
+            eprintln!("SKIPPED: no libarchive with RAR 5 on this computer");
+            return;
+        }
+        // libarchive reports the encryption it saw, not only an error text.
+        let refused = lib_entries(ArchiveKind::SevenZ, &[testdata().join("crypted-header.7z")]).unwrap_err();
+        assert_eq!(refused, ArchiveError::Password);
+    }
+
+    #[test]
+    fn a_data_error_from_libarchive_keeps_its_kind_so_unar_still_gets_the_archive() {
+        let path = Path::new("Game/data.bin");
+        let unsupported = std::io::Error::other(ArchiveError::Unsupported("the archive couldn't be read: X".into()));
+        assert_eq!(
+            read_failed(path, unsupported),
+            ArchiveError::Unsupported("Game/data.bin couldn't be read: the archive couldn't be read: X".into())
+        );
+        assert_eq!(read_failed(path, std::io::Error::other(ArchiveError::Password)), ArchiveError::Password);
+        assert_eq!(
+            read_failed(path, std::io::Error::other("cut short")),
+            ArchiveError::Corrupt("Game/data.bin couldn't be read: cut short".into())
+        );
     }
 
     #[test]
@@ -855,17 +922,25 @@ mod tests {
         let mut unreadable = b"#!/usr/bin/env sh\narcsz=3000\n".to_vec();
         unreadable.resize(4096 + 3000, 0x7f);
         std::fs::write(dir.join("other.run"), &unreadable).unwrap();
-        let refused = run(ArchiveKind::Script, &[dir.join("other.run")], &folder("script-bad")).unwrap_err();
+        let bad = folder("script-bad");
+        let refused = run(ArchiveKind::Script, &[dir.join("other.run")], &bad).unwrap_err();
         if Unar::find().is_none() {
-            assert!(refused.ends_with("Install unar to unpack it, or run the installer by hand"), "{refused}");
+            assert!(matches!(refused, ArchiveError::Missing(_)), "{refused:?}");
+            assert!(
+                refused.to_string().ends_with("Install unar to unpack it, or run the installer by hand"),
+                "{refused}"
+            );
         } else {
-            assert!(refused.contains("couldn't be read"), "unar can't read it either: {refused}");
+            assert!(matches!(refused, ArchiveError::Corrupt(_)), "unar can't read it either: {refused:?}");
+            let copy = bad.join("out.archive");
+            assert!(refused.to_string().starts_with(&format!("{} couldn't be read", copy.display())), "{refused}");
         }
         std::fs::remove_dir_all(&dir).unwrap();
+        std::fs::remove_dir_all(&bad).unwrap();
     }
 
     /// Unpacks with unar into `<dir>/out`, and returns the last progress it reported.
-    fn run_unar(tools: &Unar, kind: ArchiveKind, parts: &[PathBuf], dir: &Path) -> Result<(u64, u64), String> {
+    fn run_unar(tools: &Unar, kind: ArchiveKind, parts: &[PathBuf], dir: &Path) -> Result<(u64, u64), ArchiveError> {
         let into = dir.join("out");
         std::fs::create_dir_all(&into).unwrap();
         let last = Arc::new(Mutex::new((0, 0)));
@@ -873,7 +948,7 @@ mod tests {
             let last = last.clone();
             Arc::new(move |done, total| *last.lock().unwrap() = (done, total))
         };
-        let work = Work { into, progress, cancel: Arc::new(AtomicBool::new(false)), done: 0, total: 0 };
+        let work = Work { into, free: None, progress, cancel: Arc::new(AtomicBool::new(false)), done: 0, total: 0 };
         tools.unpack(kind, parts, work)?;
         Ok(*last.lock().unwrap())
     }
@@ -884,7 +959,7 @@ mod tests {
             eprintln!("SKIPPED: no unar on this computer");
             return;
         };
-        let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata");
+        let data = testdata();
         let dir = folder("unar-rar");
         run_unar(&tools, ArchiveKind::Rar, &[data.join("version.rar")], &dir).unwrap();
         assert!(!std::fs::read(dir.join("out/VERSION")).unwrap().is_empty());
@@ -901,6 +976,35 @@ mod tests {
         assert!(!std::fs::read(dir.join("out/VERSION")).unwrap().is_empty());
         assert!(!dir.join("out.archive").exists(), "the archive's copy is gone");
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn unar_refuses_by_the_same_plan() {
+        let Some(tools) = Unar::find() else {
+            eprintln!("SKIPPED: no unar on this computer");
+            return;
+        };
+        let dir = folder("unar-room");
+        let into = dir.join("out");
+        std::fs::create_dir_all(&into).unwrap();
+        let work = Work {
+            into: into.clone(),
+            free: Some(0),
+            progress: Arc::new(|_, _| {}),
+            cancel: Arc::new(AtomicBool::new(false)),
+            done: 0,
+            total: 0,
+        };
+        let refused = tools.unpack(ArchiveKind::Rar, &[testdata().join("version.rar")], work).unwrap_err();
+        assert!(matches!(refused, ArchiveError::NoRoom { free: 0, .. }), "{refused:?}");
+        assert!(nothing_in(&into), "nothing written");
+
+        let locked = folder("unar-locked");
+        let refused = run_unar(&tools, ArchiveKind::Rar, &[testdata().join("crypted.rar")], &locked).unwrap_err();
+        assert_eq!(refused, ArchiveError::Password);
+        assert!(nothing_in(&locked.join("out")), "nothing written");
+        std::fs::remove_dir_all(&dir).unwrap();
+        std::fs::remove_dir_all(&locked).unwrap();
     }
 
     #[test]
@@ -933,7 +1037,8 @@ mod tests {
         bad.append_link(&mut out, "Game/passwd", "../../../etc/passwd").unwrap();
         std::fs::write(dir.join("bad.tar"), bad.into_inner().unwrap()).unwrap();
         let refused = run(ArchiveKind::Tar, &[dir.join("bad.tar")], &folder("tar-bad")).unwrap_err();
-        assert!(refused.contains("links out of the folder"), "{refused}");
+        assert_eq!(refused, ArchiveError::Escapes { entry: "Game/passwd".into(), how: Escape::LinksOut });
+        assert_eq!(refused.to_string(), "Game/passwd links out of the folder");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -961,16 +1066,16 @@ mod tests {
             eprintln!("SKIPPED: no libarchive with RAR 5 on this computer");
             return;
         }
-        let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata");
+        let data = testdata();
         let dir = folder("rar");
         run(ArchiveKind::Rar, &[data.join("version.rar")], &dir).unwrap();
         assert!(!std::fs::read(dir.join("out/VERSION")).unwrap().is_empty());
 
         let locked = folder("rar-locked");
         let refused = run(ArchiveKind::Rar, &[data.join("crypted.rar")], &locked).unwrap_err();
-        assert!(refused.contains("needs a password"), "{refused}");
-        let left: Vec<_> = std::fs::read_dir(locked.join("out")).unwrap().collect();
-        assert!(left.is_empty(), "nothing written");
+        assert_eq!(refused, ArchiveError::Password);
+        assert_eq!(refused.to_string(), "This archive needs a password, which Nexus can't ask for");
+        assert!(nothing_in(&locked.join("out")), "nothing written");
         std::fs::remove_dir_all(&dir).unwrap();
         std::fs::remove_dir_all(&locked).unwrap();
     }
@@ -981,7 +1086,7 @@ mod tests {
             eprintln!("SKIPPED: no libarchive with RAR 5 on this computer");
             return;
         }
-        let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata");
+        let data = testdata();
         for (kind, file) in [
             (ArchiveKind::TarXz, "game.tar.xz"),
             (ArchiveKind::TarBz2, "game.tar.bz2"),
@@ -1004,9 +1109,10 @@ mod tests {
         let into = dir.join("out");
         std::fs::create_dir_all(&into).unwrap();
         let cancel = Arc::new(AtomicBool::new(true));
-        let work = Work { into, progress: Arc::new(|_, _| {}), cancel, done: 0, total: 0 };
+        let work = Work { into, free: None, progress: Arc::new(|_, _| {}), cancel, done: 0, total: 0 };
         let stopped = unpack(ArchiveKind::Zip, &[dir.join("game.zip")], work).unwrap_err();
-        assert!(stopped.contains("cancelled"), "{stopped}");
+        assert_eq!(stopped, ArchiveError::Cancelled);
+        assert_eq!(stopped.to_string(), "The unpacking was cancelled");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

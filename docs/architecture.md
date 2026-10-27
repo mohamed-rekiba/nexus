@@ -272,6 +272,13 @@ starts with a stand-in for each; the app plugs in the real ones; the test kit ha
   `window_close_ends_game` (macOS only), `problem` and start at login.
 - `Hardware::specs` is slow (it runs system tools); the core calls it once a run, off the async
   threads. `free_bytes` gives a disk's free space.
+- `Archives` has one call, `unpack`, which takes the free space the core read from `Hardware`.
+  Each adapter lists an archive with its format readers, then hands the listing to the core's
+  archive plan (`plan_unpack`, `archive_plan.rs`). The plan refuses passwords, paths and links
+  out of the folder, and archives bigger than the free space; the adapter writes only what the
+  plan holds. Failures are a typed `ArchiveError`, and `HostArchives` picks its `unar` fallback
+  by the error's kind. `contract::archives` in the test kit checks the same refusals against
+  `HostArchives` and `FakeArchives`.
 - Calls into `Desktop`, `ProcessTree` and `Network` run in `spawn_blocking`.
 - `Clock` is the core's time: `now`, `sleep` and `interval`, and on `dyn Clock`, `sleep_until`
   and `timeout`. Every timer of the core runs on it: the pollers, the game watcher, the
@@ -338,9 +345,9 @@ persistence with fastresume in `torrents/resume/`.
 **Unpack.** When a download completes, the core finds its archive sets
 (`crates/nexus-core/src/archives.rs`) and unpacks them through the `Archives` port into
 `unpacked/<folder>/<name>/` in the download, through a `.part` folder. The unpack state is
-saved with the download. The app's `HostArchives` lists each archive first and refuses
-passwords, paths out of the folder and archives bigger than the free space, then writes. Its
-readers are `zip`, `tar` with `flate2`, `sevenz-rust2`, and libarchive loaded at run time for
+saved with the download. The app's `HostArchives` lists each archive first, and the core's
+archive plan refuses passwords, paths out of the folder and archives bigger than the free
+space, then the adapter writes. Its readers are `zip`, `tar` with `flate2`, `sevenz-rust2`, and libarchive loaded at run time for
 RAR and the rest. Details: [reference/archives-and-pc-games.md](reference/archives-and-pc-games.md).
 
 ## Game installs
@@ -435,6 +442,17 @@ forums (`refreshed/`), else the copy bundled into the binary from `assets/catalo
 `ps4.json`, `pc.json`). Fetches and refreshes run in the plugin's own task, which publishes
 `RELEASES_CHANGED` when it has something new. The catalog sources come from
 `assets/catalog-sources.json` the same way.
+
+Inside the plugin, each part has its own module:
+
+- `topic.rs` is one typed model of a catalog file. The refresh (`refresh.rs`) changes it, and
+  `format.rs` turns it into releases in one function, `format::release`.
+- `store.rs` (`CopyStore`) keeps the fetched and refreshed copies and their meta files.
+- `schedule.rs` holds the due-time and back-off rules. It takes the time as an input.
+- `sources.rs` reads the catalog sources. Only the bundled sources say what a forum's topics
+  are for, so a catalog file reads the same whichever sources are in use.
+- `lib.rs` (`Catalogs`) tracks what the core asked for, runs the task and builds the slot
+  items over these modules.
 
 ## The machine's settings
 

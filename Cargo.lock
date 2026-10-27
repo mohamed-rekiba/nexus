@@ -4136,6 +4136,7 @@ dependencies = [
  "librqbit",
  "nexus-api",
  "nexus-core",
+ "nexus-testkit",
  "nexus-ui-api",
  "nexus-ui-host",
  "playstation-store",

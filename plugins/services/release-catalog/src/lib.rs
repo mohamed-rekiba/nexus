@@ -70,19 +70,27 @@
 //! refresh takes only each forum's `f=` number: its addresses are fixed in [`refresh::API`]
 //! and [`refresh::FEED`]. A forum whose address has no `f=` number is left out. The "Catalog
 //! sources" section names the copy in use, each catalog's forums and each forum left out.
+//!
+//! The code: [`topic`] is the typed model of a catalog file, which [`refresh`] brings up to
+//! date and [`format`] turns into releases. `store.rs` keeps the copies and their meta files,
+//! and `schedule.rs` says when the fetch and the refresh run. `Catalogs` tracks what the core
+//! asked for, and builds the slot items over them.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::sync::{Arc, Mutex, Weak};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use tokio::sync::Notify;
-// Tokio's, not the system's: a test that pauses tokio's time moves the holds' time too.
+// Tokio's, not the system's: a test that pauses tokio's time moves the schedule's time too.
 use tokio::time::Instant;
 
 use nexus_api::schemars::{self, JsonSchema};
 use nexus_api::serde::{Deserialize, Serialize};
 use nexus_api::serde_json::{self, Value};
 use nexus_api::*;
+
+use schedule::{Hold, Outcome, Timing, Work};
+use store::{CopyFile, CopyStore};
 
 const MANIFEST: &str = include_str!("../plugin.toml");
 /// The catalog files in the project's `assets/catalog/`, by file name: the ones in
@@ -146,22 +154,8 @@ impl Plugin for ReleaseCatalog {
 impl ServicePlugin for ReleaseCatalog {
     async fn init(&self, ctx: PluginContext) -> PluginResult<Provided> {
         let wake = Arc::new(Notify::new());
-        let catalogs = Arc::new(Catalogs {
-            ctx,
-            parsed: Mutex::new(HashMap::new()),
-            asked: Mutex::new(BTreeSet::new()),
-            played: Mutex::new(BTreeSet::new()),
-            asking: Mutex::new(BTreeSet::new()),
-            not_run: Mutex::new(HashMap::new()),
-            forced: Mutex::new(BTreeSet::new()),
-            refreshing: std::sync::atomic::AtomicBool::new(false),
-            held: Mutex::new(HashMap::new()),
-            fetch_held: Mutex::new(HashMap::new()),
-            fetch_problem: Mutex::new(HashMap::new()),
-            wake: wake.clone(),
-            fresh: self.fresh.as_secs(),
-            retry: self.retry,
-        });
+        let timing = Timing { fresh: Duration::from_secs(self.fresh.as_secs()), retry: self.retry };
+        let catalogs = Arc::new(Catalogs::new(ctx, wake.clone(), timing));
         let task = tokio::spawn(refresh_task(Arc::downgrade(&catalogs), wake));
         // A task from an activation before, if its shutdown didn't run.
         if let Some(before) = self.task.lock().unwrap_or_else(|p| p.into_inner()).replace(task) {
@@ -215,7 +209,7 @@ async fn refresh_task(catalogs: Weak<Catalogs>, wake: Arc<Notify>) {
             Ok(wait) => wait,
             Err(e) => {
                 catalogs.ctx.log().error(&format!("the catalog fetch and refresh stopped with a panic: {e}"));
-                Some(catalogs.retry)
+                Some(catalogs.timing.retry)
             }
         };
     }
@@ -353,48 +347,6 @@ struct Refreshed {
     vpn: Option<String>,
 }
 
-/// A refresh that failed or waits for the VPN, and when it tries again: after [`RETRY`] the
-/// first time, then twice as long each time, at most [`FRESH`]. A new base copy is not held.
-#[derive(Clone, Debug, PartialEq)]
-struct Held {
-    /// The base copy the refresh was of: see [`Catalogs::base`].
-    base: String,
-    /// `true` while it waits for the VPN: then each wake asks the VPN gate again, which asks
-    /// no forum. A failed refresh doesn't run before `at`.
-    waiting: bool,
-    /// When it tries again.
-    at: Instant,
-    /// How long it waited this time.
-    delay: Duration,
-}
-
-impl Held {
-    /// The hold after a try of `base` at `now` that failed or waits, with the hold before:
-    /// `first` the first time, else twice the delay before, at most `most`.
-    fn after(before: Option<&Held>, base: &str, waiting: bool, first: Duration, most: Duration, now: Instant) -> Self {
-        let delay = match before {
-            Some(b) if b.base == base => b.delay.saturating_mul(2).min(most),
-            _ => first.min(most),
-        };
-        Held { base: base.to_owned(), waiting, at: now + delay, delay }
-    }
-}
-
-/// Now, in nanoseconds since 1970: a new name for each kept copy.
-fn nanos() -> u128 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or_default()
-}
-
-/// The file `body` names in `folder` (`refreshed`, `fetched`), when it is a copy of the catalog
-/// named `console`: `<console>.<digits>.json`.
-fn copy_path(folder: &str, console: &str, body: &str) -> Result<RelPath, String> {
-    let plain = body.strip_prefix(&format!("{console}.")).and_then(|rest| rest.strip_suffix(".json"));
-    if !plain.is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())) {
-        return Err(format!("the {folder} {console} catalog's meta file names no copy of it"));
-    }
-    RelPath::new(format!("{folder}/{body}")).map_err(|e| e.to_string())
-}
-
 fn now() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
@@ -444,7 +396,10 @@ pub fn info_hash(magnet: &str) -> Option<String> {
 
 pub mod format;
 pub mod refresh;
+mod schedule;
 pub mod sources;
+mod store;
+pub mod topic;
 
 /// The catalog sources the build bundles: the project's `assets/catalog-sources.json`.
 const BUNDLED_SOURCES: &[u8] = include!(concat!(env!("OUT_DIR"), "/sources.rs"));
@@ -453,19 +408,23 @@ const BUNDLED_SOURCES: &[u8] = include!(concat!(env!("OUT_DIR"), "/sources.rs"))
 /// console an emulator plugin plays. `build.rs` reads the same list.
 pub const BUNDLED_NAMES: [&str; 3] = include!("../bundled-names.rs");
 
-/// Where the catalog sources are kept, without `.json`: in a folder of their own, so no
-/// console's catalog file can take their place.
-const SOURCES_KEPT: &str = "sources/catalog-sources";
+/// The name the catalog sources are kept under, in [`Catalogs::kept_sources`].
+const SOURCES: &str = "catalog-sources";
+
+/// The catalog sources the build bundles. A test checks them, so sources that don't read are a
+/// broken build: it is logged, and no forum is named.
+fn bundled_sources(log: &Logger) -> sources::Sources {
+    sources::read(BUNDLED_SOURCES).unwrap_or_else(|e| {
+        log.error(&format!("the bundled catalog sources don't read: {e}"));
+        debug_assert!(false, "bundled catalog sources: {e}");
+        sources::Sources::default()
+    })
+}
 
 /// The address of the catalog named `console` with the catalog address set, else `None`.
 fn catalog_url(settings: &Settings, console: &str) -> Option<String> {
     let base = settings.catalog_url.trim().trim_end_matches('/');
     (!base.is_empty()).then(|| format!("{base}/{console}.json"))
-}
-
-/// Where the copy fetched of the catalog named `console` is kept, without `.json`.
-fn fetched(console: &str) -> String {
-    format!("fetched/{console}")
 }
 
 /// The catalog sources in use, with only the forums that have an `f=` number.
@@ -481,10 +440,17 @@ struct SourcesInUse {
     unusable: Vec<String>,
 }
 
-/// Reads a catalog file. A release keeps only the pictures on the hosts in the manifest: the
-/// core fetches a picture with this plugin's permissions, and refuses any other host.
-fn read(bytes: &[u8]) -> Result<ReleaseList, String> {
-    let mut list = format::read(bytes)?;
+/// Reads a catalog file with the forums `forums`: see [`releases`].
+fn read(bytes: &[u8], forums: &sources::Forums) -> Result<ReleaseList, String> {
+    let file: topic::CatalogFile = serde_json::from_slice(bytes).map_err(|e| format!("not a catalog file: {e}"))?;
+    releases(&file, forums)
+}
+
+/// The releases of a catalog file, as [`format::releases`] gives them. A release keeps only the
+/// pictures on the hosts in the manifest: the core fetches a picture with this plugin's
+/// permissions, and refuses any other host.
+fn releases(file: &topic::CatalogFile, forums: &sources::Forums) -> Result<ReleaseList, String> {
+    let mut list = format::releases(file, forums)?;
     let permissions = PluginManifest::from_toml(MANIFEST).map_err(|e| e.to_string())?.permissions;
     for release in &mut list.releases {
         release.image_urls.retain(|url| https_host(url).is_some_and(|host| permissions.allows_host(&host)));
@@ -492,41 +458,77 @@ fn read(bytes: &[u8]) -> Result<ReleaseList, String> {
     Ok(list)
 }
 
+/// The Game Catalog's state: what the core asked for, how each fetch and refresh ended, and the
+/// catalogs read. The copies are in [`store`], and when work runs is in [`schedule`].
 struct Catalogs {
     ctx: PluginContext,
+    /// What the topics of each forum are for, from the bundled catalog sources: a catalog file
+    /// reads the same whichever sources are in use.
+    forums: sources::Forums,
+    /// The copies fetched from the catalog address, by console: `fetched/`.
+    fetched: CopyStore,
+    /// The refreshed copies, by console: `refreshed/`.
+    refreshed: CopyStore,
+    /// The catalog sources fetched from the sources address: `sources/`, a folder of its own,
+    /// so no console's catalog file can take their place.
+    kept_sources: CopyStore,
     /// Each console's catalog as read last, by file name, with the copy it came from: a
     /// catalog file can be megabytes, and is read once per copy.
-    parsed: Mutex<HashMap<String, (String, ReleaseList)>>,
+    parsed: Mutex<HashMap<String, (String, Arc<ReleaseList>)>>,
+    /// What the core asked for, and **Refresh now**.
+    asks: Mutex<Asks>,
+    /// How the last fetch and the last refresh of each console ended.
+    tries: Mutex<Tries>,
+    /// Wakes the refresh task.
+    wake: Arc<Notify>,
+    /// How long a copy is used, and the first wait after a try that failed: [`FRESH`] and
+    /// [`RETRY`] but in tests.
+    timing: Timing,
+    /// The system's time and tokio's when the plugin started: see [`Catalogs::now`].
+    started: (SystemTime, Instant),
+}
+
+/// What the core asked for, and **Refresh now**.
+#[derive(Default)]
+struct Asks {
     /// The consoles the core asked for: the ones **Refresh now** refreshes.
-    asked: Mutex<BTreeSet<Console>>,
+    asked: BTreeSet<Console>,
     /// The consoles the core asked for in its last pass over the emulators: the ones with a
     /// "Show <console> games" setting. The core asks for the Catalog's buttons after the
     /// catalogs, which ends a pass: a console whose emulator was turned off goes.
-    played: Mutex<BTreeSet<Console>>,
+    played: BTreeSet<Console>,
     /// The consoles the core asked for in the pass it is in, until it ends.
-    asking: Mutex<BTreeSet<Console>>,
-    /// Why the last refresh of each console didn't run or failed, by file name. A refresh that
-    /// works removes its entry.
-    not_run: Mutex<HashMap<String, String>>,
+    asking: BTreeSet<Console>,
     /// The consoles **Refresh now** asked for: the next refresh runs for them, fresh or not.
-    forced: Mutex<BTreeSet<Console>>,
+    forced: BTreeSet<Console>,
     /// **Refresh now** asked, and its refresh hasn't ended yet: the Catalog says "Refreshing…".
-    refreshing: std::sync::atomic::AtomicBool,
-    /// Each refresh that failed or waits, by file name, and when it tries again. A refresh that
-    /// works removes its entry.
-    held: Mutex<HashMap<String, Held>>,
-    /// Each fetch of a catalog address that failed, by file name, and when it tries again. Its
-    /// `base` is the address. A fetch that works removes its entry.
-    fetch_held: Mutex<HashMap<String, Held>>,
-    /// Why the last fetch of each console's catalog failed, by file name, with the address.
-    fetch_problem: Mutex<HashMap<String, (String, String)>>,
-    /// Wakes the refresh task.
-    wake: Arc<Notify>,
-    /// How long a copy is used before it is fetched or refreshed again, in seconds: [`FRESH`]
-    /// but in tests.
-    fresh: u64,
-    /// The first wait of a refresh that failed or waits: [`RETRY`] but in tests.
-    retry: Duration,
+    refreshing: bool,
+}
+
+/// How the last fetch and the last refresh of each console ended, by file name. A try that
+/// works removes its entries.
+#[derive(Default)]
+struct Tries {
+    /// Each fetch of a catalog address that failed, and when it tries again. It is of the
+    /// address.
+    fetch_held: HashMap<String, Hold>,
+    /// Why the last fetch of each console's catalog failed, with the address.
+    fetch_problem: HashMap<String, (String, String)>,
+    /// Each refresh that failed or waits, and when it tries again. It is of the base copy.
+    refresh_held: HashMap<String, Hold>,
+    /// Why the last refresh of each console didn't run or failed.
+    not_run: HashMap<String, String>,
+}
+
+/// A console's catalog with no refresh: see [`Catalogs::base`].
+struct Base {
+    list: Arc<ReleaseList>,
+    /// Which copy: `bundled:<time>` for the bundled copy, else the name [`Catalogs::kept_copy`]
+    /// gives. A refresh is of this copy.
+    copy: String,
+    source: ReleaseSource,
+    host: String,
+    problem: Option<String>,
 }
 
 impl Drop for Catalogs {
@@ -536,7 +538,44 @@ impl Drop for Catalogs {
     }
 }
 
+/// `secs` seconds since 1970, as a time.
+fn time(secs: u64) -> SystemTime {
+    UNIX_EPOCH + Duration::from_secs(secs)
+}
+
 impl Catalogs {
+    fn new(ctx: PluginContext, wake: Arc<Notify>, timing: Timing) -> Self {
+        let store = |folder| CopyStore::new(ctx.storage().clone(), ctx.log().clone(), folder);
+        Self {
+            forums: bundled_sources(ctx.log()).forums(),
+            fetched: store("fetched"),
+            refreshed: store("refreshed"),
+            kept_sources: store("sources"),
+            ctx,
+            parsed: Mutex::new(HashMap::new()),
+            asks: Mutex::new(Asks::default()),
+            tries: Mutex::new(Tries::default()),
+            wake,
+            timing,
+            started: (SystemTime::now(), Instant::now()),
+        }
+    }
+
+    /// The time the schedule reads: the system's time when the plugin started, moved on by
+    /// tokio's clock. A test that pauses tokio's time moves the holds and the wake with it.
+    fn now(&self) -> SystemTime {
+        let (system, instant) = self.started;
+        system + instant.elapsed()
+    }
+
+    fn asks(&self) -> MutexGuard<'_, Asks> {
+        self.asks.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    fn tries(&self) -> MutexGuard<'_, Tries> {
+        self.tries.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
     /// Tells the core the catalogs changed: it asks for them again.
     fn changed(&self) {
         if let Err(e) = self.ctx.events().publish(RELEASES_CHANGED, Value::Null) {
@@ -552,19 +591,7 @@ impl Catalogs {
     /// The consoles the core asked for whose catalog `settings` shows: the ones fetched,
     /// refreshed and shown on the page.
     fn shown(&self, settings: &Settings) -> Vec<Console> {
-        let asked = self.asked.lock().unwrap_or_else(|p| p.into_inner());
-        asked.iter().filter(|c| settings.shows(c)).cloned().collect()
-    }
-
-    /// The file of the copy kept at `stem` (see [`fetched`] and [`SOURCES_KEPT`]): `part` is
-    /// empty for the copy, `.meta` for its meta file.
-    fn kept_path(stem: &str, part: &str) -> PluginResult<RelPath> {
-        Ok(RelPath::new(format!("{stem}{part}.json"))?)
-    }
-
-    async fn kept(&self, stem: &str) -> Option<Kept> {
-        let bytes = self.ctx.storage().read(&Self::kept_path(stem, ".meta").ok()?).await.ok()?;
-        serde_json::from_slice(&bytes).ok()
+        self.asks().asked.iter().filter(|c| settings.shows(c)).cloned().collect()
     }
 
     /// The catalog in `copy`, read from `bytes` unless it was read before.
@@ -573,18 +600,23 @@ impl Catalogs {
         console: &str,
         copy: &str,
         bytes: impl FnOnce() -> Option<Vec<u8>>,
-    ) -> Result<ReleaseList, String> {
-        if let Some((read_from, list)) = self.parsed.lock().unwrap_or_else(|p| p.into_inner()).get(console)
-            && read_from == copy
-        {
-            return Ok(list.clone());
+    ) -> Result<Arc<ReleaseList>, String> {
+        if let Some(list) = self.cached(console, copy) {
+            return Ok(list);
         }
-        let list = read(&bytes().ok_or("the copy is gone")?)?;
-        self.parsed
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .insert(console.to_owned(), (copy.to_owned(), list.clone()));
+        let list = Arc::new(read(&bytes().ok_or("the copy is gone")?, &self.forums)?);
+        self.remember(console, copy, list.clone());
         Ok(list)
+    }
+
+    /// The catalog read last at `slot`, when it is of `copy`.
+    fn cached(&self, slot: &str, copy: &str) -> Option<Arc<ReleaseList>> {
+        let parsed = self.parsed.lock().unwrap_or_else(|p| p.into_inner());
+        parsed.get(slot).filter(|(read_from, _)| read_from == copy).map(|(_, list)| list.clone())
+    }
+
+    fn remember(&self, slot: &str, copy: &str, list: Arc<ReleaseList>) {
+        self.parsed.lock().unwrap_or_else(|p| p.into_inner()).insert(slot.to_owned(), (copy.to_owned(), list));
     }
 
     /// Which kept copy of a console's catalog this is, for [`Catalogs::read_once`] and as a
@@ -596,20 +628,17 @@ impl Catalogs {
     /// What `fetched/<console>.meta.json` says, when it names a copy of the catalog named
     /// `console`.
     async fn kept_catalog(&self, console: &str) -> Option<Kept> {
-        self.kept(&fetched(console)).await.filter(|k| copy_path("fetched", console, &k.body).is_ok())
+        let kept: Kept = self.fetched.latest(console).await?;
+        self.fetched.path(console, &kept.body).is_ok().then_some(kept)
     }
 
-    async fn read_kept(&self, console: &str, kept: &Kept) -> Result<ReleaseList, String> {
+    async fn read_kept(&self, console: &str, kept: &Kept) -> Result<Arc<ReleaseList>, String> {
         let copy = Self::kept_copy(kept);
-        let cached =
-            self.parsed.lock().unwrap_or_else(|p| p.into_inner()).get(console).is_some_and(|(c, _)| *c == copy);
-        let bytes = if cached {
-            None
-        } else {
-            let path = copy_path("fetched", console, &kept.body)?;
-            Some(self.ctx.storage().read(&path).await.map_err(|e| e.to_string())?)
+        let bytes = match self.cached(console, &copy) {
+            Some(list) => return Ok(list),
+            None => self.fetched.read(console, &kept.body).await?,
         };
-        self.read_once(console, &copy, || bytes)
+        self.read_once(console, &copy, || Some(bytes))
     }
 
     /// Fetches `url`, the address of the catalog named `console`, and keeps the copy when it
@@ -617,44 +646,28 @@ impl Catalogs {
     /// before keeps that copy's name, and only its time changes. `true` for a new copy. It
     /// fails when the copy or its meta file can't be written.
     async fn fetch(&self, url: &str, console: &str) -> Result<bool, String> {
-        let response = self.ctx.http().send(HttpRequest::get(url)).await.map_err(|e| e.to_string())?;
-        if response.status != 200 {
-            return Err(format!("HTTP {} from {url}", response.status));
-        }
-        let body = response.body;
-        let list = read(&body)?;
+        let body = self.get(url).await?;
+        let list = read(&body, &self.forums)?;
         let before = self.kept_catalog(console).await.filter(|k| k.url == url);
         let same = match &before {
-            Some(before) => match copy_path("fetched", console, &before.body) {
-                Ok(path) => self.ctx.storage().read(&path).await.is_ok_and(|b| b == body),
-                Err(_) => false,
-            },
+            Some(before) => self.fetched.read(console, &before.body).await.is_ok_and(|b| b == body),
             None => false,
         };
         let name = match &before {
             Some(before) if same => before.body.clone(),
-            _ => format!("{console}.{}.json", nanos()),
+            _ => CopyStore::new_body(console),
         };
         let kept = Kept { fetched: now(), url: url.to_owned(), body: name };
-        let saved = async {
-            if !same {
-                let path = copy_path("fetched", console, &kept.body)?;
-                self.ctx.storage().write(&path, &body).await.map_err(|e| e.to_string())?;
-            }
-            let meta = serde_json::to_vec(&kept).unwrap_or_default();
-            let path = Self::kept_path(&fetched(console), ".meta").map_err(|e| e.to_string())?;
-            self.ctx.storage().write(&path, &meta).await.map_err(|e| e.to_string())
-        };
-        // A copy with no meta file is no change: the next read would not find it.
-        saved.await.map_err(|e| format!("could not keep the {console} catalog: {e}"))?;
+        let copy = if same { CopyFile::Kept } else { CopyFile::New { body: &kept.body, bytes: &body } };
+        self.fetched
+            .write(console, copy, &kept)
+            .await
+            .map_err(|e| format!("could not keep the {console} catalog: {e}"))?;
         if !same {
             // Always this answer's own reading: an earlier copy may have the same name.
-            self.parsed
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .insert(console.to_owned(), (Self::kept_copy(&kept), list));
+            self.remember(console, &Self::kept_copy(&kept), Arc::new(list));
             let keep = [kept.body.as_str(), before.as_ref().map_or("", |b| b.body.as_str())];
-            self.remove_old_copies("fetched", console, &keep).await;
+            self.fetched.prune(console, &keep).await;
         }
         Ok(!same)
     }
@@ -664,7 +677,7 @@ impl Catalogs {
         let url = self.settings().await.sources_url.trim().to_owned();
         let host = https_host(&url).unwrap_or_default();
         let (sources, copy, problem) = if url.is_empty() {
-            (self.bundled_sources(), ReleaseSource::Bundled, None)
+            (bundled_sources(self.ctx.log()), ReleaseSource::Bundled, None)
         } else {
             self.address_sources(&url).await
         };
@@ -675,24 +688,13 @@ impl Catalogs {
         SourcesInUse { sources, copy, host, problem, unusable }
     }
 
-    fn bundled_sources(&self) -> sources::Sources {
-        sources::read(BUNDLED_SOURCES).unwrap_or_else(|e| {
-            // A test checks the bundled file, so this is a broken build.
-            self.ctx.log().error(&format!("the bundled catalog sources don't read: {e}"));
-            debug_assert!(false, "bundled catalog sources: {e}");
-            sources::Sources::default()
-        })
-    }
-
     /// The catalog sources from `url`: the kept copy while it is fresh, else a new fetch, else
     /// the kept copy, else the bundled one.
     async fn address_sources(&self, url: &str) -> (sources::Sources, ReleaseSource, Option<String>) {
-        let kept = self.kept(SOURCES_KEPT).await.filter(|k| k.url == url);
-        let read_kept = || async {
-            let path = Self::kept_path(SOURCES_KEPT, "").map_err(|e| e.to_string())?;
-            sources::read(&self.ctx.storage().read(&path).await.map_err(|e| e.to_string())?)
-        };
-        if kept.as_ref().is_some_and(|k| now().saturating_sub(k.fetched) < self.fresh)
+        let kept = self.kept_sources.latest::<Kept>(SOURCES).await.filter(|k| k.url == url);
+        let read_kept = || async { sources::read(&self.kept_sources.read_plain(SOURCES).await?) };
+        let made = kept.as_ref().map(|k| time(k.fetched));
+        if schedule::fresh(self.now(), made, &self.timing)
             && let Ok(list) = read_kept().await
         {
             return (list, ReleaseSource::Fetched, None);
@@ -707,24 +709,16 @@ impl Catalogs {
         {
             return (list, ReleaseSource::Cached, Some(problem));
         }
-        (self.bundled_sources(), ReleaseSource::Bundled, Some(problem))
+        (bundled_sources(self.ctx.log()), ReleaseSource::Bundled, Some(problem))
     }
 
     /// Fetches the catalog sources from `url` and reads them. The copy is kept only when it
     /// reads.
     async fn fetch_sources(&self, url: &str) -> Result<sources::Sources, String> {
-        let response = self.ctx.http().send(HttpRequest::get(url)).await.map_err(|e| e.to_string())?;
-        if response.status != 200 {
-            return Err(format!("HTTP {} from {url}", response.status));
-        }
-        let list = sources::read(&response.body)?;
+        let body = self.get(url).await?;
+        let list = sources::read(&body)?;
         let kept = Kept { fetched: now(), url: url.to_owned(), body: String::new() };
-        let saved = async {
-            self.ctx.storage().write(&Self::kept_path(SOURCES_KEPT, "")?, &response.body).await?;
-            let meta = serde_json::to_vec(&kept).unwrap_or_default();
-            self.ctx.storage().write(&Self::kept_path(SOURCES_KEPT, ".meta")?, &meta).await
-        };
-        if let Err(e) = saved.await {
+        if let Err(e) = self.kept_sources.write(SOURCES, CopyFile::Plain(&body), &kept).await {
             self.ctx.log().warn(&format!("could not keep the catalog sources: {e}"));
         }
         Ok(list)
@@ -754,7 +748,7 @@ impl Catalogs {
         }
     }
 
-    fn bundled(&self, console: &str) -> Option<ReleaseList> {
+    fn bundled(&self, console: &str) -> Option<Arc<ReleaseList>> {
         let name = format!("{console}.json");
         let (_, bytes) = BUNDLED.iter().find(|(n, _)| *n == name)?;
         match self.read_once(console, "bundled", || Some(bytes.to_vec())) {
@@ -771,87 +765,91 @@ impl Catalogs {
     /// It doesn't wait for a refresh: with the refresh on, it is the copy refreshed before, if
     /// any, also from another base copy. The refresh task makes one from this base copy.
     async fn list(&self, console: &str, settings: &Settings) -> Option<ReleaseList> {
-        let (base, _) = self.base(console, settings).await?;
-        if !settings.refresh_from_forums {
-            return Some(base);
-        }
-        let kept = self.refreshed_meta(console).await;
-        let refreshed = match &kept {
-            Some(meta) => self.read_refreshed(console, meta).await.ok(),
-            None => None,
+        let base = self.base(console, settings).await?;
+        let refreshed = match self.refreshed_meta(console).await {
+            Some(meta) if settings.refresh_from_forums => self.read_refreshed(console, &meta).await.ok(),
+            _ => None,
         };
-        let list = refreshed.unwrap_or_else(|| base.clone());
-        Some(ReleaseList { source: base.source, host: base.host, problem: base.problem, ..list })
+        let list = refreshed.unwrap_or(base.list);
+        Some(ReleaseList { source: base.source, host: base.host, problem: base.problem, ..(*list).clone() })
     }
 
-    /// The catalog named `console` with no refresh, and the name of its copy: `bundled:<time>`
-    /// for the bundled copy, else the name [`Catalogs::kept_copy`] gives. It doesn't fetch: with
-    /// an address set, it is the copy fetched before, if any, else the bundled one. The refresh
-    /// task fetches (see [`Catalogs::fetch_due`]).
-    async fn base(&self, console: &str, settings: &Settings) -> Option<(ReleaseList, String)> {
-        let bundled = |list: ReleaseList| {
-            let copy = format!("bundled:{}", list.updated);
-            (list, copy)
-        };
+    /// The catalog named `console` with no refresh, and which copy it is. It doesn't fetch:
+    /// with an address set, it is the copy fetched before, if any, else the bundled one. The
+    /// refresh task fetches (see [`Catalogs::fetch_due`]).
+    async fn base(&self, console: &str, settings: &Settings) -> Option<Base> {
         let Some(url) = catalog_url(settings, console) else {
-            return self.bundled(console).map(bundled);
+            let list = self.bundled(console)?;
+            let copy = format!("bundled:{}", list.updated);
+            return Some(Base { list, copy, source: ReleaseSource::Bundled, host: String::new(), problem: None });
         };
         let host = https_host(&url).unwrap_or_default();
-        let problem = self
-            .fetch_problem
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .get(console)
-            .filter(|(at, _)| *at == url)
-            .map(|(_, why)| why.clone());
+        let problem = self.tries().fetch_problem.get(console).filter(|(at, _)| *at == url).map(|(_, why)| why.clone());
         if let Some(kept) = self.kept_catalog(console).await.filter(|k| k.url == url)
             && let Ok(list) = self.read_kept(console, &kept).await
         {
             let source = if problem.is_some() { ReleaseSource::Cached } else { ReleaseSource::Fetched };
-            return Some((ReleaseList { source, host, problem, ..list }, Self::kept_copy(&kept)));
+            return Some(Base { list, copy: Self::kept_copy(&kept), source, host, problem });
         }
-        let (list, copy) = bundled(self.bundled(console)?);
-        Some((ReleaseList { source: ReleaseSource::Bundled, host, problem, ..list }, copy))
+        let list = self.bundled(console)?;
+        let copy = format!("bundled:{}", list.updated);
+        Some(Base { list, copy, source: ReleaseSource::Bundled, host, problem })
     }
 
-    /// The fetch of each catalog address the core asked for that is due: with no copy fetched
-    /// from it, or one over [`FRESH`] old. A fetch that failed doesn't run again before its
-    /// [`Held`] time. `true` when a copy or the reason a fetch failed changed. A reason is
-    /// logged once, when it changes.
+    /// The fetch of the catalog named `console` from `url`, as the schedule sees it, with the
+    /// hold of its last try.
+    async fn fetch_work(&self, console: &str, url: &str) -> (Option<SystemTime>, Option<Hold>) {
+        let kept = self.kept_catalog(console).await.filter(|k| k.url == url);
+        let held = self.tries().fetch_held.get(console).cloned();
+        (kept.map(|k| time(k.fetched)), held)
+    }
+
+    /// The refresh of the catalog named `console`, as the schedule sees it: its base copy, when
+    /// its refreshed copy of that base copy was made, and the hold of its last try. `None` with
+    /// no catalog.
+    async fn refresh_work(
+        &self,
+        console: &str,
+        settings: &Settings,
+    ) -> Option<(String, Option<SystemTime>, Option<Hold>)> {
+        let copy = self.base(console, settings).await?.copy;
+        let kept = self.refreshed_meta(console).await.filter(|m| m.base == copy && !m.body.is_empty());
+        let held = self.tries().refresh_held.get(console).cloned();
+        Some((copy, kept.map(|m| time(m.refreshed)), held))
+    }
+
+    /// The fetch of each catalog address the core asked for that is due (see [`schedule`]).
+    /// `true` when a copy or the reason a fetch failed changed. A reason is logged once, when
+    /// it changes.
     async fn fetch_due(&self) -> bool {
         let settings = self.settings().await;
-        let asked = self.shown(&settings);
         let mut changed = false;
-        for console in asked {
+        for console in self.shown(&settings) {
             let name = console.file_name();
             let Some(url) = catalog_url(&settings, &name) else { continue };
-            let kept = self.kept_catalog(&name).await.filter(|k| k.url == url);
-            if kept.is_some_and(|k| now().saturating_sub(k.fetched) < self.fresh) {
-                continue;
-            }
-            let before = self.fetch_held.lock().unwrap_or_else(|p| p.into_inner()).get(&name).cloned();
-            if before.as_ref().is_some_and(|h| h.base == url && Instant::now() < h.at) {
+            let (made, held) = self.fetch_work(&name, &url).await;
+            let work = Work { of: &url, made, held: held.as_ref(), forced: false };
+            if !schedule::next(self.now(), &work, &self.timing).run {
                 continue;
             }
             let fetched = self.fetch(&url, &name).await;
-            let mut problems = self.fetch_problem.lock().unwrap_or_else(|p| p.into_inner());
-            let mut holds = self.fetch_held.lock().unwrap_or_else(|p| p.into_inner());
+            let outcome = if fetched.is_ok() { Outcome::Done } else { Outcome::Failed };
+            let hold = schedule::hold_after(self.now(), &work, outcome, &self.timing);
+            let mut tries = self.tries();
+            match hold {
+                Some(hold) => tries.fetch_held.insert(name.clone(), hold),
+                None => tries.fetch_held.remove(&name),
+            };
             match fetched {
                 Ok(new) => {
-                    holds.remove(&name);
-                    let solved = problems.remove(&name).is_some();
+                    let solved = tries.fetch_problem.remove(&name).is_some();
                     changed |= new || solved;
                 }
                 Err(why) => {
-                    let most = Duration::from_secs(self.fresh);
-                    holds.insert(
-                        name.clone(),
-                        Held::after(before.as_ref(), &url, false, self.retry, most, Instant::now()),
-                    );
                     let new = (url.clone(), why);
-                    if problems.get(&name) != Some(&new) {
+                    if tries.fetch_problem.get(&name) != Some(&new) {
                         self.ctx.log().warn(&format!("{url}: {}", new.1));
-                        problems.insert(name, new);
+                        tries.fetch_problem.insert(name, new);
                         changed = true;
                     }
                 }
@@ -860,128 +858,90 @@ impl Catalogs {
         changed
     }
 
-    fn refreshed_path(console: &str, part: &str) -> PluginResult<RelPath> {
-        Ok(RelPath::new(format!("refreshed/{console}{part}.json"))?)
-    }
-
     /// What `refreshed/<console>.meta.json` says, from any base copy.
     async fn refreshed_meta(&self, console: &str) -> Option<Refreshed> {
-        let bytes = self.ctx.storage().read(&Self::refreshed_path(console, ".meta").ok()?).await.ok()?;
-        serde_json::from_slice(&bytes).ok()
+        self.refreshed.latest(console).await
     }
 
-    /// How long until the task has work with no ask, at least a second from now: for each
-    /// console the core asked for, when its fetched copy gets too old or a fetch that failed
-    /// tries again, and with the refresh on, when its refreshed copy gets too old or a refresh
-    /// that failed or waits tries again (see [`Held`]). With the refresh on, a console with no
-    /// refreshed copy tries again after the fresh time. `None` with no such work: then only an
-    /// ask wakes the task.
+    /// How long until the task has work with no ask (see [`schedule::sleep`]): for each console
+    /// the core asked for, when its fetch is due, and with the refresh on, when its refresh is
+    /// due. `None` with no such work: then only an ask wakes the task.
     async fn next_wake(&self) -> Option<Duration> {
         let settings = self.settings().await;
-        let asked = self.shown(&settings);
-        let fresh = Duration::from_secs(self.fresh);
-        let mut next = settings.refresh_from_forums.then_some(fresh);
-        let mut soonest = |wait: Duration| next = Some(next.map_or(wait, |n| n.min(wait)));
-        let until = |at: Instant| at.saturating_duration_since(Instant::now());
-        let after = |time: u64| Duration::from_secs((time + self.fresh).saturating_sub(now()));
-        for console in asked {
+        let now = self.now();
+        let mut wakes = Vec::new();
+        for console in self.shown(&settings) {
             let name = console.file_name();
             if let Some(url) = catalog_url(&settings, &name) {
-                let held = self.fetch_held.lock().unwrap_or_else(|p| p.into_inner()).get(&name).cloned();
-                match held.filter(|h| h.base == url) {
-                    Some(held) => soonest(until(held.at)),
-                    None => {
-                        if let Some(kept) = self.kept_catalog(&name).await.filter(|k| k.url == url) {
-                            soonest(after(kept.fetched));
-                        }
-                    }
-                }
+                let (made, held) = self.fetch_work(&name, &url).await;
+                let work = Work { of: &url, made, held: held.as_ref(), forced: false };
+                wakes.push(schedule::next(now, &work, &self.timing).wake);
             }
-            if !settings.refresh_from_forums {
-                continue;
-            }
-            let held = self.held.lock().unwrap_or_else(|p| p.into_inner()).get(&name).cloned();
-            match held {
-                Some(held) => soonest(until(held.at)),
-                None => soonest(after(self.refreshed_meta(&name).await.map_or(now(), |m| m.refreshed))),
+            if settings.refresh_from_forums
+                && let Some((copy, made, held)) = self.refresh_work(&name, &settings).await
+            {
+                let work = Work { of: &copy, made, held: held.as_ref(), forced: false };
+                wakes.push(schedule::next(now, &work, &self.timing).wake);
             }
         }
-        next.map(|n| n.max(Duration::from_secs(1)))
+        schedule::sleep(now, wakes, settings.refresh_from_forums, &self.timing)
     }
 
-    /// The refresh of each console the core asked for that is due: with no refreshed copy of
-    /// its base copy, with one over [`FRESH`] old, or after **Refresh now**. A refresh of the
-    /// same base copy that failed doesn't run again before its [`Held`] time, also on an ask;
-    /// one that waits for the VPN asks the VPN gate again. **Refresh now** runs either.
-    /// `true` when a catalog or the reason a refresh didn't run changed. A reason is logged
-    /// once, when it changes.
+    /// The refresh of each console the core asked for that is due (see [`schedule`]): with no
+    /// refreshed copy of its base copy, with one too old, or after **Refresh now**. `true` when
+    /// a catalog or the reason a refresh didn't run changed. A reason is logged once, when it
+    /// changes.
     async fn refresh_due(&self) -> bool {
         let settings = self.settings().await;
         if !settings.refresh_from_forums {
             return false;
         }
-        let forced = std::mem::take(&mut *self.forced.lock().unwrap_or_else(|p| p.into_inner()));
-        let asked = self.shown(&settings);
+        let forced = std::mem::take(&mut self.asks().forced);
         // A refresh that Refresh now asked for always tells the core when it ends, so the
         // Catalog stops saying "Refreshing…", also when it fails for the same reason again.
         let mut changed = !forced.is_empty();
-        for console in asked {
+        for console in self.shown(&settings) {
             let name = console.file_name();
-            let Some((_, copy)) = self.base(&name, &settings).await else { continue };
-            let kept = self.refreshed_meta(&name).await.filter(|m| m.base == copy && !m.body.is_empty());
-            let fresh = kept.is_some_and(|m| now().saturating_sub(m.refreshed) < self.fresh);
-            let force = forced.contains(&console);
-            if fresh && !force {
-                continue;
-            }
-            let before = self.held.lock().unwrap_or_else(|p| p.into_inner()).get(&name).cloned();
-            let held = before.as_ref().filter(|h| h.base == copy && Instant::now() < h.at);
-            if held.is_some_and(|h| !h.waiting) && !force {
+            let Some((copy, made, held)) = self.refresh_work(&name, &settings).await else { continue };
+            let work = Work { of: &copy, made, held: held.as_ref(), forced: forced.contains(&console) };
+            if !schedule::next(self.now(), &work, &self.timing).run {
                 continue;
             }
             let why = match self.vpn().await {
-                Err(why) => Some((why, true)),
+                Err(why) => Some((why, Outcome::Waiting)),
                 Ok(vpn) => match self.refresh(&name, &copy, vpn).await {
                     Ok(_) => None,
-                    Err(e) => Some((format!("Failed: {e}"), false)),
+                    Err(e) => Some((format!("Failed: {e}"), Outcome::Failed)),
                 },
             };
-            {
-                let mut holds = self.held.lock().unwrap_or_else(|p| p.into_inner());
-                match &why {
-                    None => {
-                        holds.remove(&name);
-                    }
-                    // Still waiting before its time: the time stays.
-                    Some((_, true)) if held.is_some_and(|h| h.waiting) && !force => {}
-                    Some((_, waiting)) => {
-                        let most = Duration::from_secs(self.fresh);
-                        let next = Held::after(before.as_ref(), &copy, *waiting, self.retry, most, Instant::now());
-                        holds.insert(name.clone(), next);
-                    }
-                }
-            }
-            let mut not_run = self.not_run.lock().unwrap_or_else(|p| p.into_inner());
+            let outcome = why.as_ref().map_or(Outcome::Done, |(_, outcome)| *outcome);
+            let hold = schedule::hold_after(self.now(), &work, outcome, &self.timing);
+            let mut tries = self.tries();
+            match hold {
+                Some(hold) => tries.refresh_held.insert(name.clone(), hold),
+                None => tries.refresh_held.remove(&name),
+            };
             let same = match why {
                 Some((why, _)) => {
-                    let same = not_run.get(&name) == Some(&why);
+                    let same = tries.not_run.get(&name) == Some(&why);
                     if !same {
                         self.ctx.log().warn(&format!("the {name} catalog is not refreshed: {why}"));
                     }
-                    not_run.insert(name, why);
+                    tries.not_run.insert(name, why);
                     same
                 }
                 None => {
                     // A refresh that ran changed the catalog.
-                    not_run.remove(&name);
+                    tries.not_run.remove(&name);
                     false
                 }
             };
             changed |= !same;
         }
+        let mut asks = self.asks();
         // No other Refresh now came while this one ran.
-        if !forced.is_empty() && self.forced.lock().unwrap_or_else(|p| p.into_inner()).is_empty() {
-            self.refreshing.store(false, std::sync::atomic::Ordering::SeqCst);
+        if !forced.is_empty() && asks.forced.is_empty() {
+            asks.refreshing = false;
         }
         changed
     }
@@ -1007,10 +967,12 @@ impl Catalogs {
             return Err(PluginError::Precondition("Turn on Refresh from the forums first".into()));
         }
         let asked = self.shown(&settings);
+        let mut asks = self.asks();
         if !asked.is_empty() {
-            self.refreshing.store(true, std::sync::atomic::Ordering::SeqCst);
+            asks.refreshing = true;
         }
-        self.forced.lock().unwrap_or_else(|p| p.into_inner()).extend(asked);
+        asks.forced.extend(asked);
+        drop(asks);
         self.wake.notify_one();
         Ok(())
     }
@@ -1037,8 +999,8 @@ impl Catalogs {
         }
         let asked = self.shown(&settings);
         let why = {
-            let not_run = self.not_run.lock().unwrap_or_else(|p| p.into_inner());
-            asked.iter().find_map(|c| not_run.get(&c.file_name()).map(|why| format!("{}: {why}", c.as_str())))
+            let tries = self.tries();
+            asked.iter().find_map(|c| tries.not_run.get(&c.file_name()).map(|why| format!("{}: {why}", c.as_str())))
         };
         let mut newest = None;
         for console in &asked {
@@ -1046,7 +1008,7 @@ impl Catalogs {
                 newest = newest.max(Some(meta.refreshed));
             }
         }
-        let (label, tone) = if self.refreshing.load(std::sync::atomic::Ordering::SeqCst) {
+        let (label, tone) = if self.asks().refreshing {
             ("Refreshing…".to_owned(), Tone::Info)
         } else if let Some(why) = why {
             (why, Tone::Warning)
@@ -1085,7 +1047,7 @@ impl Catalogs {
                 }
                 None => "Not refreshed yet".into(),
             };
-            let why = self.not_run.lock().unwrap_or_else(|p| p.into_inner()).get(&name).cloned();
+            let why = self.tries().not_run.get(&name).cloned();
             let value = match why {
                 Some(why) => format!("{why}. {last}"),
                 None => last,
@@ -1104,23 +1066,15 @@ impl Catalogs {
         format!("refreshed:{}", meta.body)
     }
 
-    /// The file of the copy `meta` names, when it is a copy of the catalog named `console`.
-    fn body_path(console: &str, meta: &Refreshed) -> Result<RelPath, String> {
-        copy_path("refreshed", console, &meta.body)
-    }
-
-    async fn read_refreshed(&self, console: &str, meta: &Refreshed) -> Result<ReleaseList, String> {
+    async fn read_refreshed(&self, console: &str, meta: &Refreshed) -> Result<Arc<ReleaseList>, String> {
         // Not under `console`: the base copy is kept there.
         let slot = format!("{console}.refreshed");
         let copy = Self::refreshed_copy(meta);
-        let cached = self.parsed.lock().unwrap_or_else(|p| p.into_inner()).get(&slot).is_some_and(|(c, _)| *c == copy);
-        let bytes = if cached {
-            None
-        } else {
-            let path = Self::body_path(console, meta)?;
-            Some(self.ctx.storage().read(&path).await.map_err(|e| e.to_string())?)
+        let bytes = match self.cached(&slot, &copy) {
+            Some(list) => return Ok(list),
+            None => self.refreshed.read(console, &meta.body).await?,
         };
-        self.read_once(&slot, &copy, || bytes)
+        self.read_once(&slot, &copy, || Some(bytes))
     }
 
     /// The bytes of the base copy `copy` of the catalog named `console`.
@@ -1132,8 +1086,7 @@ impl Catalogs {
         }
         // The file the meta file named when the base copy was read: a later fetch writes a new one.
         let body = copy.rsplit_once(':').map_or("", |(_, body)| body);
-        let path = copy_path("fetched", console, body)?;
-        self.ctx.storage().read(&path).await.map_err(|e| e.to_string())
+        self.fetched.read(console, body).await
     }
 
     /// Fetches `url`, as bytes.
@@ -1143,28 +1096,6 @@ impl Catalogs {
             return Err(format!("HTTP {} from {url}", response.status));
         }
         Ok(response.body)
-    }
-
-    /// Removes the copies of the catalog named `console` in `folder` (`refreshed`, `fetched`)
-    /// other than the ones in `keep`: the one the meta file names, and the one it named before,
-    /// which a reader that read the meta file before may still read.
-    async fn remove_old_copies(&self, folder: &str, console: &str, keep: &[&str]) {
-        let Ok(path) = RelPath::new(folder) else { return };
-        let names = self.ctx.storage().list(&path).await.unwrap_or_default();
-        let meta_file = format!("{console}.meta.json");
-        for name in names {
-            let copy = name.starts_with(&format!("{console}.")) && name.ends_with(".json") && name != meta_file;
-            if !copy || keep.contains(&name.as_str()) {
-                continue;
-            }
-            let removed = match RelPath::new(format!("{folder}/{name}")) {
-                Ok(path) => self.ctx.storage().remove(&path).await,
-                Err(e) => Err(e.into()),
-            };
-            if let Err(e) = removed {
-                self.ctx.log().warn(&format!("could not remove the old {folder} copy {name}: {e}"));
-            }
-        }
     }
 
     /// The feed and the forum list of `forum`, a forum of `catalog`, from the fixed addresses
@@ -1194,7 +1125,7 @@ impl Catalogs {
     /// the result when it reads. A forum that doesn't answer leaves its topics as they are, and
     /// the meta file names it. It fails when no forum answers, and when the copy or its meta
     /// file can't be written.
-    async fn refresh(&self, console: &str, copy: &str, vpn: Option<String>) -> Result<ReleaseList, String> {
+    async fn refresh(&self, console: &str, copy: &str, vpn: Option<String>) -> Result<(), String> {
         let used = self.sources().await;
         let catalog = used.sources.catalogs.get(console).ok_or("the catalog sources name no forum for it")?;
         let mut answers = Vec::new();
@@ -1212,52 +1143,49 @@ impl Catalogs {
         for (key, e) in &failed {
             self.ctx.log().warn(&format!("the {console} catalog's forum {key} is not refreshed: {e}"));
         }
-        let mut file: Value = serde_json::from_slice(&self.base_bytes(console, copy).await?)
+        let mut file: topic::CatalogFile = serde_json::from_slice(&self.base_bytes(console, copy).await?)
             .map_err(|e| format!("not a catalog file: {e}"))?;
         let time = now();
         let counts =
             refresh::refresh(&mut file, &answers, catalog.forums.len(), i64::try_from(time).unwrap_or(i64::MAX))?;
+        // The refreshed model reads as it is: the bytes written are not read again.
+        let list = releases(&file, &self.forums)?;
         let body = serde_json::to_vec(&file).map_err(|e| e.to_string())?;
         let before = self.refreshed_meta(console).await;
         let meta = Refreshed {
             refreshed: time,
             base: copy.to_owned(),
-            body: format!("{console}.{}.json", nanos()),
+            body: CopyStore::new_body(console),
             new: counts.new,
             removed: counts.removed,
             borrowed: counts.borrowed,
             failed: failed.into_iter().map(|(key, e)| format!("{key} failed: {e}")).collect(),
             vpn,
         };
-        let list = read(&body)?;
-        let saved = async {
-            let path = Self::body_path(console, &meta).map_err(PluginError::InvalidInput)?;
-            self.ctx.storage().write(&path, &body).await?;
-            let bytes = serde_json::to_vec(&meta).unwrap_or_default();
-            self.ctx.storage().write(&Self::refreshed_path(console, ".meta")?, &bytes).await
-        };
-        // A copy with no meta file is no change: the next read would not find it.
-        saved.await.map_err(|e| format!("could not keep the refreshed {console} catalog: {e}"))?;
+        self.refreshed
+            .write(console, CopyFile::New { body: &meta.body, bytes: &body }, &meta)
+            .await
+            .map_err(|e| format!("could not keep the refreshed {console} catalog: {e}"))?;
         // Always this refresh's own reading: an earlier copy may have the same name.
-        self.parsed
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .insert(format!("{console}.refreshed"), (Self::refreshed_copy(&meta), list.clone()));
+        self.remember(&format!("{console}.refreshed"), &Self::refreshed_copy(&meta), Arc::new(list));
         let keep = [meta.body.as_str(), before.as_ref().map_or("", |b| b.body.as_str())];
-        self.remove_old_copies("refreshed", console, &keep).await;
+        self.refreshed.prune(console, &keep).await;
         self.ctx.log().info(&format!(
             "refreshed the {console} catalog: {} new, {} removed, {} borrowed",
             counts.new, counts.removed, counts.borrowed
         ));
-        Ok(list)
+        Ok(())
     }
 }
 
 #[async_trait]
 impl Releases for Catalogs {
     async fn releases(&self, console: &Console) -> PluginResult<Option<ReleaseList>> {
-        self.asked.lock().unwrap_or_else(|p| p.into_inner()).insert(console.clone());
-        self.asking.lock().unwrap_or_else(|p| p.into_inner()).insert(console.clone());
+        {
+            let mut asks = self.asks();
+            asks.asked.insert(console.clone());
+            asks.asking.insert(console.clone());
+        }
         let settings = self.settings().await;
         if !settings.shows(console) {
             return Ok(None);
@@ -1272,10 +1200,10 @@ impl Releases for Catalogs {
 #[async_trait]
 impl Configurator for Catalogs {
     /// The settings, with a "Show <console> games" toggle for each console an emulator turned
-    /// on plays (see [`Catalogs::played`]).
+    /// on plays (see [`Asks::played`]).
     async fn schema(&self, _scope: &ConfigScope) -> PluginResult<Value> {
         let mut schema = serde_json::to_value(schemars::schema_for!(Settings))?;
-        let played = self.played.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        let played = self.asks().played.clone();
         if let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) {
             for console in played {
                 let name = console.as_str();
@@ -1336,8 +1264,10 @@ impl Slots for Catalogs {
             }],
             SlotId::CatalogAction => {
                 // The core's pass over the consoles ended.
-                let pass = std::mem::take(&mut *self.asking.lock().unwrap_or_else(|p| p.into_inner()));
-                *self.played.lock().unwrap_or_else(|p| p.into_inner()) = pass;
+                {
+                    let mut asks = self.asks();
+                    asks.played = std::mem::take(&mut asks.asking);
+                }
                 self.catalog_items().await
             }
             // The plugin's page draws these.
@@ -1377,12 +1307,17 @@ mod tests {
 
     const HASH: &str = "c12fe1c06bba254a9dc9f519b335aa7c1367a88a";
 
+    /// The forums of the bundled catalog sources.
+    fn forums() -> sources::Forums {
+        sources::read(BUNDLED_SOURCES).unwrap().forums()
+    }
+
     #[test]
     fn every_bundled_catalog_reads() {
         let names: Vec<&str> = BUNDLED.iter().map(|(n, _)| *n).collect();
         assert_eq!(names, BUNDLED_NAMES, "one bundled file for each console");
         for (name, bytes) in BUNDLED {
-            read(bytes).unwrap_or_else(|e| panic!("{name}: {e}"));
+            read(bytes, &forums()).unwrap_or_else(|e| panic!("{name}: {e}"));
         }
     }
 
@@ -1411,7 +1346,7 @@ mod tests {
               "magnet": "magnet:?xt=urn:btih:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
               "game_info": { "image_urls": ["https://ir.ozone.ru/cover.jpg", "https://i128.fastpic.org/big/a.jpg",
                 "https://i1.imageban.ru/out/b.png"] } }] });
-        let list = read(&serde_json::to_vec(&file).unwrap()).unwrap();
+        let list = read(&serde_json::to_vec(&file).unwrap(), &forums()).unwrap();
         assert_eq!(
             list.releases[0].image_urls,
             ["https://i128.fastpic.org/big/a.jpg", "https://i1.imageban.ru/out/b.png"],
@@ -1427,7 +1362,7 @@ mod tests {
             ("pc", include_bytes!("../samples/pc.json").as_slice()),
         ];
         for (console, bytes) in samples {
-            let list = read(bytes).unwrap_or_else(|e| panic!("{console}: {e}"));
+            let list = read(bytes, &forums()).unwrap_or_else(|e| panic!("{console}: {e}"));
             assert!(!list.releases.is_empty(), "{console}");
         }
     }
@@ -1439,39 +1374,6 @@ mod tests {
         assert_eq!(info_hash("magnet:?dn=x&xt=urn:btih:YEX6DQDLXISUVHOJ6UM3GNNKPQJWPKEK").as_deref(), Some(HASH));
         assert_eq!(info_hash("https://xyz.dev/a.torrent"), None);
         assert_eq!(info_hash("magnet:?xt=urn:btih:1234"), None);
-    }
-
-    #[test]
-    fn a_meta_file_names_only_a_copy_of_its_own_catalog() {
-        let meta = |body: &str| Refreshed {
-            refreshed: 0,
-            base: String::new(),
-            body: body.into(),
-            new: 0,
-            removed: 0,
-            borrowed: 0,
-            failed: Vec::new(),
-            vpn: None,
-        };
-        let path = Catalogs::body_path("ps5", &meta("ps5.1791400000000000000.json")).unwrap();
-        assert_eq!(path.as_str(), "refreshed/ps5.1791400000000000000.json");
-        for body in ["", "ps4.1.json", "ps5..json", "ps5.meta.json", "ps5.1/../../x.json"] {
-            assert!(Catalogs::body_path("ps5", &meta(body)).is_err(), "{body}");
-        }
-    }
-
-    #[test]
-    fn a_held_refresh_waits_twice_as_long_each_try_at_most_the_fresh_time() {
-        let (first, most, now) = (Duration::from_secs(300), Duration::from_secs(1000), Instant::now());
-        let one = Held::after(None, "a", false, first, most, now);
-        assert_eq!((one.delay, one.at), (first, now + first));
-        let two = Held::after(Some(&one), "a", false, first, most, now);
-        assert_eq!(two.delay, Duration::from_secs(600));
-        let three = Held::after(Some(&two), "a", true, first, most, now);
-        assert_eq!((three.delay, three.waiting), (most, true), "at most the fresh time");
-        let other = Held::after(Some(&three), "b", false, first, most, now);
-        assert_eq!(other.delay, first, "a new base copy starts again");
-        assert_eq!(Held::after(None, "a", false, first, Duration::from_secs(1), now).delay, Duration::from_secs(1));
     }
 
     /// A runtime of one thread for a test.

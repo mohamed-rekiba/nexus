@@ -152,19 +152,29 @@ names a file's set by the same rules, so a plugin finds each set's unpacked fold
 ### Readers
 
 The app plugs in the `Archives` port (`crates/nexus-app/src/archives.rs`). It has one call:
-`unpack(kind, parts, into, progress, cancel)`, on real paths in the download's folder.
+`unpack(kind, parts, into, free, progress, cancel)`, on real paths in the download's folder.
+The core reads `free` from the `Hardware` port, on the disk that holds `into`. The call fails
+with a typed `ArchiveError` (`crates/nexus-core/src/ports.rs`): `Password`, `Escapes`,
+`NoRoom`, `Unsupported`, `Missing`, `Corrupt`, `Io` or `Cancelled`. The core shows its text.
 
 | Kind | Reader |
 |---|---|
 | zip, GOG installer | the `zip` crate, which finds the zip from its end, past the script |
 | tar, tar.gz | the `tar` crate, with `flate2` for gzip |
-| 7z | `sevenz-rust2` 0.23.0, with a split 7z read as one stream |
+| 7z | `sevenz-rust2` 0.24.1, with a split 7z read as one stream |
 | RAR (3, 4 and 5), tar.xz, tar.bz2, tar.zst, ISO, cab | libarchive, loaded at run time |
 | script installer | libarchive, reading the file from the archive's start as a stream |
-| a RAR or script installer libarchive can't read | `unar` (The Unarchiver), when it is installed: `lsar -j` lists it for the checks, then `unar` unpacks it; a script installer's archive is copied out beside the unpack folder first and removed after |
+| a RAR or script installer libarchive can't read (`Unsupported`) | `unar` (The Unarchiver), when it is installed: `lsar -j` lists it for the checks, then `unar` unpacks it; a script installer's archive is copied out beside the unpack folder first and removed after |
 | 7z with BZip2, Zstandard, Brotli, LZ4, LZS, Lizard or Deflate64 | libarchive |
 
-`sevenz-rust2` is built without those codecs, so a 7z that uses one goes to libarchive.
+`sevenz-rust2` is built without those codecs, or AES, so a 7z that uses one goes to
+libarchive. A 7z whose listing is encrypted goes there too, and libarchive reports the
+password.
+
+The fallback to `unar` is chosen by the error's kind: libarchive's read errors are
+`Unsupported`. A password, a path, the room or a cancel never fall back. Without `unar`, the
+error says to install it (`Missing`), and for a script installer, "or run the installer by
+hand".
 
 libarchive (`crates/nexus-app/src/libarchive.rs`) is loaded with `libloading`, and must have
 RAR 5 support. The app looks for it in this order:
@@ -175,8 +185,11 @@ RAR 5 support. The app looks for it in this order:
 
 `scripts/bundle-libarchive.sh` ships libarchive 3.8.9, built from its release with only its
 compression codecs, on Linux and macOS, and MSYS2's build on Windows. Without libarchive, such
-an archive fails with the fix, for example "RAR archives need libarchive, which isn't here:
-install libarchive13 on Debian and Ubuntu, libarchive on Fedora".
+an archive fails with the fix (`Missing`), for example "RAR archives need libarchive, which
+isn't here: install libarchive13 on Debian and Ubuntu, libarchive on Fedora".
+
+libarchive reports a password by the encryption it saw (`archive_entry_is_encrypted`, and
+`archive_read_has_encrypted_entries` after a failed read), not by its error text.
 
 RAR goes through libarchive, which reads RAR with its own BSD-licensed code, and not through
 UnRAR. UnRAR's licence adds terms the GPL doesn't allow, and Nexus is GPL-2.0-or-later. See
@@ -184,23 +197,33 @@ UnRAR. UnRAR's licence adds terms the GPL doesn't allow, and Nexus is GPL-2.0-or
 
 ### Checks
 
-Each archive is read twice. The first pass lists it and refuses before anything is written:
+Each archive is read twice. The first pass lists it with a format reader. The core's archive
+plan (`plan_unpack` in `crates/nexus-core/src/archive_plan.rs`) checks the listing and refuses
+before anything is written:
 
 | Problem | Error |
 |---|---|
-| An entry needs a password | "This archive needs a password, which Nexus can't ask for" |
-| A path is absolute or has `..` | "<name> leaves the folder" |
-| A link points out of the folder | "<name> links out of the folder" |
-| Not enough room | "This archive needs <size> free, and the disk has <free>" |
+| An entry needs a password | `Password`: "This archive needs a password, which Nexus can't ask for" |
+| A path is absolute or has `..` | `Escapes`: "<name> leaves the folder" |
+| A link points out of the folder, or a hard link names a path outside it | `Escapes`: "<name> links out of the folder" |
+| Not enough room | `NoRoom`: "This archive needs <size> free, and the disk has <free>" |
 
-The room check adds 64 MiB of spare to the unpacked size. A disk that doesn't report its free
-space counts as having room.
+The plan leaves out the archive's own top (`./`), devices and pipes. The room check adds
+64 MiB of spare (`UNPACK_SPARE`) to the files' bytes. A disk that doesn't report its free
+space counts as having room. For `unar`, a script installer's copied-out archive counts
+against the free space too.
 
-The second pass writes. Before each entry it checks again on the disk: nothing is written
-through a link ("<name> would write through a link"), and the path stays inside the folder once
-links are followed. Files keep their Unix mode, so a program stays a program. Links are made
-only on Unix. Devices and pipes are left out. Progress is reported every MiB, and a cancel
-stops the work at the next MiB: "The unpacking was cancelled".
+Every adapter runs the same plan: the app's `HostArchives`, for every reader and for `unar`,
+and the test kit's `FakeArchives`. So the rules exist once.
+
+The second pass writes only the plan's entries: by index for zip, in order for tar and
+libarchive, by name for 7z (its reader gives entries block by block). An entry the second pass
+doesn't find as the first one listed it fails: "the archive changed while it was unpacked".
+Before each entry it checks again on the disk: nothing is written through a link ("<name>
+would write through a link"), and the path stays inside the folder once links are followed
+("<name> leaves the folder through a link"). Files keep their Unix mode, so a program stays a
+program. Links are made only on Unix. Progress is reported every MiB, and a cancel stops the
+work at the next MiB: "The unpacking was cancelled".
 
 ### Where sets go, and the phases
 
@@ -539,6 +562,12 @@ sibling `.unpacking` folder first, so a failure leaves the old build.
 - The tests in `crates/nexus-app/src/archives.rs` unpack real zip, tar.gz, GOG, script installer and RAR files,
   and check the refusals and cancel. The RAR files in `crates/nexus-app/testdata/` come from the
   `unrar` crate's test data.
+- `contract::archives` in the test kit checks the refusals every `Archives` adapter makes: `..`,
+  an absolute path, a link out, a password and no room, plus a plain archive that unpacks. It
+  runs against `HostArchives` (with real zip files) in `crates/nexus-app/src/archives.rs`, and
+  against `FakeArchives` in `crates/nexus-testkit/src/archives.rs`.
+- The archive plan's tests in `crates/nexus-core/src/archive_plan.rs` run a table of hostile
+  paths and 5000 generated listings, and check that no planned path leaves the folder.
 - `tests/tests/seams/real_archives.rs` installs the real KytyPS5 and shadPS4 release archives, with
   `NEXUS_REAL_ARCHIVES` set to a folder of them.
 - A real transfer between two local librqbit sessions runs with `NEXUS_TORRENT_TESTS=1`.
