@@ -382,6 +382,19 @@ installed into the `games` folders.
 (`crates/nexus-core/src/game_installs/mod.rs`), the library
 (`crates/nexus-core/src/library/mod.rs`), the running games
 (`crates/nexus-core/src/sessions/mod.rs`, see [Launches and the game
+Which folder a download or an install uses is decided in one place,
+`HostFolders::place` (`crates/nexus-core/src/folders.rs`). A caller names a `Purpose`
+(`Download` or `Install`) and a console. `place` returns the console's folder: the folder the
+player chose, else the one last picked for the console, else `<console>` in the first folder of
+the grant. The grant is `packages` for a download and `games` for an install. The last pick is
+saved under `app.download_folder.<console>` or `app.install_folder.<console>`, and a pick that is
+in no grant folder any more reads as none. A chosen folder must lie inside one of the plugin's
+grant folders. `HostFolders::remember` saves a pick, after the caller has checked the free
+space. `HostFolders::new` builds it from a plugin's manifest, for the plugin's context and,
+through `Kernel::host_folders`, for the core. The download flow (`release_downloads.rs`) adds `torrent-<info hash>` to the
+console's folder. The view's snapshot and the disks read model ask `place` for the same folder,
+so the Game Hub and the download agree. The rules have unit tests in `folders.rs`.
+
 watcher](#launches-and-the-game-watcher)), the notices (`notices.rs`), the VPN setting
 (`vpn.rs`) and the launcher's update (`launcher_update.rs`) are subsystems; the other areas
 follow the same shape:

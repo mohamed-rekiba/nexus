@@ -40,7 +40,9 @@ pub(crate) async fn uninstall_game(core: &Core, game: &GameKey) -> CoreResult<()
         return Ok(());
     }
     let folder = folder.ok_or_else(|| CoreError::Invalid(format!("{title} has no folder to delete")))?;
-    let folders = crate::app::game_folders(core.kernel(), game)
+    let folders = core
+        .kernel()
+        .host_folders(&game.plugin)
         .ok_or_else(|| CoreError::Invalid(format!("{title} has no folder to delete")))?;
     folders.remove(&folder).await.map_err(|e| CoreError::Plugin { plugin: game.plugin.clone(), error: e })?;
     // Its update and add-ons, in their own folders.

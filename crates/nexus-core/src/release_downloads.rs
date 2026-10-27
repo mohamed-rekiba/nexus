@@ -13,12 +13,13 @@
 //! folder. Install checks the free space first. The subsystem's events come back here: a new
 //! game refreshes the library, and a failure is a notice.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use nexus_api::{GAMES_FOLDER, GameKey, HostPath, PACKAGES_FOLDER, PluginId, RelPath};
+use nexus_api::{GameKey, HostPath, PluginId};
 
 use crate::app::Core;
 use crate::changes::Area;
+use crate::folders::{HostFolders, Purpose};
 use crate::game_installs::{GameInstallCmd, InstallEvent, NewInstall};
 use crate::torrents::{NewDownload, TorrentAction, TorrentCmd, TorrentEvent, TorrentState, no_room};
 use crate::{CoreError, CoreResult, Kernel};
@@ -28,67 +29,6 @@ use crate::{CoreError, CoreResult, Kernel};
 pub(crate) fn free_at(hardware: &dyn crate::Hardware, folder: &Path) -> Option<u64> {
     let there = folder.ancestors().find(|p| p.is_dir())?;
     hardware.free_bytes(there)
-}
-
-/// A folder inside one of `emulator`'s `grant` folders (`packages` or `games`): `chosen`, or
-/// else the one last picked for the console (saved under `app.<saved>.<console>`), or else
-/// `<console>` in the first one. `what` names the grant in the errors ("packages folder").
-pub(crate) fn folder_in(
-    kernel: &Kernel,
-    emulator: &PluginId,
-    grant: &str,
-    console: &str,
-    chosen: Option<&Path>,
-    saved: &str,
-    what: &str,
-) -> CoreResult<(HostPath, PathBuf)> {
-    let manifest = kernel.manifest(emulator)?;
-    let host = kernel.host();
-    let home = host.home.as_deref();
-    let roots = manifest
-        .permissions
-        .folder(grant)
-        .map(|g| crate::folders::roots(kernel.config(), home, host.platform, g))
-        .unwrap_or_default();
-    // The root that holds `folder`, and the path from that root.
-    let inside = |folder: &Path| {
-        roots.iter().enumerate().find_map(|(i, root)| {
-            let rest = folder.strip_prefix(root).ok()?;
-            let parts: Vec<String> = rest.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
-            Some((i as u32, parts))
-        })
-    };
-    let (root, parts) = match chosen {
-        Some(path) => {
-            let path = crate::folders::expand(&path.to_string_lossy(), home)
-                .ok_or_else(|| CoreError::Invalid(format!("{} isn't a full path", path.display())))?;
-            inside(&path).ok_or_else(|| {
-                CoreError::Invalid(format!(
-                    "{} isn't in a {what}. Pick a folder inside a {what}, or add it in Settings",
-                    path.display()
-                ))
-            })?
-        }
-        None => kernel
-            .config()
-            .get(&["app", saved, console])
-            .as_str()
-            .and_then(|saved| inside(Path::new(saved)))
-            .unwrap_or_else(|| (0, vec![console.to_owned()])),
-    };
-    let rel = RelPath::new(parts.join("/")).map_err(|e| CoreError::Invalid(e.to_string()))?;
-    let at = HostPath::new(grant, root, rel);
-    let folder = crate::folders::resolve(kernel.config(), home, host.platform, &manifest.permissions, &at)
-        .map_err(|e| CoreError::Invalid(format!("{} has no {what}: {e}", manifest.name)))?;
-    Ok((at, folder))
-}
-
-/// Saves `folder` as the last one picked for `console`, under `app.<saved>`.
-fn save_folder(kernel: &Kernel, saved: &str, console: &str, folder: &Path) {
-    let value = serde_json::Value::String(folder.display().to_string());
-    if let Err(e) = kernel.config().set(&["app", saved, console], value) {
-        tracing::warn!(error = %e, "could not save the folder");
-    }
 }
 
 /// The console an emulator plays, which names its folders: the plugin's id when its manifest
@@ -101,20 +41,14 @@ pub(crate) fn console_of(kernel: &Kernel, emulator: &PluginId) -> String {
         .unwrap_or_else(|| emulator.to_string())
 }
 
-/// Where an install of `emulator`'s goes: `chosen`, or else the folder last picked for its
-/// console, or else the console's folder in the first game folder.
-pub(crate) fn install_folder(
-    kernel: &Kernel,
-    emulator: &PluginId,
-    chosen: Option<&Path>,
-) -> CoreResult<(HostPath, PathBuf)> {
-    let console = console_of(kernel, emulator);
-    folder_in(kernel, emulator, GAMES_FOLDER, &console, chosen, "install_folder", "game folder")
+/// The player's folders as `emulator` may use them.
+pub(crate) fn folders_of(kernel: &Kernel, emulator: &PluginId) -> CoreResult<HostFolders> {
+    kernel.host_folders(emulator).ok_or_else(|| CoreError::UnknownPlugin(emulator.clone()))
 }
 
 /// The console a release is for, which names its folder: the emulator's when the catalog
 /// doesn't say.
-fn console(kernel: &Kernel, emulator: &PluginId, platform: &str) -> String {
+pub(crate) fn console(kernel: &Kernel, emulator: &PluginId, platform: &str) -> String {
     if platform.is_empty() { console_of(kernel, emulator) } else { platform.to_owned() }
 }
 
@@ -256,7 +190,12 @@ async fn download_release(core: &Core, offer: &GameKey, release: &str, folder: O
             crate::torrents::MAX_DOWNLOADS
         )));
     }
-    let (source, folder) = torrent_folder(core, &found.emulator, &release.platform, &release.id, folder)?;
+    let folders = folders_of(core.kernel(), &found.emulator)?;
+    let for_console = console(core.kernel(), &found.emulator, &release.platform);
+    let (at, console_folder) = folders.place(Purpose::Download, &for_console, folder)?;
+    let name = format!("torrent-{}", release.id);
+    let source = at.join(&name).map_err(|e| CoreError::Invalid(e.to_string()))?;
+    let folder = console_folder.join(name);
     // A picked folder may be on another disk than the one the Game Hub checked.
     if chosen
         && let (Some(size), Some(free)) = (release.size_bytes, free_at(core.ports().hardware.as_ref(), &folder))
@@ -264,13 +203,8 @@ async fn download_release(core: &Core, offer: &GameKey, release: &str, folder: O
     {
         return Err(CoreError::Invalid(error));
     }
-    if let Some(parent) = folder.parent().filter(|_| chosen) {
-        save_folder(
-            core.kernel(),
-            "download_folder",
-            &console(core.kernel(), &found.emulator, &release.platform),
-            parent,
-        );
+    if chosen {
+        folders.remember(Purpose::Download, &for_console, &console_folder);
     }
     torrents
         .add(NewDownload {
@@ -286,30 +220,6 @@ async fn download_release(core: &Core, offer: &GameKey, release: &str, folder: O
             total: release.size_bytes.unwrap_or(0),
         })
         .await
-}
-
-/// Where a download of `emulator`'s goes: in `chosen`, or else in the folder last picked
-/// for the console, or else in the console's folder in the first packages folder. The
-/// folder must be inside one of the emulator's packages folders, so its installer reads it.
-pub(crate) fn torrent_folder(
-    core: &Core,
-    emulator: &PluginId,
-    platform: &str,
-    id: &str,
-    chosen: Option<&Path>,
-) -> CoreResult<(HostPath, PathBuf)> {
-    let kernel = core.kernel();
-    let (at, folder) = folder_in(
-        kernel,
-        emulator,
-        PACKAGES_FOLDER,
-        &console(kernel, emulator, platform),
-        chosen,
-        "download_folder",
-        "packages folder",
-    )?;
-    let name = format!("torrent-{id}");
-    Ok((at.join(&name).map_err(|e| CoreError::Invalid(e.to_string()))?, folder.join(name)))
 }
 
 /// Runs the player's command on game installs.
@@ -337,8 +247,7 @@ pub(crate) async fn install_game(
     let kernel = core.kernel();
     let provided = kernel.provided(plugin).await?;
     let installer = crate::error::require(plugin, nexus_api::Capability::GameInstaller, provided.game_installer)?;
-    let folders = crate::app::plugin_folders(kernel, plugin)
-        .ok_or_else(|| CoreError::Invalid(format!("{plugin} has no manifest")))?;
+    let folders = kernel.host_folders(plugin).ok_or_else(|| CoreError::Invalid(format!("{plugin} has no manifest")))?;
     let id = core.inner.downloads.next_id();
     core.installs().begin(NewInstall { id, plugin: plugin.clone(), source, into, installer, folders }).await
 }
@@ -386,14 +295,16 @@ async fn start_install(core: &Core, id: &str, folder: Option<&Path>) -> CoreResu
         return Ok(());
     }
     let kernel = core.kernel();
-    let (into, path) = install_folder(kernel, &job.emulator, folder)?;
+    let folders = folders_of(kernel, &job.emulator)?;
+    let console = console_of(kernel, &job.emulator);
+    let (into, path) = folders.place(Purpose::Install, &console, folder)?;
     if let Some(free) = free_at(core.ports().hardware.as_ref(), &path)
         && let Some(error) = no_room(job.total, free, "game folder")
     {
         return Err(CoreError::Invalid(error));
     }
     if folder.is_some() {
-        save_folder(kernel, "install_folder", &console_of(kernel, &job.emulator), &path);
+        folders.remember(Purpose::Install, &console, &path);
     }
     if let Some((plugin, source)) = core.installs().install_download(id, into.clone()) {
         install_game(core, &plugin, source, Some(into)).await?;

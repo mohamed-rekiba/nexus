@@ -13,6 +13,7 @@ use nexus_api::PluginId;
 
 use crate::Core;
 use crate::changes::Area;
+use crate::folders::Purpose;
 
 /// Where a console's downloads go, and the free space there.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -61,12 +62,10 @@ fn read(core: &Core) -> Disks {
         if folders.contains_key(&at) {
             continue;
         }
-        // The folder of a download in it, less the download's own folder.
-        let Ok((_, download)) = crate::release_downloads::torrent_folder(core, &offer.emulator, console, "x", None)
-        else {
-            continue;
-        };
-        let Some(path) = download.parent().map(std::path::Path::to_path_buf) else { continue };
+        let kernel = core.kernel();
+        let Some(host) = kernel.host_folders(&offer.emulator) else { continue };
+        let console_name = crate::release_downloads::console(kernel, &offer.emulator, console);
+        let Ok((_, path)) = host.place(Purpose::Download, &console_name, None) else { continue };
         // The console's folder may not be there yet: the disk that holds it is the one the
         // nearest folder above is on.
         let free = path.ancestors().find(|p| p.is_dir()).and_then(|there| core.ports().hardware.free_bytes(there));
