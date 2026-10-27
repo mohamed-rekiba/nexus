@@ -91,6 +91,11 @@ one while the `own_build` setting is on. The host never updates it.
 download, and what the core does next: unpause, stop, finished or stopped. They exist once, in
 the core; the adapter and the fake decide nothing.
 
+**Pref** (`Pref`): one of the app's own one-value settings, such as sounds, the size or the
+VPN rule, saved as `app.<key>`. Its spec says what values it takes and its default. The
+preferences subsystem checks each value the player sets, and the core reads them typed.
+_Avoid_: option (a theme's options are something else)
+
 **Port**: what the core needs from the outside world, as one interface. The app plugs in real ones and
 the tests plug in fakes.
 _Avoid_: adapter (that is the thing plugged in), driver

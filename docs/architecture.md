@@ -312,10 +312,12 @@ Linux, `~/Library/Application Support/nexus` on macOS, `%APPDATA%\nexus` on Wind
 | `updates/` | A downloaded launcher update and its `ready.json`. |
 | `extensions/` | Third-party themes, unless `--extensions` names another folder. |
 
-Some `app` keys the core keeps: `theme`, `theme-options`, `disabled_plugins`,
-`enabled_plugins`, `folders`, `downloads` and `installs` (work in progress, resumed at start),
-`game_installs` (work folders to clean up), `torrents`, `playtime`, `results`, `seed_downloads`,
-`vpn_only`, `vpn`, `update_repo`, `auto_update`, `pc_noticed`.
+Some `app` keys the core keeps: `theme-options`, `disabled_plugins`, `enabled_plugins`,
+`folders`, `downloads` and `installs` (work in progress, resumed at start), `game_installs`
+(work folders to clean up), `torrents`, `playtime`, `results`, `seed_downloads`. The one-value
+settings are the prefs (`Pref`): `sounds`, `fullscreen`, `return_on_exit`, `scale`,
+`start_at_login`, `auto_update`, `monitor`, `welcomed`, `vpn_only`, `vpn`, `theme`,
+`pc_noticed` and `update_repo`.
 
 Downloaded games are not in the data folder: they go to the player's `packages` folders and are
 installed into the `games` folders.
@@ -340,6 +342,16 @@ first (`crates/nexus-core/src/torrents/mod.rs`); the other areas follow the same
   the unpack and the install) change through one call, `hand_off`.
 - The subsystem never calls out while it holds its lock, and the core takes a subsystem's lock
   only when it doesn't hold `AppState`.
+
+The preferences are the second subsystem (`crates/nexus-core/src/preferences.rs`). Each of the
+app's one-value settings is a `Pref`, saved as `app.<key>` with the same key and value as
+before. A `Pref`'s spec says what values it takes, its default, and whether the player sets it.
+`Command::Pref(Pref, Value)` checks the value against that spec: a size goes to the nearest end
+of its range, and a value of the wrong type is refused. "Start at login" asks the `Desktop`
+port first, and "Download only through a VPN" is refused where the `Network` port can't bind
+downloads. The core reads them typed, through `Core::prefs()`. The theme, the PC the hardware
+notice was for and the update repo are prefs the core sets; a command can't. The config is
+the subsystem's store: it keeps no copy of its own, so a setting can't drift from what is saved.
 
 ## Downloads and torrents
 
