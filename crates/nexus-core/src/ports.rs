@@ -4,12 +4,66 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+use futures::future::BoxFuture;
 use futures::stream::BoxStream;
+use futures::{FutureExt, StreamExt as _};
 use nexus_api::{HttpRequest, HttpResponse, PluginResult};
 use serde::{Deserialize, Serialize};
+
+/// The time for the core: what time it is, and waits. Every timer in the core goes through
+/// it, so a test can move time instead of waiting for it.
+pub trait Clock: Send + Sync {
+    fn now(&self) -> Instant;
+
+    /// Ends `wait` from now.
+    fn sleep(&self, wait: Duration) -> BoxFuture<'static, ()>;
+
+    /// Ticks every `every`, the first one `every` from now. A tick that came late doesn't
+    /// bring the next ones closer.
+    fn interval(&self, every: Duration) -> BoxStream<'static, ()>;
+}
+
+impl dyn Clock + '_ {
+    /// Ends at `deadline`, or at once when it has passed.
+    pub fn sleep_until(&self, deadline: Instant) -> BoxFuture<'static, ()> {
+        self.sleep(deadline.saturating_duration_since(self.now()))
+    }
+
+    /// `work`'s result, or `None` when `limit` passed first. `work` is dropped then.
+    pub async fn timeout<T>(&self, limit: Duration, work: impl Future<Output = T>) -> Option<T> {
+        tokio::select! {
+            done = work => Some(done),
+            () = self.sleep(limit) => None,
+        }
+    }
+}
+
+/// Real time, from tokio's timers.
+pub struct TokioClock;
+
+impl Clock for TokioClock {
+    fn now(&self) -> Instant {
+        // Tokio's, not the system's: a runtime whose time a test paused gives the paused time.
+        tokio::time::Instant::now().into_std()
+    }
+
+    fn sleep(&self, wait: Duration) -> BoxFuture<'static, ()> {
+        tokio::time::sleep(wait).boxed()
+    }
+
+    fn interval(&self, every: Duration) -> BoxStream<'static, ()> {
+        let mut ticks = tokio::time::interval_at(tokio::time::Instant::now() + every, every);
+        ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        futures::stream::unfold(ticks, |mut ticks| async move {
+            ticks.tick().await;
+            Some(((), ticks))
+        })
+        .boxed()
+    }
+}
 
 /// The body of a download, from some offset.
 pub struct Body {
@@ -175,10 +229,12 @@ impl ProcessSpawner for TokioSpawner {
             child.wait().await?;
             Ok::<_, std::io::Error>(out)
         };
-        match tokio::time::timeout(timeout, run).await {
-            Ok(Ok(out)) => Ok(Some(out)),
-            Ok(Err(e)) => Err(nexus_api::PluginError::Other(format!("{:?}: {e}", command.program))),
-            Err(_) => {
+        // A real program runs in real time, whatever clock the core has.
+        let clock: &dyn Clock = &TokioClock;
+        match clock.timeout(timeout, run).await {
+            Some(Ok(out)) => Ok(Some(out)),
+            Some(Err(e)) => Err(nexus_api::PluginError::Other(format!("{:?}: {e}", command.program))),
+            None => {
                 let _ = child.kill().await;
                 Ok(None)
             }
@@ -191,6 +247,7 @@ impl ProcessSpawner for TokioSpawner {
         line: &(dyn for<'a> Fn(&'a str) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> PluginResult<i32> {
+        use futures::StreamExt;
         use tokio::io::{AsyncBufReadExt, BufReader};
         let failed = |e: std::io::Error| nexus_api::PluginError::Other(format!("{:?}: {e}", command.program));
         let mut child = tokio::process::Command::new(&command.program)
@@ -206,7 +263,7 @@ impl ProcessSpawner for TokioSpawner {
         let mut out = BufReader::new(child.stdout.take().expect("stdout is piped")).lines();
         let mut err = BufReader::new(child.stderr.take().expect("stderr is piped")).lines();
         let (mut out_open, mut err_open) = (true, true);
-        let mut tick = tokio::time::interval(Duration::from_millis(250));
+        let mut tick = TokioClock.interval(Duration::from_millis(250));
         while out_open || err_open {
             tokio::select! {
                 read = out.next_line(), if out_open => match read.map_err(failed)? {
@@ -217,7 +274,7 @@ impl ProcessSpawner for TokioSpawner {
                     Some(text) => line(&text),
                     None => err_open = false,
                 },
-                _ = tick.tick() => if cancelled() {
+                _ = tick.next() => if cancelled() {
                     let _ = child.kill().await;
                     break;
                 },
@@ -488,6 +545,9 @@ impl HttpTransport for NoNetwork {
 mod tests {
     use super::*;
 
+    /// Real programs run in real time.
+    const REAL: &dyn Clock = &TokioClock;
+
     fn sh(script: &str) -> SpawnCommand {
         SpawnCommand {
             program: "/bin/sh".into(),
@@ -508,7 +568,7 @@ mod tests {
         let process = TokioSpawner.spawn(command).await.unwrap();
         let id = process.id().unwrap().to_string();
         drop(process);
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        TokioClock.sleep(Duration::from_millis(200)).await;
         let alive = std::process::Command::new("kill").args(["-0", &id]).status().is_ok_and(|s| s.success());
         let _ = std::process::Command::new("kill").args(["-KILL", &id]).status();
         assert!(alive, "the program was stopped with its handle");
@@ -541,10 +601,10 @@ mod tests {
 
     #[tokio::test]
     async fn output_stops_a_program_that_runs_past_the_timeout() {
-        let started = std::time::Instant::now();
+        let started = REAL.now();
         let out = TokioSpawner.output(sh("sleep 30"), Duration::from_millis(200), 1024).await.unwrap();
         assert_eq!(out, None);
-        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(REAL.now() - started < Duration::from_secs(5));
     }
 
     async fn alive(pid: &str) -> bool {
@@ -560,7 +620,7 @@ mod tests {
 
         process.terminate().await.unwrap();
 
-        let exit = tokio::time::timeout(Duration::from_secs(5), process.wait()).await.unwrap().unwrap();
+        let exit = REAL.timeout(Duration::from_secs(5), process.wait()).await.unwrap().unwrap();
         assert!(!exit.success);
     }
 
@@ -574,7 +634,7 @@ mod tests {
         let child = loop {
             match std::fs::read_to_string(&pidfile) {
                 Ok(pid) if pid.ends_with('\n') => break pid.trim().to_owned(),
-                _ => tokio::time::sleep(Duration::from_millis(20)).await,
+                _ => TokioClock.sleep(Duration::from_millis(20)).await,
             }
         };
         assert!(alive(&child).await);
@@ -584,10 +644,10 @@ mod tests {
 
         let gone = async {
             while alive(&child).await {
-                tokio::time::sleep(Duration::from_millis(20)).await;
+                TokioClock.sleep(Duration::from_millis(20)).await;
             }
         };
-        tokio::time::timeout(Duration::from_secs(5), gone).await.expect("the script's program stopped too");
+        REAL.timeout(Duration::from_secs(5), gone).await.expect("the script's program stopped too");
     }
 
     #[tokio::test]

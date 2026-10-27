@@ -7,6 +7,7 @@
 mod app;
 mod archives;
 mod bus;
+mod changes;
 mod config;
 mod downloads;
 mod error;
@@ -38,15 +39,16 @@ pub use app::{
 };
 pub use archives::embedded_archive;
 pub use bus::EventBus;
+pub use changes::{Area, Change};
 pub use config::ConfigService;
 pub use downloads::{Job, JobPhase};
 pub use error::{CoreError, CoreResult, LoadError};
 pub use kernel::{BootReport, HostConfig, Kernel, KernelBuilder, Loader, Origin, PluginInfo, PluginStatus, Rejection};
 pub use ports::{
-    ArchiveKind, Archives, Body, Desktop, Front, Gpu, GroupTree, Hardware, HttpTransport, Network, NoArchives,
+    ArchiveKind, Archives, Body, Clock, Desktop, Front, Gpu, GroupTree, Hardware, HttpTransport, Network, NoArchives,
     NoDesktop, NoHardware, NoNetwork, NoTorrents, NoVpn, Opened, PackageError, PackageManager, ProcessExit,
-    ProcessHandle, ProcessSpawner, ProcessTree, SEED_UPLOAD_LIMIT, SpawnCommand, Specs, TokioSpawner, TorrentFile,
-    TorrentInfo, TorrentPhase, TorrentStart, TorrentStatus, Torrents, UnpackProgress, Vpn,
+    ProcessHandle, ProcessSpawner, ProcessTree, SEED_UPLOAD_LIMIT, SpawnCommand, Specs, TokioClock, TokioSpawner,
+    TorrentFile, TorrentInfo, TorrentPhase, TorrentStart, TorrentStatus, Torrents, UnpackProgress, Vpn,
 };
 pub use storage::DirStorage;
 pub use themes::{DataTheme, DirFiles};

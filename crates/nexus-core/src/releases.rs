@@ -11,6 +11,7 @@ use nexus_api::{
 };
 
 use crate::app::{Core, Detail, Entry};
+use crate::changes::Area;
 
 /// A release added this many days ago, or fewer, is new.
 pub const NEW_DAYS: i64 = 14;
@@ -463,7 +464,7 @@ impl Core {
                 format!("{added} new release{s} in the Catalog"),
             );
         }
-        self.changed();
+        self.changed(Area::Catalogs);
         self.describe_catalog_page();
         // A catalog refresh waits for the VPN: the VPN check reads the catalogs again when it is back.
         if self.plugin_waiting_vpn() {
@@ -476,6 +477,7 @@ impl Core {
     pub(crate) fn watch_store_installs(&self) {
         let weak = std::sync::Arc::downgrade(&self.inner);
         let every = self.kernel().host().store_poll;
+        let clock = self.kernel().clock().clone();
         tokio::spawn(async move {
             loop {
                 let Some(inner) = weak.upgrade() else { return };
@@ -483,11 +485,10 @@ impl Core {
                 core.refresh_store_installs().await;
                 let busy = {
                     let state = core.state();
-                    !state.store_installs.is_empty()
-                        || state.store_watch_until.is_some_and(|until| std::time::Instant::now() < until)
+                    !state.store_installs.is_empty() || state.store_watch_until.is_some_and(|until| clock.now() < until)
                 };
                 drop(core);
-                tokio::time::sleep(if busy { every } else { every * 10 }).await;
+                clock.sleep(if busy { every } else { every * 10 }).await;
             }
         });
     }
@@ -538,7 +539,7 @@ impl Core {
                 }
             }
         }
-        self.changed();
+        self.changed(Area::Downloads);
     }
 
     /// The offer `key` names, if it is one.

@@ -10,8 +10,9 @@ use nexus_api::{Capability, HostPath, InstallJob, InstalledGame, JobId, PluginEr
 use serde_json::Value;
 
 use crate::app::{Core, Inner};
+use crate::changes::Area;
 use crate::error::require;
-use crate::{CoreError, CoreResult};
+use crate::{Clock, CoreError, CoreResult};
 
 /// Where a running install's work folder is saved, by job id, so the next start can remove it.
 const RECORDS: [&str; 2] = ["app", "game_installs"];
@@ -66,8 +67,9 @@ struct HostJob {
     latest: Arc<(AtomicU64, AtomicU64)>,
     /// A task is on its way to put `latest` in the state.
     reporting: Arc<AtomicBool>,
-    /// When the last report went to the state.
+    /// When the last report went to the state, by `clock`.
     reported: Mutex<Option<Instant>>,
+    clock: Arc<dyn Clock>,
     /// The plugin, and the source it installs from.
     plugin: PluginId,
     source: HostPath,
@@ -104,11 +106,12 @@ impl InstallJob for HostJob {
         self.latest.1.store(total, Ordering::Release);
         {
             let mut reported = self.reported.lock().unwrap_or_else(|p| p.into_inner());
-            let due = done >= total || reported.is_none_or(|at| at.elapsed() >= REPORT_EVERY);
+            let due = done >= total
+                || reported.is_none_or(|at| self.clock.now().saturating_duration_since(at) >= REPORT_EVERY);
             if !due || self.reporting.swap(true, Ordering::AcqRel) {
                 return;
             }
-            *reported = Some(Instant::now());
+            *reported = Some(self.clock.now());
         }
         let Some(inner) = self.core.upgrade() else { return };
         let (id, latest, reporting) = (self.id, self.latest.clone(), self.reporting.clone());
@@ -118,7 +121,7 @@ impl InstallJob for HostJob {
                 (job.done, job.total) = (latest.0.load(Ordering::Acquire), latest.1.load(Ordering::Acquire));
             }
             reporting.store(false, Ordering::Release);
-            core.changed();
+            core.changed(Area::Installs);
         });
     }
 
@@ -233,6 +236,7 @@ impl Core {
             latest: Arc::default(),
             reporting: Arc::default(),
             reported: Mutex::new(None),
+            clock: kernel.clock().clone(),
             plugin: plugin.clone(),
             source: source.clone(),
             disposable,
@@ -242,7 +246,7 @@ impl Core {
             Ok(work) => work,
             Err(e) => {
                 self.state().game_installs.remove(&id);
-                self.changed();
+                self.changed(Area::Installs);
                 return Err(e);
             }
         };
@@ -265,7 +269,7 @@ impl Core {
         if ended_already == Some(true) {
             self.remove_work(plugin, &work).await;
         }
-        self.changed();
+        self.changed(Area::Installs);
         Ok(())
     }
 
@@ -331,7 +335,10 @@ impl Core {
             }
             cleaned = work;
         }
-        self.changed();
+        if phase == GamePhase::Failed {
+            self.inner.changes.publish(Area::Notices);
+        }
+        self.changed(Area::Installs);
     }
 
     /// Removes an install's work folder, checked against the plugin's grants.

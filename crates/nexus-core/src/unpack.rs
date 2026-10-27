@@ -210,9 +210,9 @@ async fn unpack_into(
                 keep_running: false,
             };
             let mut process = kernel.spawner().spawn(command).await.map_err(failed)?;
-            let exit = match tokio::time::timeout(EXTRACT_TIMEOUT, process.wait()).await {
-                Ok(exit) => exit.map_err(failed)?,
-                Err(_) => {
+            let exit = match kernel.clock().timeout(EXTRACT_TIMEOUT, process.wait()).await {
+                Some(exit) => exit.map_err(failed)?,
+                None => {
                     let _ = process.kill().await;
                     return Err(failed("the AppImage's --appimage-extract took too long"));
                 }

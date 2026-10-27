@@ -10,11 +10,12 @@
 //! with those words in its command line, once it shows, and the processes below it; the program
 //! started here is left to itself.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use nexus_api::SessionId;
 use tokio::sync::oneshot;
 
+use crate::changes::Area;
 use crate::{Core, Desktop, Front, ProcessExit, ProcessHandle, ProcessTree};
 
 /// How often the module looks for a started game's window, until it shows.
@@ -108,13 +109,13 @@ pub(crate) async fn run(
             tracing::debug!(error = %e, "the program that handed the game over wasn't waited for");
         }
     });
-    let host = core.kernel().host().clone();
-    let deadline = Instant::now() + host.hand_over_timeout;
+    let (host, clock) = (core.kernel().host().clone(), core.kernel().clock().clone());
+    let deadline = clock.now() + host.hand_over_timeout;
     loop {
         tokio::select! {
             // Nothing of the game runs yet: nothing to close, and nothing was played.
             _ = &mut stop => return None,
-            _ = tokio::time::sleep(SHOW_EVERY.min(host.watch_every)) => {}
+            () = clock.sleep(SHOW_EVERY.min(host.watch_every)) => {}
         }
         let looking = game_process.clone();
         let found = blocking(&core, move |_, processes| processes.find(&looking)).await;
@@ -125,7 +126,7 @@ pub(crate) async fn run(
             }
             return Some(follow(core, session, Followed::Found(id), stop).await);
         }
-        if Instant::now() >= deadline {
+        if clock.now() >= deadline {
             return None;
         }
     }
@@ -138,12 +139,12 @@ async fn follow(
     mut followed: Followed,
     mut stop: oneshot::Receiver<()>,
 ) -> ProcessExit {
-    let host = core.kernel().host().clone();
+    let (host, clock) = (core.kernel().host().clone(), core.kernel().clock().clone());
     let root = match &followed {
         Followed::Started(process) => process.id(),
         Followed::Found(id) => Some(*id),
     };
-    let deadline = Instant::now() + host.show_timeout;
+    let deadline = clock.now() + host.show_timeout;
     let mut first: Option<ProcessExit> = None;
     let mut shown = false;
     // Only a game whose window was seen can lose it: a desktop that can't see the game's
@@ -157,13 +158,13 @@ async fn follow(
                 first = Some(exit);
             }
             _ = &mut stop => break close(&core, &mut followed, root, first).await,
-            _ = tokio::time::sleep(every) => {}
+            () = clock.sleep(every) => {}
         }
         let root_exited = first.is_some();
         if !shown {
             // Until the game shows, only its processes and one try to show them: each call
             // may run a helper program.
-            let waited = Instant::now() >= deadline;
+            let waited = clock.now() >= deadline;
             let (ids, showing, front) = blocking(&core, move |desktop, processes| {
                 let ids = members(processes, root, root_exited);
                 let showing = !ids.is_empty() && desktop.show_game(&ids);
@@ -190,7 +191,7 @@ async fn follow(
                     state.game_in_front |= in_front;
                 }
                 drop(state);
-                core.changed();
+                core.changed(Area::Sessions);
             }
             continue;
         }
@@ -228,7 +229,7 @@ async fn follow(
             state.game_in_front = in_front;
             drop(state);
             if changed {
-                core.changed();
+                core.changed(Area::Sessions);
             }
         }
     };
@@ -283,19 +284,18 @@ async fn close(core: &Core, followed: &mut Followed, root: Option<u32>, mut firs
     }
     let asked = ids.clone();
     blocking(core, move |_, processes| processes.end(&asked, false)).await;
-    let deadline = Instant::now() + core.kernel().host().stop_grace;
-    while Instant::now() < deadline {
+    let clock = core.kernel().clock();
+    let deadline = clock.now() + core.kernel().host().stop_grace;
+    while clock.now() < deadline {
         let waited = match followed {
-            Followed::Started(process) if first.is_none() => {
-                tokio::time::timeout(STOP_EVERY, process.wait()).await.ok()
-            }
+            Followed::Started(process) if first.is_none() => clock.timeout(STOP_EVERY, process.wait()).await,
             _ => None,
         };
         match waited {
             Some(Ok(exit)) => first = Some(exit),
             // Timed out: the wait was the pause. Otherwise pause here, or this loop spins.
             None if first.is_none() && drop_root => {}
-            _ => tokio::time::sleep(STOP_EVERY).await,
+            _ => clock.sleep(STOP_EVERY).await,
         }
         let left = blocking(core, move |_, processes| members(processes, root, drop_root)).await;
         ended_by_itself(followed, &left, &mut first);

@@ -1966,7 +1966,7 @@ fn running_vm(kernel: &Kernel, state: &AppState, route: &Route) -> Option<Runnin
         } else {
             "starting".into()
         },
-        elapsed_secs: s.started.elapsed().as_secs(),
+        elapsed_secs: kernel.clock().now().saturating_duration_since(s.started).as_secs(),
         in_front: state.game_in_front,
         keymap: manifest.map(|m| m.keymap.clone()).unwrap_or_default(),
     })

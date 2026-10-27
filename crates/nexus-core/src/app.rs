@@ -15,6 +15,7 @@ use nexus_api::{
 use nexus_ui_api::{AppView, CompatVm, NoticeKind, SettingsPanelVm, SlotVm};
 use serde_json::Value;
 
+use crate::changes::{Area, Change, Changes};
 use crate::downloads::Downloads;
 use crate::error::require;
 use crate::view::{self, slot_vms};
@@ -399,6 +400,7 @@ pub(crate) struct Session {
     pub shown: bool,
     /// The system's id for the game's process.
     pub pid: Option<u32>,
+    /// By the kernel's clock.
     pub started: std::time::Instant,
     /// Where the game's output goes.
     pub log: std::path::PathBuf,
@@ -523,6 +525,7 @@ pub(crate) struct Inner {
     pub stops: Mutex<HashMap<SessionId, tokio::sync::oneshot::Sender<()>>>,
     /// The desktop was asked what it is missing, at the first game of this run.
     pub desktop_checked: std::sync::atomic::AtomicBool,
+    pub changes: Changes,
 }
 
 /// The app. Cheap to clone; every clone is the same app.
@@ -633,6 +636,7 @@ impl Core {
                 next_session: AtomicU64::new(0),
                 stops: Mutex::new(HashMap::new()),
                 desktop_checked: Default::default(),
+                changes: Changes::new(),
             }),
         };
         core.clean_up_game_installs();
@@ -656,7 +660,7 @@ impl Core {
             let Ok(specs) = tokio::task::spawn_blocking(move || hardware.specs()).await else { return };
             core.notice_blocked(&specs);
             core.state().hardware = Some(specs);
-            core.changed();
+            core.changed(Area::Hardware);
         });
     }
 
@@ -697,34 +701,50 @@ impl Core {
         self.inner.state.lock().unwrap_or_else(|p| p.into_inner())
     }
 
-    pub(crate) fn changed(&self) {
+    /// Each change of the state, by its area, from now on. The app renders on
+    /// [`Event::StateChanged`] instead, which every change also publishes.
+    pub fn changes(&self) -> tokio::sync::broadcast::Receiver<Change> {
+        self.inner.changes.subscribe()
+    }
+
+    /// The state in `area` changed: the core's readers learn which part, and the app that
+    /// something did.
+    pub(crate) fn changed(&self, area: Area) {
+        self.inner.changes.publish(area);
         self.inner.kernel.events().publish(Event::StateChanged);
+    }
+
+    /// Posts a notice. The change that goes with it publishes [`Event::StateChanged`]; this
+    /// says only that the notices changed.
+    fn post(&self, kind: NoticeKind, message: String, route: Option<Route>, game: Option<GameKey>) {
+        self.state().post_notice(kind, message, route, game);
+        self.inner.changes.publish(Area::Notices);
     }
 
     /// A notice of the default kind, `Info`.
     pub(crate) fn notice(&self, message: String) {
-        self.state().post_notice(NoticeKind::Info, message, None, None);
+        self.post(NoticeKind::Info, message, None, None);
     }
 
     /// A notice of the `Error` kind: something failed.
     pub(crate) fn problem(&self, message: String) {
-        self.state().post_notice(NoticeKind::Error, message, None, None);
+        self.post(NoticeKind::Error, message, None, None);
     }
 
     /// A notice whose subject `route` shows: clicking it opens that screen.
     pub(crate) fn notice_opening(&self, kind: NoticeKind, route: Route, message: String) {
-        self.state().post_notice(kind, message, Some(route), None);
+        self.post(kind, message, Some(route), None);
     }
 
     /// A problem with one game: its card shows the game's art.
     pub(crate) fn game_problem(&self, game: &GameKey, message: String) {
-        self.state().post_notice(NoticeKind::Error, message, None, Some(game.clone()));
+        self.post(NoticeKind::Error, message, None, Some(game.clone()));
     }
 
     /// Shows the player a problem outside the core, such as a theme's logic failing.
     pub fn report(&self, message: String) {
         self.state().post_notice(NoticeKind::Error, message, None, None);
-        self.changed();
+        self.changed(Area::Notices);
     }
 
     /// The view models for the current state.
@@ -772,12 +792,12 @@ impl Core {
                         state.nav.pop();
                     }
                 }
-                self.changed();
+                self.changed(Area::Navigation);
                 Ok(())
             }
             Command::Select(game) => {
                 self.select(&game);
-                self.changed();
+                self.changed(Area::Navigation);
                 self.prefetch_around(&game);
                 // Themes show the selected game's details on the home screen, so load them
                 // once. Wait first: a player who scrolls past a game doesn't need its details.
@@ -789,7 +809,7 @@ impl Core {
                 if !wanted {
                     return Ok(());
                 }
-                tokio::time::sleep(SELECT_SETTLE).await;
+                self.kernel().clock().sleep(SELECT_SETTLE).await;
                 let still = {
                     let state = self.state();
                     state.selected.as_ref() == Some(&game) || state.catalog_selected.as_ref() == Some(&game)
@@ -798,7 +818,7 @@ impl Core {
                     return Ok(());
                 }
                 match self.load_detail(&game).await {
-                    Ok(()) => self.changed(),
+                    Ok(()) => self.changed(Area::Library),
                     Err(e) => {
                         self.state().detail_failed.insert(game);
                         self.problem(e.to_string());
@@ -854,7 +874,7 @@ impl Core {
                     .config()
                     .set(&["app", "sounds"], Value::Bool(on))
                     .map_err(|e| CoreError::Io(e.to_string()))?;
-                self.changed();
+                self.changed(Area::Settings);
                 Ok(())
             }
             Command::SetFullscreen(on) => {
@@ -863,7 +883,7 @@ impl Core {
                     .config()
                     .set(&["app", "fullscreen"], Value::Bool(on))
                     .map_err(|e| CoreError::Io(e.to_string()))?;
-                self.changed();
+                self.changed(Area::Settings);
                 Ok(())
             }
             Command::ReportResult(level) => {
@@ -883,7 +903,7 @@ impl Core {
                     }
                     None => set("result_skipped", build)?,
                 }
-                self.changed();
+                self.changed(Area::Sessions);
                 Ok(())
             }
             Command::LibrarySearch(text) => self.set_grid(false, |v| v.query = text),
@@ -929,7 +949,7 @@ impl Core {
                 if !on {
                     self.stop_all_seeding().await;
                 }
-                self.changed();
+                self.changed(Area::Torrents);
                 Ok(())
             }
             Command::SetVpnOnly(on) => {
@@ -964,13 +984,13 @@ impl Core {
             Command::AskResult(game) => {
                 let build = self.build_of(&game.plugin);
                 self.state().result_prompt = Some((game, build));
-                self.changed();
+                self.changed(Area::Sessions);
                 Ok(())
             }
             Command::SetMonitor(name) => {
                 let value = name.map(Value::String).unwrap_or(Value::Null);
                 self.inner.kernel.config().set(&["app", "monitor"], value).map_err(|e| CoreError::Io(e.to_string()))?;
-                self.changed();
+                self.changed(Area::Settings);
                 Ok(())
             }
             Command::FinishWelcome => {
@@ -979,7 +999,7 @@ impl Core {
                     .config()
                     .set(&["app", "welcomed"], Value::Bool(true))
                     .map_err(|e| CoreError::Io(e.to_string()))?;
-                self.changed();
+                self.changed(Area::Settings);
                 Ok(())
             }
             Command::SetReturnOnExit(on) => {
@@ -988,29 +1008,29 @@ impl Core {
                     .config()
                     .set(&["app", "return_on_exit"], Value::Bool(on))
                     .map_err(|e| CoreError::Io(e.to_string()))?;
-                self.changed();
+                self.changed(Area::Settings);
                 Ok(())
             }
             Command::System(command) => crate::system::run(self, command).await,
             Command::DismissNotices => {
                 self.state().notices.clear();
-                self.changed();
+                self.changed(Area::Notices);
                 Ok(())
             }
             Command::DismissNotice(id) => {
                 self.state().notices.retain(|n| n.id != id);
-                self.changed();
+                self.changed(Area::Notices);
                 Ok(())
             }
             Command::CheckLauncherUpdate => {
                 use crate::launcher_update::{UpdateState, check};
                 self.state().launcher_update = UpdateState::Checking;
-                self.changed();
+                self.changed(Area::LauncherUpdate);
                 let found = check(self, env!("CARGO_PKG_VERSION"), self.kernel().host().install).await;
                 // Nexus OS brings the new launcher with its next update: look for that now.
                 let with_system = matches!(found, UpdateState::WithSystem { .. });
                 self.state().launcher_update = found;
-                self.changed();
+                self.changed(Area::LauncherUpdate);
                 if with_system {
                     let core = self.clone();
                     tokio::spawn(async move {
@@ -1025,10 +1045,10 @@ impl Core {
                     return Err(CoreError::Invalid("no launcher update to download".into()));
                 };
                 self.state().launcher_update = UpdateState::Downloading { version: version.clone() };
-                self.changed();
+                self.changed(Area::LauncherUpdate);
                 let done = update(self, &version, &asset, self.kernel().host().install).await;
                 self.state().launcher_update = done.unwrap_or_else(|e| UpdateState::Failed(e.to_string()));
-                self.changed();
+                self.changed(Area::LauncherUpdate);
                 Ok(())
             }
             Command::OpenNotice(id) => {
@@ -1041,7 +1061,7 @@ impl Core {
                 match route {
                     Some(route) => self.navigate(route).await,
                     None => {
-                        self.changed();
+                        self.changed(Area::Notices);
                         Ok(())
                     }
                 }
@@ -1061,7 +1081,7 @@ impl Core {
                     // Two decimals: 1.2, not the f32's 1.2000000476837158.
                     .set(&["app", "scale"], Value::from((f64::from(scale) * 100.0).round() / 100.0))
                     .map_err(|e| CoreError::Io(e.to_string()))?;
-                self.changed();
+                self.changed(Area::Settings);
                 Ok(())
             }
             Command::SetStartAtLogin(on) => {
@@ -1074,7 +1094,7 @@ impl Core {
                     .map_err(|e| CoreError::Io(e.to_string()))?;
                 if let Err(error) = done {
                     self.state().login_error = Some(error.clone());
-                    self.changed();
+                    self.changed(Area::Settings);
                     return Err(CoreError::Invalid(error));
                 }
                 self.state().login_error = None;
@@ -1083,7 +1103,7 @@ impl Core {
                     .config()
                     .set(&["app", "start_at_login"], Value::Bool(on))
                     .map_err(|e| CoreError::Io(e.to_string()))?;
-                self.changed();
+                self.changed(Area::Settings);
                 Ok(())
             }
             Command::SetAutoUpdate(on) => {
@@ -1092,18 +1112,18 @@ impl Core {
                     .config()
                     .set(&["app", "auto_update"], Value::Bool(on))
                     .map_err(|e| CoreError::Io(e.to_string()))?;
-                self.changed();
+                self.changed(Area::Settings);
                 Ok(())
             }
             Command::ConfirmInstall => {
                 let Some(prompt) = self.state().install_prompt.take() else { return Ok(()) };
-                self.changed();
+                self.changed(Area::Sessions);
                 self.install(&prompt.game.plugin, Some(prompt.version), None).await?;
                 crate::launch::launch(self, prompt.game).await
             }
             Command::CancelInstall => {
                 self.state().install_prompt = None;
-                self.changed();
+                self.changed(Area::Sessions);
                 Ok(())
             }
         };
@@ -1141,7 +1161,7 @@ impl Core {
             kernel.config().set(&["app", "hidden_games"], serde_json::json!(list))
         };
         saved.map_err(|e| CoreError::Io(e.to_string()))?;
-        self.changed();
+        self.changed(Area::Library);
         Ok(())
     }
 
@@ -1229,7 +1249,7 @@ impl Core {
                 state.nav.push(route);
             }
         }
-        self.changed();
+        self.changed(Area::Navigation);
     }
 
     /// Activates every plugin with `capability`, skipping (with a notice) those that fail.
@@ -1250,7 +1270,7 @@ impl Core {
             state.loading = true;
             state.detail_failed.clear();
         }
-        self.changed();
+        self.changed(Area::Library);
         let kernel = &self.inner.kernel;
         let mut library = Vec::new();
         let mut badges = HashMap::new();
@@ -1297,7 +1317,7 @@ impl Core {
         };
         self.remember_offer_art();
         kernel.events().publish(Event::LibraryChanged);
-        self.changed();
+        self.changed(Area::Library);
         if let Some(game) = first
             && !self.state().details.contains_key(&game)
         {
@@ -1305,7 +1325,7 @@ impl Core {
                 self.state().detail_failed.insert(game);
                 self.problem(e.to_string());
             }
-            self.changed();
+            self.changed(Area::Library);
         }
         if self.state().booted {
             // Later loads: the store's art and the details, all in the background.
@@ -1320,13 +1340,13 @@ impl Core {
         // checklist, and the store's art and details, as the old launcher's boot did, so Home
         // opens whole. A slow network doesn't hold it for more than BOOT_DESCRIBE_LIMIT.
         self.refresh_emulators().await;
-        if tokio::time::timeout(BOOT_DESCRIBE_LIMIT, self.describe_library()).await.is_err() {
+        if self.kernel().clock().timeout(BOOT_DESCRIBE_LIMIT, self.describe_library()).await.is_none() {
             tracing::info!("the store's descriptions are slow: Home opens without the rest");
             let core = self.clone();
             tokio::spawn(async move { core.describe_library().await });
         }
         self.state().booted = true;
-        self.changed();
+        self.changed(Area::Library);
         let core = self.clone();
         tokio::spawn(async move {
             // The catalogs, read once a run, after Home is up.
@@ -1369,7 +1389,7 @@ impl Core {
         }
         state.described = true;
         drop(state);
-        self.changed();
+        self.changed(Area::Library);
     }
 
     /// Asks the metadata plugins about these games, and keeps what they say.
@@ -1425,10 +1445,10 @@ impl Core {
             }
             state.task = Some(format!("Downloading game art {n}/{total}"));
             drop(state);
-            self.changed();
+            self.changed(Area::Library);
         }
         self.state().task = None;
-        self.changed();
+        self.changed(Area::Library);
         true
     }
 
@@ -1440,13 +1460,13 @@ impl Core {
         };
         for (n, key) in keys.iter().enumerate() {
             self.state().task = Some(format!("Reading game details {}/{}", n + 1, keys.len()));
-            self.changed();
+            self.changed(Area::Library);
             if self.load_detail(key).await.is_err() {
                 self.state().detail_failed.insert(key.clone());
             }
         }
         self.state().task = None;
-        self.changed();
+        self.changed(Area::Library);
     }
 
     /// Searches the Catalog, and shows it.
@@ -1467,7 +1487,7 @@ impl Core {
             change(view);
             view.shown = GRID_PAGE;
         }
-        self.changed();
+        self.changed(Area::Navigation);
         if catalog {
             self.describe_catalog_page();
         }
@@ -1481,7 +1501,7 @@ impl Core {
             let view = if catalog { &mut state.catalog_view } else { &mut state.library_view };
             view.shown += GRID_PAGE;
         }
-        self.changed();
+        self.changed(Area::Navigation);
         if catalog {
             self.describe_catalog_page();
         }
@@ -1669,7 +1689,7 @@ impl Core {
         }
         // The manager removes the record and reports the end as an event.
         let _ = self.inner.downloads.submit(plugin, plan, Some(key));
-        self.changed();
+        self.changed(Area::Downloads);
         Ok(())
     }
 
@@ -1718,7 +1738,7 @@ impl Core {
             version: version.into(),
             state: phase,
         });
-        self.changed();
+        self.changed(Area::Downloads);
     }
 
     /// The install workflow: plan, download, check, install. Each phase is saved, so a crash
@@ -1769,7 +1789,7 @@ impl Core {
             }
         }
         self.refresh_emulator(plugin).await;
-        self.changed();
+        self.changed(Area::Downloads);
         result
     }
 
@@ -1820,7 +1840,7 @@ impl Core {
             let store = crate::view::system_of(&self.inner.kernel, &platform).name;
             tracing::info!(%game, %link, "asked the store to uninstall");
             self.notice(format!("{store} is uninstalling {title}: it leaves your Library when it's done"));
-            self.changed();
+            self.changed(Area::Library);
             return Ok(());
         }
         let folder = folder.ok_or_else(|| CoreError::Invalid(format!("{title} has no folder to delete")))?;
@@ -1843,7 +1863,7 @@ impl Core {
         }
         self.refresh_library().await?;
         self.notice(format!("Uninstalled {title}"));
-        self.changed();
+        self.changed(Area::Library);
         Ok(())
     }
 
@@ -1883,7 +1903,7 @@ impl Core {
         if let Some(detail) = self.state().details.get_mut(&game) {
             detail.shaders = Some(info);
         }
-        self.changed();
+        self.changed(Area::Library);
         Ok(())
     }
 
@@ -1913,7 +1933,7 @@ impl Core {
                 detail.settings = panel;
             }
         }
-        self.changed();
+        self.changed(Area::Plugins);
         Ok(())
     }
 
@@ -1944,7 +1964,7 @@ impl Core {
         {
             self.open_game(game).await?;
         }
-        self.changed();
+        self.changed(Area::Plugins);
         Ok(())
     }
 
@@ -2031,7 +2051,7 @@ impl Core {
         }
         self.refresh_settings().await;
         self.refresh_library().await?;
-        self.changed();
+        self.changed(Area::Plugins);
         Ok(())
     }
 
@@ -2060,7 +2080,7 @@ impl Core {
             config.set(&["app", "folders", name], Value::Array(list))
         };
         saved.map_err(|e| CoreError::Io(e.to_string()))?;
-        self.changed();
+        self.changed(Area::Settings);
         Ok(())
     }
 
@@ -2083,8 +2103,9 @@ impl Core {
     /// Runs [`Command::CheckUpdates`] every few hours while the app runs.
     fn schedule_update_checks(&self) {
         let weak = Arc::downgrade(&self.inner);
+        let clock = self.kernel().clock().clone();
         tokio::spawn(async move {
-            tokio::time::sleep(FIRST_UPDATE_CHECK).await;
+            clock.sleep(FIRST_UPDATE_CHECK).await;
             loop {
                 let Some(inner) = weak.upgrade() else { return };
                 let core = Core { inner };
@@ -2092,7 +2113,7 @@ impl Core {
                     core.check_updates().await;
                 }
                 drop(core);
-                tokio::time::sleep(UPDATE_CHECK_EVERY).await;
+                clock.sleep(UPDATE_CHECK_EVERY).await;
             }
         });
     }
@@ -2120,7 +2141,7 @@ impl Core {
                 self.problem(e.to_string());
             }
         }
-        self.changed();
+        self.changed(Area::Downloads);
     }
 
     /// One of the emulator's games is running.
@@ -2138,7 +2159,7 @@ impl Core {
             if let Err(e) = core.update(&plugin).await {
                 core.problem(e.to_string());
             }
-            core.changed();
+            core.changed(Area::Downloads);
         });
     }
 
@@ -2174,7 +2195,7 @@ impl Core {
                 .unwrap_or_else(|| game.local.clone())
         };
         self.state().install_prompt = Some(InstallPrompt { game: game.clone(), emulator, version, title, size_bytes });
-        self.changed();
+        self.changed(Area::Sessions);
         Ok(true)
     }
 
@@ -2306,7 +2327,7 @@ impl Core {
             .config()
             .set(&["app", "theme-options", theme.as_str()], options)
             .map_err(|e| CoreError::Io(e.to_string()))?;
-        self.changed();
+        self.changed(Area::Settings);
         Ok(())
     }
 
@@ -2381,7 +2402,7 @@ impl Core {
             .set(&["app", "theme"], Value::from(theme.as_str()))
             .map_err(|e| CoreError::Io(e.to_string()))?;
         self.inner.kernel.events().publish(Event::ThemeChanged { from, to: theme });
-        self.changed();
+        self.changed(Area::Settings);
         Ok(())
     }
 

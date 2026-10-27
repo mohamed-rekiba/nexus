@@ -22,9 +22,9 @@ use crate::guard::guarded;
 use crate::resolve::{dependency_ids, resolve};
 use crate::themes::DataThemeLoader;
 use crate::{
-    Archives, CoreError, CoreResult, Desktop, DirStorage, EventBus, GroupTree, Hardware, HttpTransport, LoadError,
-    Network, NoArchives, NoDesktop, NoHardware, NoNetwork, NoTorrents, NoVpn, ProcessSpawner, ProcessTree,
-    TokioSpawner, Torrents,
+    Archives, Clock, CoreError, CoreResult, Desktop, DirStorage, EventBus, GroupTree, Hardware, HttpTransport,
+    LoadError, Network, NoArchives, NoDesktop, NoHardware, NoNetwork, NoTorrents, NoVpn, ProcessSpawner, ProcessTree,
+    TokioClock, TokioSpawner, Torrents,
 };
 
 /// Settings for one run of the host.
@@ -160,6 +160,7 @@ pub struct KernelBuilder {
     torrents: Arc<dyn Torrents>,
     network: Arc<dyn Network>,
     archives: Arc<dyn Archives>,
+    clock: Arc<dyn Clock>,
     config: Option<Arc<ConfigService>>,
 }
 
@@ -177,6 +178,7 @@ impl KernelBuilder {
             torrents: Arc::new(NoTorrents),
             network: Arc::new(NoVpn),
             archives: Arc::new(NoArchives),
+            clock: Arc::new(TokioClock),
             config: None,
         }
     }
@@ -282,6 +284,13 @@ impl KernelBuilder {
         self
     }
 
+    /// The time every timer of the core and every plugin call's timeout runs on. Real time
+    /// by default.
+    pub fn clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
+    }
+
     /// Defaults to `config.json` in the data folder.
     pub fn config(mut self, config: Arc<ConfigService>) -> Self {
         self.config = Some(config);
@@ -377,6 +386,7 @@ struct Inner {
     /// A plugin's [`VpnGate`] said "wait for the VPN", and the VPN check hasn't seen it back.
     vpn_waited: Arc<AtomicBool>,
     archives: Arc<dyn Archives>,
+    clock: Arc<dyn Clock>,
     order: Vec<PluginId>,
     records: BTreeMap<PluginId, Record>,
 }
@@ -405,6 +415,7 @@ impl Kernel {
             torrents,
             network,
             archives,
+            clock,
             config,
         } = builder;
         let mut report = BootReport::default();
@@ -514,6 +525,7 @@ impl Kernel {
                 network: crate::vpn::NetworkSource::new(network),
                 vpn_waited: Arc::default(),
                 archives,
+                clock,
                 order: order.clone(),
                 records,
             }),
@@ -580,6 +592,11 @@ impl Kernel {
 
     pub(crate) fn archives(&self) -> &Arc<dyn Archives> {
         &self.inner.archives
+    }
+
+    /// The time the core's timers run on.
+    pub fn clock(&self) -> &Arc<dyn Clock> {
+        &self.inner.clock
     }
 
     pub(crate) fn http(&self) -> &Arc<dyn HttpTransport> {
@@ -714,18 +731,21 @@ impl Kernel {
                 State::Loaded => {}
             }
 
-            let host = &self.inner.host;
+            let (host, clock) = (&self.inner.host, self.inner.clock.as_ref());
             let result = match &record.plugin {
                 // A theme has no init: its files are read on demand.
                 Code::Theme(_) => Ok(Provided::default()),
                 Code::Emulator(code) => {
-                    Self::init_code(plugin, record, code.init(self.context_for(record)), code.as_ref(), host).await
+                    Self::init_code(plugin, record, code.init(self.context_for(record)), code.as_ref(), host, clock)
+                        .await
                 }
                 Code::Service(code) => {
-                    Self::init_code(plugin, record, code.init(self.context_for(record)), code.as_ref(), host).await
+                    Self::init_code(plugin, record, code.init(self.context_for(record)), code.as_ref(), host, clock)
+                        .await
                 }
                 Code::System(code) => {
-                    Self::init_code(plugin, record, code.init(self.context_for(record)), code.as_ref(), host).await
+                    Self::init_code(plugin, record, code.init(self.context_for(record)), code.as_ref(), host, clock)
+                        .await
                 }
             };
             match result {
@@ -753,14 +773,15 @@ impl Kernel {
         init: BoxFuture<'_, PluginResult<Provided>>,
         code: &dyn nexus_api::Plugin,
         host: &HostConfig,
+        clock: &dyn Clock,
     ) -> Result<Provided, LoadError> {
-        let provided = guarded(plugin, "init", host.call_timeout, init).await.map_err(LoadError::Init)?;
+        let provided = guarded(clock, plugin, "init", host.call_timeout, init).await.map_err(LoadError::Init)?;
         let declared: BTreeSet<Capability> = record.manifest.capabilities.clone();
         let got = provided.capabilities();
         if declared == got {
             return Ok(provided);
         }
-        let _ = guarded(plugin, "shutdown", host.shutdown_timeout, code.shutdown()).await;
+        let _ = guarded(clock, plugin, "shutdown", host.shutdown_timeout, code.shutdown()).await;
         Err(LoadError::CapabilityMismatch {
             declared: declared.into_iter().collect(),
             provided: got.into_iter().collect(),
@@ -839,7 +860,9 @@ impl Kernel {
             *state = State::Loaded;
             drop(state);
             let timeout = self.inner.host.shutdown_timeout;
-            if let Err(error) = guarded(plugin, "shutdown", timeout, record.plugin.shutdown()).await {
+            if let Err(error) =
+                guarded(self.clock().as_ref(), plugin, "shutdown", timeout, record.plugin.shutdown()).await
+            {
                 tracing::warn!(plugin_id = %plugin, %error, "shutdown failed");
             }
             self.inner.bus.publish(Event::PluginDeactivated { plugin: plugin.clone() });
@@ -870,7 +893,7 @@ impl Kernel {
         method: &'static str,
         call: impl Future<Output = PluginResult<T>>,
     ) -> CoreResult<T> {
-        guarded(plugin, method, self.inner.host.call_timeout, call)
+        guarded(self.clock().as_ref(), plugin, method, self.inner.host.call_timeout, call)
             .await
             .map_err(|error| CoreError::Plugin { plugin: plugin.clone(), error })
     }

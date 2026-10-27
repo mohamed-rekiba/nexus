@@ -73,9 +73,11 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex, Weak};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use tokio::sync::Notify;
+// Tokio's, not the system's: a test that pauses tokio's time moves the holds' time too.
+use tokio::time::Instant;
 
 use nexus_api::schemars::{self, JsonSchema};
 use nexus_api::serde::{Deserialize, Serialize};

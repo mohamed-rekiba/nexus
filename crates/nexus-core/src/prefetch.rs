@@ -31,8 +31,9 @@ impl Core {
     }
 
     async fn prefetch(&self, game: GameKey) {
-        let rested = tokio::time::Instant::now() + SCREENSHOTS_AFTER;
-        tokio::time::sleep(NEIGHBOURS_AFTER).await;
+        let clock = self.kernel().clock().clone();
+        let rested = clock.now() + SCREENSHOTS_AFTER;
+        clock.sleep(NEIGHBOURS_AFTER).await;
         let art: Vec<ImageRef> = {
             let state = self.state();
             crate::view::neighbours(&self.inner.kernel, &state, &game, &state.grid_columns, MOST_NEIGHBOURS)
@@ -47,7 +48,7 @@ impl Core {
         for image in &art {
             self.fetch_ahead(image).await;
         }
-        tokio::time::sleep_until(rested).await;
+        clock.sleep_until(rested).await;
         let shots = crate::view::hub_art(&self.state(), &game).screenshots;
         for image in &shots {
             self.fetch_ahead(image).await;

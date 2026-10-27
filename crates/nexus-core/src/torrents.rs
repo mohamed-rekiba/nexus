@@ -19,6 +19,7 @@ use nexus_api::{GAMES_FOLDER, GameKey, HostPath, PACKAGES_FOLDER, PluginId, RelP
 use serde::{Deserialize, Serialize};
 
 use crate::app::Core;
+use crate::changes::Area;
 use crate::{CoreError, CoreResult, Kernel, TorrentFile, TorrentPhase, TorrentStart};
 
 /// Where downloads are saved in the config.
@@ -271,7 +272,7 @@ impl Core {
             job.clone()
         };
         self.save_torrent(&job);
-        self.changed();
+        self.changed(Area::Torrents);
     }
 
     /// The downloads the last run left: unfinished ones come back paused, and finished ones
@@ -347,9 +348,9 @@ impl Core {
         let store = crate::view::system_of(self.kernel(), &release.platform).name;
         tracing::info!(%offer, link = %release.store, "asked the store to install");
         // The store writes its install down a moment later: its progress is read often for now.
-        self.state().store_watch_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(60));
+        self.state().store_watch_until = Some(self.kernel().clock().now() + std::time::Duration::from_secs(60));
         self.notice(format!("{store} is installing {}: it shows in your Library when it's done", release.title));
-        self.changed();
+        self.changed(Area::Downloads);
         Ok(())
     }
 
@@ -415,7 +416,7 @@ impl Core {
         };
         self.state().torrents.insert(job.id.clone(), job.clone());
         self.save_torrent(&job);
-        self.changed();
+        self.changed(Area::Torrents);
         // Even its files come from the swarm: without the VPN it waits.
         if self.vpn_gate(&job.id).await {
             let core = self.clone();
@@ -540,20 +541,23 @@ impl Core {
         self.state().torrent_watch = true;
         let core = self.clone();
         tokio::spawn(async move {
-            let mut checked = std::time::Instant::now();
+            let clock = core.kernel().clock().clone();
+            let mut checked = clock.now();
             loop {
                 let mut running = core.poll_torrents();
                 let waiting = core.any_waiting_vpn() || core.plugin_waiting_vpn();
-                if (waiting || (running && core.vpn_only())) && checked.elapsed() >= core.kernel().host().vpn_poll {
+                if (waiting || (running && core.vpn_only()))
+                    && clock.now().saturating_duration_since(checked) >= core.kernel().host().vpn_poll
+                {
                     core.check_vpn().await;
-                    checked = std::time::Instant::now();
+                    checked = clock.now();
                     // What it started is read on the next round.
                     running = true;
                 }
                 if !running && !waiting {
                     break;
                 }
-                tokio::time::sleep(core.kernel().host().torrent_poll).await;
+                clock.sleep(core.kernel().host().torrent_poll).await;
             }
             core.state().torrent_watch = false;
         });
@@ -712,7 +716,7 @@ impl Core {
                 port.stop(id).await.map_err(|e| CoreError::Io(e.to_string()))?;
                 self.state().torrents.remove(id);
                 self.forget_torrent(id);
-                self.changed();
+                self.changed(Area::Torrents);
             }
             TorrentAction::DeleteFiles
                 if !job.state.active()
@@ -735,7 +739,7 @@ impl Core {
                 {
                     self.problem(format!("Couldn't delete {}: {e}", job.folder.display()));
                 }
-                self.changed();
+                self.changed(Area::Torrents);
             }
             TorrentAction::StopSeeding if job.seeding || job.verifying => {
                 port.stop(id).await.map_err(|e| CoreError::Io(e.to_string()))?;

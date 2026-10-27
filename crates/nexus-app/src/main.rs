@@ -29,7 +29,7 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use nexus_api::PluginId;
-use nexus_core::{Command, Core, HostConfig, Kernel};
+use nexus_core::{Command, Core, HostConfig, Kernel, TokioClock};
 use nexus_ui_host::{ThemeHost, UiRequest};
 use slint_interpreter::ComponentHandle;
 
@@ -676,6 +676,7 @@ fn run(args: Args) -> Result<(), String> {
             .hardware(Arc::new(hardware::SystemHardware { data_dir: args.data_dir.clone() }))
             .torrents(Arc::new(torrents::RqbitTorrents::new(args.data_dir.join("torrents"), runtime.handle().clone())))
             .archives(Arc::new(archives::HostArchives))
+            .clock(Arc::new(TokioClock))
             .built_in_plugins()
             .discover(&extensions)
             .discover(&bundled_extensions())

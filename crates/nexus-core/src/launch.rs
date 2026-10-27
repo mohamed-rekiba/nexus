@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use nexus_api::{
@@ -13,6 +13,7 @@ use nexus_api::{
 use serde_json::Value;
 
 use crate::app::{Route, Session};
+use crate::changes::Area;
 use crate::error::require;
 use crate::order::sort_by_order;
 use crate::{Core, CoreError, CoreResult, DirStorage, Kernel, ProcessExit, SpawnCommand, folders, running};
@@ -274,7 +275,7 @@ pub(crate) async fn launch(core: &Core, game: GameKey) -> CoreResult<()> {
         .map(|e| e.summary.title.clone())
         .unwrap_or_else(|| game.local.clone());
     let pid = process.id();
-    let started = Instant::now();
+    let started = kernel.clock().now();
     let build = core.build_of(&plugin);
     core.state().sessions.insert(
         session,
@@ -298,7 +299,8 @@ pub(crate) async fn launch(core: &Core, game: GameKey) -> CoreResult<()> {
     let core = core.clone();
     tokio::spawn(async move {
         let ended = running::run(core.clone(), session, process, stop_rx, hand_over).await;
-        let duration_ms = started.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+        let played = core.kernel().clock().now().saturating_duration_since(started);
+        let duration_ms = played.as_millis().try_into().unwrap_or(u64::MAX);
         finish(&core, session, &game, ended, duration_ms, &launcher).await;
     });
     Ok(())
@@ -406,7 +408,7 @@ pub(crate) async fn show_game(core: &Core, session: SessionId) -> CoreResult<()>
         return Err(CoreError::Invalid("the game has no window to show yet".into()));
     }
     core.state().game_in_front = true;
-    core.changed();
+    core.changed(Area::Sessions);
     Ok(())
 }
 
@@ -416,7 +418,7 @@ pub(crate) async fn toggle_focus(core: &Core) {
     if game_in_front(core) {
         running::show_launcher(core).await;
         core.state().game_in_front = false;
-        core.changed();
+        core.changed(Area::Sessions);
     } else if let Err(e) = show_game(core, session).await {
         tracing::info!(error = %e, "the game can't come to the front");
     }

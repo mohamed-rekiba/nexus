@@ -26,6 +26,7 @@ use async_trait::async_trait;
 use nexus_api::{VpnBlock, VpnCheck, VpnPass};
 
 use crate::app::Core;
+use crate::changes::Area;
 use crate::config::ConfigService;
 use crate::torrents::TorrentState;
 use crate::{Network, TorrentStart, Vpn};
@@ -135,7 +136,7 @@ impl Core {
             changed
         };
         if changed {
-            self.changed();
+            self.changed(Area::Vpn);
         }
         vpns
     }
@@ -300,7 +301,7 @@ impl Core {
             self.check_vpn().await;
             self.watch_torrents();
         }
-        self.changed();
+        self.changed(Area::Vpn);
     }
 }
 
