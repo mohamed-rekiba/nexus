@@ -291,7 +291,7 @@ impl Core {
         // The library lists the game before the job shows as done.
         if let Ok(game) = &result {
             tracing::info!(title = %game.title, "game installed");
-            if let Err(e) = Box::pin(self.dispatch(crate::Command::RefreshLibrary)).await {
+            if let Err(e) = Box::pin(self.dispatch(crate::Command::Library(crate::LibraryCmd::Refresh))).await {
                 tracing::warn!(error = %e, "library refresh after an install failed");
             }
         }

@@ -900,7 +900,7 @@ fn run(args: Args) -> Result<(), String> {
 
     let starting = core.clone();
     handle.spawn(async move {
-        let _ = starting.dispatch(Command::RefreshLibrary).await;
+        let _ = starting.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await;
     });
     render();
 

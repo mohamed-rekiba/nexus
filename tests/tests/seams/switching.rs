@@ -25,7 +25,7 @@ fn with_examples(h: nexus_testkit::FakeHost) -> nexus_testkit::FakeHost {
 fn switching_keeps_screen_selection_and_running_games() {
     let mut host = composed(with_examples);
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::Select("emu-a:G1".parse().unwrap()));
     host.dispatch(Command::Launch("emu-a:G2".parse().unwrap()));
     host.dispatch(Command::OpenGame("emu-a:G1".parse().unwrap()));

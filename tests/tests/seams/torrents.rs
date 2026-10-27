@@ -705,7 +705,7 @@ async fn after_a_restart_a_pc_download_s_card_still_plays_the_game_it_installed(
 
     // The next start: the install's record is gone, and a PC game has no title id.
     let again = nexus_core::Core::start(t.kernel.clone()).await;
-    again.dispatch(Command::RefreshLibrary).await.unwrap();
+    again.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     catalogs_fetched(&again).await;
     let card = |core: &nexus_core::Core| core.view().downloads.torrents.into_iter().next().unwrap();
     until_in(&again, Area::Library, |core| !card(core).game.is_empty()).await;

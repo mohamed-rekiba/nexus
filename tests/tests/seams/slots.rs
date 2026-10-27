@@ -11,7 +11,7 @@ fn shown(theme: &str, width: f32, height: f32) -> Composed {
     host.ui.start().unwrap();
     host.ui.switch(&id(theme)).unwrap();
     host.resize(width, height);
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     if theme == "default" {
         // The default theme shows games, and their badges, in the Library.
         let tabs = i_slint_backend_testing::ElementHandle::find_by_accessible_label(host.instance(), "default-system");
@@ -83,7 +83,7 @@ fn default_theme_shows_the_shader_cache_and_controller_profiles_and_clears_the_c
     std::fs::write(cache.join("b.spv"), vec![0u8; 500_000]).unwrap();
     let mut host = composed(|h| h.plugin(games_with_shaders("emu-a", vec!["Alpha"], cache.clone())));
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
 
     host.dispatch(Command::OpenGame("emu-a:G0".parse().unwrap()));
     let shown = host.first("shader-cache").accessible_value().unwrap_or_default();

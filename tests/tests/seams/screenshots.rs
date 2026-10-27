@@ -514,7 +514,7 @@ fn shoot_this_pc(window: &MinimalSoftwareWindow, out: &Path) {
             value: serde_json::json!({ "catalog_url": "https://xyz.dev/c" }),
         });
         host.catalogs_fetched();
-        host.dispatch(Command::RefreshLibrary);
+        host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
         host.dispatch(Command::Navigate(Route::Home));
         host.load_images();
         shoot(window, &out.join(format!("default-this-pc-{name}-start.png")));
@@ -563,7 +563,7 @@ fn shoot_releases(window: &MinimalSoftwareWindow, out: &Path) {
             value: serde_json::json!({ "catalog_url": "https://xyz.dev/c" }),
         });
         host.catalogs_fetched();
-        host.dispatch(Command::RefreshLibrary);
+        host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
         host.dispatch(Command::OpenGame("release-catalog:emu-kyty/PPSA01234".parse().unwrap()));
         host.load_images();
         key(&mut host, Key::DownArrow);
@@ -579,7 +579,7 @@ fn shoot_pad_hints(window: &MinimalSoftwareWindow, out: &Path) {
     use nexus_ui_host::PadButton;
     let mut host = composed_on_current_platform(|h| h.plugin(games("emu-a", vec!["Alpha", "Beta"])));
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.load_images();
     let pad = |host: &mut Composed, button: PadButton| {
         host.ui.pad(button).unwrap();
@@ -618,7 +618,7 @@ fn shoot_genres(window: &MinimalSoftwareWindow, out: &Path) {
         host.ui.start().unwrap();
         host.dispatch(Command::SetScale(1.4));
         host.dispatch(Command::SetThemeOption { key: "direction".into(), value: direction.into() });
-        host.dispatch(Command::RefreshLibrary);
+        host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
         host.until(Area::Library, |core| core.view().home.library.genres.len() >= 3);
         host.load_images();
         // Up to the Library tab, in, then up to the genres and on to the last one.
@@ -652,7 +652,7 @@ fn shoot_trailer(window: &MinimalSoftwareWindow, out: &Path) {
         host.ui.set_trailers_available(true);
         host.ui.start().unwrap();
         host.dispatch(Command::SetThemeOption { key: "direction".into(), value: direction.into() });
-        host.dispatch(Command::RefreshLibrary);
+        host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
         host.until(Area::Library, |core| core.view().detail.is_some_and(|d| !d.trailer_url.is_empty()));
         host.load_images();
         let text: slint::SharedString = "t".into();
@@ -682,7 +682,7 @@ fn shoot_keyboard(window: &MinimalSoftwareWindow, out: &Path) {
     use nexus_ui_host::PadButton;
     let mut host = composed_on_current_platform(|h| h.plugin(games_on("emu-a", "PS5", vec!["Astro Drift"])));
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     let pad = |host: &mut Composed, button: PadButton| {
         host.ui.pad(button).unwrap();
         follow(host);
@@ -757,7 +757,7 @@ fn shoot_system(window: &MinimalSoftwareWindow, out: &Path) {
         h.place(place).plugin(plugin).plugin(games_on("emu-a", "PS5", vec!["Astro Drift"]))
     });
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::System(SystemCommand::Refresh));
     let open = |host: &mut Composed, label: &str| {
         let found = i_slint_backend_testing::ElementHandle::find_by_accessible_label(host.instance(), label);
@@ -789,7 +789,7 @@ fn shoot_system(window: &MinimalSoftwareWindow, out: &Path) {
     let plugin = system.plugin();
     let mut host = composed_on_current_platform(|h| h.place(place).plugin(plugin));
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::System(SystemCommand::Refresh));
     follow(&mut host);
     for key in [slint::platform::Key::DownArrow, slint::platform::Key::Return, slint::platform::Key::Return] {
@@ -814,7 +814,7 @@ fn shoot_splash(window: &MinimalSoftwareWindow, out: &Path) {
             composed_on_current_platform(move |h| h.plugin(playable_games_with("emu-a", vec!["Alpha"], &keymap)));
         host.ui.start().unwrap();
         host.dispatch(Command::SetThemeOption { key: "direction".into(), value: direction.into() });
-        host.dispatch(Command::RefreshLibrary);
+        host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
         // No window yet: the game stays "starting", behind the splash.
         host.test.desktop.no_windows();
         host.dispatch(Command::Launch("emu-a:G0".parse().unwrap()));
@@ -836,7 +836,7 @@ fn shoot_console_names(window: &MinimalSoftwareWindow, out: &Path) {
         });
         host.ui.start().unwrap();
         host.dispatch(Command::SetThemeOption { key: "direction".into(), value: direction.into() });
-        host.dispatch(Command::RefreshLibrary);
+        host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
         host.load_images();
         shoot(window, &out.join(format!("{prefix}-names-welcome.png")));
         host.dispatch(Command::FinishWelcome);
@@ -850,7 +850,7 @@ fn shoot_console_names(window: &MinimalSoftwareWindow, out: &Path) {
         });
         host.ui.start().unwrap();
         host.dispatch(Command::SetThemeOption { key: "direction".into(), value: direction.into() });
-        host.dispatch(Command::RefreshLibrary);
+        host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
         host.dispatch(Command::Launch("emu-k:G0".parse().unwrap()));
         host.load_images();
         shoot(window, &out.join(format!("{prefix}-names-install-prompt.png")));
@@ -883,7 +883,7 @@ fn shoot_ps4_cover(window: &MinimalSoftwareWindow, out: &Path) {
     });
     host.test.http.serve("https://art.example/ps4.png", ps4_box_art());
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::Navigate(Route::Home));
     host.load_images();
     shoot(window, &out.join("default-ps4-home.png"));
@@ -977,7 +977,7 @@ fn library(home: &Path) -> Composed {
         value: serde_json::json!({ "catalog_url": "https://xyz.dev/catalog" }),
     });
     host.catalogs_fetched();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::Select("emu-a:G1".parse().unwrap()));
     host.dispatch(Command::Search("a".into()));
     host

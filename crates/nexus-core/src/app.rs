@@ -3,22 +3,23 @@
 //! All state lives here, never in a theme, so the UI can be rebuilt (or a theme swapped) at
 //! any time without losing navigation, selection, downloads or running games.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use futures::stream::BoxStream;
 use nexus_api::{
-    Capability, ConfigScope, DownloadRequest, Event, GameDetails, GameKey, GameSummary, InstallPhase, JobId,
-    PageRequest, PluginId, PluginKind, Provided, SessionId, SlotId, SlotRequest,
+    Capability, ConfigScope, DownloadRequest, Event, GameKey, InstallPhase, JobId, PluginId, PluginKind, Provided,
+    SessionId, SlotId, SlotRequest,
 };
-use nexus_ui_api::{AppView, CompatVm, NoticeKind, SettingsPanelVm, SlotVm};
+use nexus_ui_api::{AppView, NoticeKind};
 use serde_json::Value;
 
 use crate::changes::{Area, Change, Changes, Notifier};
 use crate::downloads::Downloads;
 use crate::error::require;
-use crate::view::{self, slot_vms};
+use crate::library::DetailState;
+use crate::view;
 use crate::{CoreError, CoreResult, Kernel};
 
 /// Where the player is. The navigation stack is a list of routes.
@@ -55,7 +56,8 @@ pub enum Command {
     Back,
     Select(GameKey),
     OpenGame(GameKey),
-    RefreshLibrary,
+    /// The Library: list its games again, or hide a game from the Catalog.
+    Library(crate::LibraryCmd),
     Search(String),
     /// Queues a download and returns. Progress comes as events.
     Download {
@@ -180,12 +182,6 @@ pub enum Command {
     /// The Catalog's search text, system, genre and sort, as the Library's.
     CatalogSearch(String),
     CatalogSystem(Option<String>),
-    /// Hides a game the Catalog offers (`hidden`), or shows it again. Hidden games leave the
-    /// Catalog, but for the "Hidden" filter (`HIDDEN_FILTER`). Kept in the config.
-    HideGame {
-        game: GameKey,
-        hidden: bool,
-    },
     CatalogGenre(Option<String>),
     CatalogSort(String),
     /// The Catalog shows its next page of games.
@@ -262,12 +258,6 @@ impl DownloadRecord {
     }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct Entry {
-    pub key: GameKey,
-    pub summary: GameSummary,
-}
-
 /// Where a game's folder is on disk, through its plugin's folder grants; `None` when the
 /// grants refuse it or it isn't a folder.
 /// The player's folders as `game`'s plugin may use them.
@@ -304,27 +294,25 @@ pub const INSTALLED_FILTER: &str = "installed";
 pub const HIDDEN_FILTER: &str = "hidden";
 
 #[derive(Clone, Debug, Default)]
-pub(crate) struct Detail {
-    pub details: Option<GameDetails>,
-    pub compat: Option<CompatVm>,
-    /// The community list's page, from the compatibility answer.
-    pub compat_page: String,
-    pub actions: Vec<SlotVm>,
-    pub sections: Vec<SlotVm>,
-    pub shaders: Option<nexus_api::ShaderCacheInfo>,
-    /// The game's own settings, when its emulator has any.
-    pub settings: Option<SettingsPanelVm>,
-}
-
-#[derive(Clone, Debug, Default)]
 pub(crate) struct EmulatorState {
     pub installed: Vec<String>,
     /// The installed build is the player's own: it never updates by itself.
     pub own: bool,
     pub available: Vec<String>,
     pub busy: bool,
-    pub panels: Vec<SlotVm>,
+    /// Its `emulator.panel` slot items.
+    pub panels: Vec<nexus_api::SlotItem>,
     pub controllers: Vec<nexus_api::ControllerProfile>,
+}
+
+/// A plugin's settings panel on the Settings screen: its slot item, and the schema and the
+/// values of the settings scope it names.
+#[derive(Clone, Debug)]
+pub(crate) struct SettingsPanel {
+    pub plugin: PluginId,
+    pub item: nexus_api::SlotItem,
+    pub schema: Value,
+    pub values: Value,
 }
 
 /// The Library's search, filters and sort.
@@ -388,22 +376,13 @@ pub(crate) struct Session {
 
 /// How long a selection must stay before its details load.
 const SELECT_SETTLE: std::time::Duration = std::time::Duration::from_millis(150);
-/// How many games the store is asked about at once.
-const DESCRIBE_AT_ONCE: usize = 6;
-/// The longest the boot waits for the store's descriptions.
-const BOOT_DESCRIBE_LIMIT: std::time::Duration = std::time::Duration::from_secs(10);
 
 pub(crate) struct AppState {
     pub nav: Vec<Route>,
     pub selected: Option<GameKey>,
-    pub library: Vec<Entry>,
-    pub badges: HashMap<GameKey, Vec<SlotVm>>,
-    pub details: HashMap<GameKey, Detail>,
-    /// Games whose details failed to load on select. They load again on open.
-    pub detail_failed: HashSet<GameKey>,
     /// Each emulator's builds and blocks, and a service plugin's blocks once its page opens.
     pub emulators: BTreeMap<PluginId, EmulatorState>,
-    pub settings: Vec<SettingsPanelVm>,
+    pub settings: Vec<SettingsPanel>,
     pub theme: Option<PluginId>,
     pub sessions: BTreeMap<SessionId, Session>,
     /// The last window the launcher brought to the front was the game's. It stands in for
@@ -411,12 +390,6 @@ pub(crate) struct AppState {
     pub game_in_front: bool,
     /// A launch is between its checks and its session: no other game may start.
     pub launching: bool,
-    /// The first library load, with the first game's details, is done.
-    pub booted: bool,
-    /// What a store's catalog says about each game, and the plugin that said it.
-    pub meta: HashMap<GameKey, (PluginId, nexus_api::GameMetadata)>,
-    /// Work in the background, as the old launcher's status pill: "Downloading game art 3/40".
-    pub task: Option<String>,
     /// The Library's search, filters and sort.
     pub library_view: LibraryView,
     /// The Catalog's.
@@ -432,39 +405,19 @@ pub(crate) struct AppState {
     pub system: crate::system::SystemState,
     /// Why the system refused the last change to "Start at login".
     pub login_error: Option<String>,
-    /// The store's descriptions: how many of how many are in. `None` without a store.
-    pub describing: Option<(usize, usize)>,
-    /// The store has been asked about every game of the library.
-    pub described: bool,
     /// What the player is told, newest last: at most `MAX_NOTICES`.
     pub notices: Vec<Notice>,
     /// The id the next notice gets.
     pub next_notice: u64,
-    pub loading: bool,
     pub install_prompt: Option<InstallPrompt>,
     /// Emulators with an update that waits for their game to close.
     pub pending_updates: BTreeSet<PluginId>,
     pub game_installs: BTreeMap<JobId, crate::game_installs::GameJob>,
-    /// Each emulator's catalog, from each catalog plugin.
-    pub catalogs: Vec<crate::releases::CatalogCopy>,
-    /// The catalog plugins answered once: until then the Catalog says it is loading.
-    pub catalogs_read: bool,
-    /// The catalog plugins' Catalog buttons and badges (`catalog.action`), as read with the
-    /// catalogs.
-    pub catalog_buttons: Vec<SlotVm>,
-    /// The games the catalogs offer, newest first.
-    pub offers: Vec<crate::releases::Offer>,
     /// The installs stores are doing (Steam's), by the catalog plugin, as last read.
     pub store_installs: Vec<(PluginId, nexus_api::StoreInstall)>,
     /// Until when the stores' installs are read often: a minute after Nexus asked a store to
     /// install, as the store writes its install down a moment later.
     pub store_watch_until: Option<std::time::Instant>,
-    /// The cover of the offer each installed game is, with the catalog plugin it is from: the
-    /// game's art when it has none of its own (a PC game). Kept in `app.game_art`, so it stays
-    /// with the catalog off.
-    pub offer_art: HashMap<GameKey, (PluginId, nexus_api::ImageSource)>,
-    /// The offer each installed game is, by the game: its Game Hub has the offer's Steam data.
-    pub installed_offers: HashMap<GameKey, GameKey>,
     /// The VPNs, as last read.
     pub vpns: Vec<crate::Vpn>,
     /// Why the last connect, disconnect or import of a VPN failed.
@@ -474,14 +427,8 @@ pub(crate) struct AppState {
     /// The Catalog's grid as last built: on another screen, each view shows this one instead
     /// of searching and sorting every offer again.
     pub catalog_grid: Option<nexus_ui_api::LibraryVm>,
-    /// The games the stores were asked about this run, so none is asked twice.
-    pub asked: HashSet<GameKey>,
     /// Each grid's columns.
     pub grid_columns: HashMap<Grid, usize>,
-    /// The art being fetched around the selection; the next select stops it.
-    pub prefetch: Option<tokio::task::AbortHandle>,
-    /// The image addresses already fetched ahead this run, so none is fetched twice.
-    pub prefetched: HashSet<String>,
 }
 
 pub(crate) struct Inner {
@@ -495,6 +442,8 @@ pub(crate) struct Inner {
     pub changes: Changes,
     /// The catalogs' downloads.
     pub torrents: crate::torrents::TorrentsSubsystem,
+    /// The games and the catalogs' offers.
+    pub library: crate::library::LibrarySubsystem,
     /// Held while the catalogs are read: see [`Core::refresh_releases`].
     pub reading_catalogs: tokio::sync::Mutex<()>,
 }
@@ -548,21 +497,12 @@ impl Core {
         let state = AppState {
             nav: vec![Route::Home],
             selected: None,
-            library: Vec::new(),
-            badges: HashMap::new(),
-            details: HashMap::new(),
-            detail_failed: HashSet::new(),
             emulators: BTreeMap::new(),
             settings: Vec::new(),
             theme,
             sessions: BTreeMap::new(),
             game_in_front: false,
             launching: false,
-            booted: false,
-            meta: HashMap::new(),
-            offer_art: Self::kept_offer_art(&kernel),
-            installed_offers: HashMap::new(),
-            task: None,
             library_view: LibraryView::default(),
             catalog_view: LibraryView::catalog(),
             result_prompt: None,
@@ -570,31 +510,25 @@ impl Core {
             launcher_update: crate::launcher_update::UpdateState::Idle,
             system: Default::default(),
             login_error: None,
-            describing: None,
-            described: false,
             notices: Vec::new(),
             next_notice: 0,
-            loading: false,
             install_prompt: None,
             pending_updates: BTreeSet::new(),
             game_installs: BTreeMap::new(),
-            catalogs: Vec::new(),
-            catalogs_read: false,
-            catalog_buttons: Vec::new(),
-            offers: Vec::new(),
             store_installs: Vec::new(),
             store_watch_until: None,
-            asked: HashSet::new(),
             catalog_selected: None,
             catalog_grid: None,
             vpns: Vec::new(),
             vpn_error: None,
             grid_columns: HashMap::new(),
-            prefetch: None,
-            prefetched: HashSet::new(),
         };
         let downloads = Downloads::spawn(kernel.clone());
         let changes = Changes::new();
+        let library = crate::library::LibrarySubsystem::new(
+            crate::library::Records::new(kernel.config().clone()),
+            Notifier::new(changes.clone(), kernel.events().clone()),
+        );
         let inner = Arc::new_cyclic(|weak: &std::sync::Weak<Inner>| {
             let weak = weak.clone();
             // The subsystem's events reach the core while it lives.
@@ -620,6 +554,7 @@ impl Core {
                 desktop_checked: Default::default(),
                 changes,
                 torrents,
+                library,
                 reading_catalogs: tokio::sync::Mutex::new(()),
             }
         });
@@ -685,6 +620,11 @@ impl Core {
     /// The catalogs' downloads.
     pub(crate) fn torrents(&self) -> &crate::torrents::TorrentsSubsystem {
         &self.inner.torrents
+    }
+
+    /// The games and the catalogs' offers.
+    pub(crate) fn library(&self) -> &crate::library::LibrarySubsystem {
+        &self.inner.library
     }
 
     pub(crate) fn state(&self) -> MutexGuard<'_, AppState> {
@@ -790,10 +730,7 @@ impl Core {
                 // Themes show the selected game's details on the home screen, so load them
                 // once. Wait first: a player who scrolls past a game doesn't need its details.
                 // A plugin that fails here leaves one notice; the selection stands.
-                let wanted = {
-                    let state = self.state();
-                    !state.details.contains_key(&game) && !state.detail_failed.contains(&game)
-                };
+                let wanted = matches!(self.library().snapshot().detail_state(&game), DetailState::Unread);
                 if !wanted {
                     return Ok(());
                 }
@@ -808,7 +745,7 @@ impl Core {
                 match self.load_detail(&game).await {
                     Ok(()) => self.changed(Area::Library),
                     Err(e) => {
-                        self.state().detail_failed.insert(game);
+                        self.library().detail_failed(&game);
                         self.problem(e.to_string());
                     }
                 }
@@ -818,7 +755,8 @@ impl Core {
                 self.torrents().set_download_error(None);
                 self.open_game(game).await
             }
-            Command::RefreshLibrary => self.refresh_library().await,
+            Command::Library(crate::LibraryCmd::Refresh) => self.refresh_library().await,
+            Command::Library(command) => self.library().handle(command),
             Command::UninstallGame(game) => self.uninstall_game(&game).await,
             Command::Search(text) => self.search(text).await,
             Command::Download { plugin, request } => self.download(&plugin, request).await,
@@ -831,8 +769,9 @@ impl Core {
             Command::UninstallEmulator { plugin, version } => self.uninstall(&plugin, &version).await,
             Command::Launch(game) => {
                 // A Catalog offer's Play starts the installed game it is.
+                let library = self.library().snapshot();
                 let torrents = self.torrents().snapshot();
-                let game = crate::view::played_game(&self.state(), &torrents, &game);
+                let game = crate::view::played_game(&self.state(), &library, &torrents, &game);
                 let result = crate::launch::launch(self, game.clone()).await;
                 // The player pressed Play: say why nothing started.
                 if let Err(error) = &result {
@@ -877,21 +816,7 @@ impl Core {
             }
             Command::ReportResult(level) => {
                 let Some((game, build)) = self.state().result_prompt.take() else { return Ok(()) };
-                let config = self.inner.kernel.config();
-                let set = |key: &str, value: Value| {
-                    config.set(&["app", key, &game.to_string()], value).map_err(|e| CoreError::Io(e.to_string()))
-                };
-                let build = build.map(Value::String).unwrap_or(Value::Null);
-                match level {
-                    Some(level) => {
-                        if !matches!(level.as_str(), "ingame" | "menus" | "boots" | "nothing") {
-                            return Err(CoreError::Invalid(format!("no result {level:?}")));
-                        }
-                        set("results", Value::String(level))?;
-                        set("result_builds", build)?;
-                    }
-                    None => set("result_skipped", build)?,
-                }
+                self.library().answer(&game, level.as_deref(), build.as_deref())?;
                 self.changed(Area::Sessions);
                 Ok(())
             }
@@ -909,7 +834,6 @@ impl Core {
             }
             Command::CatalogSearch(text) => self.set_grid(true, |v| v.query = text),
             Command::CatalogSystem(system) => self.set_grid(true, |v| v.set_system(system)),
-            Command::HideGame { game, hidden } => self.hide_game(&game, hidden),
             Command::CatalogGenre(genre) => self.set_grid(true, |v| v.genre = genre),
             Command::CatalogSort(sort) => {
                 check_sort(&sort)?;
@@ -1107,65 +1031,6 @@ impl Core {
         })
     }
 
-    /// The games the player hid from the Catalog.
-    pub(crate) fn hidden_games(kernel: &Kernel) -> HashSet<String> {
-        let list = kernel.config().get(&["app", "hidden_games"]);
-        list.as_array().map(|ids| ids.iter().filter_map(Value::as_str).map(str::to_owned).collect()).unwrap_or_default()
-    }
-
-    fn hide_game(&self, game: &GameKey, hidden: bool) -> CoreResult<()> {
-        let kernel = &self.inner.kernel;
-        let mut list: Vec<String> = Self::hidden_games(kernel).into_iter().filter(|k| *k != game.to_string()).collect();
-        if hidden {
-            list.push(game.to_string());
-        }
-        list.sort();
-        let saved = if list.is_empty() {
-            kernel.config().remove(&["app", "hidden_games"])
-        } else {
-            kernel.config().set(&["app", "hidden_games"], serde_json::json!(list))
-        };
-        saved.map_err(|e| CoreError::Io(e.to_string()))?;
-        self.changed(Area::Library);
-        Ok(())
-    }
-
-    /// The offers' covers kept for installed games (see [`AppState::offer_art`]).
-    fn kept_offer_art(kernel: &Kernel) -> HashMap<GameKey, (PluginId, nexus_api::ImageSource)> {
-        let kept = kernel.config().get(&["app", "game_art"]);
-        let Some(kept) = kept.as_object() else { return HashMap::new() };
-        kept.iter()
-            .filter_map(|(game, art)| {
-                let plugin = PluginId::new(art.get("plugin")?.as_str()?).ok()?;
-                let image = serde_json::from_value(art.get("image")?.clone()).ok()?;
-                Some((game.parse().ok()?, (plugin, image)))
-            })
-            .collect()
-    }
-
-    /// Finds the offer each installed game is ([`AppState::installed_offers`]), gives the game
-    /// its cover (see [`AppState::offer_art`]), and keeps the covers that changed.
-    pub(crate) fn remember_offer_art(&self) {
-        let changed = {
-            let torrents = self.torrents().snapshot();
-            let mut state = self.state();
-            let found = view::installed_offers(&state, &torrents);
-            state.installed_offers = found.iter().map(|(game, offer, _)| (game.clone(), offer.clone())).collect();
-            let art: Vec<_> = found.into_iter().filter_map(|(game, _, art)| Some((game, art?))).collect();
-            let changed = art.iter().any(|(game, art)| state.offer_art.get(game) != Some(art));
-            state.offer_art.extend(art);
-            changed.then(|| state.offer_art.clone())
-        };
-        let Some(art) = changed else { return };
-        let kept: serde_json::Map<String, Value> = art
-            .into_iter()
-            .map(|(game, (plugin, image))| (game.to_string(), serde_json::json!({ "plugin": plugin, "image": image })))
-            .collect();
-        if let Err(e) = self.inner.kernel.config().set(&["app", "game_art"], Value::Object(kept)) {
-            tracing::warn!(error = %e, "could not keep the installed games' art");
-        }
-    }
-
     /// A turned-on plugin gives release catalogs, so there is a Catalog.
     pub(crate) fn catalog_available(kernel: &Kernel) -> bool {
         !kernel.providers(Capability::Releases).is_empty()
@@ -1192,12 +1057,14 @@ impl Core {
             }
             // Read once; a new catalog address reads them again. The Catalog opens at once and
             // says it is loading until the read ends.
-            Route::Catalog if self.state().catalogs.is_empty() => {
+            Route::Catalog if !self.library().has_catalogs() => {
                 self.push(route);
                 self.refresh_releases().await;
                 return Ok(());
             }
-            Route::GameSettings(game) if !self.state().details.contains_key(game) => self.load_detail(game).await?,
+            Route::GameSettings(game) if self.library().snapshot().detail(game).is_none() => {
+                self.load_detail(game).await?
+            }
             _ => {}
         }
         self.push(route);
@@ -1230,214 +1097,9 @@ impl Core {
         out
     }
 
-    pub(crate) async fn refresh_library(&self) -> CoreResult<()> {
-        {
-            let mut state = self.state();
-            state.loading = true;
-            state.detail_failed.clear();
-        }
-        self.changed(Area::Library);
-        let kernel = &self.inner.kernel;
-        let mut library = Vec::new();
-        let mut badges = HashMap::new();
-        for (plugin, provided) in self.providers(Capability::Catalog).await {
-            let catalog = provided.catalog.expect("declared and checked at init");
-            let page = match kernel.guard(&plugin, "catalog.list", catalog.list(PageRequest::ALL)).await {
-                Ok(page) => page,
-                Err(e) => {
-                    self.problem(e.to_string());
-                    continue;
-                }
-            };
-            for summary in page.items {
-                let key = GameKey::new(plugin.clone(), summary.id.clone());
-                if let Some(slots) = &provided.slots {
-                    let request = SlotRequest { slot: SlotId::GameBadge, game: Some(summary.id.clone()) };
-                    match kernel.guard(&plugin, "slots.items", slots.items(&request)).await {
-                        Ok(items) => {
-                            badges.insert(key.clone(), slot_vms(&plugin, SlotId::GameBadge, items));
-                        }
-                        Err(e) => self.problem(e.to_string()),
-                    }
-                }
-                library.push(Entry { key, summary });
-            }
-        }
-        library.sort_by(|a, b| {
-            a.summary.title.to_lowercase().cmp(&b.summary.title.to_lowercase()).then(a.key.cmp(&b.key))
-        });
-        // The home screen shows the selected game with its details. With no selection, or one
-        // that is gone, the first game is selected, so the first screen is a whole one.
-        let first = {
-            let mut state = self.state();
-            state.library = library;
-            state.badges = badges;
-            state.loading = false;
-            let kept = state.selected.as_ref().is_some_and(|s| state.library.iter().any(|e| &e.key == s));
-            if kept {
-                None
-            } else {
-                state.selected = state.library.first().map(|e| e.key.clone());
-                state.selected.clone()
-            }
-        };
-        self.remember_offer_art();
-        kernel.events().publish(Event::LibraryChanged);
-        self.changed(Area::Library);
-        if let Some(game) = first
-            && !self.state().details.contains_key(&game)
-        {
-            if let Err(e) = self.load_detail(&game).await {
-                self.state().detail_failed.insert(game);
-                self.problem(e.to_string());
-            }
-            self.changed(Area::Library);
-        }
-        if self.state().booted {
-            // Later loads: the store's art and the details, all in the background.
-            let core = self.clone();
-            tokio::spawn(async move {
-                core.describe_library().await;
-                core.read_all_details().await;
-            });
-            return Ok(());
-        }
-        // The first load of a run is the boot: the emulators' builds for the Welcome
-        // checklist, and the store's art and details, as the old launcher's boot did, so Home
-        // opens whole. A slow network doesn't hold it for more than BOOT_DESCRIBE_LIMIT.
-        self.refresh_emulators().await;
-        if self.kernel().clock().timeout(BOOT_DESCRIBE_LIMIT, self.describe_library()).await.is_none() {
-            tracing::info!("the store's descriptions are slow: Home opens without the rest");
-            let core = self.clone();
-            tokio::spawn(async move { core.describe_library().await });
-        }
-        self.state().booted = true;
-        self.changed(Area::Library);
-        let core = self.clone();
-        tokio::spawn(async move {
-            // The catalogs, read once a run, after Home is up.
-            if core.state().catalogs.is_empty() {
-                core.refresh_releases().await;
-            }
-            core.read_all_details().await;
-        });
-        Ok(())
-    }
-
-    /// Asks the metadata plugins about every game they haven't described yet.
-    async fn describe_library(&self) {
-        self.state().describing = Some((0, 0));
-        let todo: Vec<(GameKey, nexus_api::GameRef)> = {
-            let state = self.state();
-            state
-                .library
-                .iter()
-                .filter(|e| !state.meta.contains_key(&e.key))
-                .filter_map(|e| {
-                    let title_id = e.summary.title_id.clone()?;
-                    Some((
-                        e.key.clone(),
-                        nexus_api::GameRef {
-                            platform: e.summary.platform.clone(),
-                            title_id,
-                            content_id: e.summary.content_id.clone().unwrap_or_default(),
-                            title: e.summary.title.clone(),
-                            region: String::new(),
-                        },
-                    ))
-                })
-                .collect()
-        };
-        let described = self.describe_with(todo, true).await;
-        let mut state = self.state();
-        if !described {
-            state.describing = None;
-        }
-        state.described = true;
-        drop(state);
-        self.changed(Area::Library);
-    }
-
-    /// Asks the metadata plugins about these games, and keeps what they say.
-    pub(crate) async fn describe(&self, todo: Vec<(GameKey, nexus_api::GameRef)>) {
-        self.describe_with(todo, false).await;
-    }
-
-    /// `false` when no plugin describes games. `boot` counts the answers for the boot screen.
-    async fn describe_with(&self, todo: Vec<(GameKey, nexus_api::GameRef)>, boot: bool) -> bool {
-        let providers: Vec<_> = self
-            .providers(Capability::Metadata)
-            .await
-            .into_iter()
-            .filter_map(|(plugin, provided)| provided.metadata.map(|m| (plugin, m)))
-            .collect();
-        if providers.is_empty() {
-            return false;
-        }
-        // Six at a time, as the old launcher's fetch threads.
-        let total = todo.len();
-        let done = std::sync::atomic::AtomicUsize::new(0);
-        let providers = &providers;
-        let answers = futures::stream::iter(todo.into_iter().map(|(key, game)| async move {
-            let mut failed = false;
-            for (plugin, metadata) in providers {
-                match self.inner.kernel.guard(plugin, "metadata.describe", metadata.describe(&game)).await {
-                    Ok(Some(found)) => return (key, Some((plugin.clone(), found)), false),
-                    Ok(None) => {}
-                    Err(e) => {
-                        failed = true;
-                        tracing::info!(plugin_id = %plugin, error = %e, "could not describe a game");
-                    }
-                }
-            }
-            (key, None, failed)
-        }));
-        let mut answers = futures::StreamExt::buffer_unordered(answers, DESCRIBE_AT_ONCE);
-        while let Some((key, found, failed)) = futures::StreamExt::next(&mut answers).await {
-            let n = done.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
-            let mut state = self.state();
-            match found {
-                Some(found) => {
-                    state.meta.insert(key, found);
-                }
-                // The store didn't answer (offline): it is asked again when the game shows.
-                None if failed => {
-                    state.asked.remove(&key);
-                }
-                None => {}
-            }
-            if boot {
-                state.describing = Some((n, total));
-            }
-            state.task = Some(format!("Downloading game art {n}/{total}"));
-            drop(state);
-            self.changed(Area::Library);
-        }
-        self.state().task = None;
-        self.changed(Area::Library);
-        true
-    }
-
-    /// Reads every game's details, for the Library's sizes.
-    async fn read_all_details(&self) {
-        let keys: Vec<GameKey> = {
-            let state = self.state();
-            state.library.iter().map(|e| e.key.clone()).filter(|k| !state.details.contains_key(k)).collect()
-        };
-        for (n, key) in keys.iter().enumerate() {
-            self.state().task = Some(format!("Reading game details {}/{}", n + 1, keys.len()));
-            self.changed(Area::Library);
-            if self.load_detail(key).await.is_err() {
-                self.state().detail_failed.insert(key.clone());
-            }
-        }
-        self.state().task = None;
-        self.changed(Area::Library);
-    }
-
     /// Searches the Catalog, and shows it.
     async fn search(&self, text: String) -> CoreResult<()> {
-        if self.state().catalogs.is_empty() {
+        if !self.library().has_catalogs() {
             self.refresh_releases().await;
         }
         self.set_grid(true, |v| v.query = text)?;
@@ -1476,8 +1138,9 @@ impl Core {
 
     /// Selects a game: a game the catalogs offer in the Catalog, any other on Home.
     fn select(&self, game: &GameKey) {
+        let offered = self.library().snapshot().offer(game).is_some();
         let mut state = self.state();
-        if state.offers.iter().any(|o| &o.entry.key == game) {
+        if offered {
             state.catalog_selected = Some(game.clone());
         } else {
             state.selected = Some(game.clone());
@@ -1486,66 +1149,12 @@ impl Core {
 
     async fn open_game(&self, game: GameKey) -> CoreResult<()> {
         // A game a catalog offers: its download sheet names the VPN in use.
-        if self.vpn_only() && self.offer(&game).is_some() {
+        if self.vpn_only() && self.library().snapshot().offer(&game).is_some() {
             self.refresh_vpns().await;
         }
         self.load_detail(&game).await?;
         self.select(&game);
         self.push(Route::GameDetail(game));
-        Ok(())
-    }
-
-    /// Asks the game's plugin for its details, compatibility, shader cache and slots.
-    async fn load_detail(&self, game: &GameKey) -> CoreResult<()> {
-        if let Some(offer) = self.offer(game) {
-            let detail = self.offer_detail(&offer);
-            self.state().details.insert(game.clone(), detail);
-            return Ok(());
-        }
-        let kernel = &self.inner.kernel;
-        let plugin = game.plugin.clone();
-        let provided = kernel.provided(&plugin).await?;
-        let catalog = require(&plugin, Capability::Catalog, provided.catalog.clone())?;
-        let details = kernel.guard(&plugin, "catalog.details", catalog.details(&game.local)).await?;
-        let mut detail = Detail { details: Some(details), ..Detail::default() };
-        if let Some(compat) = &provided.compatibility {
-            match kernel.guard(&plugin, "compatibility.status", compat.status(&game.local)).await {
-                Ok(info) => {
-                    detail.compat_page = info.page.clone().unwrap_or_default();
-                    detail.compat = Some(view::compat_vm(&info));
-                }
-                Err(e) => self.problem(e.to_string()),
-            }
-        }
-        if let Some(shaders) = &provided.shaders {
-            match kernel.guard(&plugin, "shaders.cache", shaders.cache(&game.local)).await {
-                Ok(info) => detail.shaders = Some(info),
-                Err(e) => self.problem(e.to_string()),
-            }
-        }
-        if let Some(slots) = &provided.slots {
-            for slot in [SlotId::GameAction, SlotId::GameDetailSection, SlotId::GameBadge] {
-                let request = SlotRequest { slot, game: Some(game.local.clone()) };
-                match kernel.guard(&plugin, "slots.items", slots.items(&request)).await {
-                    Ok(items) => {
-                        let vms = slot_vms(&plugin, slot, items);
-                        match slot {
-                            SlotId::GameAction => detail.actions = vms,
-                            SlotId::GameDetailSection => detail.sections = vms,
-                            _ => {
-                                self.state().badges.insert(game.clone(), vms);
-                            }
-                        }
-                    }
-                    Err(e) => self.problem(e.to_string()),
-                }
-            }
-        }
-        detail.settings = self.game_settings(&plugin, &provided, game).await;
-        self.refresh_emulator(&plugin).await;
-        let mut state = self.state();
-        state.details.insert(game.clone(), detail);
-        state.detail_failed.remove(game);
         Ok(())
     }
 
@@ -1576,46 +1185,16 @@ impl Core {
         if let Some(slots) = &provided.slots {
             let request = SlotRequest { slot: SlotId::EmulatorPanel, game: None };
             if let Ok(items) = kernel.guard(plugin, "slots.items", slots.items(&request)).await {
-                emu.panels = slot_vms(plugin, SlotId::EmulatorPanel, items);
+                emu.panels = items;
             }
         }
         self.state().emulators.insert(plugin.clone(), emu);
     }
 
-    async fn refresh_emulators(&self) {
+    pub(crate) async fn refresh_emulators(&self) {
         for plugin in self.inner.kernel.of_kind(PluginKind::Emulator) {
             self.refresh_emulator(&plugin).await;
         }
-    }
-
-    /// A game's own settings, from its emulator's schema for it. `None` when it has none.
-    async fn game_settings(&self, plugin: &PluginId, provided: &Provided, game: &GameKey) -> Option<SettingsPanelVm> {
-        let kernel = &self.inner.kernel;
-        let configurator = provided.configurator.as_ref()?;
-        let scope = ConfigScope::Game(game.local.clone());
-        let schema = kernel.guard(plugin, "configurator.schema", configurator.schema(&scope)).await.ok()?;
-        if schema["properties"].as_object().is_none_or(|p| p.is_empty()) {
-            return None;
-        }
-        let values = self.config_value(plugin, &scope).await.unwrap_or(Value::Null);
-        let name = kernel.manifest(plugin).map(|m| m.emulator_name().to_owned()).unwrap_or_default();
-        let slot = SlotVm {
-            slot: SlotId::SettingsPanel,
-            plugin: plugin.clone(),
-            id: "game".into(),
-            label: format!("{plugin}:game"),
-            kind: nexus_ui_api::SlotKind::SettingsPanel,
-            text: format!("{name} settings for this game"),
-            short: String::new(),
-            tone: nexus_api::Tone::Neutral,
-            style: nexus_api::ActionStyle::Secondary,
-            icon: None,
-            rows: Vec::new(),
-            action: None,
-            args: Value::Null,
-            scope: Some(scope),
-        };
-        Some(SettingsPanelVm { fields: view::fields(&schema, &values), slot })
     }
 
     async fn refresh_settings(&self) {
@@ -1625,8 +1204,13 @@ impl Core {
             let slots = provided.slots.clone().expect("declared and checked at init");
             let request = SlotRequest { slot: SlotId::SettingsPanel, game: None };
             let Ok(items) = kernel.guard(&plugin, "slots.items", slots.items(&request)).await else { continue };
-            for slot in slot_vms(&plugin, SlotId::SettingsPanel, items) {
-                let scope = slot.scope.clone().unwrap_or(ConfigScope::Emulator);
+            let items =
+                crate::order::sort_by_order(items.into_iter().map(|i| (i.id.clone(), i.order.clone(), i)).collect());
+            for item in items {
+                let scope = match &item.content {
+                    nexus_api::SlotContent::SettingsPanel { scope, .. } => scope.clone(),
+                    _ => ConfigScope::Emulator,
+                };
                 let schema = match &provided.configurator {
                     Some(c) => {
                         kernel.guard(&plugin, "configurator.schema", c.schema(&scope)).await.unwrap_or(Value::Null)
@@ -1634,7 +1218,7 @@ impl Core {
                     None => Value::Null,
                 };
                 let values = self.config_value(&plugin, &scope).await.unwrap_or(Value::Null);
-                panels.push(SettingsPanelVm { fields: view::fields(&schema, &values), slot });
+                panels.push(SettingsPanel { plugin: plugin.clone(), item, schema, values });
             }
         }
         self.state().settings = panels;
@@ -1772,6 +1356,7 @@ impl Core {
         let also;
         let link;
         let (folder, title) = {
+            let library = self.library().snapshot();
             let state = self.state();
             if state.sessions.values().any(|s| &s.game == game) {
                 return Err(CoreError::Invalid("Stop the game before you uninstall it".into()));
@@ -1783,13 +1368,12 @@ impl Core {
             {
                 return Err(CoreError::Invalid("Wait until the install ends".into()));
             }
-            let details = state.details.get(game).and_then(|d| d.details.as_ref());
+            let details = library.detail(game).map(|d| &d.details);
             let folder = details.and_then(|d| d.folder.clone());
             also = details.map(|d| d.also.clone()).unwrap_or_default();
             // A store's game: the store removes it (Steam asks in its own dialog).
             link = details.and_then(|d| Some((d.uninstall_link.clone()?, d.summary.platform.clone())));
-            let title = state.library.iter().find(|e| &e.key == game).map(|e| e.summary.title.clone());
-            (folder, title.unwrap_or_else(|| game.local.clone()))
+            (folder, library.title(game))
         };
         if let Some((link, platform)) = link {
             let allowed = self.inner.kernel.manifest(&game.plugin)?.permissions.allows_link(&link);
@@ -1819,9 +1403,9 @@ impl Core {
                 tracing::warn!(error = %e, folder = %other.path, "a folder of an uninstalled game stays");
             }
         }
+        self.library().forget_detail(game);
         {
             let mut state = self.state();
-            state.details.remove(game);
             state.nav.retain(|r| r != &Route::GameDetail(game.clone()));
             if state.nav.is_empty() {
                 state.nav.push(Route::Home);
@@ -1866,9 +1450,7 @@ impl Core {
         let shaders = require(&game.plugin, Capability::Shaders, provided.shaders)?;
         kernel.guard(&game.plugin, "shaders.clear_cache", shaders.clear_cache(&game.local)).await?;
         let info = kernel.guard(&game.plugin, "shaders.cache", shaders.cache(&game.local)).await?;
-        if let Some(detail) = self.state().details.get_mut(&game) {
-            detail.shaders = Some(info);
-        }
+        self.library().set_shaders(&game, info);
         self.changed(Area::Library);
         Ok(())
     }
@@ -1895,9 +1477,7 @@ impl Core {
             let game = GameKey::new(plugin.clone(), local.clone());
             let provided = kernel.provided(plugin).await?;
             let panel = self.game_settings(plugin, &provided, &game).await;
-            if let Some(detail) = self.state().details.get_mut(&game) {
-                detail.settings = panel;
-            }
+            self.library().set_game_settings(&game, panel);
         }
         self.changed(Area::Plugins);
         Ok(())
@@ -1997,14 +1577,13 @@ impl Core {
         // The last catalog turned off: the Catalog goes, and Back passes where it was. Its
         // offers go too, so turning one on reads them again.
         if !Self::catalog_available(kernel) {
+            self.library().clear_catalogs();
             let mut state = self.state();
             state.nav.retain(|r| *r != Route::Catalog);
             state.nav.dedup();
             if state.nav.is_empty() {
                 state.nav.push(Route::Home);
             }
-            state.catalogs.clear();
-            state.offers.clear();
             state.catalog_grid = None;
         }
         if enabled && kernel.of_kind(PluginKind::Emulator).contains(plugin) {
@@ -2151,15 +1730,7 @@ impl Core {
         };
         let emulator =
             kernel.manifest(plugin).map(|m| m.emulator_name().to_owned()).unwrap_or_else(|_| plugin.to_string());
-        let title = {
-            let state = self.state();
-            state
-                .library
-                .iter()
-                .find(|e| &e.key == game)
-                .map(|e| e.summary.title.clone())
-                .unwrap_or_else(|| game.local.clone())
-        };
+        let title = self.library().snapshot().title(game);
         self.state().install_prompt = Some(InstallPrompt { game: game.clone(), emulator, version, title, size_bytes });
         self.changed(Area::Sessions);
         Ok(true)
@@ -2179,7 +1750,7 @@ impl Core {
     /// The game's folder on disk, through its plugin's folder grants. `None` before its
     /// details are in, or when it has no folder.
     pub fn game_folder(&self, game: &GameKey) -> Option<std::path::PathBuf> {
-        let folder = self.state().details.get(game)?.details.as_ref()?.folder.clone()?;
+        let folder = self.library().snapshot().detail(game)?.details.folder.clone()?;
         resolve_game_folder(&self.inner.kernel, game, &folder)
     }
 
@@ -2217,29 +1788,14 @@ impl Core {
         Some(crate::launch::log_path(&self.inner.kernel, game)).filter(|p| p.is_file())
     }
 
-    /// The player's own result for a game: `ingame`, `menus`, `boots` or `nothing`.
-    pub(crate) fn your_result(&self, game: &GameKey) -> Option<String> {
-        self.inner.kernel.config().get(&["app", "results", &game.to_string()]).as_str().map(str::to_owned)
-    }
-
     /// The emulator build `plugin` runs games on: its newest installed one.
     pub(crate) fn build_of(&self, plugin: &PluginId) -> Option<String> {
         self.state().emulators.get(plugin).and_then(|e| e.installed.last().cloned())
     }
 
-    /// Whether the player answered "How far did it get?" for `game` on `build`, or said
-    /// "Not now" to it. A game with no build is always asked.
-    pub(crate) fn result_asked(&self, game: &GameKey, build: Option<&str>) -> bool {
-        let Some(build) = build else { return false };
-        let config = self.inner.kernel.config();
-        ["result_builds", "result_skipped"]
-            .iter()
-            .any(|key| config.get(&["app", key, &game.to_string()]).as_str() == Some(build))
-    }
-
     /// The first library load of the run, with the store's art and details, is done.
     pub fn booted(&self) -> bool {
-        self.state().booted
+        self.library().booted()
     }
 
     /// Whether the player has been welcomed: the Welcome screen shows on the first run only.

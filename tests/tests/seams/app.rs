@@ -252,7 +252,7 @@ async fn the_library_merges_every_catalog_sorted_by_title_with_badges() {
     let b = FakeEmu::new(vec!["Mu"]);
     let t = FakeHost::new().plugin(emu_plugin("emu-a", a)).plugin(emu_plugin("emu-b", b)).boot_core().await;
 
-    t.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
 
     let home = t.core.view().home;
     let titles: Vec<_> = home.games.iter().map(|g| g.title.as_str()).collect();
@@ -272,7 +272,7 @@ async fn a_broken_catalog_leaves_a_notice_and_the_other_catalogs_still_show() {
     let ok = FakeEmu::new(vec!["Shown"]);
     let t = FakeHost::new().plugin(emu_plugin("emu-a", broken)).plugin(emu_plugin("emu-b", ok)).boot_core().await;
 
-    t.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
 
     let view = t.core.view();
     assert_eq!(view.home.games.iter().map(|g| g.title.as_str()).collect::<Vec<_>>(), ["Shown"]);
@@ -818,7 +818,7 @@ async fn stop_ends_the_game_another_program_started_and_leaves_that_program_runn
 #[tokio::test]
 async fn a_game_another_program_never_starts_ends_with_a_notice() {
     let (t, emu) = core_with(FakeEmu::new(vec!["A"]).handing_over("AppId=7 ")).await;
-    t.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     let mut events = t.core.events();
     let (_, launcher) = play(&t).await;
     launcher.exit(0);
@@ -834,7 +834,7 @@ async fn a_game_another_program_never_starts_ends_with_a_notice() {
 #[tokio::test]
 async fn stop_before_the_game_another_program_starts_shows_ends_with_nothing_played() {
     let (t, _) = core_with(FakeEmu::new(vec!["A"]).handing_over("AppId=7 ")).await;
-    t.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     let mut events = t.core.events();
     let (session, launcher) = play(&t).await;
     // Steam is still starting, and the player gives up.
@@ -912,7 +912,7 @@ async fn what_the_desktop_is_missing_is_said_once_a_run() {
 #[tokio::test]
 async fn after_playing_the_player_says_how_far_it_got_and_it_is_kept() {
     let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
-    t.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     let mut events = t.core.events();
     let (_, process) = play(&t).await;
     process.exit(0);
@@ -952,7 +952,7 @@ async fn play_run(t: &TestCore, n: usize) {
 #[tokio::test]
 async fn how_far_it_got_is_asked_once_for_each_build() {
     let (t, emu) = core_with(FakeEmu::new(vec!["A"])).await;
-    t.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     install(&t.core).await;
     play_run(&t, 1).await;
     t.core.dispatch(Command::ReportResult(Some("menus".into()))).await.unwrap();
@@ -971,7 +971,7 @@ async fn how_far_it_got_is_asked_once_for_each_build() {
 #[tokio::test]
 async fn not_now_is_kept_for_the_build() {
     let (t, emu) = core_with(FakeEmu::new(vec!["A"])).await;
-    t.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     install(&t.core).await;
     play_run(&t, 1).await;
     t.core.dispatch(Command::ReportResult(None)).await.unwrap();
@@ -1133,7 +1133,7 @@ async fn stop_asks_the_game_to_close_before_it_kills_it() {
 #[tokio::test]
 async fn a_game_that_closes_right_after_it_starts_leaves_a_notice_with_its_log() {
     let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
-    t.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     let mut events = t.core.events();
     let (_, process) = play(&t).await;
     // Joined a part at a time, as the core does: the notice shows its text, and on Windows a
@@ -1151,7 +1151,7 @@ async fn a_game_that_closes_right_after_it_starts_leaves_a_notice_with_its_log()
 #[tokio::test]
 async fn one_game_runs_at_a_time() {
     let (t, _) = core_with(FakeEmu::new(vec!["A", "B"])).await;
-    t.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     let (_, _process) = play(&t).await;
 
     let err = t.core.dispatch(Command::Launch(key("emu-a:G1"))).await.unwrap_err();
@@ -1163,7 +1163,7 @@ async fn one_game_runs_at_a_time() {
 #[tokio::test]
 async fn play_time_adds_up_and_the_game_page_shows_it() {
     let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
-    t.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     t.core.dispatch(Command::OpenGame(key("emu-a:G0"))).await.unwrap();
     let detail = t.core.view().detail.unwrap();
     assert_eq!((detail.played_secs, detail.last_played_days), (0, None), "never played");
@@ -1266,7 +1266,7 @@ async fn launch_middleware_can_change_the_spec_or_stop_the_launch() {
 async fn the_first_game_is_selected_with_its_details_once_the_library_loads() {
     let (t, _) = core_with(FakeEmu::new(vec!["Beta", "Alpha"])).await;
 
-    t.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
 
     let view = t.core.view();
     assert_eq!(view.home.selected, Some(0), "the first game by title");
@@ -1276,7 +1276,7 @@ async fn the_first_game_is_selected_with_its_details_once_the_library_loads() {
 #[tokio::test]
 async fn navigation_and_selection_live_in_the_core() {
     let (t, _) = core_with(FakeEmu::new(vec!["A", "B"])).await;
-    t.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
 
     t.core.dispatch(Command::Select(key("emu-a:G1"))).await.unwrap();
     t.core.dispatch(Command::OpenGame(key("emu-a:G1"))).await.unwrap();
@@ -1404,7 +1404,7 @@ async fn playing_a_game_whose_emulator_isn_t_installed_asks_first_then_installs_
     let mut emu = FakeEmu::new(vec!["A"]);
     emu.build_size = Some(20_000);
     let (t, _) = core_with(emu).await;
-    t.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
 
     t.core.dispatch(Command::Launch(key("emu-a:G0"))).await.unwrap();
     let prompt = t.core.view().install_prompt.expect("a prompt before anything downloads");
@@ -1425,7 +1425,7 @@ async fn a_plugin_named_by_its_console_names_its_program_where_a_sentence_means_
     emu.build_sha = host.http().serve(&emu.build_url, vec![7u8; 20_000]);
     let names = "name = \"PS5\"\nemulator = \"KytyPS5\"";
     let t = host.plugin(emu_plugin_named("emu-a", names, emu, PERMISSIONS)).boot_core().await;
-    t.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     let steps: Vec<String> = t.core.view().boot.steps.into_iter().map(|s| s.label).collect();
     assert!(steps.contains(&"KytyPS5 emulator".to_owned()), "the first start's step: {steps:?}");
     t.core.dispatch(Command::OpenGame(key("emu-a:G0"))).await.unwrap();

@@ -20,6 +20,8 @@ mod hardware;
 mod kernel;
 mod launch;
 pub mod launcher_update;
+mod library;
+mod library_reads;
 mod order;
 mod ports;
 mod prefetch;
@@ -47,6 +49,7 @@ pub use config::ConfigService;
 pub use downloads::{Job, JobPhase};
 pub use error::{CoreError, CoreResult, LoadError};
 pub use kernel::{BootReport, HostConfig, Kernel, KernelBuilder, Loader, Origin, PluginInfo, PluginStatus, Rejection};
+pub use library::LibraryCmd;
 pub use ports::{ArchiveError, Escape};
 pub use ports::{
     ArchiveKind, Archives, Body, Clock, Desktop, Front, Gpu, GroupTree, Hardware, HttpTransport, Network, NoArchives,

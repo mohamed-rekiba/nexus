@@ -200,7 +200,7 @@ async fn a_game_an_older_nexus_installed_starts_its_start_script_by_default() {
         "alternatives": [{ "launch": "ENG/start.sh", "kind": "script" }, { "launch": "RUS/start.sh", "kind": "script" },
             { "launch": "RUS/game.exe", "kind": "windows" }] });
     std::fs::write(game.join(GAME_FILE), manifest.to_string()).unwrap();
-    p.test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    p.test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
 
     let key: nexus_api::GameKey = "emu-pc:Game".parse().unwrap();
     let field = p.starts_field("Game").await;
@@ -644,7 +644,7 @@ async fn a_gog_game_installed_before_shows_the_name_gog_gives_it() {
     let manifest = serde_json::json!({ "version": 1, "name": "world of goo 2 1 0 13120 81588",
         "launch": "data/noarch/start.sh", "kind": "script" });
     std::fs::write(game.join(GAME_FILE), manifest.to_string()).unwrap();
-    p.test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    p.test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     assert_eq!(p.titles(), [("World of Goo 2".to_owned(), "PC".to_owned())]);
 }
 
@@ -707,7 +707,7 @@ impl Pc {
 async fn a_game_copied_into_pc_by_hand_shows_and_plays_as_an_installed_one() {
     let p = boot(Platform::Linux).await;
     p.copy_in(&[("my_game/start.sh", b"#!/bin/sh\n"), ("my_game/bin/game.x86_64", &elf())]);
-    p.test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    p.test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
 
     assert_eq!(p.titles(), [("My Game".to_owned(), "PC".to_owned())], "named after its folder");
     assert_eq!(p.starts("my_game"), ["start.sh", "bin/game.x86_64"], "found as an install finds them");
@@ -721,7 +721,7 @@ async fn a_game_copied_into_pc_by_hand_shows_and_plays_as_an_installed_one() {
 async fn a_folder_with_nothing_to_start_or_still_installing_isn_t_a_game() {
     let p = boot(Platform::Linux).await;
     p.copy_in(&[("Notes/readme.txt", b"hello"), ("Game.part/start.sh", b"#!/bin/sh\n")]);
-    p.test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    p.test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
 
     assert_eq!(p.titles(), []);
     for folder in ["Notes", "Game.part"] {
@@ -733,7 +733,7 @@ async fn a_folder_with_nothing_to_start_or_still_installing_isn_t_a_game() {
 async fn a_cover_image_in_a_game_s_folder_is_its_cover() {
     let p = boot(Platform::Linux).await;
     p.copy_in(&[("Game/start.sh", b"#!/bin/sh\n"), ("Game/cover.png", b"png")]);
-    p.test.core.dispatch(Command::RefreshLibrary).await.unwrap();
+    p.test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
 
     let card = p.test.core.view().home.games.first().cloned().expect("the game");
     let cover = HostPath::new("games", 0, RelPath::new("PC/Game/cover.png").unwrap());

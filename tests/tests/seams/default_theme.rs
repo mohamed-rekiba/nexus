@@ -15,7 +15,7 @@ fn default_theme_with(more: impl FnOnce(nexus_testkit::FakeHost) -> nexus_testki
         more(h.plugin(games_on("emu-a", "PS4", vec!["Alpha", "Beta"])).plugin(games_on("emu-b", "PS5", vec!["Gamma"])))
     });
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.resize(1600.0, 900.0);
     settle(&mut host);
     host
@@ -80,7 +80,7 @@ fn with_the_game_catalog_turned_off_the_ways_to_the_catalog_go() {
             .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.load_images();
     settle(&mut host);
     assert_eq!(host.count("Search"), 1, "with a catalog, the top bar's Search");
@@ -106,14 +106,14 @@ fn the_boot_screen_shows_until_the_library_is_in() {
     settle(&mut host);
     assert_eq!(values(&host, "boot"), ["Loading..."], "from the first frame");
 
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     settle(&mut host);
     assert!(values(&host, "boot").is_empty(), "it fades out over Home");
 }
 
 /// Home's line for the first game, once its details are in.
 fn home_line(host: &mut Composed) -> String {
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.until(Area::Library, |core| core.view().detail.is_some());
     host.ui.render().unwrap();
     settle(host);
@@ -205,7 +205,7 @@ fn the_boot_screen_waits_for_homes_art() {
         ))
     });
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     settle(&mut host);
     assert_eq!(values(&host, "boot"), ["All set · 1 installed game found"], "the library is in, its art isn't");
 
@@ -229,7 +229,7 @@ fn a_tile_shows_a_light_while_its_cover_loads_and_the_name_only_without_art() {
     image::RgbImage::from_pixel(64, 96, image::Rgb([200, 60, 40])).write_to(&mut png, image::ImageFormat::Png).unwrap();
     host.test.http.serve("https://art.example/alpha.png", png.into_inner());
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     settle(&mut host);
     assert_eq!(host.count("cover-loading"), 1, "Alpha's cover is on its way");
     assert_eq!(values(&host, "cover-name"), ["Beta"], "only the game without art shows its name");
@@ -245,7 +245,7 @@ fn the_first_run_welcomes_the_player_and_enter_starts() {
     use slint::platform::Key;
     let mut host = composed(|h| h.first_run().plugin(games("emu-a", vec!["Alpha", "Beta"])));
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     settle(&mut host);
     assert_eq!(values(&host, "welcome"), ["All set · 2 installed games found"]);
     let steps = values(&host, "welcome-step");
@@ -432,7 +432,7 @@ fn settings_show_this_pc_and_how_each_emulator_runs_on_it() {
 fn the_game_hub_stops_a_running_game() {
     let mut host = composed(|h| h.plugin(playable_games("emu-a", vec!["Alpha"])));
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::Launch("emu-a:G0".parse().unwrap()));
     host.until(Area::Sessions, |core| core.game_running());
     host.dispatch(Command::OpenGame("emu-a:G0".parse().unwrap()));
@@ -863,7 +863,7 @@ fn the_launch_splash_shows_the_emulator_s_keys_and_takes_every_key_but_back_and_
     let keymap = "[[keymap]]\nbutton = \"Cross\"\nkeys = \"J\"\n[[keymap]]\nbutton = \"Circle\"\nkeys = \"L\"\n";
     let mut host = composed(|h| h.plugin(playable_games_with("emu-a", vec!["Alpha"], keymap)));
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     // Play from the game's Game Hub. No window yet: the game stays "starting", behind the splash.
     host.dispatch(Command::OpenGame("emu-a:G0".parse().unwrap()));
     host.test.desktop.no_windows();
@@ -1049,7 +1049,7 @@ fn the_download_sheet_has_no_options_hint_and_options_does_not_open_the_menu() {
 fn the_launch_splash_names_the_controller_or_the_keyboard() {
     let mut host = composed(|h| h.plugin(playable_games("emu-a", vec!["Alpha"])));
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     // No window yet: the game stays "starting", behind the splash.
     host.test.desktop.no_windows();
     host.dispatch(Command::Launch("emu-a:G0".parse().unwrap()));
@@ -1251,7 +1251,7 @@ fn a_long_library() -> Composed {
     let titles: Vec<&'static str> = (0..40).map(|n| &*Box::leak(format!("Game {n:02}").into_boxed_str())).collect();
     let mut host = composed(|h| h.plugin(games("emu-a", titles)));
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.resize(1600.0, 900.0);
     settle(&mut host);
     host
@@ -1318,7 +1318,7 @@ fn the_hero_and_the_game_hub_show_the_time_played() {
     let stats = serde_json::json!({ "secs": 4 * 3600 + 6 * 60, "count": 2, "last": now });
     host.core().kernel().config().set(&["app", "playtime", "emu-a:G0"], stats).unwrap();
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::Select("emu-a:G0".parse().unwrap()));
     settle(&mut host);
     assert_eq!(values(&host, "default-played"), ["PLAYED 4 HR 6 MIN"], "over the title, as the old launcher");
@@ -1334,7 +1334,7 @@ fn a_new_game_s_hero_waits_for_its_details_but_not_for_ever() {
     // These games' details never load.
     let mut host = composed(|h| h.plugin(games_without_details("emu-a", vec!["Alpha", "Beta"])));
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::Select("emu-a:G0".parse().unwrap()));
     settle(&mut host);
     assert_eq!(values(&host, "default-title"), ["Alpha"]);
@@ -1673,8 +1673,11 @@ fn the_keys_move_through_settings_and_change_the_focused_row() {
     // Enter on the first row, "Rescan game folders", scans the folders again.
     let text: slint::SharedString = Key::Return.into();
     host.instance().window().dispatch_event(slint::platform::WindowEvent::KeyPressed { text });
-    let asked =
-        host.requests.borrow().iter().any(|r| matches!(r, nexus_ui_host::UiRequest::Core(Command::RefreshLibrary)));
+    let asked = host
+        .requests
+        .borrow()
+        .iter()
+        .any(|r| matches!(r, nexus_ui_host::UiRequest::Core(Command::Library(nexus_core::LibraryCmd::Refresh))));
     assert!(asked, "Enter on Rescan asks the core to scan");
     host.pump();
 
@@ -1722,7 +1725,7 @@ fn a_first_play_asks_before_the_emulator_downloads_and_enter_agrees() {
     use slint::platform::Key;
     let mut host = composed(|h| h.plugin(games_needing_an_emulator("emu-x", vec!["Astro"])));
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::Launch("emu-x:G0".parse().unwrap()));
     settle(&mut host);
 
@@ -1741,7 +1744,7 @@ fn a_first_play_asks_before_the_emulator_downloads_and_enter_agrees() {
 fn an_emulator_s_download_says_where_it_is_in_words() {
     let mut host = composed(|h| h.plugin(games_needing_an_emulator("emu-x", vec!["Astro"])));
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::Launch("emu-x:G0".parse().unwrap()));
     // The build isn't there: the download fails, and its card stays to say so.
     let core = host.core().clone();
@@ -1756,7 +1759,7 @@ fn not_now_closes_the_install_prompt() {
     use slint::platform::Key;
     let mut host = composed(|h| h.plugin(games_needing_an_emulator("emu-x", vec!["Astro"])));
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::Launch("emu-x:G0".parse().unwrap()));
     settle(&mut host);
     key(&mut host, Key::Escape);
@@ -2179,7 +2182,7 @@ fn the_catalog_is_the_library_s_view_and_loads_a_page_at_a_time() {
         value: serde_json::json!({ "catalog_url": "https://xyz.dev/c" }),
     });
     host.catalogs_fetched();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.resize(1600.0, 900.0);
     host.dispatch(Command::Navigate(nexus_core::Route::Catalog));
     settle(&mut host);
@@ -2251,7 +2254,7 @@ fn three_on_the_catalog() -> Composed {
     host.catalogs_fetched();
     host.resize(1600.0, 900.0);
     // The boot screen is over everything until the library and Home's art are in.
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.load_images();
     host.dispatch(Command::Navigate(nexus_core::Route::Catalog));
     settle(&mut host);
@@ -2328,7 +2331,7 @@ fn the_bar_under_the_catalog_s_header_shows_how_far_down_all_its_games_the_grid_
     });
     host.catalogs_fetched();
     host.resize(1600.0, 900.0);
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.load_images();
     host.dispatch(Command::Navigate(nexus_core::Route::Catalog));
     settle(&mut host);
@@ -2381,7 +2384,7 @@ fn back_from_a_game_s_details_the_catalog_is_where_it_was() {
     host.catalogs_fetched();
     host.resize(1600.0, 900.0);
     // The boot screen is over everything until the library and Home's art are in.
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.load_images();
     host.dispatch(Command::Navigate(nexus_core::Route::Catalog));
     settle(&mut host);
@@ -2640,7 +2643,7 @@ fn one_mouse_click_presses_a_button() {
     until_torrent(&mut host, "ready");
 
     // The boot screen is over everything until the library and Home's art are in.
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.load_images();
     settle(&mut host);
     assert!(values(&host, "boot").is_empty());
@@ -3397,7 +3400,7 @@ fn penguins_installed(host: &mut Composed) -> String {
     host.first("install-agree").invoke_accessible_default_action();
     host.pump();
     until_install(host, "done");
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     let library = host.core().view().home.games;
     library.iter().find(|g| g.title.contains("Penguins")).expect("the installed game").key.clone()
 }
@@ -3758,7 +3761,7 @@ fn right_to_left_the_install_prompt_has_install_and_play_on_the_right_and_the_ke
     use slint::platform::Key;
     let mut host = composed(|h| h.plugin(games_needing_an_emulator("emu-x", vec!["Astro"])));
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::SetThemeOption { key: "direction".into(), value: "rtl".into() });
     host.dispatch(Command::Launch("emu-x:G0".parse().unwrap()));
     settle(&mut host);
@@ -3854,7 +3857,7 @@ fn alpha_and_bolt_on_the_catalog() -> Composed {
         value: serde_json::json!({ "catalog_url": "https://xyz.dev/c" }),
     });
     host.catalogs_fetched();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.resize(1600.0, 900.0);
     host.dispatch(Command::Navigate(nexus_core::Route::Catalog));
     host.dispatch(Command::CatalogSort("title".into()));
@@ -4299,7 +4302,7 @@ export component EmulatorsScreen inherits Rectangle {
     );
     let mut host = composed(|h| h.discover(dir.path()).plugin(games("emu-a", vec!["Alpha"])));
     host.ui.switch(&id("secrets")).expect("the test theme loads");
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.resize(1600.0, 900.0);
     settle(&mut host);
     (dir, host)

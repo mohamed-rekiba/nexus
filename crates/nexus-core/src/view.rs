@@ -9,10 +9,16 @@ use nexus_api::{
 use nexus_ui_api::*;
 use serde_json::Value;
 
-use crate::app::{AppState, EmulatorState, Entry, Grid, Route};
+use crate::app::{AppState, EmulatorState, Grid, Route};
+use crate::library::{Entry, LibrarySnapshot, PluginImage};
 use crate::order::sort_by_order;
 use crate::torrents::{TorrentJob, TorrentsSnapshot};
 use crate::{Core, Job, JobPhase, Kernel, PluginStatus};
+
+/// A plugin's image as the theme host fetches it.
+fn plugin_image((plugin, source): PluginImage) -> ImageRef {
+    image(&plugin, &source)
+}
 
 pub(crate) fn image(plugin: &PluginId, source: &ImageSource) -> ImageRef {
     match source {
@@ -74,15 +80,20 @@ fn slot_vm(plugin: &PluginId, slot: SlotId, item: SlotItem) -> SlotVm {
     vm
 }
 
-pub(crate) fn compat_vm(info: &CompatInfo) -> CompatVm {
-    let (level, label) = match info.level {
+/// A compatibility level's id and its words.
+fn compat_level(level: CompatLevel) -> (&'static str, &'static str) {
+    match level {
         CompatLevel::Unknown => ("unknown", "Not tested"),
         CompatLevel::Nothing => ("nothing", "Doesn't start"),
         CompatLevel::Boots => ("boots", "Boots"),
         CompatLevel::Menus => ("menus", "Menus"),
         CompatLevel::Ingame => ("ingame", "In-game"),
         CompatLevel::Playable => ("playable", "Playable"),
-    };
+    }
+}
+
+fn compat_vm(info: &CompatInfo) -> CompatVm {
+    let (level, label) = compat_level(info.level);
     CompatVm {
         level: level.into(),
         label: label.into(),
@@ -215,26 +226,20 @@ fn unordered_fields(schema: &Value, values: &Value) -> Vec<FieldVm> {
         .collect()
 }
 
-/// The game's square art: the store's tile when a catalog describes it, else its own icon,
-/// else the cover of the offer it is.
-fn cover_of(state: &AppState, entry: &Entry) -> Option<ImageRef> {
-    let store = state.meta.get(&entry.key).and_then(|(plugin, m)| m.icon.as_ref().map(|i| image(plugin, i)));
-    store
-        .or_else(|| entry.summary.cover.as_ref().map(|c| image(&entry.key.plugin, c)))
-        .or_else(|| state.offer_art.get(&entry.key).map(|(plugin, c)| image(plugin, c)))
+/// The game's square art (see [`LibrarySnapshot::tile`]).
+fn cover_of(library: &LibrarySnapshot, entry: &Entry) -> Option<ImageRef> {
+    library.tile(entry).map(plugin_image)
 }
 
-/// An installed game, the offer it is, and the offer's cover with the plugin that has it.
-pub(crate) type InstalledOffer = (GameKey, GameKey, Option<(PluginId, ImageSource)>);
-
 /// The offer each installed game is (see [`installed_game`]), by the game, with its cover.
-pub(crate) fn installed_offers(state: &AppState, torrents: &TorrentsSnapshot) -> Vec<InstalledOffer> {
-    let owned = Owned::new(state, torrents);
-    state
-        .offers
+pub(crate) fn installed_offers(
+    owned: &Owned,
+    offers: &[crate::releases::Offer],
+) -> Vec<crate::library::InstalledOffer> {
+    offers
         .iter()
         .filter_map(|offer| {
-            let game = installed_game(state, &owned, offer)?;
+            let game = installed_game(owned, offer)?;
             let cover = offer.entry.summary.cover.clone().map(|c| (offer.entry.key.plugin.clone(), c));
             Some((game.key.clone(), offer.entry.key.clone(), cover))
         })
@@ -243,24 +248,21 @@ pub(crate) fn installed_offers(state: &AppState, torrents: &TorrentsSnapshot) ->
 
 /// The game Play starts for `key`: for a Catalog offer the player has installed, the installed
 /// game it is; else `key` itself.
-pub(crate) fn played_game(state: &AppState, torrents: &TorrentsSnapshot, key: &GameKey) -> GameKey {
-    let owned = Owned::new(state, torrents);
-    let offer = state.offers.iter().find(|o| &o.entry.key == key);
-    offer.and_then(|o| installed_game(state, &owned, o)).map(|g| g.key.clone()).unwrap_or_else(|| key.clone())
-}
-
-/// A catalog's Steam data for `key`: an offer's own, or for an installed game, the offer's it
-/// is.
-fn steam_for(state: &AppState, key: &GameKey) -> Option<(PluginId, nexus_api::GameMetadata)> {
-    let offer_key = state.installed_offers.get(key).unwrap_or(key);
-    let offer = state.offers.iter().find(|o| &o.entry.key == offer_key)?;
-    crate::releases::steam_of(offer).map(|s| (offer.entry.key.plugin.clone(), crate::releases::steam_metadata(s)))
+pub(crate) fn played_game(
+    state: &AppState,
+    library: &LibrarySnapshot,
+    torrents: &TorrentsSnapshot,
+    key: &GameKey,
+) -> GameKey {
+    let owned = Owned::new(library.library(), &torrents.jobs, &state.game_installs);
+    let offer = library.offer(key);
+    offer.and_then(|o| installed_game(&owned, o)).map(|g| g.key.clone()).unwrap_or_else(|| key.clone())
 }
 
 /// Whether `key`'s game can be uninstalled: its folder is known, isn't a whole player's folder,
 /// is in one its emulator may write, and is there.
-fn can_uninstall(kernel: &Kernel, state: &AppState, key: &GameKey) -> bool {
-    let folder = state.details.get(key).and_then(|d| d.details.as_ref()).and_then(|d| d.folder.as_ref());
+fn can_uninstall(kernel: &Kernel, library: &LibrarySnapshot, key: &GameKey) -> bool {
+    let folder = library.detail(key).and_then(|d| d.details.folder.as_ref());
     folder.is_some_and(|f| {
         !f.path.is_root()
             && kernel.manifest(&key.plugin).is_ok_and(|m| m.permissions.folder(&f.folder).is_some_and(|g| g.write))
@@ -282,25 +284,30 @@ pub(crate) fn system_of(kernel: &Kernel, platform: &str) -> GameSystemVm {
     }
 }
 
-fn card(kernel: &Kernel, core_state: &AppState, entry: &Entry) -> GameCardVm {
+/// A game's badges, from its plugin.
+fn badges_of(library: &LibrarySnapshot, key: &GameKey) -> Vec<SlotVm> {
+    slot_vms(&key.plugin, SlotId::GameBadge, library.badges(key).to_vec())
+}
+
+fn card(kernel: &Kernel, core_state: &AppState, library: &LibrarySnapshot, entry: &Entry) -> GameCardVm {
     let stats = crate::launch::play_stats(kernel, &entry.key);
     GameCardVm {
         key: entry.key.to_string(),
         title: entry.summary.title.clone(),
         platform: entry.summary.platform.clone(),
         system: system_of(kernel, &entry.summary.platform),
-        cover: cover_of(core_state, entry),
+        cover: cover_of(library, entry),
         selected: core_state.selected.as_ref() == Some(&entry.key),
-        badges: core_state.badges.get(&entry.key).cloned().unwrap_or_default(),
+        badges: badges_of(library, &entry.key),
         release_year: entry.summary.release_year,
-        rating: core_state.meta.get(&entry.key).and_then(|(_, m)| m.rating).map(|r| r.score),
-        size_bytes: core_state.details.get(&entry.key).and_then(|d| d.details.as_ref()).and_then(|d| d.size_bytes),
+        rating: library.meta(&entry.key).and_then(|(_, m)| m.rating).map(|r| r.score),
+        size_bytes: library.detail(&entry.key).and_then(|d| d.details.size_bytes),
         last_played_days: (stats.count > 0).then(|| crate::launch::days_since(stats.last)),
         releases: 0,
         availability: String::new(),
         hidden: false,
         // A Library game's; `offer_card` gives an offer's.
-        can: game_actions(kernel, core_state, &entry.key, None),
+        can: game_actions(kernel, library, &entry.key, None),
     }
 }
 
@@ -316,7 +323,7 @@ fn card(kernel: &Kernel, core_state: &AppState, entry: &Entry) -> GameCardVm {
 /// - The main action: Play, else Get, else none. Uninstall is never the main one.
 pub(crate) fn game_actions(
     kernel: &Kernel,
-    state: &AppState,
+    library: &LibrarySnapshot,
     key: &GameKey,
     offer: Option<(&crate::releases::Offer, Option<&Entry>)>,
 ) -> GameActionsVm {
@@ -329,14 +336,14 @@ pub(crate) fn game_actions(
         installed.is_some_and(|k| manifest(&k.plugin).is_some_and(|m| m.capabilities.contains(&Capability::Launcher)));
     let mut actions = GameActionsVm { play, ..GameActionsVm::default() };
     if let Some(game) = installed {
-        let details = state.details.get(game).and_then(|d| d.details.as_ref());
+        let details = library.detail(game).map(|d| &d.details);
         let link = details.and_then(|d| d.uninstall_link.as_deref());
         let store_removes = link.is_some_and(|l| manifest(&game.plugin).is_some_and(|m| m.permissions.allows_link(l)));
         if store_removes {
             let platform = details.map(|d| d.summary.platform.as_str()).unwrap_or_default();
             actions.uninstall = game.to_string();
             actions.uninstall_store = system_of(kernel, platform).name;
-        } else if can_uninstall(kernel, state, game) {
+        } else if can_uninstall(kernel, library, game) {
             actions.uninstall = game.to_string();
         }
     }
@@ -362,14 +369,14 @@ pub(crate) fn game_actions(
 }
 
 /// The genres a store's catalog gives the game.
-fn genres_of(state: &AppState, key: &GameKey) -> Vec<String> {
-    state.meta.get(key).map(|(_, m)| m.genres.clone()).unwrap_or_default()
+fn genres_of(library: &LibrarySnapshot, key: &GameKey) -> Vec<String> {
+    library.meta(key).map(|(_, m)| m.genres.clone()).unwrap_or_default()
 }
 
 /// The fixed genres of a game a catalog offers (see [`crate::releases::GENRES`]), from its
 /// releases' genre words, a store's genres and Steam's.
-fn offer_genres(state: &AppState, offer: &crate::releases::Offer) -> Vec<String> {
-    let store = state.meta.get(&offer.entry.key).map(|(_, m)| &m.genres);
+fn offer_genres(library: &LibrarySnapshot, offer: &crate::releases::Offer) -> Vec<String> {
+    let store = library.meta(&offer.entry.key).map(|(_, m)| &m.genres);
     let steam = crate::releases::steam_of(offer).map(|s| &s.genres);
     let words: Vec<&str> = offer
         .releases
@@ -404,25 +411,30 @@ struct GridGames<'a> {
 }
 
 /// The offers by their key.
-fn offers_by_key(state: &AppState) -> std::collections::HashMap<&GameKey, &crate::releases::Offer> {
-    state.offers.iter().map(|o| (&o.entry.key, o)).collect()
+fn offers_by_key(library: &LibrarySnapshot) -> std::collections::HashMap<&GameKey, &crate::releases::Offer> {
+    library.offers.iter().map(|o| (&o.entry.key, o)).collect()
 }
 
-fn grid<'a>(kernel: &Kernel, state: &'a AppState, torrents: &TorrentsSnapshot, catalog: bool) -> GridGames<'a> {
+fn grid<'a>(
+    kernel: &Kernel,
+    state: &AppState,
+    library: &'a LibrarySnapshot,
+    torrents: &TorrentsSnapshot,
+    catalog: bool,
+) -> GridGames<'a> {
     let view = if catalog { &state.catalog_view } else { &state.library_view };
-    let offers = offers_by_key(state);
-    let owned = Owned::new(state, torrents);
+    let offers = offers_by_key(library);
+    let owned = Owned::new(library.library(), &torrents.jobs, &state.game_installs);
     let entries: Vec<&Entry> =
-        if catalog { state.offers.iter().map(|o| &o.entry).collect() } else { state.library.iter().collect() };
+        if catalog { library.offers.iter().map(|o| &o.entry).collect() } else { library.library().collect() };
     // The Catalog's hidden games: out, but for the "Hidden" filter, which shows only them. With
     // the filter turned off in the catalog's settings, its chip goes and it doesn't apply.
-    let hidden = if catalog { crate::Core::hidden_games(kernel) } else { Default::default() };
     let hidden_filter = catalog && crate::Core::hidden_filter_on(kernel);
     let only_hidden = hidden_filter && view.hidden;
     // Hidden by the player in Nexus, or in the game's store (Steam's Hidden collection).
     let store_hidden =
         |e: &Entry| offers.get(&e.key).is_some_and(|o| !o.releases.is_empty() && o.releases.iter().all(|r| r.hidden));
-    let is_hidden = |e: &Entry| catalog && (hidden.contains(&e.key.to_string()) || store_hidden(e));
+    let is_hidden = |e: &Entry| catalog && (library.hidden(&e.key) || store_hidden(e));
     let hidden_count = entries.iter().filter(|e| is_hidden(e)).count();
     let entries: Vec<&Entry> = entries.into_iter().filter(|e| is_hidden(e) == only_hidden).collect();
     // How many games there are before the search and the filters: hidden ones count nowhere.
@@ -433,7 +445,7 @@ fn grid<'a>(kernel: &Kernel, state: &'a AppState, torrents: &TorrentsSnapshot, c
         if e.summary.title.to_lowercase().contains(&needle) {
             return true;
         }
-        let publisher = state.meta.get(&e.key).map(|(_, m)| m.publisher.as_str()).unwrap_or_default();
+        let publisher = library.meta(&e.key).map(|(_, m)| m.publisher.as_str()).unwrap_or_default();
         let title_id = e.summary.title_id.as_deref().unwrap_or_default();
         match offers.get(&e.key) {
             // Every word in one release: its title, title ids, publisher, region and version.
@@ -461,12 +473,10 @@ fn grid<'a>(kernel: &Kernel, state: &'a AppState, torrents: &TorrentsSnapshot, c
             }),
         }
     }
-    // How far each game gets: the player's own result first, then the community's. The
-    // player's results are read once, not once a game.
-    let results = kernel.config().get(&["app", "results"]);
+    // How far each game gets: the player's own result first, then the community's.
     let level = |e: &Entry| -> u8 {
-        let own = results.get(e.key.to_string()).and_then(Value::as_str);
-        let compat = state.details.get(&e.key).and_then(|d| d.compat.as_ref()).map(|c| c.level.as_str());
+        let own = library.result(&e.key);
+        let compat = library.detail(&e.key).and_then(|d| d.compat.as_ref()).map(|c| compat_level(c.level).0);
         match own.or(compat) {
             Some("playable") => 5,
             Some("ingame") => 4,
@@ -489,7 +499,7 @@ fn grid<'a>(kernel: &Kernel, state: &'a AppState, torrents: &TorrentsSnapshot, c
         });
     }
     // The Catalog's offers of the games the player has.
-    let installed = |e: &Entry| offers.get(&e.key).is_some_and(|o| installed_game(state, &owned, o).is_some());
+    let installed = |e: &Entry| offers.get(&e.key).is_some_and(|o| installed_game(&owned, o).is_some());
     let installed_count = if catalog { searched.iter().filter(|e| installed(e)).count() } else { 0 };
     if installed_count > 0 || (catalog && view.installed) {
         systems.push(FilterVm {
@@ -518,8 +528,8 @@ fn grid<'a>(kernel: &Kernel, state: &'a AppState, torrents: &TorrentsSnapshot, c
         .iter()
         .map(|e| {
             let genres = match offers.get(&e.key) {
-                Some(o) if catalog => offer_genres(state, o),
-                _ => genres_of(state, &e.key),
+                Some(o) if catalog => offer_genres(library, o),
+                _ => genres_of(library, &e.key),
             };
             (&e.key, genres)
         })
@@ -544,15 +554,15 @@ fn grid<'a>(kernel: &Kernel, state: &'a AppState, torrents: &TorrentsSnapshot, c
         in_system.into_iter().filter(|e| view.genre.as_ref().is_none_or(|g| chips_of(e).contains(g))).collect();
     let size = |e: &Entry| -> Option<u64> {
         match offers.get(&e.key) {
-            Some(o) => best_release(state, &owned, o).size_bytes,
-            None => state.details.get(&e.key).and_then(|d| d.details.as_ref()).and_then(|d| d.size_bytes),
+            Some(o) => best_release(library, &owned, o).size_bytes,
+            None => library.detail(&e.key).and_then(|d| d.details.size_bytes),
         }
     };
     let added = |e: &Entry| offers.get(&e.key).map(|o| o.releases[0].added.clone()).unwrap_or_default();
     // The catalog's own date of its best release first, then the store's, then the year.
     let released = |e: &Entry| {
-        let catalog = offers.get(&e.key).and_then(|o| crate::releases::release_day(best_release(state, &owned, o)));
-        let store = || state.meta.get(&e.key).and_then(|(_, m)| crate::releases::date_key(&m.release));
+        let catalog = offers.get(&e.key).and_then(|o| crate::releases::release_day(best_release(library, &owned, o)));
+        let store = || library.meta(&e.key).and_then(|(_, m)| crate::releases::date_key(&m.release));
         catalog.or_else(store).or_else(|| e.summary.release_year.map(|y| y.to_string())).unwrap_or_default()
     };
     match view.sort.as_str() {
@@ -562,7 +572,7 @@ fn grid<'a>(kernel: &Kernel, state: &'a AppState, torrents: &TorrentsSnapshot, c
         "smallest" => shown.sort_by_key(|e| size(e).unwrap_or(u64::MAX)),
         // Top rated, newest, and best running first; a game without one goes last.
         "rating" => shown.sort_by(|a, b| {
-            let score = |e: &Entry| state.meta.get(&e.key).and_then(|(_, m)| m.rating).map_or(-1.0, |r| r.score);
+            let score = |e: &Entry| library.meta(&e.key).and_then(|(_, m)| m.rating).map_or(-1.0, |r| r.score);
             score(b).total_cmp(&score(a))
         }),
         "release" => shown.sort_by_cached_key(|e| std::cmp::Reverse(released(e))),
@@ -580,6 +590,7 @@ fn grid<'a>(kernel: &Kernel, state: &'a AppState, torrents: &TorrentsSnapshot, c
 pub(crate) fn neighbours(
     kernel: &Kernel,
     state: &AppState,
+    library: &LibrarySnapshot,
     torrents: &TorrentsSnapshot,
     game: &GameKey,
     columns: &std::collections::HashMap<Grid, usize>,
@@ -598,13 +609,13 @@ pub(crate) fn neighbours(
         }
     };
     // An offer is in the Catalog's grid; a game of the Library is in Home's row too.
-    let (which, view) = if state.offers.iter().any(|o| &o.entry.key == game) {
+    let (which, view) = if library.offer(game).is_some() {
         (Grid::Catalog, &state.catalog_view)
     } else {
-        around(state.library.iter().map(|e| &e.key).collect(), &[1, -1]);
+        around(library.library().map(|e| &e.key).collect(), &[1, -1]);
         (Grid::Library, &state.library_view)
     };
-    let games = grid(kernel, state, torrents, which == Grid::Catalog);
+    let games = grid(kernel, state, library, torrents, which == Grid::Catalog);
     let keys: Vec<&GameKey> = games.shown.iter().take(view.shown).map(|e| &e.key).collect();
     match columns.get(&which).copied().filter(|c| *c > 1) {
         Some(c) => around(keys, &[1, -1, c as isize, -(c as isize)]),
@@ -615,8 +626,13 @@ pub(crate) fn neighbours(
 }
 
 /// The games on the Catalog's shown pages, in order.
-pub(crate) fn catalog_page(kernel: &Kernel, state: &AppState, torrents: &TorrentsSnapshot) -> Vec<GameKey> {
-    grid(kernel, state, torrents, true)
+pub(crate) fn catalog_page(
+    kernel: &Kernel,
+    state: &AppState,
+    library: &LibrarySnapshot,
+    torrents: &TorrentsSnapshot,
+) -> Vec<GameKey> {
+    grid(kernel, state, library, torrents, true)
         .shown
         .into_iter()
         .take(state.catalog_view.shown)
@@ -624,23 +640,28 @@ pub(crate) fn catalog_page(kernel: &Kernel, state: &AppState, torrents: &Torrent
         .collect()
 }
 
-fn grid_vm(kernel: &Kernel, state: &AppState, torrents: &TorrentsSnapshot, catalog: bool) -> LibraryVm {
+fn grid_vm(
+    kernel: &Kernel,
+    state: &AppState,
+    library: &LibrarySnapshot,
+    torrents: &TorrentsSnapshot,
+    catalog: bool,
+) -> LibraryVm {
     let view = if catalog { &state.catalog_view } else { &state.library_view };
-    let GridGames { shown, all, systems, genres } = grid(kernel, state, torrents, catalog);
-    let offers = offers_by_key(state);
-    let owned = Owned::new(state, torrents);
+    let GridGames { shown, all, systems, genres } = grid(kernel, state, library, torrents, catalog);
+    let offers = offers_by_key(library);
+    let owned = Owned::new(library.library(), &torrents.jobs, &state.game_installs);
     let today = crate::releases::today();
     let total = shown.len();
-    let hidden = if catalog { crate::Core::hidden_games(kernel) } else { Default::default() };
     let games: Vec<GameCardVm> = shown
         .into_iter()
         .take(view.shown)
         .map(|e| match offers.get(&e.key) {
             Some(offer) if catalog => GameCardVm {
-                hidden: hidden.contains(&e.key.to_string()),
-                ..offer_card(kernel, state, &owned, offer, today)
+                hidden: library.hidden(&e.key),
+                ..offer_card(kernel, state, library, &owned, offer, today)
             },
-            _ => card(kernel, state, e),
+            _ => card(kernel, state, library, e),
         })
         .collect();
     LibraryVm {
@@ -670,17 +691,17 @@ fn notice_opens(kernel: &Kernel, notice: &crate::app::Notice) -> String {
 }
 
 /// The cover of the game `notice` is about.
-fn notice_art(state: &AppState, notice: &crate::app::Notice) -> Option<ImageRef> {
+fn notice_art(library: &LibrarySnapshot, notice: &crate::app::Notice) -> Option<ImageRef> {
     let game = notice.game.as_ref()?;
-    state.library.iter().find(|e| &e.key == game).and_then(|e| cover_of(state, e))
+    library.listed(game).and_then(|e| cover_of(library, e))
 }
 
-fn notice_vm(kernel: &Kernel, state: &AppState, notice: &crate::app::Notice) -> NoticeVm {
+fn notice_vm(kernel: &Kernel, library: &LibrarySnapshot, notice: &crate::app::Notice) -> NoticeVm {
     NoticeVm {
         id: notice.id,
         text: notice.message.clone(),
         kind: notice.kind,
-        art: notice_art(state, notice),
+        art: notice_art(library, notice),
         opens: notice_opens(kernel, notice),
     }
 }
@@ -689,6 +710,7 @@ pub(crate) fn build(core: &Core) -> AppView {
     let kernel = core.kernel();
     let jobs = core.inner.downloads.jobs();
     let statuses = kernel.statuses();
+    let library = core.library().snapshot();
     let torrents = core.torrents().snapshot();
     let mut state = core.state();
 
@@ -715,7 +737,7 @@ pub(crate) fn build(core: &Core) -> AppView {
         .or_else(|| if route == Route::Catalog { state.catalog_selected.clone() } else { None })
         .or_else(|| state.selected.clone());
 
-    let catalog = catalog_vm(kernel, &state, &torrents);
+    let catalog = catalog_vm(kernel, &state, &library, &torrents);
     if state.catalog_grid.is_none() || state.nav.last() == Some(&Route::Catalog) {
         state.catalog_grid = Some(catalog.games.clone());
     }
@@ -724,10 +746,10 @@ pub(crate) fn build(core: &Core) -> AppView {
         screen,
         game: game.map(|g| g.to_string()),
         can_go_back: state.nav.len() > 1,
-        home: home_vm(kernel, &state, &torrents),
-        detail: detail_game.and_then(|key| detail_vm(core, kernel, &state, &torrents, &key)),
+        home: home_vm(kernel, &state, &library, &torrents),
+        detail: detail_game.and_then(|key| detail_vm(core, kernel, &state, &library, &torrents, &key)),
         catalog,
-        downloads: downloads_vm(kernel, jobs, &state, &torrents),
+        downloads: downloads_vm(kernel, jobs, &state, &library, &torrents),
         settings: settings_vm(core, &state),
         emulators: emulators_vm(kernel, &state, &statuses),
         plugin_page: match &route {
@@ -736,7 +758,7 @@ pub(crate) fn build(core: &Core) -> AppView {
         },
         running: running_vm(kernel, &state, &route),
         notices: state.notices.iter().map(|n| n.message.clone()).collect(),
-        notice_cards: state.notices.iter().map(|n| notice_vm(kernel, &state, n)).collect(),
+        notice_cards: state.notices.iter().map(|n| notice_vm(kernel, &library, n)).collect(),
         install_prompt: state.install_prompt.as_ref().map(|p| InstallPromptVm {
             plugin: p.game.plugin.clone(),
             emulator: p.emulator.clone(),
@@ -744,19 +766,12 @@ pub(crate) fn build(core: &Core) -> AppView {
             game: p.title.clone(),
             size_bytes: p.size_bytes,
         }),
-        boot: boot_vm(core, kernel, &state),
-        task: state.task.clone(),
+        boot: boot_vm(core, kernel, &state, &library),
+        task: library.task.clone(),
         notice_opens: state.notices.last().map(|n| notice_opens(kernel, n)).unwrap_or_default(),
-        notice_art: state.notices.last().and_then(|n| notice_art(&state, n)),
+        notice_art: state.notices.last().and_then(|n| notice_art(&library, n)),
         system: system_vm(kernel, &state),
-        result_prompt: state.result_prompt.as_ref().map(|(key, _)| {
-            state
-                .library
-                .iter()
-                .find(|e| &e.key == key)
-                .map(|e| e.summary.title.clone())
-                .unwrap_or_else(|| key.local.clone())
-        }),
+        result_prompt: state.result_prompt.as_ref().map(|(key, _)| library.title(key)),
     }
 }
 
@@ -773,29 +788,30 @@ fn badge(plugin: &PluginId, id: &str, text: &str, tone: Tone) -> SlotVm {
     )
 }
 
-/// The game of the emulator's library that the download `j` installed: the one with the title
-/// its install reported. A PC game has no title id, so this is how its download finds it.
-fn installed_from<'a>(state: &'a AppState, j: &TorrentJob) -> Option<&'a Entry> {
-    let install = state.game_installs.values().rev().find(|g| g.plugin == j.emulator && g.source == j.source)?;
-    let done = install.phase == crate::game_installs::GamePhase::Done;
-    let title = &install.installed.as_ref().filter(|_| done)?.title;
-    state.library.iter().find(|e| e.key.plugin == j.emulator && &e.summary.title == title)
-}
-
 /// The emulators' installed games by title id and by name, to find the game an offer is. A
 /// view builds it once: the Catalog asks it about every offer.
 pub(crate) struct Owned<'a> {
     /// The downloads, whose installs say which game an offer is.
     jobs: &'a BTreeMap<String, TorrentJob>,
+    /// The game installs, which say which game a download installed.
+    installs: &'a BTreeMap<nexus_api::JobId, crate::game_installs::GameJob>,
+    /// The Library's games.
+    library: Vec<&'a Entry>,
     by_id: std::collections::HashMap<(&'a PluginId, &'a str), &'a Entry>,
     /// By the emulator, and the console and the title as letters and digits (`ps5/astrobot`).
     by_name: std::collections::HashMap<(&'a PluginId, String), &'a Entry>,
 }
 
 impl<'a> Owned<'a> {
-    pub(crate) fn new(state: &'a AppState, torrents: &'a TorrentsSnapshot) -> Self {
-        let mut owned = Owned { jobs: &torrents.jobs, by_id: Default::default(), by_name: Default::default() };
-        for e in &state.library {
+    pub(crate) fn new(
+        library: impl IntoIterator<Item = &'a Entry>,
+        jobs: &'a BTreeMap<String, TorrentJob>,
+        installs: &'a BTreeMap<nexus_api::JobId, crate::game_installs::GameJob>,
+    ) -> Self {
+        let library: Vec<&Entry> = library.into_iter().collect();
+        let mut owned =
+            Owned { jobs, installs, library: library.clone(), by_id: Default::default(), by_name: Default::default() };
+        for e in library {
             if let Some(id) = e.summary.title_id.as_deref().filter(|t| !t.is_empty()) {
                 owned.by_id.entry((&e.key.plugin, id)).or_insert(e);
             }
@@ -811,17 +827,23 @@ impl<'a> Owned<'a> {
         let title = crate::releases::plain(title);
         (!title.is_empty()).then(|| format!("{}/{title}", console.to_ascii_lowercase()))
     }
+
+    /// The game of the emulator's library that the download `j` installed: the one with the
+    /// title its install reported. A PC game has no title id, so this is how its download
+    /// finds it.
+    fn installed_from(&self, j: &TorrentJob) -> Option<&'a Entry> {
+        let install = self.installs.values().rev().find(|g| g.plugin == j.emulator && g.source == j.source)?;
+        let done = install.phase == crate::game_installs::GamePhase::Done;
+        let title = &install.installed.as_ref().filter(|_| done)?.title;
+        self.library.iter().copied().find(|e| e.key.plugin == j.emulator && &e.summary.title == title)
+    }
 }
 
 /// The installed game an offer is, from the emulator's library: the game a download of one of
 /// its releases installed, else the game with one of its title ids, else the game of its name
 /// on the same console. A PS4 and a PS5 game of one name are two games.
-pub(crate) fn installed_game<'a>(
-    state: &'a AppState,
-    owned: &Owned<'a>,
-    offer: &crate::releases::Offer,
-) -> Option<&'a Entry> {
-    let downloaded = owned.jobs.values().filter(|j| j.offer == offer.entry.key).find_map(|j| installed_from(state, j));
+pub(crate) fn installed_game<'a>(owned: &Owned<'a>, offer: &crate::releases::Offer) -> Option<&'a Entry> {
+    let downloaded = owned.jobs.values().filter(|j| j.offer == offer.entry.key).find_map(|j| owned.installed_from(j));
     let emulator = &offer.emulator;
     let by_id = || {
         let mut ids = offer.releases.iter().flat_map(|r| std::iter::once(&r.title_id).chain(&r.title_ids));
@@ -839,20 +861,19 @@ pub(crate) fn installed_game<'a>(
 /// download installed the game, then one with a magnet link, then one with art, then the
 /// highest version, then the one most people share. Of equals, the newest upload.
 pub(crate) fn best_release<'a>(
-    state: &AppState,
+    library: &LibrarySnapshot,
     owned: &Owned,
     offer: &'a crate::releases::Offer,
 ) -> &'a nexus_api::Release {
     use crate::releases::version_key;
-    let game = installed_game(state, owned, offer);
+    let game = installed_game(owned, offer);
     let has = game
-        .and_then(|e| state.details.get(&e.key))
-        .and_then(|d| d.details.as_ref())
-        .and_then(|d| d.facts.iter().find(|f| f.id == "version"))
+        .and_then(|e| library.detail(&e.key))
+        .and_then(|d| d.details.facts.iter().find(|f| f.id == "version"))
         .map(|f| version_key(&f.value))
         .filter(|v| !v.is_empty());
     let rank = |r: &nexus_api::Release| {
-        let downloaded = owned.jobs.get(&r.id).and_then(|j| installed_from(state, j)).is_some();
+        let downloaded = owned.jobs.get(&r.id).and_then(|j| owned.installed_from(j)).is_some();
         (
             has.as_ref().is_some_and(|v| *v == version_key(&r.version)),
             downloaded,
@@ -869,18 +890,19 @@ pub(crate) fn best_release<'a>(
 fn offer_card(
     kernel: &Kernel,
     state: &AppState,
+    library: &LibrarySnapshot,
     owned: &Owned,
     offer: &crate::releases::Offer,
     today: i64,
 ) -> GameCardVm {
-    let mut card = card(kernel, state, &offer.entry);
+    let mut card = card(kernel, state, library, &offer.entry);
     card.selected = state.catalog_selected.as_ref() == Some(&offer.entry.key);
-    let best = best_release(state, owned, offer);
+    let best = best_release(library, owned, offer);
     card.size_bytes = best.size_bytes;
     card.availability = crate::releases::availability(best.seeders).into();
     card.releases = offer.releases.len();
-    let installed = installed_game(state, owned, offer);
-    card.can = game_actions(kernel, state, &offer.entry.key, Some((offer, installed)));
+    let installed = installed_game(owned, offer);
+    card.can = game_actions(kernel, library, &offer.entry.key, Some((offer, installed)));
     // A game its store installs has no torrent to be available.
     if offer.releases.iter().any(|r| !r.store.is_empty()) {
         card.availability = String::new();
@@ -902,10 +924,10 @@ fn offer_card(
     card
 }
 
-fn catalog_vm(kernel: &Kernel, state: &AppState, torrents: &TorrentsSnapshot) -> CatalogVm {
+fn catalog_vm(kernel: &Kernel, state: &AppState, library: &LibrarySnapshot, torrents: &TorrentsSnapshot) -> CatalogVm {
     let name =
         |plugin: &PluginId| kernel.manifest(plugin).map(|m| m.name.clone()).unwrap_or_else(|_| plugin.to_string());
-    let sources = state
+    let sources = library
         .catalogs
         .iter()
         .map(|c| {
@@ -933,16 +955,15 @@ fn catalog_vm(kernel: &Kernel, state: &AppState, torrents: &TorrentsSnapshot) ->
             parts.join(" · ")
         })
         .collect();
-    let releases = state.catalogs.iter().flat_map(|c| &c.list.releases);
+    let releases = library.catalogs.iter().flat_map(|c| &c.list.releases);
     // The releases of the games the Catalog has, not of the ones the player hid.
-    let hidden = crate::Core::hidden_games(kernel);
     let shown_releases: usize =
-        state.offers.iter().filter(|o| !hidden.contains(&o.entry.key.to_string())).map(|o| o.releases.len()).sum();
+        library.offers.iter().filter(|o| !library.hidden(&o.entry.key)).map(|o| o.releases.len()).sum();
     // The newest count of seeders, else the newest date a catalog gives.
     let counted =
         releases.clone().filter_map(|r| crate::releases::days_of(&r.counted_at).map(|_| &r.counted_at[..10])).max();
     let dated = || {
-        state
+        library
             .catalogs
             .iter()
             .filter_map(|c| crate::releases::days_of(&c.list.updated).map(|_| &c.list.updated[..10]))
@@ -951,7 +972,13 @@ fn catalog_vm(kernel: &Kernel, state: &AppState, torrents: &TorrentsSnapshot) ->
     // Only the Catalog shows its grid: on another screen, the last one stands.
     let games = match &state.catalog_grid {
         Some(games) if state.nav.last() != Some(&Route::Catalog) => games.clone(),
-        _ => grid_vm(kernel, state, torrents, true),
+        _ => grid_vm(kernel, state, library, torrents, true),
+    };
+    let buttons = |kind: SlotKind| -> Vec<SlotVm> {
+        let all = library.catalog_buttons.iter();
+        all.flat_map(|(plugin, items)| slot_vms(plugin, SlotId::CatalogAction, items.clone()))
+            .filter(|s| s.kind == kind)
+            .collect()
     };
     CatalogVm {
         available: crate::Core::catalog_available(kernel),
@@ -959,14 +986,14 @@ fn catalog_vm(kernel: &Kernel, state: &AppState, torrents: &TorrentsSnapshot) ->
         sources,
         releases: shown_releases,
         updated: counted.or_else(dated).unwrap_or_default().to_owned(),
-        loading: !state.catalogs_read,
-        actions: state.catalog_buttons.iter().filter(|s| s.kind == SlotKind::Action).cloned().collect(),
-        status: state.catalog_buttons.iter().filter(|s| s.kind == SlotKind::Badge).cloned().collect(),
+        loading: !library.catalogs_read,
+        actions: buttons(SlotKind::Action),
+        status: buttons(SlotKind::Badge),
     }
 }
 
-fn home_vm(kernel: &Kernel, state: &AppState, torrents: &TorrentsSnapshot) -> HomeVm {
-    let games: Vec<GameCardVm> = state.library.iter().map(|e| card(kernel, state, e)).collect();
+fn home_vm(kernel: &Kernel, state: &AppState, library: &LibrarySnapshot, torrents: &TorrentsSnapshot) -> HomeVm {
+    let games: Vec<GameCardVm> = library.library().map(|e| card(kernel, state, library, e)).collect();
     let selected = games.iter().position(|g| g.selected);
     let mut groups: Vec<GroupVm> = Vec::new();
     for game in &games {
@@ -978,71 +1005,70 @@ fn home_vm(kernel: &Kernel, state: &AppState, torrents: &TorrentsSnapshot) -> Ho
     for group in &mut groups {
         group.selected = group.games.iter().position(|g| g.selected);
     }
-    HomeVm { games, selected, loading: state.loading, groups, library: grid_vm(kernel, state, torrents, false) }
+    let grid = grid_vm(kernel, state, library, torrents, false);
+    HomeVm { games, selected, loading: library.loading, groups, library: grid }
 }
 
-/// The art a game's Game Hub and Home's hero show beside its cover.
-pub(crate) struct HubArt {
-    pub background: Option<ImageRef>,
-    pub logo: Option<ImageRef>,
-    pub screenshots: Vec<ImageRef>,
+/// A plugin's settings panel, with its fields.
+fn settings_panel_vm(panel: &crate::app::SettingsPanel) -> SettingsPanelVm {
+    let slot = slot_vm(&panel.plugin, SlotId::SettingsPanel, panel.item.clone());
+    SettingsPanelVm { fields: fields(&panel.schema, &panel.values), slot }
 }
 
-/// A game's background, logo and screenshots: from the store's catalog, then a catalog's
-/// Steam data, then (the background) the game's own details, when they are in.
-pub(crate) fn hub_art(state: &AppState, key: &GameKey) -> HubArt {
-    let steam = steam_for(state, key);
-    let metas: Vec<&(PluginId, nexus_api::GameMetadata)> =
-        state.meta.get(key).into_iter().chain(steam.as_ref()).collect();
-    let art = |field: fn(&nexus_api::GameMetadata) -> Option<&nexus_api::ImageSource>| {
-        metas.iter().find_map(|(plugin, m)| field(m).map(|c| image(plugin, c)))
+/// A game's own settings, as its Game Hub shows them.
+fn game_settings_vm(kernel: &Kernel, key: &GameKey, settings: &crate::library::GameSettings) -> SettingsPanelVm {
+    let plugin = &key.plugin;
+    let name = kernel.manifest(plugin).map(|m| m.emulator_name().to_owned()).unwrap_or_default();
+    let slot = SlotVm {
+        slot: SlotId::SettingsPanel,
+        plugin: plugin.clone(),
+        id: "game".into(),
+        label: format!("{plugin}:game"),
+        kind: SlotKind::SettingsPanel,
+        text: format!("{name} settings for this game"),
+        short: String::new(),
+        tone: Tone::Neutral,
+        style: ActionStyle::Secondary,
+        icon: None,
+        rows: Vec::new(),
+        action: None,
+        args: Value::Null,
+        scope: Some(nexus_api::ConfigScope::Game(key.local.clone())),
     };
-    let own = state.details.get(key).and_then(|d| d.details.as_ref()).and_then(|d| d.background.as_ref());
-    HubArt {
-        background: art(|m| m.background.as_ref()).or_else(|| own.map(|c| image(&key.plugin, c))),
-        logo: art(|m| m.logo.as_ref()),
-        screenshots: metas
-            .iter()
-            .map(|(plugin, m)| m.screenshots.iter().map(|s| image(plugin, s)).collect::<Vec<_>>())
-            .find(|shots| !shots.is_empty())
-            .unwrap_or_default(),
-    }
+    SettingsPanelVm { fields: fields(&settings.schema, &settings.values), slot }
 }
 
 fn detail_vm(
     core: &Core,
     kernel: &Kernel,
     state: &AppState,
+    library: &LibrarySnapshot,
     torrents: &TorrentsSnapshot,
     key: &GameKey,
 ) -> Option<GameDetailVm> {
-    let d = state.details.get(key)?;
-    let details = d.details.as_ref()?;
+    let d = library.detail(key)?;
+    let details = &d.details;
     let summary = &details.summary;
     let manifest = kernel.manifest(&key.plugin).ok();
-    let offer = state.offers.iter().find(|o| &o.entry.key == key);
-    let owned = Owned::new(state, torrents);
+    let offer = library.offer(key);
+    let owned = Owned::new(library.library(), &torrents.jobs, &state.game_installs);
     let has_installer = manifest.is_some_and(|m| m.capabilities.contains(&Capability::Installer));
     let installed = state.emulators.get(&key.plugin).is_some_and(|e| !e.installed.is_empty());
     // A Catalog offer plays as the installed game it is, and not at all before it is installed.
-    let installed_as = offer.and_then(|o| installed_game(state, &owned, o));
+    let installed_as = offer.and_then(|o| installed_game(&owned, o));
     let played = installed_as.map(|g| &g.key).unwrap_or(key);
-    let can = game_actions(kernel, state, key, offer.map(|o| (o, installed_as)));
+    let can = game_actions(kernel, library, key, offer.map(|o| (o, installed_as)));
     let needs_emulator = has_installer && !installed;
     // The program, not the console: "Launches with the KytyPS5 emulator".
     let name = manifest.map(|m| m.emulator_name().to_owned()).unwrap_or_default();
     let stats = crate::launch::play_stats(kernel, key);
-    let meta = state.meta.get(key);
+    let meta = library.meta(key);
     // A catalog's Steam data fills in, field by field, what the store's catalog leaves out.
-    let steam = steam_for(state, key);
-    let metas: Vec<&(PluginId, nexus_api::GameMetadata)> = meta.into_iter().chain(steam.as_ref()).collect();
+    let metas = library.metadata(key);
     let text = |field: fn(&nexus_api::GameMetadata) -> &String| {
         metas.iter().map(|(_, m)| field(m)).find(|t| !t.is_empty()).cloned().unwrap_or_default()
     };
-    let art = |field: fn(&nexus_api::GameMetadata) -> Option<&nexus_api::ImageSource>| {
-        metas.iter().find_map(|(plugin, m)| field(m).map(|c| image(plugin, c)))
-    };
-    let shown = hub_art(state, key);
+    let shown = library.art(key);
     // The game's own words first; a store's catalog fills in what they leave out.
     let description =
         if details.description.is_empty() { text(|m| &m.description) } else { details.description.clone() };
@@ -1100,7 +1126,7 @@ fn detail_vm(
     let releases = offer.map_or(&[][..], |o| &o.releases[..]);
     let (this_pc, pc_warning) = on_this_pc(kernel, state, offer.map_or(&key.plugin, |o| &o.emulator), releases);
     // A game that starts here but doesn't fit says so instead, from its best release.
-    let this_pc = match (this_pc, offer.map(|o| no_room(best_release(state, &owned, o))), free) {
+    let this_pc = match (this_pc, offer.map(|o| no_room(best_release(library, &owned, o))), free) {
         (Some(v), Some(short), Some(free)) if v.level != "no" && !short.is_empty() => Some(VerdictVm {
             level: "no".into(),
             headline: "Not enough space".into(),
@@ -1118,32 +1144,30 @@ fn detail_vm(
         description,
         developer,
         genres,
-        cover: art(|m| m.cover.as_ref().or(m.icon.as_ref()))
-            .or_else(|| summary.cover.as_ref().map(|c| image(&key.plugin, c)))
-            .or_else(|| state.offer_art.get(key).map(|(plugin, c)| image(plugin, c))),
-        background: shown.background,
-        logo: shown.logo,
+        cover: shown.cover.map(plugin_image),
+        background: shown.background.map(plugin_image),
+        logo: shown.logo.map(plugin_image),
         rating: meta.and_then(|(_, m)| m.rating),
         release: text(|m| &m.release),
         age_rating: meta.map(|(_, m)| m.age_rating.clone()).unwrap_or_default(),
-        screenshots: shown.screenshots,
+        screenshots: shown.screenshots.into_iter().map(plugin_image).collect(),
         store_url: text(|m| &m.store_url),
         protondb: protondb.0,
         protondb_url: protondb.1,
         this_pc,
         pc_warning,
-        your_result: core.your_result(key).unwrap_or_default(),
+        your_result: library.result(key).unwrap_or_default().to_owned(),
         has_folder: details.folder.as_ref().and_then(|f| crate::app::resolve_game_folder(kernel, key, f)).is_some(),
         has_log: crate::launch::log_path(kernel, key).is_file(),
-        hidden: crate::Core::hidden_games(kernel).contains(&key.to_string()),
-        compat_page: d.compat_page.clone(),
+        hidden: library.hidden(key),
+        compat_page: d.compat.as_ref().and_then(|c| c.page.clone()).unwrap_or_default(),
         trailer_url: meta.map(|(_, m)| m.trailer.clone()).unwrap_or_default(),
-        compat: d.compat.clone(),
-        badges: state.badges.get(key).cloned().unwrap_or_default(),
-        actions: d.actions.clone(),
-        sections: d.sections.clone(),
+        compat: d.compat.as_ref().map(compat_vm),
+        badges: badges_of(library, key),
+        actions: slot_vms(&key.plugin, SlotId::GameAction, d.actions.clone()),
+        sections: slot_vms(&key.plugin, SlotId::GameDetailSection, d.sections.clone()),
         can: can.clone(),
-        settings: d.settings.iter().cloned().collect(),
+        settings: d.settings.iter().map(|settings| game_settings_vm(kernel, key, settings)).collect(),
         launch_hint: if can.play && needs_emulator { format!("Play installs {name} first") } else { String::new() },
         running: state.sessions.values().any(|s| &s.game == played),
         size_bytes: details.size_bytes,
@@ -1154,7 +1178,7 @@ fn detail_vm(
         releases: offer
             .map(|o| {
                 let today = crate::releases::today();
-                let best = &best_release(state, &owned, o).id;
+                let best = &best_release(library, &owned, o).id;
                 // By version, highest first; of one version, the newest upload first. A release
                 // its store installs is no use once the game is installed.
                 let mut ordered: Vec<&nexus_api::Release> =
@@ -1209,7 +1233,7 @@ fn detail_vm(
             .map(|p| short_home(&p.display().to_string(), kernel.host().home.as_ref().and_then(|h| h.to_str())))
             .unwrap_or_default(),
         availability: offer
-            .map(|o| crate::releases::availability(best_release(state, &owned, o).seeders).to_owned())
+            .map(|o| crate::releases::availability(best_release(library, &owned, o).seeders).to_owned())
             .unwrap_or_default(),
         download_error: torrents
             .download_error
@@ -1261,7 +1285,13 @@ fn on_this_pc(
     )
 }
 
-fn downloads_vm(kernel: &Kernel, jobs: Vec<Job>, state: &AppState, torrents: &TorrentsSnapshot) -> DownloadsVm {
+fn downloads_vm(
+    kernel: &Kernel,
+    jobs: Vec<Job>,
+    state: &AppState,
+    library: &LibrarySnapshot,
+    torrents: &TorrentsSnapshot,
+) -> DownloadsVm {
     // Game installs, newest first, then the downloads. A catalog download's install shows on
     // the download's own card (`torrent_vm`), so it has no card of its own.
     let on_a_card = |j: &crate::game_installs::GameJob| {
@@ -1304,7 +1334,7 @@ fn downloads_vm(kernel: &Kernel, jobs: Vec<Job>, state: &AppState, torrents: &To
     });
     let jobs = installs.chain(downloads).collect();
     let home = kernel.host().home.as_ref().and_then(|h| h.to_str()).map(str::to_owned);
-    let owned = Owned::new(state, torrents);
+    let owned = Owned::new(library.library(), &torrents.jobs, &state.game_installs);
     let mut cards: Vec<TorrentVm> = torrents
         .jobs
         .values()
@@ -1314,7 +1344,7 @@ fn downloads_vm(kernel: &Kernel, jobs: Vec<Job>, state: &AppState, torrents: &To
             install_folder: crate::release_downloads::install_folder(kernel, &j.emulator, None)
                 .map(|(_, path)| short_home(&path.display().to_string(), home.as_deref()))
                 .unwrap_or_default(),
-            ..torrent_vm(state, &owned, j)
+            ..torrent_vm(state, library, &owned, j)
         })
         .collect();
     cards.reverse();
@@ -1371,7 +1401,7 @@ fn bytes_label(bytes: u64) -> String {
     if gb >= 1.0 { format!("{gb:.1} GB") } else { format!("{:.0} MB", bytes as f64 / 1e6) }
 }
 
-fn torrent_vm(state: &AppState, owned: &Owned, j: &TorrentJob) -> TorrentVm {
+fn torrent_vm(state: &AppState, library: &LibrarySnapshot, owned: &Owned, j: &TorrentJob) -> TorrentVm {
     use crate::torrents::TorrentState as S;
     let install = state.game_installs.values().rev().find(|g| g.plugin == j.emulator && g.source == j.source);
     let installing = install.is_some_and(|g| g.phase == crate::game_installs::GamePhase::Installing);
@@ -1379,9 +1409,10 @@ fn torrent_vm(state: &AppState, owned: &Owned, j: &TorrentJob) -> TorrentVm {
     // The installed game: the one this download's install reported, else the offer's, as its
     // Catalog card finds it (by title id, or by name: a PC game has no title id). The install's
     // record is gone after a restart.
-    let offer = state.offers.iter().find(|o| o.entry.key == j.offer);
-    let game = installed_from(state, j)
-        .or_else(|| offer.and_then(|o| installed_game(state, owned, o)))
+    let offer = library.offer(&j.offer);
+    let game = owned
+        .installed_from(j)
+        .or_else(|| offer.and_then(|o| installed_game(owned, o)))
         .map(|e| e.key.to_string())
         .unwrap_or_default();
     use crate::archives::UnpackPhase as U;
@@ -1656,7 +1687,7 @@ fn settings_vm(core: &Core, state: &AppState) -> SettingsVm {
     SettingsVm {
         launcher_update: launcher_update_vm(core, &state.launcher_update),
         hardware,
-        panels: state.settings.clone(),
+        panels: state.settings.iter().map(settings_panel_vm).collect(),
         themes,
         theme_options,
         // The game folders. The other folders are on the pages of the plugins that ask for them.
@@ -1786,7 +1817,7 @@ fn emulators_vm(kernel: &Kernel, state: &AppState, statuses: &BTreeMap<PluginId,
                 installed: emu.installed,
                 available: emu.available,
                 busy: emu.busy,
-                panels: emu.panels,
+                panels: slot_vms(&id, SlotId::EmulatorPanel, emu.panels),
                 controllers: emu
                     .controllers
                     .iter()
@@ -1878,8 +1909,12 @@ fn plugin_page_vm(
         .unwrap_or_default();
     Some(PluginPageVm {
         emulator: all.emulators.into_iter().find(|e| &e.plugin == plugin),
-        panels: state.settings.iter().filter(|p| &p.slot.plugin == plugin).cloned().collect(),
-        sections: state.emulators.get(plugin).map(|e| e.panels.clone()).unwrap_or_default(),
+        panels: state.settings.iter().filter(|p| &p.plugin == plugin).map(settings_panel_vm).collect(),
+        sections: state
+            .emulators
+            .get(plugin)
+            .map(|e| slot_vms(plugin, SlotId::EmulatorPanel, e.panels.clone()))
+            .unwrap_or_default(),
         folders: folders_vm(kernel)
             .into_iter()
             .filter(|f| nexus_api::shared_folder(&f.name).is_none() && asks.contains(&f.name.as_str()))
@@ -1891,9 +1926,9 @@ fn plugin_page_vm(
 /// The most covers the boot screen's wall shows.
 const BOOT_COVERS: usize = 30;
 
-fn boot_vm(core: &Core, kernel: &Kernel, state: &AppState) -> BootVm {
-    let ready = state.booted;
-    let games = state.library.len();
+fn boot_vm(core: &Core, kernel: &Kernel, state: &AppState, library: &LibrarySnapshot) -> BootVm {
+    let ready = library.booted;
+    let games = library.library().count();
     let step = |label: String, detail: String| BootStepVm {
         label,
         detail,
@@ -1916,17 +1951,17 @@ fn boot_vm(core: &Core, kernel: &Kernel, state: &AppState) -> BootVm {
         };
         steps.push(step(format!("{} emulator", manifest.emulator_name()), detail.into()));
     }
-    if let Some((done, total)) = state.describing {
+    if let Some((done, total)) = library.describing {
         steps.push(BootStepVm {
             label: "Official artwork & details".into(),
-            detail: if state.described {
+            detail: if library.described {
                 "Done".into()
             } else if total > 0 {
                 format!("{done}/{total}")
             } else {
                 "Looking…".into()
             },
-            state: if state.described { "done".into() } else { "working".into() },
+            state: if library.described { "done".into() } else { "working".into() },
         });
     }
     steps.push(step("Covers & Home screen".into(), if ready { "Ready".into() } else { "Loading…".into() }));
@@ -1935,7 +1970,7 @@ fn boot_vm(core: &Core, kernel: &Kernel, state: &AppState) -> BootVm {
         welcome: !core.welcomed(),
         progress: if ready {
             1.0
-        } else if state.loading {
+        } else if library.loading {
             0.6
         } else {
             0.2
@@ -1946,7 +1981,7 @@ fn boot_vm(core: &Core, kernel: &Kernel, state: &AppState) -> BootVm {
             "Loading...".into()
         },
         steps,
-        covers: state.library.iter().filter_map(|e| cover_of(state, e)).take(BOOT_COVERS).collect(),
+        covers: library.library().filter_map(|e| cover_of(library, e)).take(BOOT_COVERS).collect(),
     }
 }
 

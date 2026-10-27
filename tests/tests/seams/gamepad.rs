@@ -9,7 +9,7 @@ fn tv() -> Composed {
     let mut host = composed(|h| h.plugin(games("emu-a", vec!["Alpha", "Beta", "Gamma"])));
     host.ui.start().unwrap();
     host.resize(1920.0, 1080.0);
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::Select("emu-a:G0".parse().unwrap()));
     host
 }
@@ -61,7 +61,7 @@ fn the_shoulder_button_goes_to_the_next_section_and_the_guide_button_home() {
             .built_in(nexus_api::PluginByKind::service(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
 
     press(&mut host, PadButton::RightShoulder);
     assert_eq!(host.core().view().screen, ScreenId::Catalog);
@@ -74,7 +74,7 @@ fn the_shoulder_button_goes_to_the_next_section_and_the_guide_button_home() {
 fn while_a_game_is_in_front_the_pad_is_the_game_s_and_a_ps_button_tap_too() {
     let mut host = composed(|h| h.plugin(playable_games("emu-a", vec!["Alpha"])));
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::Launch("emu-a:G0".parse().unwrap()));
     watch_until(&mut host, "the game is in front", |core| core.game_in_front());
     assert_eq!(host.core().view().screen, ScreenId::Running);
@@ -97,7 +97,7 @@ fn holding_the_ps_button_closes_a_running_game_at_once_and_opens_no_power_menu()
     use nexus_testkit::Signal;
     let mut host = composed(|h| h.plugin(playable_games("emu-a", vec!["Alpha"])));
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::Launch("emu-a:G0".parse().unwrap()));
     watch_until(&mut host, "the game is in front", |core| core.game_in_front());
     let process = host.test.spawner.spawned()[0].clone();
@@ -134,7 +134,7 @@ fn while_the_launcher_s_window_is_not_focused_the_pad_is_the_other_window_s() {
 fn after_a_game_closes_the_launcher_asks_how_far_it_got() {
     let mut host = composed(|h| h.plugin(playable_games("emu-a", vec!["Alpha"])));
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::Launch("emu-a:G0".parse().unwrap()));
     watch_until(&mut host, "the game is in front", |core| core.game_in_front());
     host.pump();

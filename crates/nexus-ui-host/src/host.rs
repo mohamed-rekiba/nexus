@@ -577,7 +577,7 @@ impl ThemeHost {
             "hide-game",
             Box::new(move |a| {
                 let hidden = matches!(a.get(1), Some(Value::Bool(true)));
-                game(a, 0).and_then(|game| core(Command::HideGame { game, hidden }))
+                game(a, 0).and_then(|game| core(Command::Library(nexus_core::LibraryCmd::Hide { game, hidden })))
             }),
         )?;
         callback("search", Box::new(move |a| core(Command::Search(arg(a, 0)))))?;
@@ -752,7 +752,7 @@ impl ThemeHost {
         callback("dismiss-notices", Box::new(move |_| core(Command::DismissNotices)))?;
         callback("dismiss-notice", Box::new(move |a| core(Command::DismissNotice(int(a, 0)))))?;
         callback("open-notice", Box::new(move |a| core(Command::OpenNotice(int(a, 0)))))?;
-        callback("refresh-library", Box::new(move |_| core(Command::RefreshLibrary)))?;
+        callback("refresh-library", Box::new(move |_| core(Command::Library(nexus_core::LibraryCmd::Refresh))))?;
         callback("play-sound", Box::new(move |a| Some(UiRequest::PlaySound(arg(a, 0)))))?;
         callback("quit", Box::new(move |_| Some(UiRequest::Quit)))?;
         callback(

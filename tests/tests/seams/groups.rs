@@ -51,7 +51,7 @@ fn two_platforms() -> Composed {
         h.plugin(games_on("emu-a", "PS4", vec!["Alpha", "Beta"])).plugin(games_on("emu-b", "PS5", vec!["Gamma"]))
     });
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host
 }
 
@@ -101,7 +101,7 @@ fn notices(host: &Composed) -> Vec<String> {
 fn details_that_failed_to_load_are_not_asked_for_again() {
     let mut host = composed(|h| h.plugin(games_without_details("emu-a", vec!["Alpha", "Beta"])));
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     for game in ["emu-a:G0", "emu-a:G1", "emu-a:G0"] {
         host.dispatch(Command::Select(game.parse().unwrap()));
     }
@@ -113,7 +113,7 @@ fn details_that_failed_to_load_are_not_asked_for_again() {
 fn of_quick_selections_only_the_last_loads_its_details() {
     let mut host = composed(|h| h.plugin(games_without_details("emu-a", vec!["Alpha", "Beta", "Gamma"])));
     host.ui.start().unwrap();
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     // The first game was selected, and its details failed, as the library loaded. The two
     // selections below are of the other games.
     host.dispatch(Command::DismissNotices);

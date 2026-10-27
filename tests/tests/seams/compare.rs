@@ -108,7 +108,7 @@ fn the_default_theme_on_a_real_library() {
     host.ui.start().unwrap();
     use slint::platform::Key;
     shoot(&mut host, &window, &out.join("new-boot.png"));
-    host.dispatch(Command::RefreshLibrary);
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     // The store's descriptions come in the background.
     host.until(Area::Library, |core| core.view().task.is_none() && core.view().boot.ready);
     shoot(&mut host, &window, &out.join("new-welcome.png"));
