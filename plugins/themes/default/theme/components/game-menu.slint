@@ -1,4 +1,5 @@
 import { Vm, Host } from "../types.slint";
+import { Commands } from "../commands.slint";
 import { Tokens } from "../tokens.slint";
 import { Look } from "look.slint";
 import { Icon } from "icon.slint";
@@ -64,7 +65,7 @@ export global GameMenu {
     }
     // The answer to "Uninstall …?": 0 uninstalls, 1 is Not now. Either closes the menu.
     public function answer(choice: int) {
-        if (choice == 0) { Host.uninstall-game(root.uninstall-key != "" ? root.uninstall-key : Vm.detail.can.uninstall); }
+        if (choice == 0) { Commands.uninstall-game(root.uninstall-key != "" ? root.uninstall-key : Vm.detail.can.uninstall); }
         root.close();
         Host.play-sound(choice == 0 ? "select" : "back");
     }
@@ -107,21 +108,21 @@ export global GameMenu {
         root.open = false;
         Host.play-sound("select");
         if (i == 0) {
-            Host.open-game(root.game);
+            Commands.open-game(root.game);
         } else if (i <= root.actions) {
             let action = Vm.detail.actions[i - 1];
-            Host.run-action(action.plugin, action.action, root.game, action.args);
+            Commands.run-action(action.plugin, action.action, root.game, action.args);
         } else {
             let id = root.items[i - 1 - root.actions].id;
-            if (id == "settings-game") { Host.open-game-settings(root.game); }
+            if (id == "settings-game") { Commands.open-game-settings(root.game); }
             if (id == "folder") { Host.open-game-folder(root.game); }
             if (id == "log") { Host.open-game-log(root.game); }
             if (id == "trailer") { Trailers.watch(); }
-            if (id == "rate") { Host.ask-result(root.game); }
+            if (id == "rate") { Commands.ask-result(root.game); }
             if (id == "compat") { Host.open-url(Vm.detail.compat-page); }
             if (id == "protondb") { Host.open-url(Vm.detail.protondb-url); }
-            if (id == "settings") { Host.navigate("settings"); }
-            if (id == "hide") { Host.hide-game(root.game, !Vm.detail.hidden); }
+            if (id == "settings") { Commands.navigate("settings"); }
+            if (id == "hide") { Commands.hide-game(root.game, !Vm.detail.hidden); }
         }
     }
 }

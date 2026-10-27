@@ -172,7 +172,7 @@ pub enum VpnCmd {
     Disconnect(String),
     /// Adds a VPN from a provider's file (WireGuard `.conf`, OpenVPN `.ovpn`) and connects it.
     /// `~/` is the home folder.
-    Import(PathBuf),
+    Import(#[serde(deserialize_with = "crate::typed_text::path")] PathBuf),
 }
 
 /// What the core does when the setting or the VPNs change: the torrents' kill switch looks at

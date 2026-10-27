@@ -1,4 +1,5 @@
 import { Vm, Host } from "../types.slint";
+import { Commands } from "../commands.slint";
 import { Tokens } from "../tokens.slint";
 import { Look } from "../components/look.slint";
 import { BackButton } from "../components/widgets.slint";
@@ -66,7 +67,7 @@ export component PluginScreen inherits Rectangle {
                 HorizontalLayout {
                     alignment: Look.rtl ? end : start;
                     padding-bottom: 20 * Look.px;
-                    BackButton { pad: Vm.input-mode == "gamepad"; clicked => { Host.back(); } }
+                    BackButton { pad: Vm.input-mode == "gamepad"; clicked => { Commands.back(); } }
                 }
                 Text { text: Vm.plugin-page.plugin.name; font-size: 44 * Look.px; font-weight: 600; color: Tokens.color-text; horizontal-alignment: Look.rtl ? right : left; }
                 Text {
@@ -112,7 +113,7 @@ export component PluginScreen inherits Rectangle {
                     accessible-label: "option:" + option.key;
                     accessible-value: option.value;
                     reveal(y, h) => { root.reveal(y, h); }
-                    set(value) => { Host.set-theme-option(option.key, value); }
+                    set(value) => { Commands.set-theme-option(option.key, value); }
                 }
                 if root.theme && !Vm.plugin-page.current : Text {
                     text: "Use it to change its options";
@@ -150,7 +151,7 @@ export component PluginScreen inherits Rectangle {
                     property <int> seen: Prefs.serial;
                     changed seen => { if (self.focused && (Prefs.pending == 0 || (Prefs.pending > 0) != root.on)) { self.flip(); } }
                     function flip() {
-                        if (Vm.plugin-page.plugin.kind != "theme") { Host.set-plugin-enabled(Vm.plugin-page.plugin.id, !root.on); }
+                        if (Vm.plugin-page.plugin.kind != "theme") { Commands.set-plugin-enabled(Vm.plugin-page.plugin.id, !root.on); }
                     }
                     Value { kind: "toggle"; on: root.on; }
                 }
@@ -173,8 +174,8 @@ export component PluginScreen inherits Rectangle {
                     changed seen => { if (self.focused && Prefs.pending == 0) { self.run(); } }
                     function run() {
                         if (Vm.plugin-page.emulator.busy) { return; }
-                        if (!root.installed) { Host.install(Vm.plugin-page.emulator.plugin, ""); }
-                        else if (Vm.plugin-page.emulator.update != "") { Host.update(Vm.plugin-page.emulator.plugin); }
+                        if (!root.installed) { Commands.install(Vm.plugin-page.emulator.plugin, ""); }
+                        else if (Vm.plugin-page.emulator.update != "") { Commands.update(Vm.plugin-page.emulator.plugin); }
                     }
                     Value {
                         text: Vm.plugin-page.emulator.busy ? "Working…"
@@ -198,7 +199,7 @@ export component PluginScreen inherits Rectangle {
                     changed seen => { if (self.focused && Prefs.pending == 0) { self.run(); } }
                     function run() {
                         if (!Vm.plugin-page.emulator.busy) {
-                            Host.uninstall(Vm.plugin-page.emulator.plugin, Vm.plugin-page.emulator.installed[Vm.plugin-page.emulator.installed.length - 1]);
+                            Commands.uninstall(Vm.plugin-page.emulator.plugin, Vm.plugin-page.emulator.installed[Vm.plugin-page.emulator.installed.length - 1]);
                         }
                     }
                 }
@@ -216,7 +217,7 @@ export component PluginScreen inherits Rectangle {
                     clicked => { Prefs.section = 1; Prefs.row = Prefs.builds + i; self.run(); }
                     property <int> seen: Prefs.serial;
                     changed seen => { if (self.focused && Prefs.pending == 0) { self.run(); } }
-                    function run() { Host.run-action(action.plugin, action.action, "", action.args); }
+                    function run() { Commands.run-action(action.plugin, action.action, "", action.args); }
                     Value { text: "›"; }
                 }
 
@@ -232,7 +233,7 @@ export component PluginScreen inherits Rectangle {
                         first: i == 0;
                         last: i == panel.fields.length - 1;
                         reveal(y, h) => { root.reveal(y, h); }
-                        set(value) => { Host.set-setting(panel.slot.plugin, panel.slot.scope, field.key, value); }
+                        set(value) => { Commands.set-setting(panel.slot.plugin, panel.slot.scope, field.key, value); }
                     }
                 }
 
@@ -255,7 +256,7 @@ export component PluginScreen inherits Rectangle {
                     accessible-role: text;
                     accessible-label: "plugin-blocks";
                     SlotSections { items: Vm.plugin-page.sections; }
-                    if Vm.plugin-page.is-emulator && Vm.plugin-page.emulator.controllers != "" : Text {
+                    if Vm.plugin-page.has-emulator && Vm.plugin-page.emulator.controllers != "" : Text {
                         text: "Controllers: " + Vm.plugin-page.emulator.controllers;
                         font-size: 17 * Look.px;
                         color: Tokens.color-text-muted;

@@ -187,6 +187,7 @@ pub enum TorrentCmd {
         /// The folder the player picked, inside a packages folder (`~/` for the home folder).
         /// `None`: the last one picked for the console, or else the console's folder in the
         /// first packages folder.
+        #[serde(default, deserialize_with = "crate::typed_text::folder")]
         folder: Option<PathBuf>,
     },
     /// The player's action on a download, by its id.

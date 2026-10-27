@@ -2,6 +2,11 @@
 //!
 //! They hold display-ready data only (text, numbers, flags, image references), so a theme
 //! needs no logic beyond layout to show them.
+//!
+//! Their `serde` form is the theme contract: the UI host turns [`AppView`] into the `Vm`
+//! properties of `types.slint`, each field kebab-cased (`can_go_back` is `can-go-back`). A
+//! field the contract doesn't have is `#[serde(skip)]`: the core's tests read it. The
+//! [`mark`]ed fields take a form of their own there, such as an image.
 
 use nexus_api::{ActionStyle, ConfigScope, PluginId, RelPath, SlotId, Tone};
 use serde::{Deserialize, Serialize};
@@ -90,12 +95,16 @@ pub struct SlotVm {
     pub short: String,
     pub tone: Tone,
     pub style: ActionStyle,
+    #[serde(serialize_with = "mark::thumb")]
     pub icon: Option<ImageRef>,
     pub rows: Vec<RowVm>,
     /// For actions: what the UI sends back when the player picks it.
     pub action: Option<String>,
+    /// As JSON text, "" for none: the theme passes it back unchanged.
+    #[serde(serialize_with = "mark::json_text")]
     pub args: serde_json::Value,
-    /// For settings panels.
+    /// For settings panels; as JSON text, "" for none.
+    #[serde(serialize_with = "mark::json_text")]
     pub scope: Option<ConfigScope>,
 }
 
@@ -118,8 +127,10 @@ pub struct RowVm {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GameSystemVm {
     /// Its full name, "PlayStation 5"; the system's code when no plugin names it.
+    #[serde(rename = "system_name")]
     pub name: String,
     /// Its color, red, green and blue; `None` draws it in the theme's neutral look.
+    #[serde(rename = "system_color", serialize_with = "mark::color")]
     pub color: Option<[u8; 3]>,
 }
 
@@ -129,7 +140,9 @@ pub struct GameCardVm {
     pub key: String,
     pub title: String,
     pub platform: String,
+    #[serde(flatten)]
     pub system: GameSystemVm,
+    #[serde(serialize_with = "mark::cover")]
     pub cover: Option<ImageRef>,
     pub selected: bool,
     pub badges: Vec<SlotVm>,
@@ -137,14 +150,22 @@ pub struct GameCardVm {
     /// Out of 5, from a store's catalog.
     pub rating: Option<f32>,
     /// Once the game's details are in.
+    #[serde(skip)]
     pub size_bytes: Option<u64>,
+    /// `size_bytes` as text, "7.6 GB"; empty when it isn't known.
+    pub size: String,
     /// Days since the game last ran; `None` when it never ran.
+    #[serde(skip)]
     pub last_played_days: Option<u64>,
+    /// `last_played_days` as text: "Today", "Yesterday" or "3 days ago"; empty when it never ran.
+    pub last_played: String,
     /// How many releases a catalog offers of the game; 0 for an installed game.
     pub releases: usize,
     /// For a game a catalog offers, how easy its best release is to download: `good`, `low`,
     /// `none` or `unknown` (see [`ReleaseVm::availability`]). Empty for an installed game.
     pub availability: String,
+    /// `availability` in words: "Good", "Low", "None", "Unknown"; empty for none.
+    pub availability_text: String,
     /// The player hid this Catalog game; it shows only under the Catalog's "Hidden" filter.
     pub hidden: bool,
     /// What can be done with the game: the same for every game and on every screen.
@@ -193,12 +214,14 @@ pub struct FilterVm {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct LibraryVm {
     /// The shown pages of games: more come with [`crate::LibraryVm::total`] and a "more".
+    #[serde(serialize_with = "mark::cards")]
     pub games: Vec<GameCardVm>,
     /// How many games match, on every page.
     pub total: usize,
     /// How many games there are before the search and the filters.
     pub all: usize,
     /// Index into `games`.
+    #[serde(serialize_with = "mark::index")]
     pub selected: Option<usize>,
     /// "All", then each system.
     pub systems: Vec<FilterVm>,
@@ -211,8 +234,10 @@ pub struct LibraryVm {
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct HomeVm {
+    #[serde(serialize_with = "mark::cards")]
     pub games: Vec<GameCardVm>,
     /// Index into `games`.
+    #[serde(serialize_with = "mark::index")]
     pub selected: Option<usize>,
     pub loading: bool,
     /// `games` split by platform, in the order each platform first appears.
@@ -226,6 +251,7 @@ pub struct GroupVm {
     pub platform: String,
     pub games: Vec<GameCardVm>,
     /// Index into `games`, when the selected game is on this platform.
+    #[serde(serialize_with = "mark::index")]
     pub selected: Option<usize>,
 }
 
@@ -237,7 +263,11 @@ pub struct CompatVm {
     pub label: String,
     pub notes: String,
     /// When the result was last tested, as `YYYY-MM-DD`; empty when no one says.
+    #[serde(skip)]
     pub tested: String,
+    /// `tested` as text, "Sep 1, 2026".
+    #[serde(rename = "tested")]
+    pub tested_text: String,
 }
 
 /// How long [`GameDetailVm::summary`] is at most: one line on Home.
@@ -248,14 +278,19 @@ pub struct GameDetailVm {
     pub key: String,
     pub title: String,
     pub platform: String,
+    #[serde(flatten)]
     pub system: GameSystemVm,
     pub description: String,
     /// `description` on one line, at most [`SUMMARY_CHARS`] characters, for Home.
     pub summary: String,
     pub developer: String,
     pub genres: Vec<String>,
+    #[serde(serialize_with = "mark::cover_picture")]
     pub cover: Option<ImageRef>,
+    #[serde(serialize_with = "mark::picture")]
     pub background: Option<ImageRef>,
+    /// With `has-compat`.
+    #[serde(serialize_with = "mark::has")]
     pub compat: Option<CompatVm>,
     pub badges: Vec<SlotVm>,
     pub actions: Vec<SlotVm>,
@@ -268,14 +303,31 @@ pub struct GameDetailVm {
     pub launch_hint: String,
     pub running: bool,
     /// The game's size on disk.
+    #[serde(skip)]
     pub size_bytes: Option<u64>,
-    /// The game's name as a picture, from a store's catalog.
+    /// `size_bytes` as text, "7.6 GB"; empty when it isn't known.
+    pub size: String,
+    /// The game's name as a picture, from a store's catalog. With `has-logo`.
+    #[serde(serialize_with = "mark::has_picture")]
     pub logo: Option<ImageRef>,
+    #[serde(skip)]
     pub rating: Option<nexus_api::Rating>,
+    /// `rating`: its score out of 5, how many players gave it, and both as text, "4.4 · 3.2K
+    /// ratings". 0, 0 and empty for none.
+    #[serde(rename = "rating")]
+    pub rating_score: f32,
+    pub ratings: u64,
+    pub rating_text: String,
     /// `YYYY-MM-DD`, or empty.
+    #[serde(skip)]
     pub release: String,
+    /// `release` as text, "Mar 12, 2024", and its year, "2024".
+    #[serde(rename = "release")]
+    pub release_text: String,
+    pub year: String,
     /// For example `PEGI 12`, from a store's catalog.
     pub age_rating: String,
+    #[serde(serialize_with = "mark::pictures")]
     pub screenshots: Vec<ImageRef>,
     /// The game's page in a store, or empty.
     pub store_url: String,
@@ -287,6 +339,8 @@ pub struct GameDetailVm {
     /// How the game runs on this PC, from its emulator's needs: `None` before the check, or
     /// when the system can't say. For a game a catalog offers that doesn't fit in the
     /// download folder, `no` with "Not enough space" and the free space ("10.0 GB free").
+    /// With `has-this-pc`.
+    #[serde(serialize_with = "mark::has")]
     pub this_pc: Option<VerdictVm>,
     /// Why the game won't start on this PC, such as "This PC can't run KytyPS5 games: No
     /// Vulkan 1.3"; empty when it can.
@@ -302,14 +356,22 @@ pub struct GameDetailVm {
     pub compat_page: String,
     /// The game's trailer, an `https://` video address; empty for none.
     pub trailer_url: String,
+    /// The values of the facts `region`, `age` and `version`; empty when the plugin gives none.
+    pub region: String,
+    pub age: String,
+    pub version: String,
     /// Short facts from the plugin, such as the region; see [`nexus_api::GameFact`].
     pub facts: Vec<nexus_api::GameFact>,
     /// Seconds played, in all.
+    #[serde(skip)]
     pub played_secs: u64,
+    /// `played_secs` as text, "4 hr 6 min"; empty when the game never ran.
+    pub played: String,
     /// Whole days, of 24 hours, since the game last closed. `None` when it never ran.
+    #[serde(skip)]
     pub last_played_days: Option<u64>,
-    /// The emulator's shader cache for this game, when it has the `shaders` capability.
-    pub shader_cache: Option<ShaderCacheVm>,
+    /// `last_played_days` as text: "Today", "Yesterday" or "3 days ago"; empty when it never ran.
+    pub last_played: String,
     /// For a game a catalog offers: its releases by version, highest first. Empty for an
     /// installed game.
     pub releases: Vec<ReleaseVm>,
@@ -319,40 +381,49 @@ pub struct GameDetailVm {
     /// install downloads.
     pub download_folder: String,
     /// For a game a catalog offers, how easy its best release is to download (see
-    /// [`ReleaseVm::availability`]); empty for an installed game.
+    /// [`ReleaseVm::availability`]), and that in words; empty for an installed game.
     pub availability: String,
+    pub availability_text: String,
     /// Why the download the player last asked for here didn't start; empty when it did.
     pub download_error: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ShaderCacheVm {
-    pub entries: u64,
-    pub size_bytes: u64,
-}
-
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+///
+/// In the contract its fields are `Vm` properties of their own: `catalog` for `games`, and
+/// `catalog-` and the field's name for the others.
 pub struct CatalogVm {
     /// A plugin that gives release catalogs is turned on. Without one there is no Catalog:
     /// a theme hides the ways to it.
+    #[serde(rename = "catalog_available")]
     pub available: bool,
     /// The games the catalogs offer, as the Library shows its games, with a `New` or
     /// `Installed` badge. Current while the Catalog is the screen; on another screen, the
     /// grid as it last was.
+    #[serde(rename = "catalog")]
     pub games: LibraryVm,
     /// Which copy of each catalog is in use, one line each, for example
     /// "KytyPS5: fetched from xyz.dev · updated 2026-10-18 · 120 releases".
+    #[serde(rename = "catalog_sources")]
     pub sources: Vec<String>,
     /// How many releases the catalogs list, of every game.
+    #[serde(rename = "catalog_releases")]
     pub releases: usize,
     /// When the list was updated, `YYYY-MM-DD`: the newest count of a release's seeders, else
     /// the newest date a catalog gives. Empty when neither says.
+    #[serde(skip)]
     pub updated: String,
+    /// `updated` as text, "Oct 19, 2026".
+    #[serde(rename = "catalog_updated")]
+    pub updated_text: String,
     /// The catalog plugins have not answered yet.
+    #[serde(rename = "catalog_loading")]
     pub loading: bool,
     /// The catalog plugins' buttons for the Catalog screen (`catalog.action`), such as a
     /// refresh, and their badges, which say what the buttons did.
+    #[serde(rename = "catalog_actions")]
     pub actions: Vec<SlotVm>,
+    #[serde(rename = "catalog_status")]
     pub status: Vec<SlotVm>,
 }
 
@@ -366,9 +437,16 @@ pub struct ReleaseVm {
     pub store: String,
     pub version: String,
     pub region: String,
+    #[serde(skip)]
     pub size_bytes: Option<u64>,
+    /// `size_bytes` as text, "7.6 GB"; empty when the catalog doesn't say.
+    pub size: String,
     /// `YYYY-MM-DD`, or empty.
+    #[serde(skip)]
     pub added: String,
+    /// `added` as text, "Oct 15, 2026".
+    #[serde(rename = "added")]
+    pub added_text: String,
     /// Added in the last 14 days.
     pub new: bool,
     pub description: String,
@@ -394,14 +472,21 @@ pub struct ReleaseVm {
     /// has, then one with art, then the highest version, then the one most people share.
     pub best: bool,
     /// How many people share it, and how many download it, as the catalog counted them;
-    /// `None` when the catalog has no count. They are not live counts.
+    /// `None` when the catalog has no count (empty in the contract). They are not live counts.
+    #[serde(serialize_with = "mark::count_text")]
     pub seeders: Option<u64>,
+    #[serde(serialize_with = "mark::count_text")]
     pub leechers: Option<u64>,
     /// When the catalog counted them, an RFC 3339 time; empty when it doesn't say.
+    #[serde(skip)]
     pub counted_at: String,
+    /// The day of `counted_at` as text, "Oct 7, 2026".
+    #[serde(rename = "counted")]
+    pub counted_text: String,
     /// How easy it is to download, from `seeders`: `good` (3 or more), `low` (1 or 2), `none`
-    /// (0) or `unknown` (no count).
+    /// (0) or `unknown` (no count), and that in words.
     pub availability: String,
+    pub availability_text: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -410,10 +495,14 @@ pub struct DownloadVm {
     pub id: u64,
     pub plugin: PluginId,
     pub label: String,
+    #[serde(skip)]
     pub received: u64,
+    #[serde(skip)]
     pub total: Option<u64>,
     /// 0.0 to 1.0. 0 when the size is unknown.
     pub progress: f32,
+    /// `received` and `total` as text, "12.5 MB of 40.0 MB".
+    pub progress_text: String,
     /// `queued`, `downloading`, `verifying`, `paused`, `done`, `failed` or `cancelled`.
     pub state: String,
     pub error: String,
@@ -423,15 +512,21 @@ pub struct DownloadVm {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+///
+/// In the contract its fields are `Vm` properties of their own.
 pub struct DownloadsVm {
+    #[serde(rename = "downloads")]
     pub jobs: Vec<DownloadVm>,
     /// The catalogs' downloads, newest first.
     pub torrents: Vec<TorrentVm>,
     /// "Keep sharing finished downloads".
+    #[serde(rename = "seed_downloads")]
     pub seeding: bool,
     /// How many of the catalogs' downloads read their files, check or download now.
+    #[serde(rename = "torrents_downloading")]
     pub downloading: usize,
     /// How many of the catalogs' downloads share their finished files now.
+    #[serde(rename = "torrents_sharing")]
     pub sharing: usize,
 }
 
@@ -448,15 +543,24 @@ pub struct TorrentVm {
     pub state: String,
     /// 0.0 to 1.0.
     pub progress: f32,
+    #[serde(skip)]
     pub done: u64,
+    #[serde(skip)]
     pub total: u64,
     /// Bytes a second.
+    #[serde(skip)]
     pub download_rate: u64,
+    #[serde(skip)]
     pub upload_rate: u64,
     /// How long the rest takes at `download_rate`, in seconds, while it downloads; 0 when no
     /// bytes arrive.
+    #[serde(skip)]
     pub seconds_left: u64,
+    #[serde(skip)]
     pub peers: u32,
+    /// One line of its sizes, speed and peers, by its state: "1.0 GB of 3.0 GB · 2.0 MB/s ·
+    /// 3 peers · 2 hr 5 min left".
+    pub detail: String,
     pub seeding: bool,
     /// Checking a finished download's files before it seeds again.
     pub verifying: bool,
@@ -467,6 +571,8 @@ pub struct TorrentVm {
     /// The first files, as "path · size", and how many there are.
     pub files: Vec<String>,
     pub file_count: usize,
+    /// What the file list shows: "120 files · 1.5 GB · first 100 shown".
+    pub file_summary: String,
     /// Where the files are.
     pub folder: String,
     /// What the player can do now, in order: `start`, `pause`, `cancel`, `remove`,
@@ -508,6 +614,7 @@ pub struct FieldVm {
     /// For `Choice`.
     pub choices: Vec<String>,
     /// What to call each choice, in the order of `choices`: "" when the plugin names none.
+    #[serde(rename = "labels")]
     pub choice_labels: Vec<String>,
 }
 
@@ -580,12 +687,15 @@ pub struct VerdictVm {
     pub why: String,
 }
 
+///
+/// In the contract its fields are `Vm` properties of their own: `settings` for `panels`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct SettingsVm {
     /// The launcher's own update.
     pub launcher_update: LauncherUpdateVm,
     /// This PC, and how each emulator's games run on it.
     pub hardware: HardwareVm,
+    #[serde(rename = "settings")]
     pub panels: Vec<SettingsPanelVm>,
     pub themes: Vec<ThemeChoiceVm>,
     /// The current theme's options.
@@ -655,6 +765,7 @@ pub struct FolderVm {
     /// The first plugin's line about it. Empty when none.
     pub help: String,
     /// The folders it means now: the player's, or else the default.
+    #[serde(skip)]
     pub paths: Vec<String>,
     /// `paths` joined with "; ", for a text field.
     pub text: String,
@@ -662,8 +773,11 @@ pub struct FolderVm {
     pub shown: String,
     /// The plugins' default, if any. Empty when there is none.
     pub default: String,
-    /// The names of the plugins that ask for it.
+    /// The names of the plugins that ask for it, and those joined with ", ".
+    #[serde(skip)]
     pub requested_by: Vec<String>,
+    #[serde(rename = "requested_by")]
+    pub requested_by_text: String,
     /// Some plugin may write to it.
     pub write: bool,
 }
@@ -684,8 +798,11 @@ pub struct EmulatorVm {
     /// An install, update or uninstall is running.
     pub busy: bool,
     pub panels: Vec<SlotVm>,
-    /// Controller profiles the emulator has, as `name (device)`.
+    /// Controller profiles the emulator has, as `name (device)`, and those joined with ", ".
+    #[serde(skip)]
     pub controllers: Vec<String>,
+    #[serde(rename = "controllers")]
+    pub controllers_text: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -714,21 +831,34 @@ pub struct PluginRowVm {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PluginPageVm {
     pub plugin: PluginRowVm,
-    /// Its builds, when it is an emulator and turned on.
+    /// Its builds, when it is an emulator and turned on. With `has-emulator`.
+    #[serde(serialize_with = "mark::has")]
     pub emulator: Option<EmulatorVm>,
     /// Its settings panels.
+    #[serde(rename = "settings")]
     pub panels: Vec<SettingsPanelVm>,
     /// Its blocks in the `emulator.panel` slot: sections and actions. An emulator's are also
     /// in `emulator`.
     pub sections: Vec<SlotVm>,
+    /// The actions of `sections`, for one row each.
+    pub actions: Vec<SlotVm>,
     /// The folders it asks for, but not the game folders: those are in Settings.
     pub folders: Vec<FolderVm>,
+    /// A theme that is the one shown.
+    pub current: bool,
 }
 
+///
+/// In the contract its fields are `Vm` properties of their own.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct EmulatorsVm {
     pub emulators: Vec<EmulatorVm>,
     pub plugins: Vec<PluginRowVm>,
+    /// `plugins` for the Emulators list: the emulators, then the services that describe their
+    /// games.
+    pub emulator_plugins: Vec<PluginRowVm>,
+    /// `plugins` for the Themes list: the themes, the one shown with the status "in use".
+    pub theme_plugins: Vec<PluginRowVm>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -743,7 +873,10 @@ pub struct RunningVm {
     /// `starting` until the game's window shows, then `running`, then `stopping`.
     pub state: String,
     /// Seconds since the game started, when the view was made.
+    #[serde(skip)]
     pub elapsed_secs: u64,
+    /// `elapsed_secs` as text, "12 min".
+    pub elapsed: String,
     /// The game's window is in front, so the gamepad is the game's.
     pub in_front: bool,
     /// The emulator's keyboard keys for the console's buttons, from its manifest's `[[keymap]]`.
@@ -764,6 +897,7 @@ pub struct BootVm {
     pub status: String,
     pub steps: Vec<BootStepVm>,
     /// Covers of the library, for a wall behind the screen.
+    #[serde(serialize_with = "mark::thumbs")]
     pub covers: Vec<ImageRef>,
 }
 
@@ -778,34 +912,49 @@ pub struct BootStepVm {
 
 /// Everything a theme can show, rebuilt from app state after every change.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+///
+/// Each field is a `Vm` property, but for `catalog`, `downloads`, `settings` and `emulators`,
+/// whose fields are. An optional part comes with `has-` and its name, such as `has-detail`.
 pub struct AppView {
     pub screen: ScreenId,
     /// The game a Game Detail screen shows.
+    #[serde(serialize_with = "mark::text")]
     pub game: Option<String>,
     pub can_go_back: bool,
     pub home: HomeVm,
+    #[serde(serialize_with = "mark::has")]
     pub detail: Option<GameDetailVm>,
+    #[serde(flatten)]
     pub catalog: CatalogVm,
+    #[serde(flatten)]
     pub downloads: DownloadsVm,
+    #[serde(flatten)]
     pub settings: SettingsVm,
+    #[serde(flatten)]
     pub emulators: EmulatorsVm,
     /// The plugin the Plugin screen shows.
+    #[serde(serialize_with = "mark::has")]
     pub plugin_page: Option<PluginPageVm>,
+    #[serde(serialize_with = "mark::has")]
     pub running: Option<RunningVm>,
     /// Short messages for the player, newest last: the text of `notice_cards`.
     pub notices: Vec<String>,
     /// The notices the theme shows, newest last. The core keeps at most `MAX_NOTICES`.
     pub notice_cards: Vec<NoticeVm>,
     /// A game was started whose emulator isn't installed: the player is asked first.
+    #[serde(serialize_with = "mark::has")]
     pub install_prompt: Option<InstallPromptVm>,
     pub boot: BootVm,
     /// Work going on in the background, for example "Downloading game art 3/40".
+    #[serde(serialize_with = "mark::text")]
     pub task: Option<String>,
     /// The art of the game the newest notice is about.
+    #[serde(serialize_with = "mark::thumb")]
     pub notice_art: Option<ImageRef>,
     /// What clicking the newest notice opens, for example "Open Downloads". Empty for nothing.
     pub notice_opens: String,
     /// "How far did it get?", for a game that just closed: its title.
+    #[serde(serialize_with = "mark::has")]
     pub result_prompt: Option<String>,
     /// The machine's settings: network, sound, Bluetooth, battery, power, Nexus OS.
     pub system: SystemVm,
@@ -951,6 +1100,7 @@ pub struct NoticeVm {
     pub text: String,
     pub kind: NoticeKind,
     /// The art of the game the notice is about.
+    #[serde(serialize_with = "mark::thumb")]
     pub art: Option<ImageRef>,
     /// What clicking the notice opens, for example "Open Downloads". Empty for nothing.
     pub opens: String,
@@ -967,5 +1117,104 @@ pub struct InstallPromptVm {
     /// The game's title.
     pub game: String,
     /// The download's size, when the plan knows it.
+    #[serde(rename = "size")]
     pub size_bytes: Option<u64>,
+}
+
+/// The fields whose contract form isn't their plain `serde` form, and the names that mark
+/// them. A field marked with a name goes to the serializer as a newtype struct of that name,
+/// which a JSON serializer passes through as the value inside. The UI host's serializer reads
+/// the name.
+pub mod mark {
+    use serde::{Serialize, Serializer};
+
+    use super::{GameCardVm, ImageRef};
+
+    /// An `Option<ImageRef>` shown small: a cover, tile or icon. An empty image for none.
+    pub const THUMB: &str = "nexus.thumb";
+    /// An `Option<ImageRef>` shown large: a background, logo or screenshot.
+    pub const PICTURE: &str = "nexus.picture";
+    /// A card's cover: as [`THUMB`], cut as the struct's `platform` needs. It comes with
+    /// `<field>-state`: `loading`, `ready` or `none`.
+    pub const COVER: &str = "nexus.cover";
+    /// The Game Hub's cover: as [`PICTURE`], cut as the struct's `platform` needs.
+    pub const COVER_PICTURE: &str = "nexus.cover-picture";
+    /// A color, as `0xAARRGGBB`.
+    pub const COLOR: &str = "nexus.color";
+    /// An `Option` that comes with `has-<field>`. When it is `None` the field is left out.
+    pub const HAS: &str = "nexus.has";
+    /// A long list of game cards, which the host changes in place.
+    pub const CARDS: &str = "nexus.cards";
+
+    /// A value under a mark's name.
+    struct Marked<'a, T: ?Sized>(&'static str, &'a T);
+
+    impl<T: Serialize + ?Sized> Serialize for Marked<'_, T> {
+        fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+            s.serialize_newtype_struct(self.0, self.1)
+        }
+    }
+
+    pub(crate) fn thumb<S: Serializer>(image: &Option<ImageRef>, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_newtype_struct(THUMB, image)
+    }
+
+    pub(crate) fn thumbs<S: Serializer>(images: &[ImageRef], s: S) -> Result<S::Ok, S::Error> {
+        s.collect_seq(images.iter().map(|image| Marked(THUMB, image)))
+    }
+
+    pub(crate) fn picture<S: Serializer>(image: &Option<ImageRef>, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_newtype_struct(PICTURE, image)
+    }
+
+    pub(crate) fn pictures<S: Serializer>(images: &[ImageRef], s: S) -> Result<S::Ok, S::Error> {
+        s.collect_seq(images.iter().map(|image| Marked(PICTURE, image)))
+    }
+
+    pub(crate) fn has_picture<S: Serializer>(image: &Option<ImageRef>, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_newtype_struct(HAS, &image.as_ref().map(|image| Marked(PICTURE, image)))
+    }
+
+    pub(crate) fn cover<S: Serializer>(image: &Option<ImageRef>, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_newtype_struct(COVER, image)
+    }
+
+    pub(crate) fn cover_picture<S: Serializer>(image: &Option<ImageRef>, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_newtype_struct(COVER_PICTURE, image)
+    }
+
+    /// Transparent for none: the theme draws it in its neutral look.
+    pub(crate) fn color<S: Serializer>(rgb: &Option<[u8; 3]>, s: S) -> Result<S::Ok, S::Error> {
+        let argb = rgb.map_or(0, |[r, g, b]| 0xff00_0000 | u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b));
+        s.serialize_newtype_struct(COLOR, &argb)
+    }
+
+    pub(crate) fn has<T: Serialize, S: Serializer>(value: &Option<T>, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_newtype_struct(HAS, value)
+    }
+
+    pub(crate) fn cards<S: Serializer>(cards: &[GameCardVm], s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_newtype_struct(CARDS, cards)
+    }
+
+    /// A list position, -1 for none.
+    pub(crate) fn index<S: Serializer>(index: &Option<usize>, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_i64(index.map_or(-1, |i| i as i64))
+    }
+
+    /// Text, "" for none.
+    pub(crate) fn text<S: Serializer>(text: &Option<String>, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(text.as_deref().unwrap_or_default())
+    }
+
+    /// A count as text, "" for none.
+    pub(crate) fn count_text<S: Serializer>(count: &Option<u64>, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&count.map(|n| n.to_string()).unwrap_or_default())
+    }
+
+    /// The value as JSON text, "" for none.
+    pub(crate) fn json_text<T: Serialize, S: Serializer>(value: &T, s: S) -> Result<S::Ok, S::Error> {
+        let json = serde_json::to_value(value).map_err(serde::ser::Error::custom)?;
+        s.serialize_str(&if json.is_null() { String::new() } else { json.to_string() })
+    }
 }

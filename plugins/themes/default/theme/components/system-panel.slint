@@ -1,4 +1,5 @@
 import { Vm, Host, SystemJobItem } from "../types.slint";
+import { Commands } from "../commands.slint";
 import { Tokens } from "../tokens.slint";
 import { Look } from "look.slint";
 import { Icon } from "icon.slint";
@@ -36,7 +37,7 @@ export global Sys {
         root.row = 0;
         root.asking = "";
         Host.play-sound("select");
-        Host.refresh-system();
+        Commands.refresh-system();
     }
     public function close() {
         root.open = -1;
@@ -44,28 +45,28 @@ export global Sys {
     }
     // The volume a step away, 0 to 100.
     function volume(delta: int) {
-        Host.set-volume(Math.clamp(Vm.system.volume + delta, 0, 100));
+        Commands.set-volume(Math.clamp(Vm.system.volume + delta, 0, 100));
         Host.play-sound("move");
     }
     public function activate() {
         let r = root.row;
         if (root.open == 0) {
-            if (r == 0) { Host.scan-wifi(); return; }
+            if (r == 0) { Commands.scan-wifi(); return; }
             let net = Vm.system.wifi[r - 1];
             if (net.active) { return; }
             if (net.secured && !net.saved) { root.asking = net.ssid; return; }
-            Host.join-wifi(net.ssid, "");
+            Commands.join-wifi(net.ssid, "");
         } else if (root.open == 1) {
             if (r == 0) { return; }
-            if (r == 1) { Host.set-muted(!Vm.system.muted); return; }
-            Host.set-audio-output(Vm.system.outputs[r - 2].name);
+            if (r == 1) { Commands.set-muted(!Vm.system.muted); return; }
+            Commands.set-audio-output(Vm.system.outputs[r - 2].name);
         } else if (root.open == 2) {
-            if (r == 0) { Host.set-bluetooth(!Vm.system.bluetooth-on); return; }
-            if (r == 1) { Host.scan-bluetooth(); return; }
+            if (r == 0) { Commands.set-bluetooth(!Vm.system.bluetooth-on); return; }
+            if (r == 1) { Commands.scan-bluetooth(); return; }
             let device = Vm.system.devices[r - 2];
-            if (!device.paired) { Host.pair-device(device.address); }
-            else if (device.connected) { Host.disconnect-device(device.address); }
-            else { Host.connect-device(device.address); }
+            if (!device.paired) { Commands.pair-device(device.address); }
+            else if (device.connected) { Commands.disconnect-device(device.address); }
+            else { Commands.connect-device(device.address); }
         }
         Host.play-sound("select");
     }
@@ -93,9 +94,9 @@ export global Sys {
         // Delete (the pad's Select) forgets a saved network or a paired device.
         if (text == Key.Delete) {
             if (root.open == 0 && root.row > 0 && Vm.system.wifi[root.row - 1].saved) {
-                Host.forget-wifi(Vm.system.wifi[root.row - 1].ssid);
+                Commands.forget-wifi(Vm.system.wifi[root.row - 1].ssid);
             } else if (root.open == 2 && root.row > 1 && Vm.system.devices[root.row - 2].paired) {
-                Host.remove-device(Vm.system.devices[root.row - 2].address);
+                Commands.remove-device(Vm.system.devices[root.row - 2].address);
             }
             return true;
         }
@@ -304,7 +305,7 @@ export component SystemSheet inherits Rectangle {
                     text-color: Tokens.color-text;
                     init => { self.focus(); }
                     accepted => {
-                        Host.join-wifi(Sys.asking, self.text);
+                        Commands.join-wifi(Sys.asking, self.text);
                         Sys.asking = "";
                     }
                     key-pressed(event) => {

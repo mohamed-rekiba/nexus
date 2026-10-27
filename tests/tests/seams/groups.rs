@@ -34,14 +34,16 @@ fn number(value: &Value) -> f64 {
     }
 }
 
-/// Each group as (platform, count, titles, selected).
+/// Each group as (platform, count, titles, selected). The count is how many cards it has, as
+/// the theme reads it.
 fn groups(host: &Composed) -> Vec<(String, f64, Vec<String>, f64)> {
     let home = host.instance().get_global_property("Vm", "home").unwrap();
     rows(&field(&home, "groups"))
         .iter()
         .map(|g| {
-            let titles = rows(&field(g, "games")).iter().map(|c| text(&field(c, "title"))).collect();
-            (text(&field(g, "platform")), number(&field(g, "count")), titles, number(&field(g, "selected")))
+            let games = rows(&field(g, "games"));
+            let titles = games.iter().map(|c| text(&field(c, "title"))).collect();
+            (text(&field(g, "platform")), games.len() as f64, titles, number(&field(g, "selected")))
         })
         .collect()
 }

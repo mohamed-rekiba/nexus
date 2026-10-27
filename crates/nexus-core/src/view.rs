@@ -96,6 +96,7 @@ fn compat_vm(info: &CompatInfo) -> CompatVm {
         label: label.into(),
         notes: info.notes.clone().unwrap_or_default(),
         tested: info.tested.clone().unwrap_or_default(),
+        tested_text: String::new(),
     }
 }
 
@@ -139,9 +140,12 @@ fn card(s: &Snapshot, entry: &Entry) -> GameCardVm {
         release_year: entry.summary.release_year,
         rating: library.meta(&entry.key).and_then(|(_, m)| m.rating).map(|r| r.score),
         size_bytes: library.detail(&entry.key).and_then(|d| d.details.size_bytes),
+        size: String::new(),
         last_played_days: last_played_days(s, &entry.key),
+        last_played: String::new(),
         releases: 0,
         availability: String::new(),
+        availability_text: String::new(),
         hidden: false,
         // A Library game's; `offer_card` gives an offer's.
         can: game_actions(s, &entry.key, None),
@@ -281,7 +285,7 @@ pub(crate) fn build(s: &Snapshot) -> AppView {
     let owned = s.ownership();
     let data = s.grid_data(&owned);
     let notices = &s.notices;
-    AppView {
+    let mut view = AppView {
         screen,
         game: game.map(|g| g.to_string()),
         can_go_back: state.nav.len() > 1,
@@ -313,7 +317,10 @@ pub(crate) fn build(s: &Snapshot) -> AppView {
         notice_art: notices.last().and_then(|n| notice_art(&s.library, n)),
         system: system_vm(s),
         result_prompt: state.result_prompt.as_ref().map(|(key, _)| s.library.title(key)),
-    }
+    };
+    plugin_lists(&mut view);
+    crate::display::write(&mut view);
+    view
 }
 
 /// A badge the core gives a card itself.
@@ -417,6 +424,7 @@ fn catalog_vm(s: &Snapshot, data: &GridData, on_screen: bool) -> CatalogVm {
         sources,
         releases: shown_releases,
         updated: counted.or_else(dated).unwrap_or_default().to_owned(),
+        updated_text: String::new(),
         loading: !library.catalogs_read,
         actions: buttons(SlotKind::Action),
         status: buttons(SlotKind::Badge),
@@ -551,6 +559,8 @@ fn detail_vm(s: &Snapshot, owned: &Ownership, key: &GameKey) -> Option<GameDetai
         (this_pc, _, _) => this_pc,
     };
     let home = s.plugins.host().home.as_ref().and_then(|h| h.to_str());
+    let fact = |id: &str| details.facts.iter().find(|f| f.id == id).map(|f| f.value.clone()).unwrap_or_default();
+    let rating = meta.and_then(|(_, m)| m.rating);
     Some(GameDetailVm {
         key: key.to_string(),
         title: summary.title.clone(),
@@ -563,8 +573,13 @@ fn detail_vm(s: &Snapshot, owned: &Ownership, key: &GameKey) -> Option<GameDetai
         cover: shown.cover.map(plugin_image),
         background: shown.background.map(plugin_image),
         logo: shown.logo.map(plugin_image),
-        rating: meta.and_then(|(_, m)| m.rating),
+        rating,
+        rating_score: rating.map_or(0.0, |r| r.score),
+        ratings: rating.map_or(0, |r| r.total),
+        rating_text: String::new(),
         release: text(|m| &m.release),
+        release_text: String::new(),
+        year: String::new(),
         age_rating: meta.map(|(_, m)| m.age_rating.clone()).unwrap_or_default(),
         screenshots: shown.screenshots.into_iter().map(plugin_image).collect(),
         store_url: text(|m| &m.store_url),
@@ -587,11 +602,15 @@ fn detail_vm(s: &Snapshot, owned: &Ownership, key: &GameKey) -> Option<GameDetai
         launch_hint: if can.play && needs_emulator { format!("Play installs {name} first") } else { String::new() },
         running: s.sessions.runs(played),
         size_bytes: details.size_bytes,
+        size: String::new(),
+        region: fact("region"),
+        age: fact("age"),
+        version: fact("version"),
         facts: details.facts.clone(),
         played_secs: stats.secs,
+        played: String::new(),
         last_played_days: last_played_days(s, key),
-        // No plugin reports a shader cache: the plugin API has no seam for one.
-        shader_cache: None,
+        last_played: String::new(),
         releases: offer
             .map(|o| {
                 let today = s.today();
@@ -615,13 +634,17 @@ fn detail_vm(s: &Snapshot, owned: &Ownership, key: &GameKey) -> Option<GameDetai
                         seeders: r.seeders,
                         leechers: r.leechers,
                         counted_at: r.counted_at.clone(),
+                        counted_text: String::new(),
                         availability: crate::releases::availability(r.seeders).into(),
+                        availability_text: String::new(),
                         id: r.id.clone(),
                         store: if r.store.is_empty() { String::new() } else { s.plugins.system(&r.platform).name },
                         version: r.version.clone(),
                         region: r.region.clone(),
                         size_bytes: r.size_bytes,
+                        size: String::new(),
                         added: r.added.clone(),
+                        added_text: String::new(),
                         new: crate::releases::is_new(&r.added, today),
                         description: r.description.clone(),
                         system: crate::releases::system_label(&r.system).into(),
@@ -647,6 +670,7 @@ fn detail_vm(s: &Snapshot, owned: &Ownership, key: &GameKey) -> Option<GameDetai
         availability: offer
             .map(|o| crate::releases::availability(owned.best_release(o).seeders).to_owned())
             .unwrap_or_default(),
+        availability_text: String::new(),
         download_error: torrents
             .download_error
             .as_ref()
@@ -712,6 +736,7 @@ fn downloads_vm(s: &Snapshot, owned: &Ownership) -> DownloadsVm {
         },
         received: j.done,
         total: (j.total > 0).then_some(j.total),
+        progress_text: String::new(),
         state: j.phase.as_str().into(),
         error: j.error.clone().unwrap_or_default(),
         can_pause: false,
@@ -728,6 +753,7 @@ fn downloads_vm(s: &Snapshot, owned: &Ownership) -> DownloadsVm {
         label: j.label,
         received: j.received,
         total: j.total,
+        progress_text: String::new(),
         state: j.phase.as_str().into(),
         error: j.error.unwrap_or_default(),
         can_pause: matches!(j.phase, JobPhase::Queued | JobPhase::Downloading),
@@ -798,12 +824,6 @@ fn install_note(plugins: &Plugins, emulator: &PluginId) -> String {
     if own.is_empty() { archives.to_owned() } else { format!("{own} {archives}") }
 }
 
-/// Sizes for file lists, as the theme's other sizes: `1.5 GB`, `340 MB`.
-fn bytes_label(bytes: u64) -> String {
-    let gb = bytes as f64 / 1e9;
-    if gb >= 1.0 { format!("{gb:.1} GB") } else { format!("{:.0} MB", bytes as f64 / 1e6) }
-}
-
 fn torrent_vm(library: &LibrarySnapshot, installs: &InstallsSnapshot, owned: &Ownership, j: &TorrentJob) -> TorrentVm {
     use crate::torrents::TorrentState as S;
     let install = installs.latest(&j.emulator, &j.source);
@@ -869,12 +889,14 @@ fn torrent_vm(library: &LibrarySnapshot, installs: &InstallsSnapshot, owned: &Ow
             _ => 0,
         },
         peers: j.peers,
+        detail: String::new(),
         seeding: j.seeding,
         verifying: j.verifying,
         waiting_vpn: j.waiting_vpn,
         error: install.and_then(|g| g.error.clone()).or(unpack_error).unwrap_or_else(|| j.error.clone()),
-        files: j.files.iter().map(|f| format!("{} · {}", f.path, bytes_label(f.size))).collect(),
+        files: j.files.iter().map(|f| format!("{} · {}", f.path, crate::display::size_text(f.size))).collect(),
         file_count: j.file_count,
+        file_summary: String::new(),
         folder: j.folder.display().to_string(),
         actions: actions.into_iter().map(str::to_owned).collect(),
         install: install.map(|g| g.phase.as_str().to_owned()).unwrap_or_default(),
@@ -1146,6 +1168,7 @@ fn folders_vm(s: &Snapshot) -> Vec<FolderVm> {
                     paths,
                     default: String::new(),
                     requested_by: Vec::new(),
+                    requested_by_text: String::new(),
                     write: false,
                 }
             });
@@ -1215,6 +1238,7 @@ fn emulators_vm(s: &Snapshot) -> EmulatorsVm {
                 busy: emu.busy,
                 panels: slot_vms(&id, SlotId::EmulatorPanel, emu.panels),
                 controllers: controllers(plugins.manifest(&id)),
+                controllers_text: String::new(),
                 plugin: id,
             }
         })
@@ -1257,7 +1281,28 @@ fn emulators_vm(s: &Snapshot) -> EmulatorsVm {
             },
         })
         .collect();
-    EmulatorsVm { emulators, plugins: rows }
+    EmulatorsVm { emulators, plugins: rows, emulator_plugins: Vec::new(), theme_plugins: Vec::new() }
+}
+
+/// The Emulators and the Themes lists, from every plugin, and the Plugin page's actions and
+/// whether its theme is the one shown.
+fn plugin_lists(view: &mut AppView) {
+    let shown = view.settings.themes.iter().find(|t| t.current).map(|t| t.id.clone());
+    let plugins = &view.emulators.plugins;
+    // Emulators, then the services that describe their games.
+    let kind = |kind: &'static str| plugins.iter().filter(move |p| p.kind == kind).cloned();
+    view.emulators.emulator_plugins = kind("emulator").chain(kind("service")).collect();
+    // A theme's status says whether it is the one shown.
+    view.emulators.theme_plugins = kind("theme")
+        .map(|p| PluginRowVm {
+            status: if shown.as_ref() == Some(&p.id) { "in use".into() } else { String::new() },
+            ..p
+        })
+        .collect();
+    if let Some(page) = &mut view.plugin_page {
+        page.actions = page.sections.iter().filter(|s| s.kind == SlotKind::Action).cloned().collect();
+        page.current = shown.as_ref() == Some(&page.plugin.id);
+    }
 }
 
 /// `build` with the program's name `emulator` once: "shadPS4 v.0.20.0", and
@@ -1285,7 +1330,9 @@ fn plugin_page_vm(s: &Snapshot, plugin: &PluginId) -> Option<PluginPageVm> {
             emulator: None,
             panels: Vec::new(),
             sections: Vec::new(),
+            actions: Vec::new(),
             folders: Vec::new(),
+            current: false,
         });
     }
     let asks: Vec<&str> = s
@@ -1305,6 +1352,8 @@ fn plugin_page_vm(s: &Snapshot, plugin: &PluginId) -> Option<PluginPageVm> {
             .into_iter()
             .filter(|f| nexus_api::shared_folder(&f.name).is_none() && asks.contains(&f.name.as_str()))
             .collect(),
+        actions: Vec::new(),
+        current: false,
         plugin: row,
     })
 }
@@ -1405,6 +1454,7 @@ fn running_vm(snapshot: &Snapshot, route: &Route) -> Option<RunningVm> {
             "starting".into()
         },
         elapsed_secs: snapshot.now.saturating_duration_since(s.started).as_secs(),
+        elapsed: String::new(),
         in_front: sessions.game_in_front,
         keymap: manifest.map(|m| m.keymap.clone()).unwrap_or_default(),
     })

@@ -88,7 +88,11 @@ pub enum GameInstallCmd {
     /// sheet (`~/` for the home folder). `None`: the last one picked for the console, or else
     /// the console's folder in the first game folder. The folder must be inside a game folder.
     /// The download's archives unpack first.
-    Download { id: String, folder: Option<PathBuf> },
+    Download {
+        id: String,
+        #[serde(default, deserialize_with = "crate::typed_text::folder")]
+        folder: Option<PathBuf>,
+    },
     /// Installs a package the plugin listed, with its game installer: the slot action
     /// [`nexus_api::HOST_INSTALL_GAME`].
     Package { plugin: PluginId, source: HostPath },

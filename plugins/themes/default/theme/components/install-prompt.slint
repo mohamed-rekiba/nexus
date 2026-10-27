@@ -1,4 +1,5 @@
 import { Vm, Host } from "../types.slint";
+import { Commands } from "../commands.slint";
 import { Tokens } from "../tokens.slint";
 import { Look } from "look.slint";
 import { Pill } from "widgets.slint";
@@ -14,11 +15,11 @@ export global Prompt {
             root.focus = (text == Key.RightArrow) == Look.rtl ? 0 : 1;
             Host.play-sound("move");
         } else if (text == Key.Return || text == " ") {
-            if (root.focus == 0) { Host.confirm-install(); } else { Host.cancel-install(); }
+            if (root.focus == 0) { Commands.confirm-install(); } else { Commands.cancel-install(); }
             root.focus = 0;
         } else if (text == Key.Escape || text == Key.Backspace) {
             Host.play-sound("back");
-            Host.cancel-install();
+            Commands.cancel-install();
             root.focus = 0;
         }
         true
@@ -88,7 +89,7 @@ export component InstallPrompt inherits Rectangle {
                 if Look.rtl : Pill {
                     text: "Not now";
                     focused: Prompt.focus == 1;
-                    clicked => { Prompt.focus = 0; Host.cancel-install(); }
+                    clicked => { Prompt.focus = 0; Commands.cancel-install(); }
                 }
                 Pill {
                     text: "Install and play";
@@ -96,12 +97,12 @@ export component InstallPrompt inherits Rectangle {
                     primary: true;
                     focused: Prompt.focus == 0;
                     dim: Prompt.focus != 0;
-                    clicked => { Prompt.focus = 0; Host.confirm-install(); }
+                    clicked => { Prompt.focus = 0; Commands.confirm-install(); }
                 }
                 if !Look.rtl : Pill {
                     text: "Not now";
                     focused: Prompt.focus == 1;
-                    clicked => { Prompt.focus = 0; Host.cancel-install(); }
+                    clicked => { Prompt.focus = 0; Commands.cancel-install(); }
                 }
             }
         }

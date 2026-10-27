@@ -4,10 +4,9 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::time::SystemTime;
 
-use nexus_api::{GameKey, JobId, PluginId, SessionId};
-use nexus_core::system::SystemCommand;
-use nexus_core::{Command, Core, GameInstallCmd, Grid, Pref, Route, SessionCmd, TorrentCmd, VpnCmd};
-use nexus_ui_api::{ScreenId, ThemeError};
+use nexus_api::{GameKey, PluginId};
+use nexus_core::{Command, Core, Route, SessionCmd};
+use nexus_ui_api::ThemeError;
 use slint_interpreter::{ComponentDefinition, ComponentHandle, ComponentInstance, Image, SharedString, Value};
 
 use crate::bind::{self, Viewport};
@@ -270,10 +269,28 @@ impl ThemeHost {
                 .unwrap_or_default()
         });
         let size = self.size.unwrap_or(view.settings.scale);
-        let viewport =
-            Viewport { width, height, scale, size, breakpoint: merged.breakpoint(width, height, scale), input_mode };
-        for (name, value) in bind::vm_values(view, &self.images, &self.cards, &viewport) {
-            bind::set(instance, "Vm", name, value)?;
+        let aspect = if height > 0.0 { width / height } else { 0.0 };
+        let breakpoint = merged.breakpoint(width, height, scale);
+        let trailer = self.trailer.clone().unwrap_or_default();
+        let host = bind::HostVm {
+            viewport: Viewport { width, height, scale, size, aspect, breakpoint },
+            input_mode: &input_mode,
+            clock: &self.clock,
+            can_play_trailers: self.trailers,
+            pad_name: &self.pad_name,
+            monitors: &self.monitors,
+            monitor: self.core.prefs().monitor.unwrap_or_default(),
+            has_trailer: self.trailer.is_some(),
+            trailer: bind::TrailerVm {
+                playing: trailer.playing,
+                loading: trailer.loading,
+                position: trailer.position,
+                duration: trailer.duration,
+            },
+        };
+        let values = bind::vm_values(view, &self.images, &self.cards)?;
+        for (name, value) in values.into_iter().chain(bind::host_values(&host, &self.images)?) {
+            bind::set(instance, "Vm", &name, value)?;
         }
         Ok(())
     }
@@ -309,32 +326,6 @@ impl ThemeHost {
         }
         let live = self.live.as_ref().expect("checked above");
         (self.fullscreen)(live.instance.window(), self.core.prefs().fullscreen && !self.windowed);
-        live.instance
-            .set_global_property("Vm", "clock", Value::String(self.clock.as_str().into()))
-            .map_err(|e| ThemeError::Binding { theme: id.clone(), message: e.to_string() })?;
-        let trailer = self.trailer.clone().unwrap_or_default();
-        let mut fields = slint_interpreter::Struct::default();
-        fields.set_field("playing".into(), Value::Bool(trailer.playing));
-        fields.set_field("loading".into(), Value::Bool(trailer.loading));
-        fields.set_field("position".into(), Value::Number(trailer.position));
-        fields.set_field("duration".into(), Value::Number(trailer.duration));
-        for (name, value) in [
-            ("can-play-trailers", Value::Bool(self.trailers)),
-            ("pad-name", Value::String(self.pad_name.as_str().into())),
-            (
-                "monitors",
-                Value::Model(slint::ModelRc::new(slint::VecModel::from(
-                    self.monitors.iter().map(|m| Value::String(m.as_str().into())).collect::<Vec<_>>(),
-                ))),
-            ),
-            ("monitor", Value::String(self.core.prefs().monitor.unwrap_or_default().into())),
-            ("has-trailer", Value::Bool(self.trailer.is_some())),
-            ("trailer", Value::Struct(fields)),
-        ] {
-            live.instance
-                .set_global_property("Vm", name, value)
-                .map_err(|e| ThemeError::Binding { theme: id.clone(), message: e.to_string() })?;
-        }
         self.images.begin_render();
         let bound = self
             .bind_view(&live.instance, &live.resolved, &view)
@@ -538,7 +529,8 @@ impl ThemeHost {
         result.map(|()| true)
     }
 
-    /// Connects the theme's `Host` callbacks to requests.
+    /// Connects the theme's `Host` callbacks to requests: `command` to the core, the others to
+    /// the app.
     fn wire(&self, instance: &ComponentInstance, theme: &PluginId) -> Result<(), ThemeError> {
         let callback = |name: &str, f: ToRequest| {
             let requests = self.requests.clone();
@@ -551,236 +543,31 @@ impl ThemeHost {
                 })
                 .map_err(|e| ThemeError::Binding { theme: theme.clone(), message: format!("Host.{name}: {e}") })
         };
-        let core = |c: Command| Some(UiRequest::Core(c));
-        let pref = move |p: Pref, value: serde_json::Value| core(Command::Pref(p, value));
-        callback("navigate", Box::new(move |a| route(&arg(a, 0)).and_then(|r| core(Command::Navigate(r)))))?;
-        callback("back", Box::new(move |_| core(Command::Back)))?;
         callback(
-            "open-plugin",
-            Box::new(move |a| plugin(a, 0).map(Route::Plugin).map(Command::Navigate).and_then(core)),
-        )?;
-        callback(
-            "set-plugin-enabled",
-            Box::new(move |a| {
-                let enabled = matches!(a.get(1), Some(Value::Bool(true)));
-                plugin(a, 0).and_then(|plugin| core(Command::SetPluginEnabled { plugin, enabled }))
+            "command",
+            Box::new(move |a| match command(&arg(a, 0), &arg(a, 1)) {
+                Ok(command) => Some(UiRequest::Core(command)),
+                Err(error) => {
+                    tracing::warn!(name = %arg(a, 0), args = %arg(a, 1), %error, "the theme sent a command that doesn't read");
+                    None
+                }
             }),
         )?;
-        callback("select", Box::new(move |a| game(a, 0).map(Command::Select).and_then(core)))?;
-        callback("open-game", Box::new(move |a| game(a, 0).map(Command::OpenGame).and_then(core)))?;
-        callback("uninstall-game", Box::new(move |a| game(a, 0).map(Command::UninstallGame).and_then(core)))?;
-        callback(
-            "hide-game",
-            Box::new(move |a| {
-                let hidden = matches!(a.get(1), Some(Value::Bool(true)));
-                game(a, 0).and_then(|game| core(Command::Library(nexus_core::LibraryCmd::Hide { game, hidden })))
-            }),
-        )?;
-        callback("search", Box::new(move |a| core(Command::Search(arg(a, 0)))))?;
         // A grid's cards on screen: the covers near them load.
         let windows = self.images.windows();
         callback(
             "grid-window",
             Box::new(move |a| {
-                let window = Window { first: int(a, 1) as usize, last: int(a, 2) as usize };
+                let window = Window { first: int(a, 1), last: int(a, 2) };
                 let changed = windows.borrow_mut().insert(arg(a, 0), window) != Some(window);
                 changed.then_some(UiRequest::Render)
             }),
         )?;
-        callback(
-            "grid-columns",
-            Box::new(move |a| {
-                grid(&arg(a, 0))
-                    .and_then(|grid| core(Command::GridColumns { grid, columns: int(a, 1).max(1) as usize }))
-            }),
-        )?;
-        callback("launch", Box::new(move |a| game(a, 0).map(SessionCmd::Launch).map(Command::Session).and_then(core)))?;
-        callback("stop", Box::new(move |a| core(Command::Session(SessionCmd::Stop(SessionId(int(a, 0)))))))?;
-        // The contract keeps the callback, but no plugin reports a shader cache to clear.
-        callback("clear-shader-cache", Box::new(|_| None))?;
-        callback("pause-download", Box::new(move |a| core(Command::PauseDownload(JobId(int(a, 0))))))?;
-        callback("resume-download", Box::new(move |a| core(Command::ResumeDownload(JobId(int(a, 0))))))?;
-        callback("cancel-download", Box::new(move |a| core(Command::CancelDownload(JobId(int(a, 0))))))?;
-        callback(
-            "download-release",
-            Box::new(move |a| {
-                game(a, 0).and_then(|offer| {
-                    let folder = Some(arg(a, 2)).filter(|f| !f.trim().is_empty()).map(|f| f.trim().into());
-                    core(Command::Torrent(TorrentCmd::Download { offer, release: arg(a, 1), folder }))
-                })
-            }),
-        )?;
-        callback(
-            "install-download",
-            Box::new(move |a| {
-                let folder = Some(arg(a, 1)).filter(|f| !f.trim().is_empty()).map(|f| f.trim().into());
-                core(Command::GameInstall(GameInstallCmd::Download { id: arg(a, 0), folder }))
-            }),
-        )?;
-        callback(
-            "torrent-action",
-            Box::new(move |a| {
-                use nexus_core::TorrentAction as T;
-                let id = arg(a, 0);
-                let install = |command| core(Command::GameInstall(command));
-                let action = match arg(a, 1).as_str() {
-                    "start" => T::Start,
-                    "pause" => T::Pause,
-                    "cancel" => T::Cancel,
-                    "remove" => T::Remove,
-                    "delete-files" => T::DeleteFiles,
-                    "stop-seeding" => T::StopSeeding,
-                    "remove-unpacked" => return install(GameInstallCmd::RemoveUnpacked { id }),
-                    "install" => return install(GameInstallCmd::Download { id, folder: None }),
-                    "cancel-install" => return install(GameInstallCmd::Cancel { id }),
-                    "open-store" => T::OpenStore,
-                    _ => return None,
-                };
-                core(Command::Torrent(TorrentCmd::Act { id, action }))
-            }),
-        )?;
-        callback(
-            "set-seed-downloads",
-            Box::new(move |a| {
-                core(Command::Torrent(TorrentCmd::SeedDownloads(matches!(a.first(), Some(Value::Bool(true))))))
-            }),
-        )?;
-        callback("set-vpn-only", Box::new(move |a| core(Command::Vpn(VpnCmd::SetOnly(flag(a, 0))))))?;
-        callback("set-vpn", Box::new(move |a| core(Command::Vpn(VpnCmd::Choose(arg(a, 0))))))?;
-        callback("connect-vpn", Box::new(move |a| core(Command::Vpn(VpnCmd::Connect(arg(a, 0))))))?;
-        callback("disconnect-vpn", Box::new(move |a| core(Command::Vpn(VpnCmd::Disconnect(arg(a, 0))))))?;
-        callback(
-            "import-vpn",
-            Box::new(move |a| {
-                let path = arg(a, 0);
-                (!path.trim().is_empty()).then(|| core(Command::Vpn(VpnCmd::Import(path.trim().into())))).flatten()
-            }),
-        )?;
-        callback(
-            "install",
-            Box::new(move |a| {
-                let version = Some(arg(a, 1)).filter(|v| !v.is_empty());
-                plugin(a, 0).and_then(|plugin| core(Command::InstallEmulator { plugin, version }))
-            }),
-        )?;
-        callback(
-            "update",
-            Box::new(move |a| plugin(a, 0).and_then(|plugin| core(Command::UpdateEmulator { plugin }))),
-        )?;
-        callback(
-            "uninstall",
-            Box::new(move |a| {
-                plugin(a, 0).and_then(|plugin| core(Command::UninstallEmulator { plugin, version: arg(a, 1) }))
-            }),
-        )?;
-        callback(
-            "run-action",
-            Box::new(move |a| {
-                let args = serde_json::from_str(&arg(a, 3)).unwrap_or(serde_json::Value::Null);
-                let game = game(a, 2);
-                plugin(a, 0).and_then(|plugin| core(Command::RunAction { plugin, action: arg(a, 1), game, args }))
-            }),
-        )?;
-        callback(
-            "set-setting",
-            Box::new(move |a| {
-                let scope = serde_json::from_str(&arg(a, 1)).unwrap_or(nexus_api::ConfigScope::Emulator);
-                plugin(a, 0).and_then(|plugin| {
-                    core(Command::SetConfigField { plugin, scope, key: arg(a, 2), value: arg(a, 3) })
-                })
-            }),
-        )?;
-        callback(
-            "set-theme-option",
-            Box::new(move |a| core(Command::SetThemeOption { key: arg(a, 0), value: arg(a, 1) })),
-        )?;
-        callback(
-            "set-folder",
-            Box::new(move |a| core(Command::SetFolders { name: arg(a, 0), paths: split_folders(&arg(a, 1)) })),
-        )?;
         callback("switch-theme", Box::new(move |a| PluginId::new(arg(a, 0)).ok().map(UiRequest::SwitchTheme)))?;
-        callback("set-fullscreen", Box::new(move |a| pref(Pref::Fullscreen, flag(a, 0).into())))?;
-        callback("set-return-on-exit", Box::new(move |a| pref(Pref::ReturnOnExit, flag(a, 0).into())))?;
-        callback("show-game", Box::new(move |a| core(Command::Session(SessionCmd::ShowGame(SessionId(int(a, 0)))))))?;
-        callback("finish-welcome", Box::new(move |_| pref(Pref::Welcomed, true.into())))?;
-        callback("library-search", Box::new(move |a| core(Command::LibrarySearch(arg(a, 0)))))?;
-        callback(
-            "report-result",
-            Box::new(move |a| core(Command::ReportResult(Some(arg(a, 0)).filter(|r| !r.is_empty())))),
-        )?;
-        let some = |s: String| (!s.is_empty()).then_some(s);
-        callback("library-system", Box::new(move |a| core(Command::LibrarySystem(some(arg(a, 0))))))?;
-        callback("library-genre", Box::new(move |a| core(Command::LibraryGenre(some(arg(a, 0))))))?;
-        callback("library-sort", Box::new(move |a| core(Command::LibrarySort(arg(a, 0)))))?;
-        callback("library-more", Box::new(move |_| core(Command::LibraryMore)))?;
-        callback("catalog-search", Box::new(move |a| core(Command::CatalogSearch(arg(a, 0)))))?;
-        callback("catalog-system", Box::new(move |a| core(Command::CatalogSystem(some(arg(a, 0))))))?;
-        callback("catalog-genre", Box::new(move |a| core(Command::CatalogGenre(some(arg(a, 0))))))?;
-        callback("catalog-sort", Box::new(move |a| core(Command::CatalogSort(arg(a, 0)))))?;
-        callback("catalog-more", Box::new(move |_| core(Command::CatalogMore)))?;
-        callback("set-sounds", Box::new(move |a| pref(Pref::Sounds, flag(a, 0).into())))?;
-        callback("set-auto-update", Box::new(move |a| pref(Pref::AutoUpdate, flag(a, 0).into())))?;
-        callback(
-            "set-scale",
-            Box::new(move |a| match a.first() {
-                Some(Value::Number(size)) => pref(Pref::Scale, (*size as f32).into()),
-                _ => None,
-            }),
-        )?;
-        callback("set-start-at-login", Box::new(move |a| pref(Pref::StartAtLogin, flag(a, 0).into())))?;
-        callback("confirm-install", Box::new(move |_| core(Command::ConfirmInstall)))?;
-        callback("cancel-install", Box::new(move |_| core(Command::CancelInstall)))?;
-        callback("dismiss-notices", Box::new(move |_| core(Command::Notice(nexus_core::NoticeCmd::DismissAll))))?;
-        callback(
-            "dismiss-notice",
-            Box::new(move |a| core(Command::Notice(nexus_core::NoticeCmd::Dismiss(int(a, 0))))),
-        )?;
-        callback("open-notice", Box::new(move |a| core(Command::Notice(nexus_core::NoticeCmd::Open(int(a, 0))))))?;
-        callback("refresh-library", Box::new(move |_| core(Command::Library(nexus_core::LibraryCmd::Refresh))))?;
         callback("play-sound", Box::new(move |a| Some(UiRequest::PlaySound(arg(a, 0)))))?;
         callback("quit", Box::new(move |_| Some(UiRequest::Quit)))?;
-        // Empty: the monitor the launcher is on.
-        callback("set-monitor", Box::new(move |a| pref(Pref::Monitor, arg(a, 0).into())))?;
-        callback(
-            "open-game-settings",
-            Box::new(move |a| game(a, 0).and_then(|g| core(Command::Navigate(Route::GameSettings(g))))),
-        )?;
         callback("restart", Box::new(move |_| Some(UiRequest::Restart)))?;
-        callback(
-            "check-launcher-update",
-            Box::new(move |_| core(Command::LauncherUpdate(nexus_core::LauncherUpdateCmd::Check))),
-        )?;
-        callback(
-            "download-launcher-update",
-            Box::new(move |_| core(Command::LauncherUpdate(nexus_core::LauncherUpdateCmd::Download))),
-        )?;
-        let system = |c: SystemCommand| Some(UiRequest::Core(Command::System(c)));
-        callback("refresh-system", Box::new(move |_| system(SystemCommand::Refresh)))?;
-        callback("scan-wifi", Box::new(move |_| system(SystemCommand::ScanWifi)))?;
-        callback(
-            "join-wifi",
-            Box::new(move |a| {
-                let password = Some(arg(a, 1)).filter(|p| !p.is_empty());
-                system(SystemCommand::JoinWifi { ssid: arg(a, 0), password })
-            }),
-        )?;
-        callback("forget-wifi", Box::new(move |a| system(SystemCommand::ForgetWifi(arg(a, 0)))))?;
-        callback("set-bluetooth", Box::new(move |a| system(SystemCommand::SetBluetooth(flag(a, 0)))))?;
-        callback("scan-bluetooth", Box::new(move |_| system(SystemCommand::ScanBluetooth)))?;
-        callback("pair-device", Box::new(move |a| system(SystemCommand::Pair(arg(a, 0)))))?;
-        callback("connect-device", Box::new(move |a| system(SystemCommand::ConnectDevice(arg(a, 0)))))?;
-        callback("disconnect-device", Box::new(move |a| system(SystemCommand::DisconnectDevice(arg(a, 0)))))?;
-        callback("remove-device", Box::new(move |a| system(SystemCommand::RemoveDevice(arg(a, 0)))))?;
-        callback("set-audio-output", Box::new(move |a| system(SystemCommand::SetOutput(arg(a, 0)))))?;
-        callback("set-volume", Box::new(move |a| system(SystemCommand::SetVolume(int(a, 0).min(100) as u8))))?;
-        callback("set-muted", Box::new(move |a| system(SystemCommand::SetMuted(flag(a, 0)))))?;
-        callback("restart-pc", Box::new(move |_| system(SystemCommand::Restart)))?;
         callback("log-out", Box::new(move |_| Some(UiRequest::LogOut)))?;
-        callback("shut-down-pc", Box::new(move |_| system(SystemCommand::ShutDown)))?;
-        callback("check-os-update", Box::new(move |_| system(SystemCommand::CheckOsUpdate)))?;
-        callback("install-os", Box::new(move |a| system(SystemCommand::InstallOs(arg(a, 0).into()))))?;
-        callback("choose-partitions", Box::new(move |_| system(SystemCommand::ChoosePartitions)))?;
-        callback("cancel-system-job", Box::new(move |a| system(SystemCommand::CancelJob(int(a, 0)))))?;
         let trailer = |r: TrailerRequest| Some(UiRequest::Trailer(r));
         callback(
             "play-trailer",
@@ -812,13 +599,25 @@ impl ThemeHost {
             "open-game-log",
             Box::new(move |a| game(a, 0).and_then(|g| logs.game_log(&g)).map(UiRequest::OpenPath)),
         )?;
-        callback("ask-result", Box::new(move |a| game(a, 0).and_then(|g| core(Command::AskResult(g)))))?;
         callback(
             "open-url",
             Box::new(move |a| Some(arg(a, 0)).filter(|u| u.starts_with("https://")).map(UiRequest::OpenUrl)),
         )?;
         Ok(())
     }
+}
+
+/// The command a theme sent with `Host.command`: the name of a [`Command`] variant, and its
+/// payload as JSON, empty for none.
+fn command(name: &str, args: &str) -> Result<Command, String> {
+    let json = if args.trim().is_empty() {
+        serde_json::json!(name)
+    } else {
+        let payload: serde_json::Value =
+            serde_json::from_str(args).map_err(|e| format!("the args aren't JSON: {e}"))?;
+        serde_json::json!({ name: payload })
+    };
+    serde_json::from_value(json).map_err(|e| e.to_string())
 }
 
 fn arg(args: &[Value], i: usize) -> String {
@@ -828,45 +627,15 @@ fn arg(args: &[Value], i: usize) -> String {
     }
 }
 
-fn flag(args: &[Value], i: usize) -> bool {
-    matches!(args.get(i), Some(Value::Bool(true)))
-}
-
-fn int(args: &[Value], i: usize) -> u64 {
+fn int(args: &[Value], i: usize) -> usize {
     match args.get(i) {
-        Some(Value::Number(n)) if *n >= 0.0 => *n as u64,
+        Some(Value::Number(n)) if *n >= 0.0 => *n as usize,
         _ => 0,
     }
 }
 
 fn game(args: &[Value], i: usize) -> Option<GameKey> {
     arg(args, i).parse().ok()
-}
-
-fn plugin(args: &[Value], i: usize) -> Option<PluginId> {
-    PluginId::new(arg(args, i)).ok()
-}
-
-/// The grid a theme names: "library" or "catalog".
-fn grid(name: &str) -> Option<Grid> {
-    match name {
-        "library" => Some(Grid::Library),
-        "catalog" => Some(Grid::Catalog),
-        _ => None,
-    }
-}
-
-fn route(screen: &str) -> Option<Route> {
-    Some(match ScreenId::parse(screen)? {
-        ScreenId::Home => Route::Home,
-        ScreenId::Catalog => Route::Catalog,
-        ScreenId::Downloads => Route::Downloads,
-        ScreenId::Settings => Route::Settings,
-        ScreenId::Emulators => Route::Emulators,
-        ScreenId::Themes => Route::Themes,
-        // These need a game, a plugin or a session; themes reach them through other callbacks.
-        ScreenId::GameDetail | ScreenId::Plugin | ScreenId::GameSettings | ScreenId::Running => return None,
-    })
 }
 
 /// For tests: the value of a `Vm` property on the live instance, as text when it is text.
@@ -877,18 +646,35 @@ pub fn vm_text(instance: &ComponentInstance, name: &str) -> Option<String> {
     }
 }
 
-/// The folders in a Settings text: separated by `;`, each trimmed, empty ones left out.
-pub fn split_folders(text: &str) -> Vec<std::path::PathBuf> {
-    text.split(';').map(str::trim).filter(|p| !p.is_empty()).map(std::path::PathBuf::from).collect()
-}
-
 #[cfg(test)]
-mod folder_text_tests {
-    use super::split_folders;
+mod tests {
+    use nexus_core::{Command, LibraryCmd, SessionCmd, TorrentAction, TorrentCmd};
+
+    use super::command;
 
     #[test]
-    fn folders_are_separated_by_semicolons() {
-        let paths = split_folders(" /games/a ; /mnt/b c;; ");
-        assert_eq!(paths, [std::path::PathBuf::from("/games/a"), "/mnt/b c".into()]);
+    fn a_command_reads_by_its_name_and_its_json_args() {
+        assert_eq!(command("Back", ""), Ok(Command::Back));
+        assert_eq!(command("LibrarySystem", "null"), Ok(Command::LibrarySystem(None)));
+        assert_eq!(command("Library", "\"Refresh\""), Ok(Command::Library(LibraryCmd::Refresh)));
+        let key: nexus_api::GameKey = "emu:astro".parse().unwrap();
+        assert_eq!(command("Session", r#"{"Launch":"emu:astro"}"#), Ok(Command::Session(SessionCmd::Launch(key))));
+        assert_eq!(
+            command("Torrent", r#"{"Act":{"id":"abc","action":"StopSeeding"}}"#),
+            Ok(Command::Torrent(TorrentCmd::Act { id: "abc".into(), action: TorrentAction::StopSeeding }))
+        );
+    }
+
+    #[test]
+    fn a_command_that_doesn_t_read_is_refused() {
+        assert!(command("Launch", "").is_err(), "no such command");
+        assert!(command("Select", "emu:astro").is_err(), "the args aren't JSON");
+        assert!(command("Select", "3").is_err(), "the args are of the wrong type");
+    }
+
+    #[test]
+    fn a_blank_folder_is_the_one_the_sheet_offers() {
+        let read = command("Torrent", r#"{"Download":{"offer":"emu:astro","release":"r","folder":"  "}}"#);
+        assert!(matches!(read, Ok(Command::Torrent(TorrentCmd::Download { folder: None, .. }))), "{read:?}");
     }
 }

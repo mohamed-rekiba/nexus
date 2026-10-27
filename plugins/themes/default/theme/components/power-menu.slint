@@ -1,4 +1,5 @@
 import { Vm, Host } from "../types.slint";
+import { Commands } from "../commands.slint";
 import { Tokens } from "../tokens.slint";
 import { Look } from "look.slint";
 import { MenuRow } from "game-menu.slint";
@@ -59,8 +60,8 @@ export global PowerMenu {
         Host.play-sound("select");
         if (id == "log-out") { Host.log-out(); }
         if (id == "quit") { Host.quit(); }
-        if (id == "restart") { Host.restart-pc(); }
-        if (id == "shut-down") { Host.shut-down-pc(); }
+        if (id == "restart") { Commands.restart-pc(); }
+        if (id == "shut-down") { Commands.shut-down-pc(); }
     }
 }
 

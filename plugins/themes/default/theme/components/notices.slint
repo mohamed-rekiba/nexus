@@ -1,4 +1,5 @@
 import { Vm, Host, Notice } from "../types.slint";
+import { Commands } from "../commands.slint";
 import { Tokens } from "../tokens.slint";
 import { Look } from "look.slint";
 import { Icon } from "icon.slint";
@@ -69,7 +70,7 @@ component NoticeCard inherits Rectangle {
     Timer {
         interval: Tokens.motion-slow;
         running: root.leaving && !root.gone;
-        triggered => { root.gone = true; Host.dismiss-notice(root.notice.id); }
+        triggered => { root.gone = true; Commands.dismiss-notice(root.notice.id); }
     }
     width: 480 * Look.px;
     height: row.preferred-height;
@@ -121,8 +122,8 @@ component NoticeCard inherits Rectangle {
                     accessible-role: button;
                     accessible-label: "notice-open";
                     accessible-value: root.notice.opens;
-                    accessible-action-default => { Host.open-notice(root.notice.id); }
-                    TouchArea { mouse-cursor: pointer; clicked => { Host.open-notice(root.notice.id); } }
+                    accessible-action-default => { Commands.open-notice(root.notice.id); }
+                    TouchArea { mouse-cursor: pointer; clicked => { Commands.open-notice(root.notice.id); } }
                 }
             }
             if !Look.rtl : VerticalLayout {

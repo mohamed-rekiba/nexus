@@ -122,6 +122,7 @@ pub enum Command {
     /// Maps a named host folder to these folders. Empty goes back to the plugins' default.
     SetFolders {
         name: String,
+        #[serde(deserialize_with = "crate::typed_text::folder_list")]
         paths: Vec<std::path::PathBuf>,
     },
     /// Sets one of the player's preferences: sounds, full screen, size, the monitor and so

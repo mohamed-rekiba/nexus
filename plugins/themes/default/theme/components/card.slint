@@ -1,4 +1,5 @@
 import { Vm, Host, GameCard } from "../types.slint";
+import { Commands } from "../commands.slint";
 import { Icon } from "icon.slint";
 import { Tokens } from "../tokens.slint";
 import { Look } from "look.slint";
@@ -82,7 +83,7 @@ export component Card inherits Rectangle {
                 accessible-role: button;
                 accessible-label: "card-hide";
                 accessible-value: (root.game.hidden ? "Show " : "Hide ") + root.game.title;
-                accessible-action-default => { Host.hide-game(root.game.key, !root.game.hidden); }
+                accessible-action-default => { Commands.hide-game(root.game.key, !root.game.hidden); }
                 Icon {
                     width: parent.width * 0.6;
                     height: self.width;
@@ -90,7 +91,7 @@ export component Card inherits Rectangle {
                 }
                 eye := TouchArea {
                     mouse-cursor: pointer;
-                    clicked => { Host.hide-game(root.game.key, !root.game.hidden); }
+                    clicked => { Commands.hide-game(root.game.key, !root.game.hidden); }
                 }
             }
             // The game's main action, the same for every game (`GameCard.can`): Play when it
@@ -115,9 +116,9 @@ export component Card inherits Rectangle {
                 accessible-action-default => { self.act(); }
                 function act() {
                     if (self.plays) {
-                        Host.launch(root.game.key);
+                        Commands.launch(root.game.key);
                     } else if (root.game.can.get-store != "") {
-                        Host.download-release(root.game.key, root.game.can.get-release, "");
+                        Commands.download-release(root.game.key, root.game.can.get-release, "");
                     } else {
                         Nav.to-releases = true;
                         root.activated();

@@ -9,12 +9,15 @@
 
 mod bind;
 mod compile;
+#[cfg(test)]
+mod drift;
 mod host;
 mod images;
 mod input;
 mod loader;
 mod shell;
 mod themes;
+mod values;
 
 pub use bind::Viewport;
 pub use compile::{VFS_ROOT, sources};

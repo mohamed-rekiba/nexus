@@ -30,8 +30,20 @@ fn every_default_screen_renders() {
     });
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
-    for screen in ["home", "catalog", "downloads", "settings", "emulators", "themes"] {
-        host.instance().invoke_global("Host", "navigate", &[slint_interpreter::Value::String(screen.into())]).unwrap();
+    let routes = [
+        ("home", "Home"),
+        ("catalog", "Catalog"),
+        ("downloads", "Downloads"),
+        ("settings", "Settings"),
+        ("emulators", "Emulators"),
+        ("themes", "Themes"),
+    ];
+    for (screen, route) in routes {
+        let args = [
+            slint_interpreter::Value::String("Navigate".into()),
+            slint_interpreter::Value::String(format!("{route:?}").into()),
+        ];
+        host.instance().invoke_global("Host", "command", &args).unwrap();
         host.pump();
         assert_eq!(nexus_ui_host::vm_text(host.instance(), "screen").as_deref(), Some(screen));
     }
@@ -117,7 +129,7 @@ fn a_theme_built_for_another_ui_api_is_refused() {
     let dir = tempfile::tempdir().unwrap();
     write_theme(dir.path(), "future", "extends = \"default\"", &[]);
     let toml = dir.path().join("future/theme.toml");
-    let text = std::fs::read_to_string(&toml).unwrap().replace("ui_api = \"^0.1\"", "ui_api = \"^9\"");
+    let text = std::fs::read_to_string(&toml).unwrap().replace("ui_api = \"^0.2\"", "ui_api = \"^9\"");
     std::fs::write(&toml, text).unwrap();
     let mut host = composed(|h| h.discover(dir.path()));
 
@@ -200,9 +212,17 @@ fn the_default_settings_screen_maps_a_folder_through_the_host() {
     settle(&mut host);
 
     assert_eq!(host.count("folder:games"), 1, "a row for the folder");
-    let value = slint_interpreter::Value::String(games.path().display().to_string().into());
+    // As the theme sends the folder's text.
+    let args = serde_json::json!({ "name": "games", "paths": games.path().display().to_string() });
     host.instance()
-        .invoke_global("Host", "set-folder", &[slint_interpreter::Value::String("games".into()), value])
+        .invoke_global(
+            "Host",
+            "command",
+            &[
+                slint_interpreter::Value::String("SetFolders".into()),
+                slint_interpreter::Value::String(args.to_string().into()),
+            ],
+        )
         .unwrap();
     host.pump();
 

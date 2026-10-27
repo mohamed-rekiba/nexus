@@ -276,7 +276,7 @@ pub fn write_theme(parent: &Path, theme_id: &str, theme_section: &str, files: &[
         dir.join("theme.toml"),
         format!(
             "id = \"{theme_id}\"\nkind = \"theme\"\nname = \"{theme_id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
-             capabilities = [\"theme\"]\n[runtime]\ntype = \"data\"\n[theme]\nui_api = \"^0.1\"\n{theme_section}\n"
+             capabilities = [\"theme\"]\n[runtime]\ntype = \"data\"\n[theme]\nui_api = \"^0.2\"\n{theme_section}\n"
         ),
     )
     .unwrap();

@@ -147,7 +147,11 @@ fn a_theme_option_changes_tokens_live_without_rebuilding_the_view() {
     let before = host.instance().as_weak();
 
     host.instance()
-        .invoke_global("Host", "set-theme-option", &[Value::String("accent".into()), Value::String("#ff0000".into())])
+        .invoke_global(
+            "Host",
+            "command",
+            &[Value::String("SetThemeOption".into()), Value::String(r##"{"key":"accent","value":"#ff0000"}"##.into())],
+        )
         .unwrap();
     host.pump();
 
