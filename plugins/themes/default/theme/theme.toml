@@ -10,7 +10,7 @@ activation = "eager"
 # contract. Every value is laid out on a 1920×1080 canvas and scaled to the window.
 [theme]
 ui_api = "^0.2.0"
-screens = ["home", "game-detail", "catalog", "downloads", "settings", "emulators", "themes", "plugin", "running"]
+screens = ["home", "game-detail", "catalog", "downloads", "settings", "emulators", "themes", "plugin", "running", "game-settings"]
 components = ["card", "button", "list-item", "progress-bar", "dialog", "slot-badges", "slot-actions", "slot-sections"]
 input = ["gamepad", "pointer"]
 navigation = "focus"
