@@ -25,9 +25,9 @@
 //! - It publishes each change of its state as [`Area::Torrents`] on the core's change signal.
 //! - What other areas must do about it goes out as events ([`TorrentEvent`]): the core turns a
 //!   finished download into an unpack and a notice. It never calls into the core.
-//! - A command that needs another area first (a catalog's release, a game folder, an install)
-//!   is resolved by the core, which then hands the subsystem plain data
-//!   ([`TorrentsSubsystem::add`]). The fields other areas still write on a download
+//! - A command that needs another area first (a catalog's release, a packages folder) is
+//!   resolved by the core, which then hands the subsystem plain data
+//!   ([`TorrentsSubsystem::add`]). The fields the game installs write on a download
 //!   ([`HandOff`]) change through one call ([`TorrentsSubsystem::hand_off`]).
 //!
 //! Locks: the subsystem never calls out while it holds its lock, and the core never takes it
@@ -71,8 +71,8 @@ pub(crate) fn no_room(needed: u64, free: u64, place: &str) -> Option<String> {
     })
 }
 
-/// The fields of a download that other areas write: the unpacking of its archives and the
-/// install from it. They are saved with the download.
+/// The fields of a download that the game installs write ([`crate::game_installs`]): the
+/// unpacking of its archives and the install from it. They are saved with the download.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub(crate) struct HandOff {
     /// Its archives, found when it finished.
@@ -171,18 +171,12 @@ pub enum TorrentAction {
     /// their unpacked copies. An installed game is elsewhere and stays.
     DeleteFiles,
     StopSeeding,
-    /// Hand a finished download to the emulator's game installer, after its archives are
-    /// unpacked.
-    Install,
-    /// Delete the unpacked archives; the torrent's files stay.
-    RemoveUnpacked,
-    /// Stop the install of the download; what it wrote goes.
-    CancelInstall,
     /// A store's install: open the store's own Downloads page.
     OpenStore,
 }
 
-/// What the player asks of the catalogs' downloads.
+/// What the player asks of the catalogs' downloads. Installing one is a
+/// [`crate::GameInstallCmd`].
 #[derive(Clone, Debug, PartialEq)]
 pub enum TorrentCmd {
     /// Downloads a release of a game the catalogs offer: the player agreed. It reads the
@@ -196,10 +190,6 @@ pub enum TorrentCmd {
         /// first packages folder.
         folder: Option<PathBuf>,
     },
-    /// Installs a finished download into the game folder the player picked on the install
-    /// sheet (`~/` for the home folder). `None`: the last one picked for the console, or else
-    /// the console's folder in the first game folder. The folder must be inside a game folder.
-    Install { id: String, folder: Option<PathBuf> },
     /// The player's action on a download, by its id.
     Act { id: String, action: TorrentAction },
     /// "Keep sharing finished downloads": on seeds them; off stops every one.
@@ -375,15 +365,14 @@ impl TorrentsSubsystem {
         Some(out)
     }
 
-    /// Changes the fields other areas write on download `id` ([`HandOff`]): the unpacking and
-    /// the install. The one way in for them.
+    /// Changes the fields the game installs write on download `id` ([`HandOff`]): the
+    /// unpacking and the install. The one way in for them.
     pub fn hand_off<R>(&self, id: &str, change: impl FnOnce(&TorrentState, &mut HandOff) -> R) -> Option<R> {
         self.update(id, |job| change(&job.state, &mut job.hand_off))
     }
 
     /// Runs a command that is the subsystem's alone. The core resolves
-    /// [`TorrentCmd::Download`] and [`TorrentCmd::Install`] first: they need the catalogs and
-    /// the game folders.
+    /// [`TorrentCmd::Download`] first: it needs the catalogs and the packages folders.
     pub async fn handle(&self, command: TorrentCmd) -> CoreResult<()> {
         match command {
             TorrentCmd::Act { id, action } => self.act(&id, action).await,
@@ -395,9 +384,7 @@ impl TorrentsSubsystem {
                 self.changed();
                 Ok(())
             }
-            TorrentCmd::Download { .. } | TorrentCmd::Install { .. } => {
-                Err(CoreError::Invalid("the core resolves downloads and installs first".into()))
-            }
+            TorrentCmd::Download { .. } => Err(CoreError::Invalid("the core resolves downloads first".into())),
         }
     }
 

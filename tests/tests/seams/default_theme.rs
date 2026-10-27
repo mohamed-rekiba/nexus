@@ -3666,7 +3666,7 @@ fn while_it_looks_up_or_installs_a_card_shows_a_button_that_does_nothing_and_can
     }));
     host.test.torrents.complete(ASTRO_HASH);
     until_torrent(&mut host, "complete");
-    host.dispatch(Command::Torrent(nexus_core::TorrentCmd::Install { id: ASTRO_HASH.into(), folder: None }));
+    host.dispatch(Command::GameInstall(nexus_core::GameInstallCmd::Download { id: ASTRO_HASH.into(), folder: None }));
     settle(&mut host);
     assert_eq!(values(&host, "torrent-placeholder"), ["Installing…"]);
     press(&mut host, "torrent-action:cancel-install", ASTRO_HASH);
@@ -3703,7 +3703,7 @@ fn right_to_left_the_install_sheet_has_install_on_the_right_and_the_keys_follow(
     key(&mut host, Key::RightArrow);
     let asked = key_asks(&mut host, Key::Return);
     assert!(
-        asked.iter().any(|c| matches!(c, Command::Torrent(nexus_core::TorrentCmd::Install { .. }))),
+        asked.iter().any(|c| matches!(c, Command::GameInstall(nexus_core::GameInstallCmd::Download { .. }))),
         "Enter installs: {asked:?}"
     );
 
@@ -3715,7 +3715,7 @@ fn right_to_left_the_install_sheet_has_install_on_the_right_and_the_keys_follow(
     key(&mut host, Key::LeftArrow);
     let asked = key_asks(&mut host, Key::Return);
     assert!(
-        !asked.iter().any(|c| matches!(c, Command::Torrent(nexus_core::TorrentCmd::Install { .. }))),
+        !asked.iter().any(|c| matches!(c, Command::GameInstall(nexus_core::GameInstallCmd::Download { .. }))),
         "Not now: {asked:?}"
     );
     host.pump();

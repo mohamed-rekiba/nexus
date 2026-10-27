@@ -199,6 +199,9 @@ pub enum Command {
     /// The catalogs' downloads: download a release, act on a download, install it, and
     /// "Keep sharing finished downloads".
     Torrent(crate::TorrentCmd),
+    /// Game installs: install a finished download or a package, delete a download's unpacked
+    /// files, stop a download's install.
+    GameInstall(crate::GameInstallCmd),
     /// "Download only through a VPN". On is refused where the system can't bind downloads to
     /// a VPN, and says why.
     SetVpnOnly(bool),
@@ -444,7 +447,6 @@ pub(crate) struct AppState {
     pub install_prompt: Option<InstallPrompt>,
     /// Emulators with an update that waits for their game to close.
     pub pending_updates: BTreeSet<PluginId>,
-    pub game_installs: BTreeMap<JobId, crate::game_installs::GameJob>,
     /// Each emulator's catalog, from each catalog plugin.
     pub catalogs: Vec<crate::releases::CatalogCopy>,
     /// The catalog plugins answered once: until then the Catalog says it is loading.
@@ -495,6 +497,7 @@ pub(crate) struct Inner {
     pub changes: Changes,
     /// The catalogs' downloads.
     pub torrents: crate::torrents::TorrentsSubsystem,
+    pub installs: crate::game_installs::GameInstallsSubsystem,
     /// Held while the catalogs are read: see [`Core::refresh_releases`].
     pub reading_catalogs: tokio::sync::Mutex<()>,
 }
@@ -577,7 +580,6 @@ impl Core {
             loading: false,
             install_prompt: None,
             pending_updates: BTreeSet::new(),
-            game_installs: BTreeMap::new(),
             catalogs: Vec::new(),
             catalogs_read: false,
             catalog_buttons: Vec::new(),
@@ -598,11 +600,14 @@ impl Core {
         let inner = Arc::new_cyclic(|weak: &std::sync::Weak<Inner>| {
             let weak = weak.clone();
             // The subsystem's events reach the core while it lives.
-            let events: crate::torrents::EventSink = Arc::new(move |event| {
-                if let Some(inner) = weak.upgrade() {
-                    Core { inner }.torrent_event(event);
-                }
-            });
+            let events: crate::torrents::EventSink = {
+                let weak = weak.clone();
+                Arc::new(move |event| {
+                    if let Some(inner) = weak.upgrade() {
+                        Core { inner }.torrent_event(event);
+                    }
+                })
+            };
             let torrents = crate::torrents::TorrentsSubsystem::new(
                 kernel.torrent_ports(),
                 crate::torrents::Polls { torrents: kernel.host().torrent_poll, vpn: kernel.host().vpn_poll },
@@ -610,6 +615,26 @@ impl Core {
                 kernel.vpn_waited().clone(),
                 Notifier::new(changes.clone(), kernel.events().clone()),
                 events,
+            );
+            let install_events: crate::game_installs::EventSink = Arc::new(move |event| {
+                let core = weak.upgrade().map(|inner| Core { inner });
+                Box::pin(async move {
+                    if let Some(core) = core {
+                        core.install_event(event).await;
+                    }
+                })
+            });
+            let installs = crate::game_installs::GameInstallsSubsystem::new(
+                crate::game_installs::InstallPorts {
+                    archives: kernel.archives().clone(),
+                    hardware: kernel.hardware().clone(),
+                    clock: kernel.clock().clone(),
+                    downloads: Arc::new(torrents.clone()),
+                    call_timeout: kernel.host().call_timeout,
+                },
+                crate::game_installs::Records::new(kernel.config().clone()),
+                Notifier::new(changes.clone(), kernel.events().clone()),
+                install_events,
             );
             Inner {
                 kernel,
@@ -620,11 +645,12 @@ impl Core {
                 desktop_checked: Default::default(),
                 changes,
                 torrents,
+                installs,
                 reading_catalogs: tokio::sync::Mutex::new(()),
             }
         });
         let core = Core { inner };
-        core.clean_up_game_installs();
+        core.installs().clean_up(|plugin| plugin_folders(core.kernel(), plugin));
         crate::system::adopt_vpn(&core).await;
         core.torrents().restore();
         core.resume_installs().await;
@@ -685,6 +711,10 @@ impl Core {
     /// The catalogs' downloads.
     pub(crate) fn torrents(&self) -> &crate::torrents::TorrentsSubsystem {
         &self.inner.torrents
+    }
+
+    pub(crate) fn installs(&self) -> &crate::game_installs::GameInstallsSubsystem {
+        &self.inner.installs
     }
 
     pub(crate) fn state(&self) -> MutexGuard<'_, AppState> {
@@ -824,15 +854,15 @@ impl Core {
             Command::Download { plugin, request } => self.download(&plugin, request).await,
             Command::PauseDownload(job) => self.inner.downloads.pause(job).await,
             Command::ResumeDownload(job) => self.inner.downloads.resume(job).await,
-            Command::CancelDownload(job) if self.cancel_game_install(job) => Ok(()),
+            Command::CancelDownload(job) if self.installs().cancel(job) => Ok(()),
             Command::CancelDownload(job) => self.inner.downloads.cancel(job).await,
             Command::InstallEmulator { plugin, version } => self.install(&plugin, version, None).await,
             Command::UpdateEmulator { plugin } => self.update(&plugin).await,
             Command::UninstallEmulator { plugin, version } => self.uninstall(&plugin, &version).await,
             Command::Launch(game) => {
                 // A Catalog offer's Play starts the installed game it is.
-                let torrents = self.torrents().snapshot();
-                let game = crate::view::played_game(&self.state(), &torrents, &game);
+                let (torrents, installs) = (self.torrents().snapshot(), self.installs().snapshot());
+                let game = crate::view::played_game(&self.state(), &torrents, &installs, &game);
                 let result = crate::launch::launch(self, game.clone()).await;
                 // The player pressed Play: say why nothing started.
                 if let Err(error) = &result {
@@ -917,6 +947,7 @@ impl Core {
             }
             Command::CatalogMore => self.more(true),
             Command::Torrent(command) => self.torrent(command).await,
+            Command::GameInstall(command) => self.game_install(command).await,
             Command::SetVpnOnly(on) => {
                 if on && let Some(why) = self.inner.kernel.network().problem() {
                     return Err(CoreError::Invalid(why));
@@ -1147,9 +1178,9 @@ impl Core {
     /// its cover (see [`AppState::offer_art`]), and keeps the covers that changed.
     pub(crate) fn remember_offer_art(&self) {
         let changed = {
-            let torrents = self.torrents().snapshot();
+            let (torrents, installs) = (self.torrents().snapshot(), self.installs().snapshot());
             let mut state = self.state();
-            let found = view::installed_offers(&state, &torrents);
+            let found = view::installed_offers(&state, &torrents, &installs);
             state.installed_offers = found.iter().map(|(game, offer, _)| (game.clone(), offer.clone())).collect();
             let art: Vec<_> = found.into_iter().filter_map(|(game, _, art)| Some((game, art?))).collect();
             let changed = art.iter().any(|(game, art)| state.offer_art.get(game) != Some(art));
@@ -1771,16 +1802,13 @@ impl Core {
     async fn uninstall_game(&self, game: &GameKey) -> CoreResult<()> {
         let also;
         let link;
+        let installs = self.installs().snapshot();
         let (folder, title) = {
             let state = self.state();
             if state.sessions.values().any(|s| &s.game == game) {
                 return Err(CoreError::Invalid("Stop the game before you uninstall it".into()));
             }
-            if state
-                .game_installs
-                .values()
-                .any(|g| g.plugin == game.plugin && g.phase == crate::game_installs::GamePhase::Installing)
-            {
+            if installs.installing(&game.plugin) {
                 return Err(CoreError::Invalid("Wait until the install ends".into()));
             }
             let details = state.details.get(game).and_then(|d| d.details.as_ref());
@@ -2187,15 +2215,7 @@ impl Core {
     /// game's folder. `None` before the folder is on disk.
     pub fn download_folder(&self, id: &str) -> Option<std::path::PathBuf> {
         let job = self.torrents().job(id)?;
-        let game = {
-            let state = self.state();
-            state
-                .game_installs
-                .values()
-                .rev()
-                .find(|g| g.plugin == job.emulator && g.source == job.source)
-                .and_then(|g| g.installed.clone())
-        };
+        let game = self.installs().snapshot().latest(&job.emulator, &job.source).and_then(|g| g.installed.clone());
         let kernel = &self.inner.kernel;
         let installed = game.and_then(|g| {
             let manifest = kernel.manifest(&job.emulator).ok()?;

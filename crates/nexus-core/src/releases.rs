@@ -529,9 +529,9 @@ impl Core {
         if !ended.is_empty() {
             for (plugin, install) in &ended {
                 let installed = {
-                    let torrents = self.torrents().snapshot();
+                    let (torrents, installs) = (self.torrents().snapshot(), self.installs().snapshot());
                     let state = self.state();
-                    let owned = crate::view::Owned::new(&state, &torrents);
+                    let owned = crate::view::Owned::new(&state, &torrents, &installs);
                     state.offers.iter().any(|o| {
                         &o.entry.key.plugin == plugin
                             && o.releases.iter().any(|r| r.id == install.release)
@@ -555,9 +555,9 @@ impl Core {
     /// [`crate::view::best_release`]), with how many share it and when the catalog counted them.
     pub(crate) fn offer_detail(&self, offer: &Offer) -> Detail {
         let best = {
-            let torrents = self.torrents().snapshot();
+            let (torrents, installs) = (self.torrents().snapshot(), self.installs().snapshot());
             let state = self.state();
-            let owned = crate::view::Owned::new(&state, &torrents);
+            let owned = crate::view::Owned::new(&state, &torrents, &installs);
             crate::view::best_release(&state, &owned, offer).clone()
         };
         let mut facts = Vec::new();
@@ -615,9 +615,9 @@ impl Core {
     /// described yet, by title id and the newest release's region. In the background.
     pub(crate) fn describe_catalog_page(&self) {
         let todo: Vec<(GameKey, nexus_api::GameRef)> = {
-            let torrents = self.torrents().snapshot();
+            let (torrents, installs) = (self.torrents().snapshot(), self.installs().snapshot());
             let mut state = self.state();
-            let page = crate::view::catalog_page(self.kernel(), &state, &torrents);
+            let page = crate::view::catalog_page(self.kernel(), &state, &torrents, &installs);
             let todo: Vec<_> = page
                 .iter()
                 .filter(|key| !state.meta.contains_key(key) && !state.asked.contains(key))

@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use nexus_api::*;
-use nexus_core::{Area, Command, TorrentAction};
+use nexus_core::{Area, Command, GameInstallCmd, TorrentAction};
 use nexus_testkit::{FakeHost, StubPlugin, TestCore, until as until_in};
 
 use crate::common::{catalogs_fetched, native};
@@ -133,6 +133,11 @@ async fn until(t: &TestCore, state: &str) -> nexus_ui_api::TorrentVm {
 
 async fn act(t: &TestCore, action: TorrentAction) {
     t.core.dispatch(Command::Torrent(nexus_core::TorrentCmd::Act { id: HASH.into(), action })).await.unwrap();
+}
+
+/// Installs the download into the game folder the install sheet shows.
+async fn install(t: &TestCore) {
+    t.core.dispatch(Command::GameInstall(GameInstallCmd::Download { id: HASH.into(), folder: None })).await.unwrap();
 }
 
 #[tokio::test]
@@ -263,7 +268,7 @@ async fn a_finished_download_installs_through_the_emulator_s_game_installer() {
     t.torrents.complete(HASH);
     until(t, "complete").await;
 
-    act(t, TorrentAction::Install).await;
+    install(t).await;
     let sources = s.sources.lock().unwrap().clone();
     assert_eq!(sources, [HostPath::new("packages", 0, RelPath::new(format!("PS5/torrent-{HASH}")).unwrap())]);
     t.until(Area::Installs, |_| row(t).install == "done").await;
@@ -518,7 +523,7 @@ async fn a_download_goes_to_the_folder_the_player_picks_inside_a_packages_folder
     t.torrents.complete(HASH);
     until(t, "complete").await;
     assert!(home.join(format!("Other/PS5/torrent-{HASH}/Astro/astro.pkg")).is_file());
-    act(t, TorrentAction::Install).await;
+    install(t).await;
     let sources = s.sources.lock().unwrap().clone();
     assert_eq!(sources, [HostPath::new("packages", 1, RelPath::new(format!("PS5/torrent-{HASH}")).unwrap())]);
 }
@@ -592,7 +597,7 @@ async fn installed(t: &TestCore) -> nexus_ui_api::TorrentVm {
 /// once the install ends.
 async fn download_and_install(console: &str, topic: serde_json::Value, files: &[(&str, &[u8])]) -> Vec<String> {
     let (t, _home) = downloaded(console, topic, files, |h, _| h).await;
-    act(&t, TorrentAction::Install).await;
+    install(&t).await;
     let ended = installed(&t).await;
     assert_eq!(ended.install, "done", "the {console} install: {ended:?}");
     // The download's card plays the game it installed, found by title id or else by the
@@ -670,7 +675,7 @@ async fn an_unpacked_pc_game_moves_into_the_games_folder_with_its_links_and_empt
         },
     )
     .await;
-    act(&t, TorrentAction::Install).await;
+    install(&t).await;
     let ended = installed(&t).await;
     assert_eq!(ended.install, "done", "{ended:?}");
 
@@ -700,7 +705,7 @@ async fn an_unpacked_pc_game_moves_into_the_games_folder_with_its_links_and_empt
 async fn after_a_restart_a_pc_download_s_card_still_plays_the_game_it_installed() {
     let (topic, elf) = penguins();
     let (t, _home) = downloaded("PC", topic, &[("Penguins/penguins.x86_64", &elf)], |h, _| h).await;
-    act(&t, TorrentAction::Install).await;
+    install(&t).await;
     assert_eq!(installed(&t).await.install, "done");
 
     // The next start: the install's record is gone, and a PC game has no title id.
@@ -735,14 +740,14 @@ async fn a_download_installs_into_the_game_folder_the_player_picks_and_the_next_
 
     // A folder outside every game folder is refused, and the sheet hears why.
     let outside =
-        Command::Torrent(nexus_core::TorrentCmd::Install { id: HASH.into(), folder: Some(home.join("Elsewhere")) });
+        Command::GameInstall(GameInstallCmd::Download { id: HASH.into(), folder: Some(home.join("Elsewhere")) });
     let refused = t.core.dispatch(outside).await.unwrap_err().to_string();
     assert!(refused.contains("Pick a folder inside a game folder"), "{refused}");
     assert!(row(&t).install_error.contains("Pick a folder inside a game folder"), "{:?}", row(&t));
     assert_eq!(row(&t).install, "", "nothing installs");
 
     let picked =
-        Command::Torrent(nexus_core::TorrentCmd::Install { id: HASH.into(), folder: Some("~/Other/Mine".into()) });
+        Command::GameInstall(GameInstallCmd::Download { id: HASH.into(), folder: Some("~/Other/Mine".into()) });
     t.core.dispatch(picked).await.unwrap();
     assert_eq!(row(&t).install_error, "", "the error goes once an install starts");
     assert_eq!(installed(&t).await.install, "done");
@@ -760,8 +765,7 @@ async fn an_install_checks_the_free_space_in_the_game_folder_the_player_picks() 
     let paths = vec![home.join("Games"), home.join("Small")];
     t.core.dispatch(Command::SetFolders { name: "games".into(), paths }).await.unwrap();
 
-    let small =
-        Command::Torrent(nexus_core::TorrentCmd::Install { id: HASH.into(), folder: Some("~/Small/PC".into()) });
+    let small = Command::GameInstall(GameInstallCmd::Download { id: HASH.into(), folder: Some("~/Small/PC".into()) });
     let refused = t.core.dispatch(small).await.unwrap_err();
     let why = "Not enough free space in the game folder: 0.0 GB needed, 0.0 GB free";
     assert_eq!(refused.to_string(), why);
@@ -769,7 +773,7 @@ async fn an_install_checks_the_free_space_in_the_game_folder_the_player_picks() 
     assert_eq!(row(&t).install, "", "nothing installs");
 
     // The folder the sheet offers is on another disk, with room.
-    t.core.dispatch(Command::Torrent(nexus_core::TorrentCmd::Install { id: HASH.into(), folder: None })).await.unwrap();
+    t.core.dispatch(Command::GameInstall(GameInstallCmd::Download { id: HASH.into(), folder: None })).await.unwrap();
     assert_eq!(installed(&t).await.install, "done");
     assert!(home.join("Games/PC/Penguins").is_dir());
 }
@@ -864,13 +868,13 @@ async fn an_install_shows_on_its_download_s_card_which_cancels_it() {
     t.torrents.complete(HASH);
     until(t, "complete").await;
 
-    act(t, TorrentAction::Install).await;
+    install(t).await;
     // The install's progress reaches the card a moment later: the plugin never waits for it.
     t.until(Area::Installs, |_| row(t).install_progress > 0.0).await;
     let installing = row(t);
     assert_eq!((installing.install.as_str(), installing.install_progress), ("installing", 0.25));
     assert_eq!(installing.actions, ["stop-seeding", "cancel-install"], "no Remove while it installs");
-    act(t, TorrentAction::CancelInstall).await;
+    t.core.dispatch(Command::GameInstall(GameInstallCmd::Cancel { id: HASH.into() })).await.unwrap();
     t.until(Area::Installs, |_| row(t).install == "cancelled").await;
     assert_eq!(row(t).install, "cancelled");
     assert!(row(t).actions.contains(&"install".to_owned()), "it installs again: {:?}", row(t).actions);
@@ -882,7 +886,7 @@ async fn once_installed_a_download_s_folder_is_the_game_s() {
     let (t, home) = downloaded("PC", topic, &[("Penguins/penguins.x86_64", &elf)], |h, _| h).await;
     let download = home.path().join(format!("Downloads/PC/torrent-{HASH}"));
     assert_eq!(t.core.download_folder(HASH), Some(download), "the download's files, before the install");
-    act(&t, TorrentAction::Install).await;
+    install(&t).await;
     assert_eq!(installed(&t).await.install, "done");
     assert_eq!(t.core.download_folder(HASH), Some(home.path().join("Games/PC/Penguins")), "the installed game");
 }

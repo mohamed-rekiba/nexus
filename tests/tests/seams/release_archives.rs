@@ -4,7 +4,7 @@
 use std::sync::{Arc, Mutex};
 
 use nexus_api::*;
-use nexus_core::{ArchiveKind, Area, Command, TorrentAction};
+use nexus_core::{ArchiveKind, Area, Command, GameInstallCmd, TorrentAction};
 use nexus_testkit::{FakeHost, StubPlugin, TestCore};
 
 use crate::common::catalogs_fetched;
@@ -137,6 +137,15 @@ async fn act(core: &nexus_core::Core, action: TorrentAction) {
     core.dispatch(Command::Torrent(nexus_core::TorrentCmd::Act { id: HASH.into(), action })).await.unwrap();
 }
 
+async fn installs(core: &nexus_core::Core, command: GameInstallCmd) {
+    core.dispatch(Command::GameInstall(command)).await.unwrap();
+}
+
+/// Installs the download into the game folder the install sheet shows.
+async fn install(core: &nexus_core::Core) {
+    installs(core, GameInstallCmd::Download { id: HASH.into(), folder: None }).await;
+}
+
 #[tokio::test]
 async fn a_finished_download_unpacks_its_archive_and_install_takes_the_unpacked_files() {
     let s =
@@ -151,7 +160,7 @@ async fn a_finished_download_unpacks_its_archive_and_install_takes_the_unpacked_
     assert_eq!(done.actions, ["install", "stop-seeding", "remove-unpacked"]);
     assert_eq!(done.unpack_progress, 1.0);
 
-    act(&s.t.core, TorrentAction::Install).await;
+    install(&s.t.core).await;
     until(&s.t.core, Area::Installs, |r| r.install == "done").await;
     let sources = s.sources.lock().unwrap().clone();
     assert_eq!(sources, [HostPath::new("packages", 0, RelPath::new(format!("PS5/torrent-{HASH}")).unwrap())]);
@@ -223,7 +232,7 @@ async fn cancel_stops_the_unpacking_and_install_starts_it_again() {
     assert!(walk(&s.folder().join("unpacked")).is_empty());
 
     held.release();
-    act(&s.t.core, TorrentAction::Install).await;
+    install(&s.t.core).await;
     until(&s.t.core, Area::Installs, |r| r.install == "done").await;
     assert_eq!(std::fs::read(s.folder().join("unpacked/Astro/game/game.pkg")).unwrap(), b"game");
     assert_eq!(s.sources.lock().unwrap().len(), 1, "installed once unpacked");
@@ -247,7 +256,7 @@ async fn an_unpack_cut_by_a_restart_comes_back_failed_and_install_unpacks_first(
     until(&again, Area::Torrents, |r| r.seeding).await;
     // The first app closed: its unpack never ends, so only the new one writes the folder.
     s.t.archives.cut();
-    act(&again, TorrentAction::Install).await;
+    install(&again).await;
     until(&again, Area::Installs, |r| r.install == "done").await;
     assert_eq!(std::fs::read(s.folder().join("unpacked/Astro/game/game.pkg")).unwrap(), b"game");
 }
@@ -267,7 +276,7 @@ async fn install_right_after_a_restart_cut_an_unpack_unpacks_and_installs() {
 
     let again = nexus_core::Core::start(s.t.kernel.clone()).await;
     assert!(!row(&again).seeding, "the check of its files hasn't ended: {:?}", row(&again));
-    act(&again, TorrentAction::Install).await;
+    install(&again).await;
     until(&again, Area::Installs, |r| r.install == "done").await;
     assert_eq!(std::fs::read(s.folder().join("unpacked/Astro/game/game.pkg")).unwrap(), b"game");
     assert_eq!(s.sources.lock().unwrap().len(), 1, "installed once unpacked");
@@ -280,7 +289,7 @@ async fn remove_unpacked_files_keeps_the_download_and_its_seeding() {
     s.finish().await;
     until(&s.t.core, Area::Torrents, |r| r.unpack == "unpacked").await;
 
-    act(&s.t.core, TorrentAction::RemoveUnpacked).await;
+    installs(&s.t.core, GameInstallCmd::RemoveUnpacked { id: HASH.into() }).await;
     let after = row(&s.t.core);
     assert_eq!(after.unpack, "waiting");
     assert!(!s.folder().join("unpacked").exists());
@@ -330,7 +339,7 @@ async fn installing_the_unpacked_game_moves_it_into_the_games_folder_and_the_arc
     let unpacked = s.folder().join("unpacked/Astro/game/PPSA01234-app0");
     let inode = std::fs::metadata(unpacked.join("eboot.bin")).unwrap().ino();
 
-    act(&s.t.core, TorrentAction::Install).await;
+    install(&s.t.core).await;
     let done = until(&s.t.core, Area::Installs, |r| r.install == "done").await;
     let installed = s.home.path().join("Games/PS5/PPSA01234-app0/eboot.bin");
     assert_eq!(std::fs::read(&installed).unwrap(), b"elf");

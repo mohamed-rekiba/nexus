@@ -6,7 +6,7 @@ use std::time::SystemTime;
 
 use nexus_api::{GameKey, JobId, PluginId, SessionId};
 use nexus_core::system::SystemCommand;
-use nexus_core::{Command, Core, Grid, Route, TorrentCmd};
+use nexus_core::{Command, Core, GameInstallCmd, Grid, Route, TorrentCmd};
 use nexus_ui_api::{ScreenId, ThemeError};
 use slint_interpreter::{ComponentDefinition, ComponentHandle, ComponentInstance, Image, SharedString, Value};
 
@@ -617,13 +617,15 @@ impl ThemeHost {
             "install-download",
             Box::new(move |a| {
                 let folder = Some(arg(a, 1)).filter(|f| !f.trim().is_empty()).map(|f| f.trim().into());
-                core(Command::Torrent(TorrentCmd::Install { id: arg(a, 0), folder }))
+                core(Command::GameInstall(GameInstallCmd::Download { id: arg(a, 0), folder }))
             }),
         )?;
         callback(
             "torrent-action",
             Box::new(move |a| {
                 use nexus_core::TorrentAction as T;
+                let id = arg(a, 0);
+                let install = |command| core(Command::GameInstall(command));
                 let action = match arg(a, 1).as_str() {
                     "start" => T::Start,
                     "pause" => T::Pause,
@@ -631,13 +633,13 @@ impl ThemeHost {
                     "remove" => T::Remove,
                     "delete-files" => T::DeleteFiles,
                     "stop-seeding" => T::StopSeeding,
-                    "remove-unpacked" => T::RemoveUnpacked,
-                    "install" => T::Install,
-                    "cancel-install" => T::CancelInstall,
+                    "remove-unpacked" => return install(GameInstallCmd::RemoveUnpacked { id }),
+                    "install" => return install(GameInstallCmd::Download { id, folder: None }),
+                    "cancel-install" => return install(GameInstallCmd::Cancel { id }),
                     "open-store" => T::OpenStore,
                     _ => return None,
                 };
-                core(Command::Torrent(TorrentCmd::Act { id: arg(a, 0), action }))
+                core(Command::Torrent(TorrentCmd::Act { id, action }))
             }),
         )?;
         callback(

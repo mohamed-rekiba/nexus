@@ -252,8 +252,10 @@ fn shoot_install_sheet(host: &mut Composed, window: &MinimalSoftwareWindow, out:
     install.invoke_accessible_default_action();
     host.pump();
     shoot(window, &out.join(format!("{prefix}-install-sheet.png")));
-    let outside =
-        Command::Torrent(nexus_core::TorrentCmd::Install { id: t.id.clone(), folder: Some("/elsewhere".into()) });
+    let outside = Command::GameInstall(nexus_core::GameInstallCmd::Download {
+        id: t.id.clone(),
+        folder: Some("/elsewhere".into()),
+    });
     assert!(host.rt.block_on(host.test.core.dispatch(outside)).is_err(), "a folder outside the game folders");
     host.ui.render().unwrap();
     shoot(window, &out.join(format!("{prefix}-install-sheet-error.png")));

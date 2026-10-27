@@ -35,16 +35,24 @@ impl Core {
         let rested = clock.now() + SCREENSHOTS_AFTER;
         clock.sleep(NEIGHBOURS_AFTER).await;
         let art: Vec<ImageRef> = {
-            let torrents = self.torrents().snapshot();
+            let (torrents, installs) = (self.torrents().snapshot(), self.installs().snapshot());
             let state = self.state();
-            crate::view::neighbours(&self.inner.kernel, &state, &torrents, &game, &state.grid_columns, MOST_NEIGHBOURS)
-                .iter()
-                .flat_map(|key| {
-                    let art = crate::view::hub_art(&state, key);
-                    [art.background, art.logo]
-                })
-                .flatten()
-                .collect()
+            crate::view::neighbours(
+                &self.inner.kernel,
+                &state,
+                &torrents,
+                &installs,
+                &game,
+                &state.grid_columns,
+                MOST_NEIGHBOURS,
+            )
+            .iter()
+            .flat_map(|key| {
+                let art = crate::view::hub_art(&state, key);
+                [art.background, art.logo]
+            })
+            .flatten()
+            .collect()
         };
         for image in &art {
             self.fetch_ahead(image).await;
