@@ -1,6 +1,5 @@
 //! Seam 1, core app API: commands in, view models and events out.
 
-use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -8,7 +7,9 @@ use futures::StreamExt;
 use nexus_api::*;
 use nexus_core::Front;
 use nexus_core::{Area, Clock, Command, Core, CoreError, Pref, Route, SessionCmd};
-use nexus_testkit::{FakeHost, Shown, Signal, SpawnedProcess, StubPlugin, TestCore};
+use nexus_testkit::{
+    FAKE_EMULATOR_PERMISSIONS, FakeEmulator, FakeHost, Shown, Signal, SpawnedProcess, StubPlugin, TestCore,
+};
 use nexus_ui_api::ScreenId;
 
 fn id(s: &str) -> PluginId {
@@ -19,233 +20,14 @@ fn key(s: &str) -> GameKey {
     s.parse().unwrap()
 }
 
-/// A small emulator for driving the core: a catalog of titles, one build to download, an
-/// installer that writes into storage, and a launcher.
-#[derive(Clone)]
-struct FakeEmu {
-    titles: Vec<&'static str>,
-    build_url: String,
-    build_sha: String,
-    build_size: Option<u64>,
-    storage: Arc<Mutex<Option<Arc<dyn Storage>>>>,
-    exits: Arc<Mutex<Vec<(String, ExitInfo)>>>,
-    broken_catalog: bool,
-    /// The newest build GitHub would list.
-    latest: Arc<Mutex<String>>,
-    /// Its launch hands the game over to a process with this text in its command line.
-    game_process: Option<String>,
-    /// A game its launcher won't start, and why.
-    refuses: Option<(&'static str, &'static str)>,
-}
-
-impl FakeEmu {
-    fn new(titles: Vec<&'static str>) -> Self {
-        Self {
-            titles,
-            build_url: "https://builds.example/emu-1.0.bin".into(),
-            build_sha: String::new(),
-            build_size: None,
-            storage: Arc::default(),
-            exits: Arc::default(),
-            broken_catalog: false,
-            latest: Arc::new(Mutex::new("1.0".into())),
-            game_process: None,
-            refuses: None,
-        }
-    }
-
-    /// Its launch hands the game over, as `steam steam://rungameid/…` does.
-    fn handing_over(mut self, game_process: &str) -> Self {
-        self.game_process = Some(game_process.into());
-        self
-    }
-
-    fn storage(&self) -> Arc<dyn Storage> {
-        self.storage.lock().unwrap().clone().expect("init ran")
-    }
-
-    fn summary(&self, i: usize) -> GameSummary {
-        GameSummary {
-            id: format!("G{i}"),
-            title: self.titles[i].into(),
-            platform: "PS4".into(),
-            cover: Some(ImageSource::Asset(RelPath::new(format!("covers/{i}.png")).unwrap())),
-            tags: vec![],
-            release_year: None,
-            title_id: None,
-            content_id: None,
-        }
-    }
-}
-
-#[async_trait]
-impl Catalog for FakeEmu {
-    async fn list(&self, _: PageRequest) -> PluginResult<Page<GameSummary>> {
-        if self.broken_catalog {
-            return Err(PluginError::Network("catalog server is down".into()));
-        }
-        Ok(Page { items: (0..self.titles.len()).map(|i| self.summary(i)).collect(), total: None })
-    }
-    async fn search(&self, query: &SearchQuery) -> PluginResult<Vec<GameSummary>> {
-        let q = query.text.to_lowercase();
-        Ok((0..self.titles.len())
-            .filter(|i| self.titles[*i].to_lowercase().contains(&q))
-            .map(|i| self.summary(i))
-            .collect())
-    }
-    async fn details(&self, game: &str) -> PluginResult<GameDetails> {
-        let i: usize = game.trim_start_matches('G').parse().map_err(|_| PluginError::NotFound(game.into()))?;
-        let summary = self.titles.get(i).map(|_| self.summary(i)).ok_or_else(|| PluginError::NotFound(game.into()))?;
-        Ok(GameDetails {
-            folder: None,
-            also: Vec::new(),
-            uninstall_link: None,
-            summary,
-            description: "A game.".into(),
-            developer: Some("Dev".into()),
-            genres: vec!["Action".into()],
-            size_bytes: None,
-            background: None,
-            facts: vec![],
-        })
-    }
-    async fn artwork(&self, _: &str, _: ArtworkKind) -> PluginResult<Option<ImageSource>> {
-        Ok(None)
-    }
-}
-
-#[async_trait]
-impl Downloader for FakeEmu {
-    async fn plan(&self, request: &DownloadRequest) -> PluginResult<DownloadPlan> {
-        match request {
-            DownloadRequest::EmulatorBuild { version } => {
-                // Each version downloads to its own file, as a real build would.
-                let version = version.clone().unwrap_or_else(|| self.latest.lock().unwrap().clone());
-                Ok(DownloadPlan {
-                    label: format!("Emu {version}"),
-                    artifacts: vec![Artifact {
-                        url: self.build_url.clone(),
-                        size: self.build_size,
-                        sha256: self.build_sha.clone(),
-                        signature: None,
-                        dest: RelPath::new(format!("downloads/emu-{version}.bin")).unwrap(),
-                        unpack: None,
-                    }],
-                })
-            }
-        }
-    }
-}
-
-#[async_trait]
-impl Installer for FakeEmu {
-    async fn available(&self) -> PluginResult<Vec<VersionInfo>> {
-        Ok(vec![VersionInfo { version: self.latest.lock().unwrap().clone(), notes: None }])
-    }
-    async fn installed(&self) -> PluginResult<Vec<InstalledVersion>> {
-        let names = self.storage().list(&RelPath::new("builds").unwrap()).await?;
-        Ok(names
-            .into_iter()
-            .map(|v| InstalledVersion { path: RelPath::new(format!("builds/{v}")).unwrap(), version: v, own: false })
-            .collect())
-    }
-    async fn install(&self, version: &str, files: &[DownloadedArtifact]) -> PluginResult<InstalledVersion> {
-        let path = RelPath::new(format!("builds/{version}")).unwrap();
-        let bin = path.join("emu").unwrap();
-        let bytes = self.storage().read(&files[0].dest).await?;
-        self.storage().write(&bin, &bytes).await?;
-        self.storage().set_executable(&bin).await?;
-        Ok(InstalledVersion { version: version.into(), path, own: false })
-    }
-    async fn uninstall(&self, version: &str) -> PluginResult<()> {
-        self.storage().remove(&RelPath::new(format!("builds/{version}")).unwrap()).await
-    }
-}
-
-#[async_trait]
-impl Launcher for FakeEmu {
-    async fn prepare(&self, game: &str, config: &serde_json::Value) -> PluginResult<LaunchSpec> {
-        let installed = self.installed().await?;
-        let build = installed.last().ok_or_else(|| PluginError::Precondition("install the emulator first".into()))?;
-        if let Some((refused, why)) = self.refuses
-            && refused == game
-        {
-            return Err(PluginError::Precondition(why.into()));
-        }
-        let mut env = BTreeMap::new();
-        if let Some(scale) = config.get("scale") {
-            env.insert("EMU_SCALE".into(), scale.to_string().into());
-        }
-        Ok(LaunchSpec {
-            program: build.path.join("emu").unwrap().into(),
-            args: vec![game.into()],
-            env,
-            cwd: None,
-            game_process: self.game_process.clone(),
-        })
-    }
-    async fn on_exit(&self, game: &str, exit: &ExitInfo) -> PluginResult<()> {
-        self.exits.lock().unwrap().push((game.into(), exit.clone()));
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl Slots for FakeEmu {
-    async fn items(&self, request: &SlotRequest) -> PluginResult<Vec<SlotItem>> {
-        Ok(match request.slot {
-            SlotId::GameBadge => vec![SlotItem {
-                id: "region".into(),
-                order: Order::default(),
-                content: SlotContent::Badge { label: "EU".into(), short: String::new(), tone: Tone::Info, icon: None },
-            }],
-            _ => vec![],
-        })
-    }
-    async fn run_action(&self, _: &str, _: Option<&str>, _: &serde_json::Value) -> PluginResult<()> {
-        Ok(())
-    }
-}
-
 /// The fake host's `watch_every`: how often the game watcher looks at the desktop.
 const WATCH_EVERY: Duration = Duration::from_millis(20);
 
-const PERMISSIONS: &str = "network = [\"builds.example\"]\nprocess = [\"builds/*/emu\"]";
-
-fn emu_plugin(plugin_id: &str, emu: FakeEmu) -> StubPlugin {
-    emu_plugin_with(plugin_id, emu, PERMISSIONS)
-}
-
-fn emu_plugin_with(plugin_id: &str, emu: FakeEmu, permissions: &str) -> StubPlugin {
-    emu_plugin_named(plugin_id, &format!("name = \"{plugin_id}\""), emu, permissions)
-}
-
-/// Like [`emu_plugin_with`], with `names`: the manifest's `name` line, and an `emulator` line
-/// if it has one.
-fn emu_plugin_named(plugin_id: &str, names: &str, emu: FakeEmu, permissions: &str) -> StubPlugin {
-    StubPlugin::from_toml(&format!(
-        "id = \"{plugin_id}\"\nkind = \"emulator\"\n{names}\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
-         capabilities = [\"catalog\", \"downloader\", \"installer\", \"launcher\", \"slots\"]\n[permissions]\n{permissions}\n"
-    ))
-    .provides(move |ctx| {
-        *emu.storage.lock().unwrap() = Some(ctx.storage().clone());
-        let e = Arc::new(emu.clone());
-        Ok(Provided {
-            catalog: Some(e.clone()),
-            downloader: Some(e.clone()),
-            installer: Some(e.clone()),
-            launcher: Some(e.clone()),
-            slots: Some(e),
-            ..Provided::default()
-        })
-    })
-}
-
 /// Boots a core with `emu` as `emu-a`, with its build served over fake HTTP.
-async fn core_with(mut emu: FakeEmu) -> (TestCore, FakeEmu) {
+async fn core_with(mut emu: FakeEmulator) -> (TestCore, FakeEmulator) {
     let host = FakeHost::new();
     emu.build_sha = host.http().serve(&emu.build_url, vec![7u8; 20_000]);
-    let core = host.plugin(emu_plugin("emu-a", emu.clone())).boot_core().await;
+    let core = host.plugin(emu.plugin("emu-a")).boot_core().await;
     (core, emu)
 }
 
@@ -255,9 +37,9 @@ async fn install(core: &Core) {
 
 #[tokio::test]
 async fn the_library_merges_every_catalog_sorted_by_title_with_badges() {
-    let a = FakeEmu::new(vec!["Zeta", "Alpha"]);
-    let b = FakeEmu::new(vec!["Mu"]);
-    let t = FakeHost::new().plugin(emu_plugin("emu-a", a)).plugin(emu_plugin("emu-b", b)).boot_core().await;
+    let a = FakeEmulator::new(vec!["Zeta", "Alpha"]);
+    let b = FakeEmulator::new(vec!["Mu"]);
+    let t = FakeHost::new().plugin(a.plugin("emu-a")).plugin(b.plugin("emu-b")).boot_core().await;
 
     t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
 
@@ -274,10 +56,10 @@ async fn the_library_merges_every_catalog_sorted_by_title_with_badges() {
 
 #[tokio::test]
 async fn a_broken_catalog_leaves_a_notice_and_the_other_catalogs_still_show() {
-    let mut broken = FakeEmu::new(vec!["Hidden"]);
+    let mut broken = FakeEmulator::new(vec!["Hidden"]);
     broken.broken_catalog = true;
-    let ok = FakeEmu::new(vec!["Shown"]);
-    let t = FakeHost::new().plugin(emu_plugin("emu-a", broken)).plugin(emu_plugin("emu-b", ok)).boot_core().await;
+    let ok = FakeEmulator::new(vec!["Shown"]);
+    let t = FakeHost::new().plugin(broken.plugin("emu-a")).plugin(ok.plugin("emu-b")).boot_core().await;
 
     t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
 
@@ -288,8 +70,8 @@ async fn a_broken_catalog_leaves_a_notice_and_the_other_catalogs_still_show() {
 
 #[tokio::test]
 async fn search_opens_the_catalog_on_its_text() {
-    let a = FakeEmu::new(vec!["The Last Road", "Road Rage"]);
-    let t = FakeHost::new().plugin(emu_plugin("emu-a", a)).boot_core().await;
+    let a = FakeEmulator::new(vec!["The Last Road", "Road Rage"]);
+    let t = FakeHost::new().plugin(a.plugin("emu-a")).boot_core().await;
 
     t.core.dispatch(Command::Search("road".into())).await.unwrap();
 
@@ -301,7 +83,7 @@ async fn search_opens_the_catalog_on_its_text() {
 
 #[tokio::test]
 async fn installing_downloads_checks_and_installs_the_build() {
-    let (t, emu) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, emu) = core_with(FakeEmulator::new(vec!["A"])).await;
     let mut events = t.core.events();
 
     install(&t.core).await;
@@ -323,10 +105,10 @@ async fn installing_downloads_checks_and_installs_the_build() {
 #[tokio::test]
 async fn an_interrupted_download_resumes_from_where_it_stopped() {
     let host = FakeHost::new();
-    let mut emu = FakeEmu::new(vec!["A"]);
+    let mut emu = FakeEmulator::new(vec!["A"]);
     emu.build_sha = host.http().serve(&emu.build_url, vec![7u8; 20_000]);
     host.http().cut_next_after(&emu.build_url, 9_000);
-    let t = host.plugin(emu_plugin("emu-a", emu.clone())).boot_core().await;
+    let t = host.plugin(emu.plugin("emu-a")).boot_core().await;
 
     let first = t.core.dispatch(Command::InstallEmulator { plugin: id("emu-a"), version: None }).await;
     assert!(first.is_err(), "the first attempt fails mid-way");
@@ -340,11 +122,11 @@ async fn an_interrupted_download_resumes_from_where_it_stopped() {
 #[tokio::test]
 async fn a_server_that_ignores_ranges_gets_a_clean_restart() {
     let host = FakeHost::new();
-    let mut emu = FakeEmu::new(vec!["A"]);
+    let mut emu = FakeEmulator::new(vec!["A"]);
     emu.build_sha = host.http().serve(&emu.build_url, (0..20_000u32).map(|i| i as u8).collect::<Vec<_>>());
     host.http().cut_next_after(&emu.build_url, 9_000);
     host.http().ignore_ranges();
-    let t = host.plugin(emu_plugin("emu-a", emu.clone())).boot_core().await;
+    let t = host.plugin(emu.plugin("emu-a")).boot_core().await;
 
     let _ = t.core.dispatch(Command::InstallEmulator { plugin: id("emu-a"), version: None }).await;
     install(&t.core).await;
@@ -355,10 +137,10 @@ async fn a_server_that_ignores_ranges_gets_a_clean_restart() {
 #[tokio::test]
 async fn a_file_with_the_wrong_checksum_is_deleted_and_never_installed() {
     let host = FakeHost::new();
-    let mut emu = FakeEmu::new(vec!["A"]);
+    let mut emu = FakeEmulator::new(vec!["A"]);
     host.http().serve(&emu.build_url, vec![1u8; 100]);
     emu.build_sha = "00".repeat(32);
-    let t = host.plugin(emu_plugin("emu-a", emu.clone())).boot_core().await;
+    let t = host.plugin(emu.plugin("emu-a")).boot_core().await;
 
     let err = t.core.dispatch(Command::InstallEmulator { plugin: id("emu-a"), version: None }).await.unwrap_err();
 
@@ -372,10 +154,10 @@ async fn a_file_with_the_wrong_checksum_is_deleted_and_never_installed() {
 #[tokio::test]
 async fn a_download_from_a_host_outside_the_allowlist_is_refused() {
     let host = FakeHost::new();
-    let mut emu = FakeEmu::new(vec!["A"]);
+    let mut emu = FakeEmulator::new(vec!["A"]);
     emu.build_url = "https://evil.example/emu.bin".into();
     emu.build_sha = host.http().serve(&emu.build_url, vec![1u8; 10]);
-    let t = host.plugin(emu_plugin("emu-a", emu)).boot_core().await;
+    let t = host.plugin(emu.plugin("emu-a")).boot_core().await;
 
     let err = t.core.dispatch(Command::InstallEmulator { plugin: id("emu-a"), version: None }).await.unwrap_err();
 
@@ -386,7 +168,7 @@ async fn a_download_from_a_host_outside_the_allowlist_is_refused() {
 #[tokio::test]
 async fn an_install_a_crash_interrupted_resumes_at_the_next_start() {
     let host = FakeHost::new();
-    let mut emu = FakeEmu::new(vec!["A"]);
+    let mut emu = FakeEmulator::new(vec!["A"]);
     let body = vec![7u8; 20_000];
     emu.build_sha = host.http().serve(&emu.build_url, body.clone());
     // What the last run left: a half-downloaded part file and the saved install phase.
@@ -398,7 +180,7 @@ async fn an_install_a_crash_interrupted_resumes_at_the_next_start() {
         r#"{"app": {"installs": {"emu-a": {"version": "1.0", "from": null, "phase": "downloading"}}}}"#,
     )
     .unwrap();
-    let (builder, dir, http, spawner, _) = host.plugin(emu_plugin("emu-a", emu.clone())).into_builder();
+    let (builder, dir, http, spawner, _) = host.plugin(emu.plugin("emu-a")).into_builder();
     let (kernel, _) = builder.boot().await;
     let mut events = kernel.events().stream();
 
@@ -419,7 +201,7 @@ async fn an_install_a_crash_interrupted_resumes_at_the_next_start() {
 #[tokio::test]
 async fn a_download_a_crash_interrupted_resumes_at_the_next_start() {
     let host = FakeHost::new();
-    let mut emu = FakeEmu::new(vec!["A"]);
+    let mut emu = FakeEmulator::new(vec!["A"]);
     let body = vec![9u8; 20_000];
     emu.build_sha = host.http().serve(&emu.build_url, body.clone());
     // What the last run left: half the file, and the saved download.
@@ -429,7 +211,7 @@ async fn a_download_a_crash_interrupted_resumes_at_the_next_start() {
     let record = serde_json::json!({"plugin": "emu-a", "request": {"type": "emulator_build", "version": null}});
     let config = serde_json::json!({"app": {"downloads": {"pending": record}}});
     std::fs::write(host.data_dir().join("config.json"), config.to_string()).unwrap();
-    let (builder, dir, http, spawner, _) = host.plugin(emu_plugin("emu-a", emu.clone())).into_builder();
+    let (builder, dir, http, spawner, _) = host.plugin(emu.plugin("emu-a")).into_builder();
     let (kernel, _) = builder.boot().await;
     let mut events = kernel.events().stream();
 
@@ -476,7 +258,7 @@ fn job_state(core: &Core, job: u64) -> String {
 
 #[tokio::test]
 async fn a_download_is_saved_while_it_runs_and_forgotten_when_it_ends() {
-    let (t, emu) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, emu) = core_with(FakeEmulator::new(vec!["A"])).await;
     let gate = t.http.hold_after(&emu.build_url, 0);
     let mut events = t.core.events();
     let request = DownloadRequest::EmulatorBuild { version: None };
@@ -494,13 +276,13 @@ async fn a_download_is_saved_while_it_runs_and_forgotten_when_it_ends() {
 #[tokio::test]
 async fn downloads_beyond_the_limit_wait_in_the_queue() {
     let host = FakeHost::new().max_downloads(1);
-    let mut a = FakeEmu::new(vec!["A"]);
+    let mut a = FakeEmulator::new(vec!["A"]);
     a.build_sha = host.http().serve(&a.build_url, vec![1u8; 10_000]);
-    let mut b = FakeEmu::new(vec!["B"]);
+    let mut b = FakeEmulator::new(vec!["B"]);
     b.build_url = "https://builds.example/b-1.0.bin".into();
     b.build_sha = host.http().serve(&b.build_url, vec![2u8; 10_000]);
     let gate = host.http().hold_after(&a.build_url, 0);
-    let t = host.plugin(emu_plugin("emu-a", a)).plugin(emu_plugin("emu-b", b)).boot_core().await;
+    let t = host.plugin(a.plugin("emu-a")).plugin(b.plugin("emu-b")).boot_core().await;
     let mut events = t.core.events();
     let request = DownloadRequest::EmulatorBuild { version: None };
 
@@ -519,7 +301,7 @@ async fn downloads_beyond_the_limit_wait_in_the_queue() {
 
 #[tokio::test]
 async fn a_paused_download_keeps_its_part_and_resumes_where_it_stopped() {
-    let (t, emu) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, emu) = core_with(FakeEmulator::new(vec!["A"])).await;
     let _gate = t.http.hold_after(&emu.build_url, 8_192);
     let mut events = t.core.events();
     let request = DownloadRequest::EmulatorBuild { version: None };
@@ -547,7 +329,7 @@ async fn a_paused_download_keeps_its_part_and_resumes_where_it_stopped() {
 
 #[tokio::test]
 async fn cancelling_a_download_deletes_its_part_and_fails_the_install_that_waits_for_it() {
-    let (t, emu) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, emu) = core_with(FakeEmulator::new(vec!["A"])).await;
     let _gate = t.http.hold_after(&emu.build_url, 4_096);
     let mut events = t.core.events();
     let core = t.core.clone();
@@ -575,7 +357,7 @@ async fn cancelling_a_download_deletes_its_part_and_fails_the_install_that_waits
 #[tokio::test]
 async fn a_part_file_that_already_has_every_byte_is_checked_without_a_request() {
     let host = FakeHost::new();
-    let mut emu = FakeEmu::new(vec!["A"]);
+    let mut emu = FakeEmulator::new(vec!["A"]);
     let body = vec![7u8; 20_000];
     emu.build_sha = host.http().serve(&emu.build_url, body.clone());
     emu.build_size = Some(body.len() as u64);
@@ -583,7 +365,7 @@ async fn a_part_file_that_already_has_every_byte_is_checked_without_a_request() 
     let downloads = host.data_dir().join("plugins/emu-a/downloads");
     std::fs::create_dir_all(&downloads).unwrap();
     std::fs::write(downloads.join("emu-1.0.bin.part"), &body).unwrap();
-    let t = host.plugin(emu_plugin("emu-a", emu.clone())).boot_core().await;
+    let t = host.plugin(emu.plugin("emu-a")).boot_core().await;
 
     install(&t.core).await;
 
@@ -593,7 +375,7 @@ async fn a_part_file_that_already_has_every_byte_is_checked_without_a_request() 
 
 #[tokio::test]
 async fn launching_spawns_the_program_from_the_plugin_folder_and_tracks_the_process() {
-    let (t, emu) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, emu) = core_with(FakeEmulator::new(vec!["A"])).await;
     install(&t.core).await;
     let plugin = id("emu-a");
     t.core
@@ -622,13 +404,13 @@ async fn launching_spawns_the_program_from_the_plugin_folder_and_tracks_the_proc
             break;
         }
     }
-    assert_eq!(emu.exits.lock().unwrap()[0].0, "G0", "the plugin hears about the exit");
+    assert_eq!(emu.exits()[0].0, "G0", "the plugin hears about the exit");
     assert_ne!(t.core.view().screen, ScreenId::Running);
 }
 
 #[tokio::test]
 async fn stop_kills_a_running_game() {
-    let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, _) = core_with(FakeEmulator::new(vec!["A"])).await;
     install(&t.core).await;
     let mut events = t.core.events();
     t.core.dispatch(Command::Session(SessionCmd::Launch(key("emu-a:G0")))).await.unwrap();
@@ -680,7 +462,7 @@ async fn closed(events: &mut futures::stream::BoxStream<'static, Event>) -> Exit
 
 #[tokio::test]
 async fn a_started_game_comes_to_the_front_and_the_launcher_comes_back_when_it_closes() {
-    let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, _) = core_with(FakeEmulator::new(vec!["A"])).await;
     let mut events = t.core.events();
     let (_, process) = play(&t).await;
 
@@ -700,7 +482,7 @@ async fn a_started_game_comes_to_the_front_and_the_launcher_comes_back_when_it_c
 
 #[tokio::test]
 async fn a_game_whose_window_closed_is_stopped_and_the_launcher_comes_back() {
-    let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, _) = core_with(FakeEmulator::new(vec!["A"])).await;
     // On macOS a program can keep running after its last window closed.
     t.windows.windows_end_games();
     let mut events = t.core.events();
@@ -717,7 +499,7 @@ async fn a_game_whose_window_closed_is_stopped_and_the_launcher_comes_back() {
 
 #[tokio::test]
 async fn a_launcher_s_own_window_closing_before_the_game_s_opens_leaves_the_game_running() {
-    let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, _) = core_with(FakeEmulator::new(vec!["A"])).await;
     let (_, process) = play(&t).await;
     until(&t, "the launcher's menu is in front", || t.core.game_in_front()).await;
 
@@ -730,7 +512,7 @@ async fn a_launcher_s_own_window_closing_before_the_game_s_opens_leaves_the_game
 
 #[tokio::test]
 async fn a_game_a_start_script_left_running_keeps_the_session_until_it_ends() {
-    let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, _) = core_with(FakeEmulator::new(vec!["A"])).await;
     let mut events = t.core.events();
     let (_, process) = play(&t).await;
     // The script starts the game in the background and exits.
@@ -749,7 +531,7 @@ async fn a_game_a_start_script_left_running_keeps_the_session_until_it_ends() {
 
 #[tokio::test]
 async fn the_window_in_front_is_the_game_s_when_a_process_below_it_owns_it() {
-    let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, _) = core_with(FakeEmulator::new(vec!["A"])).await;
     let (_, process) = play(&t).await;
     until(&t, "the game is in front", || t.core.game_in_front()).await;
     // A sandbox's process, out of the game's group, draws the game.
@@ -764,7 +546,7 @@ async fn the_window_in_front_is_the_game_s_when_a_process_below_it_owns_it() {
 
 #[tokio::test]
 async fn stop_reaches_the_processes_a_sandbox_moved_out_of_the_game_s_group() {
-    let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, _) = core_with(FakeEmulator::new(vec!["A"])).await;
     let mut events = t.core.events();
     let (session, process) = play(&t).await;
     let sandboxed = process.id + 1000;
@@ -784,7 +566,7 @@ const STEAM_GAME: &str = "reaper SteamLaunch AppId=7 -- /games/seven/run";
 
 #[tokio::test]
 async fn a_game_another_program_starts_runs_until_its_own_process_ends() {
-    let (t, _) = core_with(FakeEmu::new(vec!["A"]).handing_over("AppId=7 ")).await;
+    let (t, _) = core_with(FakeEmulator::new(vec!["A"]).handing_over("AppId=7 ")).await;
     let mut events = t.core.events();
     let (_, launcher) = play(&t).await;
     // `steam steam://rungameid/7` hands the game to Steam and exits.
@@ -808,7 +590,7 @@ async fn a_game_another_program_starts_runs_until_its_own_process_ends() {
 
 #[tokio::test]
 async fn stop_ends_the_game_another_program_started_and_leaves_that_program_running() {
-    let (t, _) = core_with(FakeEmu::new(vec!["A"]).handing_over("AppId=7 ")).await;
+    let (t, _) = core_with(FakeEmulator::new(vec!["A"]).handing_over("AppId=7 ")).await;
     let mut events = t.core.events();
     // Steam wasn't running: the launch started Steam's client, which stays.
     let (session, steam) = play(&t).await;
@@ -824,7 +606,7 @@ async fn stop_ends_the_game_another_program_started_and_leaves_that_program_runn
 
 #[tokio::test]
 async fn a_game_another_program_never_starts_ends_with_a_notice() {
-    let (t, emu) = core_with(FakeEmu::new(vec!["A"]).handing_over("AppId=7 ")).await;
+    let (t, emu) = core_with(FakeEmulator::new(vec!["A"]).handing_over("AppId=7 ")).await;
     t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     let mut events = t.core.events();
     let (_, launcher) = play(&t).await;
@@ -835,12 +617,12 @@ async fn a_game_another_program_never_starts_ends_with_a_notice() {
     let notices = t.core.view().notices;
     assert!(notices.iter().any(|n| n.contains("A didn't start")), "{notices:?}");
     assert_eq!(t.core.view().result_prompt, None, "nothing was played");
-    assert_eq!(emu.exits.lock().unwrap().len(), 1, "the plugin hears of it");
+    assert_eq!(emu.exits().len(), 1, "the plugin hears of it");
 }
 
 #[tokio::test]
 async fn stop_before_the_game_another_program_starts_shows_ends_with_nothing_played() {
-    let (t, _) = core_with(FakeEmu::new(vec!["A"]).handing_over("AppId=7 ")).await;
+    let (t, _) = core_with(FakeEmulator::new(vec!["A"]).handing_over("AppId=7 ")).await;
     t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     let mut events = t.core.events();
     let (session, launcher) = play(&t).await;
@@ -859,7 +641,7 @@ async fn stop_before_the_game_another_program_starts_shows_ends_with_nothing_pla
 
 #[tokio::test]
 async fn the_same_game_already_running_before_play_isn_t_taken_for_the_one_play_starts() {
-    let (t, _) = core_with(FakeEmu::new(vec!["A"]).handing_over("AppId=7 ")).await;
+    let (t, _) = core_with(FakeEmulator::new(vec!["A"]).handing_over("AppId=7 ")).await;
     let mut events = t.core.events();
     // Started from Steam itself, before Nexus.
     t.processes.start(8000, STEAM_GAME);
@@ -879,7 +661,7 @@ async fn the_same_game_already_running_before_play_isn_t_taken_for_the_one_play_
 
 #[tokio::test]
 async fn only_the_newest_three_notices_stay_and_each_closes_on_its_own() {
-    let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, _) = core_with(FakeEmulator::new(vec!["A"])).await;
     for n in 1..=4 {
         t.core.report(format!("Problem {n}"));
     }
@@ -898,7 +680,7 @@ async fn only_the_newest_three_notices_stay_and_each_closes_on_its_own() {
 
 #[tokio::test]
 async fn what_the_desktop_is_missing_is_said_once_a_run() {
-    let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, _) = core_with(FakeEmulator::new(vec!["A"])).await;
     t.windows.set_problem("Install xdotool so games come to the front and the launcher comes back");
     let mut events = t.core.events();
     let (_, process) = play(&t).await;
@@ -918,7 +700,7 @@ async fn what_the_desktop_is_missing_is_said_once_a_run() {
 
 #[tokio::test]
 async fn after_playing_the_player_says_how_far_it_got_and_it_is_kept() {
-    let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, _) = core_with(FakeEmulator::new(vec!["A"])).await;
     t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     let mut events = t.core.events();
     let (_, process) = play(&t).await;
@@ -935,7 +717,7 @@ async fn after_playing_the_player_says_how_far_it_got_and_it_is_kept() {
 
 #[tokio::test]
 async fn not_now_keeps_no_result() {
-    let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, _) = core_with(FakeEmulator::new(vec!["A"])).await;
     let mut events = t.core.events();
     let (_, process) = play(&t).await;
     process.exit(0);
@@ -958,7 +740,7 @@ async fn play_run(t: &TestCore, n: usize) {
 
 #[tokio::test]
 async fn how_far_it_got_is_asked_once_for_each_build() {
-    let (t, emu) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, emu) = core_with(FakeEmulator::new(vec!["A"])).await;
     t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     install(&t.core).await;
     play_run(&t, 1).await;
@@ -967,7 +749,7 @@ async fn how_far_it_got_is_asked_once_for_each_build() {
     play_run(&t, 2).await;
     assert_eq!(t.core.view().result_prompt, None, "this build has a result");
 
-    *emu.latest.lock().unwrap() = "2.0".into();
+    emu.release("2.0");
     t.core.dispatch(Command::CheckUpdates).await.unwrap();
     play_run(&t, 3).await;
     assert_eq!(t.core.view().result_prompt.as_deref(), Some("A"), "a new build asks again");
@@ -977,7 +759,7 @@ async fn how_far_it_got_is_asked_once_for_each_build() {
 
 #[tokio::test]
 async fn not_now_is_kept_for_the_build() {
-    let (t, emu) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, emu) = core_with(FakeEmulator::new(vec!["A"])).await;
     t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     install(&t.core).await;
     play_run(&t, 1).await;
@@ -989,7 +771,7 @@ async fn not_now_is_kept_for_the_build() {
     assert_eq!(t.core.view().result_prompt.as_deref(), Some("A"), "Rate how it runs still asks");
     t.core.dispatch(Command::ReportResult(None)).await.unwrap();
 
-    *emu.latest.lock().unwrap() = "2.0".into();
+    emu.release("2.0");
     t.core.dispatch(Command::CheckUpdates).await.unwrap();
     play_run(&t, 3).await;
     assert_eq!(t.core.view().result_prompt.as_deref(), Some("A"), "a new build asks again");
@@ -997,7 +779,7 @@ async fn not_now_is_kept_for_the_build() {
 
 #[tokio::test]
 async fn two_presses_of_play_start_one_game() {
-    let (t, _) = core_with(FakeEmu::new(vec!["A", "B"])).await;
+    let (t, _) = core_with(FakeEmulator::new(vec!["A", "B"])).await;
     install(&t.core).await;
 
     let (a, b) = tokio::join!(
@@ -1012,7 +794,7 @@ async fn two_presses_of_play_start_one_game() {
 
 #[tokio::test]
 async fn a_desktop_that_can_t_say_leaves_the_pad_to_the_game() {
-    let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, _) = core_with(FakeEmulator::new(vec!["A"])).await;
     // As on Windows: no window can be shown, and the front is unknown.
     t.windows.set_front(Front::Unknown);
     t.windows.no_windows();
@@ -1026,7 +808,7 @@ async fn a_desktop_that_can_t_say_leaves_the_pad_to_the_game() {
 
 #[tokio::test]
 async fn a_game_whose_window_the_desktop_never_saw_is_not_taken_for_closed() {
-    let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, _) = core_with(FakeEmulator::new(vec!["A"])).await;
     // As on Wayland: xdotool sees no window of a game that draws to a Wayland surface.
     t.windows.set_front(Front::Unknown);
     t.windows.no_windows();
@@ -1041,7 +823,7 @@ async fn a_game_whose_window_the_desktop_never_saw_is_not_taken_for_closed() {
 
 #[tokio::test]
 async fn the_log_of_the_run_before_is_kept() {
-    let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, _) = core_with(FakeEmulator::new(vec!["A"])).await;
     let log = t.data_dir().join("logs/emu-a/G0.log");
     std::fs::create_dir_all(log.parent().unwrap()).unwrap();
     std::fs::write(&log, "the crash").unwrap();
@@ -1054,7 +836,7 @@ async fn the_log_of_the_run_before_is_kept() {
 
 #[tokio::test]
 async fn the_running_screen_says_starting_until_the_game_shows_a_window() {
-    let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, _) = core_with(FakeEmulator::new(vec!["A"])).await;
     t.windows.no_windows();
     let (_, _process) = play(&t).await;
 
@@ -1067,7 +849,7 @@ async fn the_running_screen_says_starting_until_the_game_shows_a_window() {
 
 #[tokio::test]
 async fn the_launcher_stays_behind_a_closed_game_when_the_player_says_so() {
-    let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, _) = core_with(FakeEmulator::new(vec!["A"])).await;
     t.core.dispatch(Command::Pref(Pref::ReturnOnExit, false.into())).await.unwrap();
     assert!(!t.core.view().settings.return_on_exit);
     let mut events = t.core.events();
@@ -1082,7 +864,7 @@ async fn the_launcher_stays_behind_a_closed_game_when_the_player_says_so() {
 
 #[tokio::test]
 async fn the_ps_button_goes_from_the_game_to_the_launcher_and_back() {
-    let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, _) = core_with(FakeEmulator::new(vec!["A"])).await;
     let (_, process) = play(&t).await;
     until(&t, "the game is in front", || t.core.game_in_front()).await;
 
@@ -1097,7 +879,7 @@ async fn the_ps_button_goes_from_the_game_to_the_launcher_and_back() {
 
 #[tokio::test]
 async fn the_desktop_says_which_window_is_in_front() {
-    let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, _) = core_with(FakeEmulator::new(vec!["A"])).await;
     let (session, process) = play(&t).await;
     until(&t, "the game is in front", || t.core.game_in_front()).await;
 
@@ -1113,7 +895,7 @@ async fn the_desktop_says_which_window_is_in_front() {
 
 #[tokio::test]
 async fn without_the_desktop_s_answer_the_last_window_shown_counts() {
-    let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, _) = core_with(FakeEmulator::new(vec!["A"])).await;
     t.windows.set_front(Front::Unknown);
     let (_, _process) = play(&t).await;
 
@@ -1124,7 +906,7 @@ async fn without_the_desktop_s_answer_the_last_window_shown_counts() {
 
 #[tokio::test]
 async fn stop_asks_the_game_to_close_before_it_kills_it() {
-    let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, _) = core_with(FakeEmulator::new(vec!["A"])).await;
     t.spawner.ignore_terminate();
     let mut events = t.core.events();
     let (session, process) = play(&t).await;
@@ -1139,7 +921,7 @@ async fn stop_asks_the_game_to_close_before_it_kills_it() {
 
 #[tokio::test]
 async fn a_game_that_closes_right_after_it_starts_leaves_a_notice_with_its_log() {
-    let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, _) = core_with(FakeEmulator::new(vec!["A"])).await;
     t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     let mut events = t.core.events();
     let (_, process) = play(&t).await;
@@ -1157,7 +939,7 @@ async fn a_game_that_closes_right_after_it_starts_leaves_a_notice_with_its_log()
 
 #[tokio::test]
 async fn one_game_runs_at_a_time() {
-    let (t, _) = core_with(FakeEmu::new(vec!["A", "B"])).await;
+    let (t, _) = core_with(FakeEmulator::new(vec!["A", "B"])).await;
     t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     let (_, _process) = play(&t).await;
 
@@ -1169,7 +951,7 @@ async fn one_game_runs_at_a_time() {
 
 #[tokio::test]
 async fn play_time_adds_up_and_the_game_page_shows_it() {
-    let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, _) = core_with(FakeEmulator::new(vec!["A"])).await;
     t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     t.core.dispatch(Command::OpenGame(key("emu-a:G0"))).await.unwrap();
     let detail = t.core.view().detail.unwrap();
@@ -1190,10 +972,10 @@ async fn play_time_adds_up_and_the_game_page_shows_it() {
 #[tokio::test]
 async fn a_program_outside_the_process_allowlist_is_not_spawned() {
     let host = FakeHost::new();
-    let mut emu = FakeEmu::new(vec!["A"]);
+    let mut emu = FakeEmulator::new(vec!["A"]);
     emu.build_sha = host.http().serve(&emu.build_url, vec![7u8; 10]);
     // Same plugin, but its manifest lets it spawn nothing.
-    let t = host.plugin(emu_plugin_with("emu-a", emu, "network = [\"builds.example\"]")).boot_core().await;
+    let t = host.plugin(emu.plugin_with("emu-a", "network = [\"builds.example\"]")).boot_core().await;
     install(&t.core).await;
 
     let err = t.core.dispatch(Command::Session(SessionCmd::Launch(key("emu-a:G0")))).await.unwrap_err();
@@ -1205,10 +987,10 @@ async fn a_program_outside_the_process_allowlist_is_not_spawned() {
 #[tokio::test]
 async fn a_launcher_s_precondition_stops_the_launch_and_says_why() {
     let host = FakeHost::new();
-    let mut emu = FakeEmu::new(vec!["A", "B"]);
+    let mut emu = FakeEmulator::new(vec!["A", "B"]);
     emu.build_sha = host.http().serve(&emu.build_url, vec![7u8; 10]);
     emu.refuses = Some(("G1", "firmware missing"));
-    let t = host.plugin(emu_plugin("emu-a", emu)).boot_core().await;
+    let t = host.plugin(emu.plugin("emu-a")).boot_core().await;
     install(&t.core).await;
 
     let mut events = t.core.events();
@@ -1227,7 +1009,7 @@ async fn a_launcher_s_precondition_stops_the_launch_and_says_why() {
 
 #[tokio::test]
 async fn the_first_game_is_selected_with_its_details_once_the_library_loads() {
-    let (t, _) = core_with(FakeEmu::new(vec!["Beta", "Alpha"])).await;
+    let (t, _) = core_with(FakeEmulator::new(vec!["Beta", "Alpha"])).await;
 
     t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
 
@@ -1238,7 +1020,7 @@ async fn the_first_game_is_selected_with_its_details_once_the_library_loads() {
 
 #[tokio::test]
 async fn navigation_and_selection_live_in_the_core() {
-    let (t, _) = core_with(FakeEmu::new(vec!["A", "B"])).await;
+    let (t, _) = core_with(FakeEmulator::new(vec!["A", "B"])).await;
     t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
 
     t.core.dispatch(Command::Select(key("emu-a:G1"))).await.unwrap();
@@ -1292,12 +1074,12 @@ async fn settings_are_checked_by_the_plugin_before_they_are_stored() {
 #[tokio::test]
 async fn a_download_follows_redirects_inside_the_allowlist_and_keeps_its_range() {
     let host = FakeHost::new();
-    let mut emu = FakeEmu::new(vec!["A"]);
+    let mut emu = FakeEmulator::new(vec!["A"]);
     let mirror = "https://cdn.builds.example/files/emu-1.0.bin";
     emu.build_sha = host.http().serve(mirror, vec![3u8; 20_000]);
     host.http().redirect(&emu.build_url, "//cdn.builds.example/files/emu-1.0.bin");
     host.http().cut_next_after(mirror, 9_000);
-    let t = host.plugin(emu_plugin_with("emu-a", emu.clone(), "network = [\"*.builds.example\"]")).boot_core().await;
+    let t = host.plugin(emu.plugin_with("emu-a", "network = [\"*.builds.example\"]")).boot_core().await;
 
     let _ = t.core.dispatch(Command::InstallEmulator { plugin: id("emu-a"), version: None }).await;
     install(&t.core).await;
@@ -1316,10 +1098,10 @@ async fn a_download_follows_redirects_inside_the_allowlist_and_keeps_its_range()
 #[tokio::test]
 async fn a_redirect_out_of_the_allowlist_is_refused_before_it_is_fetched() {
     let host = FakeHost::new();
-    let mut emu = FakeEmu::new(vec!["A"]);
+    let mut emu = FakeEmulator::new(vec!["A"]);
     emu.build_sha = host.http().serve("https://evil.example/emu.bin", vec![1u8; 10]);
     host.http().redirect(&emu.build_url, "https://evil.example/emu.bin");
-    let t = host.plugin(emu_plugin("emu-a", emu)).boot_core().await;
+    let t = host.plugin(emu.plugin("emu-a")).boot_core().await;
 
     let err = t.core.dispatch(Command::InstallEmulator { plugin: id("emu-a"), version: None }).await.unwrap_err();
 
@@ -1364,7 +1146,7 @@ async fn installed(core: &Core) -> Vec<String> {
 
 #[tokio::test]
 async fn playing_a_game_whose_emulator_isn_t_installed_asks_first_then_installs_and_plays() {
-    let mut emu = FakeEmu::new(vec!["A"]);
+    let mut emu = FakeEmulator::new(vec!["A"]);
     emu.build_size = Some(20_000);
     let (t, _) = core_with(emu).await;
     t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
@@ -1384,10 +1166,10 @@ async fn playing_a_game_whose_emulator_isn_t_installed_asks_first_then_installs_
 #[tokio::test]
 async fn a_plugin_named_by_its_console_names_its_program_where_a_sentence_means_the_program() {
     let host = FakeHost::new().first_run();
-    let mut emu = FakeEmu::new(vec!["A"]);
+    let mut emu = FakeEmulator::new(vec!["A"]);
     emu.build_sha = host.http().serve(&emu.build_url, vec![7u8; 20_000]);
     let names = "name = \"PS5\"\nemulator = \"KytyPS5\"";
-    let t = host.plugin(emu_plugin_named("emu-a", names, emu, PERMISSIONS)).boot_core().await;
+    let t = host.plugin(emu.plugin_named("emu-a", names, FAKE_EMULATOR_PERMISSIONS)).boot_core().await;
     t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     let steps: Vec<String> = t.core.view().boot.steps.into_iter().map(|s| s.label).collect();
     assert!(steps.contains(&"KytyPS5 emulator".to_owned()), "the first start's step: {steps:?}");
@@ -1421,7 +1203,7 @@ async fn a_plugin_named_by_its_console_names_its_program_where_a_sentence_means_
 
 #[tokio::test]
 async fn not_now_leaves_the_emulator_uninstalled() {
-    let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, _) = core_with(FakeEmulator::new(vec!["A"])).await;
     t.core.dispatch(Command::Session(SessionCmd::Launch(key("emu-a:G0")))).await.unwrap();
     t.core.dispatch(Command::CancelInstall).await.unwrap();
     assert!(t.core.view().install_prompt.is_none());
@@ -1431,9 +1213,9 @@ async fn not_now_leaves_the_emulator_uninstalled() {
 
 #[tokio::test]
 async fn a_newer_build_installs_by_itself_when_no_game_runs() {
-    let (t, emu) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, emu) = core_with(FakeEmulator::new(vec!["A"])).await;
     install(&t.core).await;
-    *emu.latest.lock().unwrap() = "2.0".into();
+    emu.release("2.0");
 
     t.core.dispatch(Command::CheckUpdates).await.unwrap();
     assert!(installed(&t.core).await.contains(&"2.0".to_owned()));
@@ -1441,11 +1223,11 @@ async fn a_newer_build_installs_by_itself_when_no_game_runs() {
 
 #[tokio::test]
 async fn an_update_waits_until_the_emulator_s_game_closes() {
-    let (t, emu) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, emu) = core_with(FakeEmulator::new(vec!["A"])).await;
     install(&t.core).await;
     t.core.dispatch(Command::Session(SessionCmd::Launch(key("emu-a:G0")))).await.unwrap();
     let process = t.spawner.wait_for(1).await;
-    *emu.latest.lock().unwrap() = "2.0".into();
+    emu.release("2.0");
 
     t.core.dispatch(Command::CheckUpdates).await.unwrap();
     assert_eq!(installed(&t.core).await, ["1.0"], "not while the game runs");
@@ -1462,11 +1244,11 @@ async fn an_update_waits_until_the_emulator_s_game_closes() {
 
 #[tokio::test]
 async fn automatic_updates_can_be_turned_off() {
-    let (t, emu) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, emu) = core_with(FakeEmulator::new(vec!["A"])).await;
     install(&t.core).await;
     assert!(t.core.view().settings.auto_update, "on by default, as in the old launcher");
     t.core.dispatch(Command::Pref(Pref::AutoUpdate, false.into())).await.unwrap();
-    *emu.latest.lock().unwrap() = "2.0".into();
+    emu.release("2.0");
 
     t.core.dispatch(Command::CheckUpdates).await.unwrap();
     assert_eq!(installed(&t.core).await, ["1.0"]);
@@ -1529,9 +1311,9 @@ async fn start_at_login_is_hidden_when_this_build_isn_t_installed() {
 
 #[tokio::test]
 async fn a_game_doesn_t_start_while_its_emulator_updates() {
-    let (t, emu) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, emu) = core_with(FakeEmulator::new(vec!["A"])).await;
     install(&t.core).await;
-    *emu.latest.lock().unwrap() = "2.0".into();
+    emu.release("2.0");
     let gate = t.http.hold_after(&emu.build_url, 10);
 
     let core = t.core.clone();
@@ -1551,8 +1333,8 @@ async fn a_game_doesn_t_start_while_its_emulator_updates() {
 #[tokio::test]
 async fn opening_another_plugin_replaces_the_open_one_so_back_goes_to_the_list() {
     let t = FakeHost::new()
-        .plugin(emu_plugin("emu-a", FakeEmu::new(vec!["A"])))
-        .plugin(emu_plugin("emu-b", FakeEmu::new(vec!["B"])))
+        .plugin(FakeEmulator::new(vec!["A"]).plugin("emu-a"))
+        .plugin(FakeEmulator::new(vec!["B"]).plugin("emu-b"))
         .boot_core()
         .await;
     t.core.dispatch(Command::Navigate(Route::Emulators)).await.unwrap();
@@ -1566,7 +1348,7 @@ async fn opening_another_plugin_replaces_the_open_one_so_back_goes_to_the_list()
 
 #[tokio::test]
 async fn emulators_and_themes_each_have_their_own_list() {
-    let t = FakeHost::new().plugin(emu_plugin("emu-a", FakeEmu::new(vec!["A"]))).boot_core().await;
+    let t = FakeHost::new().plugin(FakeEmulator::new(vec!["A"]).plugin("emu-a")).boot_core().await;
     t.core.dispatch(Command::Navigate(Route::Themes)).await.unwrap();
     assert_eq!(t.core.view().screen, ScreenId::Themes);
     t.core.dispatch(Command::Navigate(Route::Emulators)).await.unwrap();
@@ -1575,7 +1357,7 @@ async fn emulators_and_themes_each_have_their_own_list() {
 
 #[tokio::test]
 async fn an_emulator_s_row_shows_its_installed_build_not_the_plugin_s_version() {
-    let (t, _emu) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, _emu) = core_with(FakeEmulator::new(vec!["A"])).await;
     t.core.dispatch(Command::Navigate(Route::Emulators)).await.unwrap();
     let row = |t: &TestCore| t.core.view().emulators.plugins.into_iter().find(|p| p.id == id("emu-a")).unwrap();
     assert_eq!(row(&t).build, "", "not installed yet");
@@ -1587,7 +1369,7 @@ async fn an_emulator_s_row_shows_its_installed_build_not_the_plugin_s_version() 
 
 #[tokio::test]
 async fn the_game_watcher_reads_the_desktop_every_round_on_the_clock_and_not_between() {
-    let (t, _) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, _) = core_with(FakeEmulator::new(vec!["A"])).await;
     play(&t).await;
     t.until(Area::Sessions, |core| core.game_in_front()).await;
 
@@ -1601,10 +1383,10 @@ async fn the_game_watcher_reads_the_desktop_every_round_on_the_clock_and_not_bet
 
 #[tokio::test]
 async fn emulator_updates_are_looked_for_a_minute_after_the_start_on_the_clock() {
-    let (t, emu) = core_with(FakeEmu::new(vec!["A"])).await;
+    let (t, emu) = core_with(FakeEmulator::new(vec!["A"])).await;
     let started = t.clock.now();
     install(&t.core).await;
-    *emu.latest.lock().unwrap() = "2.0".into();
+    emu.release("2.0");
 
     t.clock.advance(Duration::from_secs(59) - (t.clock.now() - started)).await;
     assert_eq!(installed(&t.core).await, ["1.0"], "not before the minute");

@@ -1,5 +1,6 @@
 //! Seam 2: the capability contracts catch a plugin that breaks a rule. The KytyPS5 and
-//! shadPS4 plugins run the full suites in `kyty.rs` and `shadps4.rs`.
+//! shadPS4 plugins run the full suites in `kyty.rs` and `shadps4.rs`; the testkit's scripted
+//! emulator runs them here.
 
 use nexus_api::PluginId;
 use nexus_testkit::FakeHost;
@@ -50,4 +51,14 @@ async fn the_contract_catches_a_plugin_that_breaks_a_rule() {
     .provides(|_| Ok(nexus_api::Provided { catalog: Some(std::sync::Arc::new(Twice)), ..Default::default() }));
     let test = FakeHost::new().plugin(plugin).boot_core().await;
     contract::emulator(&test, &PluginId::new("twice").unwrap()).await;
+}
+
+#[tokio::test]
+async fn the_fake_emulator_keeps_every_contract() {
+    let host = FakeHost::new();
+    let mut emulator = nexus_testkit::FakeEmulator::new(vec!["Alpha", "Beta"]);
+    emulator.build_sha = host.http().serve(&emulator.build_url, vec![7u8; 20_000]);
+    let test = host.plugin(emulator.plugin("emu-a")).boot_core().await;
+    contract::emulator(&test, &PluginId::new("emu-a").unwrap()).await;
+    assert_eq!(emulator.exits().len(), 1, "the launch contract's game exited");
 }
