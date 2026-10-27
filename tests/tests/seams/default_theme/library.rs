@@ -203,12 +203,8 @@ fn the_keys_reach_the_library_s_filters_and_its_card_size() {
 fn the_genre_row_scrolls_to_the_focused_chip_and_fades_where_chips_are_hidden() {
     use slint::platform::Key;
     let mut host = composed(|h| {
-        h.plugin(games("emu-a", vec!["Alpha"])).plugin(store(
-            "store",
-            vec![("CUSA00000", 4.5, "")],
-            None,
-            std::time::Duration::ZERO,
-        ))
+        h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha"]).build())
+            .plugin(FakeStore::new("store").knows("CUSA00000", 4.5, "").build())
     });
     host.ui.start().unwrap();
     home_line(&mut host);
@@ -239,12 +235,8 @@ fn the_genre_row_scrolls_to_the_focused_chip_and_fades_where_chips_are_hidden() 
 fn right_to_left_the_library_s_header_and_genre_row_are_mirrored() {
     use slint::platform::Key;
     let mut host = composed(|h| {
-        h.plugin(games("emu-a", vec!["Alpha"])).plugin(store(
-            "store",
-            vec![("CUSA00000", 4.5, "")],
-            None,
-            std::time::Duration::ZERO,
-        ))
+        h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha"]).build())
+            .plugin(FakeStore::new("store").knows("CUSA00000", 4.5, "").build())
     });
     host.ui.start().unwrap();
     home_line(&mut host);
@@ -299,7 +291,7 @@ fn without_genres_the_library_s_grid_starts_under_the_systems() {
 /// The Library with 40 games, at 1600 × 900.
 fn a_long_library() -> Composed {
     let titles: Vec<&'static str> = (0..40).map(|n| &*Box::leak(format!("Game {n:02}").into_boxed_str())).collect();
-    let mut host = composed(|h| h.plugin(games("emu-a", titles)));
+    let mut host = composed(|h| h.plugin(FakeCatalog::new("emu-a").system("PS4").games(titles).build()));
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.resize(1600.0, 900.0);

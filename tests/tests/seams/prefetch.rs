@@ -39,7 +39,8 @@ fn art_store() -> nexus_testkit::StubPlugin {
 /// their number's.
 fn twelve() -> Composed {
     let titles = vec!["G00", "G01", "G02", "G03", "G04", "G05", "G06", "G07", "G08", "G09", "G10", "G11"];
-    let mut host = composed(|h| h.plugin(games("emu-a", titles)).plugin(art_store()));
+    let mut host =
+        composed(|h| h.plugin(FakeCatalog::new("emu-a").system("PS4").games(titles).build()).plugin(art_store()));
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host

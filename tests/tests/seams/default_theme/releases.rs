@@ -272,7 +272,7 @@ fn astro_on(
 ) -> Composed {
     first_offer_on(
         home,
-        offering_emulator("vulkan = \"1.3\""),
+        FakeCatalog::kyty().playable().requires("vulkan = \"1.3\"").build(),
         build,
         serde_json::json!([{ "id": "1", "title": "[PS5] Astro [EUR / v01.05]", "size": "50 GB",
             "magnet": format!("magnet:?xt=urn:btih:{ASTRO_HASH}"),

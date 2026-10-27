@@ -275,7 +275,7 @@ async fn a_failed_refresh_tries_again_after_a_back_off_not_every_second() {
 async fn a_refresh_that_can_t_keep_its_copy_is_no_change_and_backs_off() {
     // KytyPS5, so the core itself reads the catalogs again on each change.
     let t = FakeHost::new()
-        .plugin(offering_emulator(""))
+        .plugin(FakeCatalog::kyty().playable().build())
         .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .boot_core()
         .await;
@@ -578,7 +578,7 @@ async fn where_downloads_can_t_be_bound_to_a_vpn_the_page_says_why_the_refresh_r
 /// a VPN" on while the VPN `wg-se` is down. Then the catalog is served with the refresh on or off.
 async fn boot_waiting_for_the_vpn(refresh: bool) -> TestCore {
     let t = FakeHost::new()
-        .plugin(offering_emulator(""))
+        .plugin(FakeCatalog::kyty().playable().build())
         .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .boot_core()
         .await;
@@ -650,7 +650,7 @@ async fn offers_once(t: &TestCore, count: usize) -> Vec<String> {
 #[tokio::test]
 async fn a_slow_forum_still_gives_the_catalog_at_once_and_the_refresh_comes_after() {
     let t = FakeHost::new()
-        .plugin(offering_emulator(""))
+        .plugin(FakeCatalog::kyty().playable().build())
         .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .boot_core()
         .await;
@@ -774,7 +774,7 @@ fn notices(t: &TestCore) -> Vec<(String, String)> {
 #[tokio::test]
 async fn a_refresh_that_adds_releases_says_how_many_and_the_first_copy_says_nothing() {
     let t = FakeHost::new()
-        .plugin(offering_emulator(""))
+        .plugin(FakeCatalog::kyty().playable().build())
         .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .boot_core()
         .await;
@@ -799,7 +799,7 @@ async fn a_refresh_that_adds_releases_says_how_many_and_the_first_copy_says_noth
 async fn on_the_catalog(refresh: bool) -> TestCore {
     let t = FakeHost::new()
         .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
-        .plugin(games_on("emu-kyty", "PS5", vec![]).console("PS5"))
+        .plugin(FakeCatalog::new("emu-kyty").system("PS5").games([]).build().console("PS5"))
         .boot_core()
         .await;
     serve(&t, refresh, PVC_ANSWER.to_owned()).await;
@@ -855,7 +855,7 @@ async fn the_catalog_s_refresh_button_runs_refresh_now_and_says_refreshing_then_
 async fn the_catalog_says_why_its_refresh_did_not_run() {
     let t = FakeHost::new()
         .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
-        .plugin(games_on("emu-kyty", "PS5", vec![]).console("PS5"))
+        .plugin(FakeCatalog::new("emu-kyty").system("PS5").games([]).build().console("PS5"))
         .boot_core()
         .await;
     serve(&t, true, "{ not json".to_owned()).await;

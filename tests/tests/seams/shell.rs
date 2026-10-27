@@ -12,7 +12,7 @@ use crate::common::*;
 
 /// A shell showing the default theme's Home, booted, with one render behind it.
 fn shown() -> Composed {
-    let mut host = composed(|h| h.plugin(playable_games("emu-a", vec!["Alpha"])));
+    let mut host = composed(|h| h.plugin(FakeCatalog::new("emu-a").playable().games(["Alpha"]).build()));
     host.ui.start().unwrap();
     host.dispatch(Command::Library(LibraryCmd::Refresh));
     host.render().unwrap();

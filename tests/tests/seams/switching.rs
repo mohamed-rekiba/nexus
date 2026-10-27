@@ -18,7 +18,7 @@ fn drain(stream: &mut futures::stream::BoxStream<'static, Event>) -> Vec<Event> 
 }
 
 fn with_examples(h: nexus_testkit::FakeHost) -> nexus_testkit::FakeHost {
-    h.discover(&fixture_themes()).plugin(playable_games("emu-a", vec!["Alpha", "Beta", "Gamma"]))
+    h.discover(&fixture_themes()).plugin(FakeCatalog::new("emu-a").playable().games(["Alpha", "Beta", "Gamma"]).build())
 }
 
 #[test]

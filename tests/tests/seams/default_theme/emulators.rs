@@ -5,7 +5,7 @@ use super::*;
 #[test]
 fn a_service_is_listed_after_the_emulators_with_nothing_to_install() {
     let mut host = composed(|h| {
-        h.plugin(store("store", vec![], None, std::time::Duration::ZERO)).plugin(playable_games("emu-a", vec!["Alpha"]))
+        h.plugin(FakeStore::new("store").build()).plugin(FakeCatalog::new("emu-a").playable().games(["Alpha"]).build())
     });
     host.ui.start().unwrap();
     host.dispatch(Command::Navigate(nexus_core::Route::Emulators));
@@ -25,7 +25,9 @@ fn a_service_is_listed_after_the_emulators_with_nothing_to_install() {
 #[test]
 fn a_first_play_asks_before_the_emulator_downloads_and_enter_agrees() {
     use slint::platform::Key;
-    let mut host = composed(|h| h.plugin(games_needing_an_emulator("emu-x", vec!["Astro"])));
+    let mut host = composed(|h| {
+        h.plugin(FakeCatalog::new("emu-x").named("Emu").playable().needing_its_emulator().games(["Astro"]).build())
+    });
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::Session(SessionCmd::Launch("emu-x:G0".parse().unwrap())));
@@ -44,7 +46,9 @@ fn a_first_play_asks_before_the_emulator_downloads_and_enter_agrees() {
 
 #[test]
 fn an_emulator_s_download_says_where_it_is_in_words() {
-    let mut host = composed(|h| h.plugin(games_needing_an_emulator("emu-x", vec!["Astro"])));
+    let mut host = composed(|h| {
+        h.plugin(FakeCatalog::new("emu-x").named("Emu").playable().needing_its_emulator().games(["Astro"]).build())
+    });
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::Session(SessionCmd::Launch("emu-x:G0".parse().unwrap())));
@@ -59,7 +63,9 @@ fn an_emulator_s_download_says_where_it_is_in_words() {
 #[test]
 fn not_now_closes_the_install_prompt() {
     use slint::platform::Key;
-    let mut host = composed(|h| h.plugin(games_needing_an_emulator("emu-x", vec!["Astro"])));
+    let mut host = composed(|h| {
+        h.plugin(FakeCatalog::new("emu-x").named("Emu").playable().needing_its_emulator().games(["Astro"]).build())
+    });
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::Session(SessionCmd::Launch("emu-x:G0".parse().unwrap())));
@@ -119,8 +125,28 @@ fn a_plugin_turned_off_on_its_page_shows_only_the_switch() {
 #[test]
 fn the_emulators_list_names_each_console_and_its_program_s_build() {
     let mut host = composed(|h| {
-        h.plugin(console_emulator("emu-k", "PS5", "KytyPS5", "KytyPS5-2026-10-21-e2dd48a", vec![]))
-            .plugin(console_emulator("emu-s", "PS4", "shadPS4", "v.0.20.0", vec![]))
+        h.plugin(
+            FakeCatalog::new("emu-k")
+                .named("PS5")
+                .emulator("KytyPS5")
+                .platform("PS5")
+                .without_slots()
+                .playable()
+                .installed("KytyPS5-2026-10-21-e2dd48a")
+                .games([])
+                .build(),
+        )
+        .plugin(
+            FakeCatalog::new("emu-s")
+                .named("PS4")
+                .emulator("shadPS4")
+                .platform("PS5")
+                .without_slots()
+                .playable()
+                .installed("v.0.20.0")
+                .games([])
+                .build(),
+        )
     });
     host.ui.start().unwrap();
     host.dispatch(Command::Navigate(nexus_core::Route::Emulators));
@@ -157,7 +183,7 @@ fn an_emulator_with_no_builds_has_no_build_row() {
 #[test]
 fn the_game_catalog_page_shows_its_sources_its_refresh_and_refresh_now() {
     let mut host = composed(|h| {
-        h.plugin(games("emu-kyty", vec!["Alpha"]).console("PS5"))
+        h.plugin(FakeCatalog::new("emu-kyty").system("PS4").games(["Alpha"]).build().console("PS5"))
             .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
@@ -229,34 +255,15 @@ fn the_game_catalog_page_shows_its_sources_its_refresh_and_refresh_now() {
 
 #[test]
 fn a_section_card_grows_with_values_that_wrap() {
-    struct Facts;
-    #[nexus_api::async_trait]
-    impl nexus_api::Slots for Facts {
-        async fn items(&self, request: &nexus_api::SlotRequest) -> nexus_api::PluginResult<Vec<nexus_api::SlotItem>> {
-            if request.slot != nexus_api::SlotId::EmulatorPanel {
-                return Ok(vec![]);
-            }
-            let row = |label: &str, value: &str| nexus_api::SectionRow { label: label.into(), value: value.into() };
-            let long = "Refreshed Oct 23, 2026 at 06:06 UTC: 16 new, 0 removed, and a few words more to wrap";
-            Ok(vec![nexus_api::SlotItem {
-                id: "refresh".into(),
-                order: Default::default(),
-                content: nexus_api::SlotContent::Section {
-                    title: "Catalog refresh".into(),
-                    rows: vec![row("PC", long), row("PS4", long), row("PS5", long)],
-                },
-            }])
-        }
-        async fn run_action(&self, _: &str, _: Option<&str>, _: &serde_json::Value) -> nexus_api::PluginResult<()> {
-            Ok(())
-        }
-    }
-    let facts = nexus_testkit::StubPlugin::from_toml(
-        "id = \"facts\"\nkind = \"service\"\nname = \"Facts\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
-         capabilities = [\"slots\"]",
-    )
-    .provides(|_| Ok(nexus_api::Provided { slots: Some(std::sync::Arc::new(Facts)), ..Default::default() }));
-    let mut host = composed(|h| h.plugin(facts));
+    let long = "Refreshed Oct 23, 2026 at 06:06 UTC: 16 new, 0 removed, and a few words more to wrap";
+    let rows = [("PC", long), ("PS4", long), ("PS5", long)];
+    let facts = FakeService::new("facts", "Facts").section(
+        nexus_api::SlotId::EmulatorPanel,
+        "refresh",
+        "Catalog refresh",
+        &rows,
+    );
+    let mut host = composed(|h| h.plugin(facts.build()));
     host.ui.start().unwrap();
     host.resize(700.0, 900.0);
     host.dispatch(Command::Navigate(nexus_core::Route::Emulators));
@@ -321,7 +328,9 @@ fn emulators_lists_emulators_only() {
 #[test]
 fn right_to_left_the_install_prompt_has_install_and_play_on_the_right_and_the_keys_follow() {
     use slint::platform::Key;
-    let mut host = composed(|h| h.plugin(games_needing_an_emulator("emu-x", vec!["Astro"])));
+    let mut host = composed(|h| {
+        h.plugin(FakeCatalog::new("emu-x").named("Emu").playable().needing_its_emulator().games(["Astro"]).build())
+    });
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::SetThemeOption { key: "direction".into(), value: "rtl".into() });

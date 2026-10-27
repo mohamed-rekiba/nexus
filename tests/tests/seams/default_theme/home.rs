@@ -4,7 +4,7 @@ use super::*;
 
 #[test]
 fn the_boot_screen_shows_until_the_library_is_in() {
-    let mut host = composed(|h| h.plugin(games("emu-a", vec!["Alpha"])));
+    let mut host = composed(|h| h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha"]).build()));
     host.ui.start().unwrap();
     settle(&mut host);
     assert_eq!(values(&host, "boot"), ["Loading..."], "from the first frame");
@@ -18,12 +18,8 @@ fn the_boot_screen_shows_until_the_library_is_in() {
 fn home_shows_the_store_s_tagline() {
     let tagline = "Build whatever you can imagine, in a world that is yours.";
     let mut host = composed(|h| {
-        h.plugin(games("emu-a", vec!["Alpha"])).plugin(store(
-            "store",
-            vec![("CUSA00000", 4.5, tagline)],
-            None,
-            std::time::Duration::ZERO,
-        ))
+        h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha"]).build())
+            .plugin(FakeStore::new("store").knows("CUSA00000", 4.5, tagline).build())
     });
     host.ui.start().unwrap();
     assert_eq!(home_line(&mut host), tagline);
@@ -32,12 +28,8 @@ fn home_shows_the_store_s_tagline() {
 #[test]
 fn without_a_tagline_home_shows_the_game_s_facts_on_one_line() {
     let mut host = composed(|h| {
-        h.plugin(games_without_description("emu-a", vec!["Alpha"])).plugin(store(
-            "store",
-            vec![("CUSA00000", 4.5, "")],
-            None,
-            std::time::Duration::ZERO,
-        ))
+        h.plugin(FakeCatalog::new("emu-a").system("PS4").without_description().games(["Alpha"]).build())
+            .plugin(FakeStore::new("store").knows("CUSA00000", 4.5, "").build())
     });
     host.ui.start().unwrap();
     // The stub's version fact is 01.000.002. Past the summary's length, the same line is cut.
@@ -58,7 +50,8 @@ fn home_cuts_a_long_line_after_a_word() {
                         Build and explore Build and explore Build and explore Build and explore Build and explore \
                         Build and explore Build and explore Build and explore Build and explore Build and explore \
                         Build and explore Build and explore Build and explore Build and explore Build and explore";
-    let mut host = composed(|h| h.plugin(games_without_description("emu-a", vec![LONG])));
+    let mut host =
+        composed(|h| h.plugin(FakeCatalog::new("emu-a").system("PS4").without_description().games([LONG]).build()));
     host.ui.start().unwrap();
     let text = home_line(&mut host);
     let kept = text.strip_suffix('…').unwrap_or_else(|| panic!("ends with …: {text}"));
@@ -69,12 +62,8 @@ fn home_cuts_a_long_line_after_a_word() {
 #[test]
 fn a_rating_counts_its_players_in_thousands() {
     let mut host = composed(|h| {
-        h.plugin(games("emu-a", vec!["Alpha"])).plugin(store(
-            "store",
-            vec![("CUSA00000", 4.44, "")],
-            None,
-            std::time::Duration::ZERO,
-        ))
+        h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha"]).build())
+            .plugin(FakeStore::new("store").knows("CUSA00000", 4.44, "").build())
     });
     host.ui.start().unwrap();
     home_line(&mut host);
@@ -89,12 +78,8 @@ fn the_boot_screen_waits_for_homes_art() {
         let mut png = std::io::Cursor::new(Vec::new());
         image::RgbImage::new(8, 8).write_to(&mut png, image::ImageFormat::Png).unwrap();
         let art = h.http().serve("https://art.example/alpha.png", png.into_inner());
-        h.plugin(games("emu-a", vec!["Alpha"])).plugin(store(
-            "store",
-            vec![("CUSA00000", 4.5, "")],
-            Some(art),
-            std::time::Duration::ZERO,
-        ))
+        h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha"]).build())
+            .plugin(FakeStore::new("store").knows("CUSA00000", 4.5, "").icon(art).build())
     });
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
@@ -110,12 +95,8 @@ fn the_boot_screen_waits_for_homes_art() {
 fn a_tile_shows_a_light_while_its_cover_loads_and_the_name_only_without_art() {
     // Only Alpha (CUSA00000) has a cover.
     let mut host = composed(|h| {
-        h.plugin(games("emu-a", vec!["Alpha", "Beta"])).plugin(store(
-            "store",
-            vec![("CUSA00000", 4.5, "")],
-            Some("https://art.example/alpha.png".into()),
-            std::time::Duration::ZERO,
-        ))
+        h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha", "Beta"]).build())
+            .plugin(FakeStore::new("store").knows("CUSA00000", 4.5, "").icon("https://art.example/alpha.png").build())
     });
     let mut png = std::io::Cursor::new(Vec::new());
     image::RgbImage::from_pixel(64, 96, image::Rgb([200, 60, 40])).write_to(&mut png, image::ImageFormat::Png).unwrap();
@@ -135,7 +116,8 @@ fn a_tile_shows_a_light_while_its_cover_loads_and_the_name_only_without_art() {
 #[test]
 fn the_first_run_welcomes_the_player_and_enter_starts() {
     use slint::platform::Key;
-    let mut host = composed(|h| h.first_run().plugin(games("emu-a", vec!["Alpha", "Beta"])));
+    let mut host =
+        composed(|h| h.first_run().plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha", "Beta"]).build()));
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     settle(&mut host);
@@ -163,8 +145,8 @@ fn the_top_bar_has_home_and_library_and_home_shows_every_game() {
 fn the_key_hints_name_the_trailer_and_options_and_hide_over_the_grids() {
     use slint::platform::Key;
     let mut host = composed(|h| {
-        h.plugin(games("emu-a", vec!["Alpha"]))
-            .plugin(store("store", vec![("CUSA00000", 4.5, "")], None, std::time::Duration::ZERO))
+        h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha"]).build())
+            .plugin(FakeStore::new("store").knows("CUSA00000", 4.5, "").build())
             .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
@@ -197,7 +179,9 @@ fn the_key_hints_name_the_trailer_and_options_and_hide_over_the_grids() {
 #[test]
 fn a_new_game_s_hero_waits_for_its_details_but_not_for_ever() {
     // These games' details never load.
-    let mut host = composed(|h| h.plugin(games_without_details("emu-a", vec!["Alpha", "Beta"])));
+    let mut host = composed(|h| {
+        h.plugin(FakeCatalog::new("emu-a").system("PS4").without_details().games(["Alpha", "Beta"]).build())
+    });
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::Select("emu-a:G0".parse().unwrap()));

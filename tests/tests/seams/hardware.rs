@@ -1,8 +1,9 @@
 //! Seam 1, core app API: "This PC". Each emulator's manifest says what its games need; the
 //! core compares it with what the computer has.
 
-use crate::common::{catalogs_fetched, games_needing, offering_emulator};
+use crate::common::catalogs_fetched;
 use nexus_core::{Area, Command, Core, Gpu, Specs};
+use nexus_testkit::FakeCatalog;
 use nexus_testkit::{FakeHost, StubPlugin, TestCore};
 use nexus_ui_api::VerdictVm;
 
@@ -113,7 +114,7 @@ async fn astro_offer(build: impl FnOnce(FakeHost) -> FakeHost) -> (TestCore, tem
     let home = tempfile::tempdir().unwrap();
     let t = build(FakeHost::new())
         .home(home.path())
-        .plugin(offering_emulator(PS5))
+        .plugin(FakeCatalog::kyty().playable().requires(PS5).build())
         .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .boot_core()
         .await;
@@ -143,7 +144,11 @@ fn on_this_pc(t: &TestCore) -> Option<(String, String, String)> {
 
 #[tokio::test]
 async fn an_installed_game_says_how_it_runs_on_this_pc() {
-    let t = FakeHost::new().hardware(old_driver()).plugin(games_needing("emu-a", PS5, vec!["Astro"])).boot_core().await;
+    let t = FakeHost::new()
+        .hardware(old_driver())
+        .plugin(FakeCatalog::new("emu-a").system("PS5").requires(PS5).games(["Astro"]).build())
+        .boot_core()
+        .await;
     wait_for_check(&t.core).await;
     t.core.dispatch(Command::OpenGame("emu-a:G0".parse().unwrap())).await.unwrap();
     assert_eq!(on_this_pc(&t), Some(("no".into(), "Won't start".into(), "No Vulkan 1.3".into())));
@@ -277,7 +282,7 @@ async fn an_offer_says_not_enough_space_from_its_best_release_not_its_newest_upl
         .hardware(strong())
         .free_space(10_000_000_000)
         .home(home.path())
-        .plugin(offering_emulator(PS5))
+        .plugin(FakeCatalog::kyty().playable().requires(PS5).build())
         .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .boot_core()
         .await;

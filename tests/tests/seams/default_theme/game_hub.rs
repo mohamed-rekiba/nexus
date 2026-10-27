@@ -22,12 +22,8 @@ fn the_game_s_menu_lists_what_the_game_has_and_rates_it() {
 fn the_game_hub_s_screenshots_open_full_screen_and_move_with_the_keys() {
     use slint::platform::Key;
     let mut host = composed(|h| {
-        h.plugin(games("emu-a", vec!["Alpha"])).plugin(store(
-            "store",
-            vec![("CUSA00000", 4.5, "")],
-            None,
-            std::time::Duration::ZERO,
-        ))
+        h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha"]).build())
+            .plugin(FakeStore::new("store").knows("CUSA00000", 4.5, "").build())
     });
     host.ui.start().unwrap();
     home_line(&mut host);
@@ -53,12 +49,8 @@ fn down_from_the_screenshots_reads_on_down_the_game_hub() {
     // A long name: its ABOUT ("About <name>") runs far below the window.
     let long: &'static str = Box::leak("Alpha and the Long Road ".repeat(200).into_boxed_str());
     let mut host = composed(|h| {
-        h.plugin(games("emu-a", vec![long])).plugin(store(
-            "store",
-            vec![("CUSA00000", 4.5, "")],
-            None,
-            std::time::Duration::ZERO,
-        ))
+        h.plugin(FakeCatalog::new("emu-a").system("PS4").games([long]).build())
+            .plugin(FakeStore::new("store").knows("CUSA00000", 4.5, "").build())
     });
     host.ui.start().unwrap();
     home_line(&mut host);
@@ -97,12 +89,8 @@ fn down_from_the_screenshots_reads_on_down_the_game_hub() {
 fn the_game_hub_s_screenshot_row_scrolls_to_the_focused_shot() {
     use slint::platform::Key;
     let mut host = composed(|h| {
-        h.plugin(games("emu-a", vec!["Alpha"])).plugin(store(
-            "store",
-            vec![("CUSA00000", 4.5, "")],
-            None,
-            std::time::Duration::ZERO,
-        ))
+        h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha"]).build())
+            .plugin(FakeStore::new("store").knows("CUSA00000", 4.5, "").build())
     });
     host.ui.start().unwrap();
     home_line(&mut host);

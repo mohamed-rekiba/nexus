@@ -6,7 +6,7 @@ use super::*;
 fn with_the_game_catalog_turned_off_the_ways_to_the_catalog_go() {
     use slint::platform::Key;
     let mut host = composed(|h| {
-        h.plugin(games("emu-kyty", vec!["Astro"]).console("PS5"))
+        h.plugin(FakeCatalog::new("emu-kyty").system("PS4").games(["Astro"]).build().console("PS5"))
             .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
@@ -33,7 +33,7 @@ fn with_the_game_catalog_turned_off_the_ways_to_the_catalog_go() {
 fn the_catalog_is_the_library_s_view_and_loads_a_page_at_a_time() {
     use slint::platform::Key;
     let mut host = composed(|h| {
-        h.plugin(games("emu-kyty", vec!["Alpha"]).console("PS5"))
+        h.plugin(FakeCatalog::new("emu-kyty").system("PS4").games(["Alpha"]).build().console("PS5"))
             .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
@@ -77,32 +77,10 @@ fn the_catalog_is_the_library_s_view_and_loads_a_page_at_a_time() {
     assert!(host.core().view().home.selected.is_some(), "Home's game, not the Catalog's");
 }
 
-/// A store that gives every game a cover at `https://art.example/<title id>.png`.
-fn covers_store() -> nexus_testkit::StubPlugin {
-    struct Covers;
-    #[nexus_api::async_trait]
-    impl nexus_api::Metadata for Covers {
-        async fn describe(
-            &self,
-            game: &nexus_api::GameRef,
-        ) -> nexus_api::PluginResult<Option<nexus_api::GameMetadata>> {
-            Ok(Some(nexus_api::GameMetadata {
-                icon: Some(nexus_api::ImageSource::Url(format!("https://art.example/{}.png", game.title_id))),
-                ..Default::default()
-            }))
-        }
-    }
-    nexus_testkit::StubPlugin::from_toml(
-        "id = \"store\"\nkind = \"service\"\nname = \"store\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
-         capabilities = [\"metadata\"]\n[permissions]\nnetwork = [\"art.example\"]",
-    )
-    .provides(|_| Ok(nexus_api::Provided { metadata: Some(std::sync::Arc::new(Covers)), ..Default::default() }))
-}
-
 /// The default theme on the Catalog, with three games a catalog offers: Astro, Bolt, Comet.
 fn three_on_the_catalog() -> Composed {
     let mut host = composed(|h| {
-        h.plugin(games("emu-kyty", vec![]).console("PS5"))
+        h.plugin(FakeCatalog::new("emu-kyty").system("PS4").games([]).build().console("PS5"))
             .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
@@ -182,7 +160,7 @@ fn the_eye_on_a_catalog_card_hides_the_game_and_the_hidden_filter_shows_it_again
 fn the_bar_under_the_catalog_s_header_shows_how_far_down_all_its_games_the_grid_is() {
     use slint::platform::Key;
     let mut host = composed(|h| {
-        h.plugin(games("emu-kyty", vec![]).console("PS5"))
+        h.plugin(FakeCatalog::new("emu-kyty").system("PS4").games([]).build().console("PS5"))
             .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
@@ -234,7 +212,7 @@ fn the_bar_under_the_catalog_s_header_shows_how_far_down_all_its_games_the_grid_
 fn back_from_a_game_s_details_the_catalog_is_where_it_was() {
     use slint::platform::Key;
     let mut host = composed(|h| {
-        h.plugin(games("emu-kyty", vec![]).console("PS5"))
+        h.plugin(FakeCatalog::new("emu-kyty").system("PS4").games([]).build().console("PS5"))
             .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
@@ -287,8 +265,8 @@ fn back_from_a_game_s_details_the_catalog_is_where_it_was() {
 #[test]
 fn the_catalog_loads_only_the_covers_near_the_screen() {
     let mut host = composed(|h| {
-        h.plugin(games("emu-kyty", vec![]).console("PS5"))
-            .plugin(covers_store())
+        h.plugin(FakeCatalog::new("emu-kyty").system("PS4").games([]).build().console("PS5"))
+            .plugin(FakeStore::new("store").covers().build())
             .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
@@ -360,7 +338,7 @@ fn the_catalog_says_loading_catalog_until_the_catalogs_are_read() {
     let open = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
     let slow = open.clone();
     let mut host = composed(|h| {
-        h.plugin(games("emu-kyty", vec![]).console("PS5")).plugin(
+        h.plugin(FakeCatalog::new("emu-kyty").system("PS4").games([]).build().console("PS5")).plugin(
             nexus_testkit::StubPlugin::from_toml(
                 "id = \"slow-catalog\"\nkind = \"service\"\nname = \"Slow\"\nversion = \"1.0.0\"\n\
                  host_api = \"^0.2\"\ncapabilities = [\"releases\"]",
@@ -391,7 +369,7 @@ fn the_catalog_says_loading_catalog_until_the_catalogs_are_read() {
 /// The Catalog with Alpha, which the emulator has, in two releases, and Bolt in one.
 fn alpha_and_bolt_on_the_catalog() -> Composed {
     let mut host = composed(|h| {
-        h.plugin(games_on("emu-kyty", "PS5", vec!["Alpha"]).console("PS5"))
+        h.plugin(FakeCatalog::new("emu-kyty").system("PS5").games(["Alpha"]).build().console("PS5"))
             .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
@@ -463,7 +441,7 @@ fn the_catalog_s_chip_row_has_installed_for_the_games_the_player_has() {
 /// The Catalog of one PS5 game, with Refresh from the forums on or off.
 fn catalog_with_refresh(refresh: bool) -> Composed {
     let mut host = composed(|h| {
-        h.plugin(games_on("emu-kyty", "PS5", vec![]).console("PS5"))
+        h.plugin(FakeCatalog::new("emu-kyty").system("PS5").games([]).build().console("PS5"))
             .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();

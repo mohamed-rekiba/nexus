@@ -4,7 +4,7 @@ use super::*;
 
 #[test]
 fn the_game_hub_stops_a_running_game() {
-    let mut host = composed(|h| h.plugin(playable_games("emu-a", vec!["Alpha"])));
+    let mut host = composed(|h| h.plugin(FakeCatalog::new("emu-a").playable().games(["Alpha"]).build()));
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::Session(SessionCmd::Launch("emu-a:G0".parse().unwrap())));
@@ -30,8 +30,8 @@ fn the_game_hub_stops_a_running_game() {
 fn the_launch_splash_shows_the_emulator_s_keys_and_takes_every_key_but_back_and_quit() {
     use nexus_ui_host::UiRequest;
     use slint::platform::Key;
-    let keymap = "[[keymap]]\nbutton = \"Cross\"\nkeys = \"J\"\n[[keymap]]\nbutton = \"Circle\"\nkeys = \"L\"\n";
-    let mut host = composed(|h| h.plugin(playable_games_with("emu-a", vec!["Alpha"], keymap)));
+    let emulator = FakeCatalog::new("emu-a").playable().key("Cross", "J").key("Circle", "L").games(["Alpha"]);
+    let mut host = composed(|h| h.plugin(emulator.build()));
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     // Play from the game's Game Hub. No window yet: the game stays "starting", behind the splash.
@@ -70,7 +70,7 @@ fn the_launch_splash_shows_the_emulator_s_keys_and_takes_every_key_but_back_and_
 
 #[test]
 fn the_launch_splash_names_the_controller_or_the_keyboard() {
-    let mut host = composed(|h| h.plugin(playable_games("emu-a", vec!["Alpha"])));
+    let mut host = composed(|h| h.plugin(FakeCatalog::new("emu-a").playable().games(["Alpha"]).build()));
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     // No window yet: the game stays "starting", behind the splash.
@@ -87,7 +87,7 @@ fn the_launch_splash_names_the_controller_or_the_keyboard() {
 
 #[test]
 fn the_hero_and_the_game_hub_show_the_time_played() {
-    let mut host = composed(|h| h.plugin(games("emu-a", vec!["Alpha"])));
+    let mut host = composed(|h| h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha"]).build()));
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
     let stats = serde_json::json!({ "secs": 4 * 3600 + 6 * 60, "count": 2, "last": now });
     host.core().kernel().config().set(&["app", "playtime", "emu-a:G0"], stats).unwrap();

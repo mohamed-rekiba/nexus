@@ -319,7 +319,7 @@ fn a_ready_download_lists_up_to_100_files_in_a_scroll_area() {
 #[test]
 fn while_it_looks_up_or_installs_a_card_shows_a_button_that_does_nothing_and_cancel_install() {
     let home = tempfile::tempdir().unwrap();
-    let mut host = astro_with(home.path(), slow_installer());
+    let mut host = astro_with(home.path(), FakeCatalog::kyty().waiting_installer().build());
     let held = host.test.torrents.hold();
     let offer: nexus_api::GameKey = "release-catalog:emu-kyty/PPSA01234".parse().unwrap();
     host.dispatch(Command::Torrent(nexus_core::TorrentCmd::Download {

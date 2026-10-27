@@ -30,7 +30,8 @@ fn settings_show_this_pc_and_how_each_emulator_runs_on_it() {
             vulkan: Some((1, 3)),
         }]),
     };
-    let mut host = composed(|h| h.hardware(specs).plugin(playable_games("emu-a", vec!["Alpha"])));
+    let mut host =
+        composed(|h| h.hardware(specs).plugin(FakeCatalog::new("emu-a").playable().games(["Alpha"]).build()));
     host.ui.start().unwrap();
     host.until(Area::Hardware, |core| core.view().settings.hardware.known);
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
@@ -164,7 +165,9 @@ fn settings_keep_the_launcher_behind_a_closed_game() {
 #[test]
 fn settings_turn_automatic_updates_off() {
     // The row is in the UPDATES section, which lists the emulators.
-    let mut host = composed(|h| h.plugin(games_needing_an_emulator("emu-x", vec!["Astro"])));
+    let mut host = composed(|h| {
+        h.plugin(FakeCatalog::new("emu-x").named("Emu").playable().needing_its_emulator().games(["Astro"]).build())
+    });
     host.ui.start().unwrap();
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
     settle(&mut host);

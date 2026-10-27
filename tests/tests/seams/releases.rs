@@ -139,7 +139,7 @@ async fn with_no_copy_kept_a_failed_fetch_falls_back_to_the_bundled_catalog() {
 async fn a_slow_catalog_address_still_gives_the_bundled_catalog_at_once_and_the_fetched_copy_after() {
     let t = FakeHost::new()
         .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
-        .plugin(games("emu-kyty", vec![]).console("PS5"))
+        .plugin(FakeCatalog::new("emu-kyty").system("PS4").games([]).build().console("PS5"))
         .boot_core()
         .await;
     // The catalog address answers only when the test lets it, after the core's call timeout.
@@ -206,8 +206,8 @@ fn offer_keys(t: &TestCore) -> Vec<String> {
 async fn an_emulator_gets_the_catalog_of_the_console_it_plays_and_keeps_its_own_id_in_the_keys() {
     let t = FakeHost::new()
         .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
-        .plugin(games("emu-a", vec![]).console("PS5"))
-        .plugin(games("emu-b", vec![]).console("PS4"))
+        .plugin(FakeCatalog::new("emu-a").system("PS4").games([]).build().console("PS5"))
+        .plugin(FakeCatalog::new("emu-b").system("PS4").games([]).build().console("PS4"))
         .boot_core()
         .await;
     t.http.serve(URL, catalog("2026-10-18T00:00:00Z"));
@@ -226,8 +226,8 @@ async fn an_emulator_gets_the_catalog_of_the_console_it_plays_and_keeps_its_own_
 async fn a_console_turned_off_in_the_catalog_s_settings_offers_nothing_and_its_games_stay() {
     let t = FakeHost::new()
         .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
-        .plugin(games_on("emu-a", "PS5", vec!["Alpha"]).console("PS5"))
-        .plugin(games("emu-b", vec![]).console("PS4"))
+        .plugin(FakeCatalog::new("emu-a").system("PS5").games(["Alpha"]).build().console("PS5"))
+        .plugin(FakeCatalog::new("emu-b").system("PS4").games([]).build().console("PS4"))
         .boot_core()
         .await;
     t.http.serve(URL, catalog("2026-10-18T00:00:00Z"));
@@ -285,7 +285,7 @@ async fn a_console_whose_emulator_lists_its_own_releases_has_no_other_catalog() 
         .platform(Some(nexus_api::Platform::Linux))
         .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .built_in(nexus_api::PluginBox::code(emu_steam::SteamPlugin))
-        .plugin(games("emu-a", vec![]).console("PS5"))
+        .plugin(FakeCatalog::new("emu-a").system("PS4").games([]).build().console("PS5"))
         .boot_core()
         .await;
     t.core.dispatch(Command::Navigate(nexus_core::Route::Catalog)).await.unwrap();
@@ -301,8 +301,8 @@ async fn a_console_whose_emulator_lists_its_own_releases_has_no_other_catalog() 
 async fn the_catalog_s_console_toggles_follow_the_emulators_turned_on() {
     let t = FakeHost::new()
         .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
-        .plugin(games("emu-a", vec![]).console("PS5"))
-        .plugin(games("emu-b", vec![]).console("PS4"))
+        .plugin(FakeCatalog::new("emu-a").system("PS4").games([]).build().console("PS5"))
+        .plugin(FakeCatalog::new("emu-b").system("PS4").games([]).build().console("PS4"))
         .boot_core()
         .await;
     t.core.dispatch(Command::Navigate(nexus_core::Route::Catalog)).await.unwrap();
@@ -325,8 +325,8 @@ async fn the_catalog_s_console_toggles_follow_the_emulators_turned_on() {
 async fn of_two_emulators_for_one_console_the_first_loaded_gets_the_catalog() {
     let t = FakeHost::new()
         .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
-        .plugin(games("emu-a", vec![]).console("PS5"))
-        .plugin(games("emu-c", vec![]).console("PS5"))
+        .plugin(FakeCatalog::new("emu-a").system("PS4").games([]).build().console("PS5"))
+        .plugin(FakeCatalog::new("emu-c").system("PS4").games([]).build().console("PS5"))
         .boot_core()
         .await;
     t.http.serve(URL, catalog("2026-10-18T00:00:00Z"));
@@ -345,7 +345,7 @@ async fn of_two_emulators_for_one_console_the_first_loaded_gets_the_catalog() {
 async fn an_emulator_with_no_console_gets_no_catalog() {
     let t = FakeHost::new()
         .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
-        .plugin(games("emu-a", vec![]))
+        .plugin(FakeCatalog::new("emu-a").system("PS4").games([]).build())
         .boot_core()
         .await;
     t.http.serve(URL, catalog("2026-10-18T00:00:00Z"));
@@ -383,7 +383,7 @@ fn topic(id: u32, title_id: &str, title: &str, version: &str, added: &str, hash:
 async fn with_offers() -> TestCore {
     let t = FakeHost::new()
         .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
-        .plugin(games("emu-kyty", vec!["Alpha"]).console("PS5"))
+        .plugin(FakeCatalog::new("emu-kyty").system("PS4").games(["Alpha"]).build().console("PS5"))
         .boot_core()
         .await;
     let topics = serde_json::json!([
@@ -479,7 +479,7 @@ async fn the_catalog_shows_a_page_at_a_time_and_describes_only_what_it_shows() {
     let asked = Arc::new(Mutex::new(Vec::new()));
     let t = FakeHost::new()
         .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
-        .plugin(games("emu-kyty", vec![]).console("PS5"))
+        .plugin(FakeCatalog::new("emu-kyty").system("PS4").games([]).build().console("PS5"))
         .plugin(counting_store(asked.clone()))
         .boot_core()
         .await;
@@ -536,10 +536,9 @@ fn steam_block() -> serde_json::Value {
 async fn offering(emulator: &str, console: &'static str, topics: serde_json::Value, store: bool) -> TestCore {
     let mut host = FakeHost::new()
         .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
-        .plugin(games_on(emulator, console, vec![]).console(console));
+        .plugin(FakeCatalog::new(emulator).system(console).games([]).build().console(console));
     if store {
-        host =
-            host.plugin(crate::common::store("store", vec![("PPSA07777", 4.0, "")], None, std::time::Duration::ZERO));
+        host = host.plugin(FakeStore::new("store").knows("PPSA07777", 4.0, "").build());
     }
     let t = host.boot_core().await;
     let file = console.to_ascii_lowercase();
@@ -591,7 +590,7 @@ async fn a_pc_offer_shows_steam_s_words_and_art_and_its_protondb_tier() {
 async fn an_installed_game_with_no_art_of_its_own_has_its_offer_s_and_keeps_it_with_the_catalog_off() {
     let t = FakeHost::new()
         .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
-        .plugin(games_on("emu-pc", "PC", vec!["Celeste"]).console("PC"))
+        .plugin(FakeCatalog::new("emu-pc").system("PC").games(["Celeste"]).build().console("PC"))
         .boot_core()
         .await;
     let topics = serde_json::json!([{ "id": "1", "title": "Celeste (v1.4.0.0) [amd64] [Wine]",
@@ -903,7 +902,7 @@ async fn releases_of_one_name_for_two_consoles_stay_two_games() {
 async fn an_installed_game_matches_its_offer_by_name_on_the_same_console_and_has_a_chip() {
     let t = FakeHost::new()
         .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
-        .plugin(games_on("emu-kyty", "PS5", vec!["Alpha"]).console("PS5"))
+        .plugin(FakeCatalog::new("emu-kyty").system("PS5").games(["Alpha"]).build().console("PS5"))
         .boot_core()
         .await;
     let topics = serde_json::json!([
@@ -948,7 +947,7 @@ fn sized(id: u32, name: &str, version: &str, size: u64, seeders: u64, hash: char
 async fn a_card_shows_its_best_release_and_the_game_hub_orders_them_by_version() {
     let t = FakeHost::new()
         .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
-        .plugin(games_on("emu-kyty", "PS5", vec!["Alpha"]).console("PS5"))
+        .plugin(FakeCatalog::new("emu-kyty").system("PS5").games(["Alpha"]).build().console("PS5"))
         .boot_core()
         .await;
     let mut art = sized(5, "Quest", "1.00", 5, 1, 'e');
@@ -1186,7 +1185,7 @@ async fn the_catalog_opens_at_once_and_says_it_is_loading_until_the_catalogs_are
     let open = Arc::new(tokio::sync::Semaphore::new(0));
     let t = FakeHost::new()
         .plugin(slow_catalogs(open.clone()))
-        .plugin(games_on("emu-kyty", "PS5", vec![]).console("PS5"))
+        .plugin(FakeCatalog::new("emu-kyty").system("PS5").games([]).build().console("PS5"))
         .boot_core()
         .await;
     let core = t.core.clone();
@@ -1244,7 +1243,7 @@ async fn the_game_hub_s_facts_come_from_the_best_release() {
 async fn with_the_game_catalog_turned_off_there_is_no_catalog_to_open() {
     let t = FakeHost::new()
         .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
-        .plugin(games("emu-kyty", vec![]).console("PS5"))
+        .plugin(FakeCatalog::new("emu-kyty").system("PS4").games([]).build().console("PS5"))
         .boot_core()
         .await;
     assert!(t.core.view().catalog.available);
@@ -1270,7 +1269,7 @@ async fn with_the_game_catalog_turned_off_there_is_no_catalog_to_open() {
 async fn a_hidden_game_leaves_the_catalog_and_the_hidden_filter_shows_it() {
     let t = FakeHost::new()
         .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
-        .plugin(games("emu-kyty", vec![]).console("PS5"))
+        .plugin(FakeCatalog::new("emu-kyty").system("PS4").games([]).build().console("PS5"))
         .boot_core()
         .await;
     let topics: Vec<serde_json::Value> = ["Astro", "Bolt", "Comet"]

@@ -7,7 +7,9 @@ use slint_interpreter::Value;
 const GAMES: [&str; 3] = ["Alpha", "Beta", "Gamma"];
 
 fn shown(theme: &str, width: f32, height: f32) -> Composed {
-    let mut host = composed(|h| h.discover(&fixture_themes()).plugin(games("emu-a", GAMES.to_vec())));
+    let mut host = composed(|h| {
+        h.discover(&fixture_themes()).plugin(FakeCatalog::new("emu-a").system("PS4").games(GAMES.to_vec()).build())
+    });
     host.ui.start().unwrap();
     host.ui.switch(&id(theme)).unwrap();
     host.resize(width, height);
@@ -77,7 +79,8 @@ fn the_desktop_grid_reflows_at_its_compact_breakpoint() {
 /// An emulator whose manifest lists its keyboard keys plays with a controller or the keyboard.
 #[test]
 fn default_theme_shows_the_controllers_of_an_emulator_with_keyboard_keys() {
-    let mut host = composed(|h| h.plugin(games_with_keys("emu-a", vec!["Alpha"])));
+    let mut host =
+        composed(|h| h.plugin(FakeCatalog::new("emu-a").playable().key("Cross", "J").games(["Alpha"]).build()));
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
 

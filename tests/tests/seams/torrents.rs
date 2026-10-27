@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use nexus_api::*;
 use nexus_core::{Area, Command, GameInstallCmd, TorrentAction};
-use nexus_testkit::{FakeHost, StubPlugin, TestCore, until as until_in};
+use nexus_testkit::{FakeCatalog, FakeHost, StubPlugin, TestCore, until as until_in};
 
 use crate::common::{catalogs_fetched, native};
 
@@ -853,7 +853,7 @@ async fn downloads_count_what_downloads_and_what_shares() {
 
 #[tokio::test]
 async fn an_install_shows_on_its_download_s_card_which_cancels_it() {
-    let s = setup_plugin(HASH, crate::common::slow_installer(), Default::default(), |h| h).await;
+    let s = setup_plugin(HASH, FakeCatalog::kyty().waiting_installer().build(), Default::default(), |h| h).await;
     let t = &s.t;
     t.core
         .dispatch(Command::Torrent(nexus_core::TorrentCmd::Download {

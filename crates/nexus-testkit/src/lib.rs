@@ -3,11 +3,13 @@
 //! - [`FakeHost`]: a real core over a temporary data folder, fake HTTP, fake processes and a
 //!   [`FakeClock`].
 //! - [`StubPlugin`]: a plugin built from a manifest and test-supplied behaviour.
+//! - [`FakeCatalog`], [`FakeStore`] and [`FakeService`]: plugins built from a few choices.
 //! - [`FakeSystem`]: a system plugin over a machine the test controls.
 //! - [`FakePlatform`]: the app shell's platform, which records each call.
 //! - [`contract`]: checks any emulator plugin against the capability contracts.
 
 mod archives;
+mod catalog;
 mod clock;
 pub mod contract;
 mod fakes;
@@ -20,6 +22,7 @@ mod system;
 mod torrents;
 
 pub use archives::FakeArchives;
+pub use catalog::{FakeCatalog, FakeService, FakeStore};
 pub use clock::FakeClock;
 pub use fakes::{
     FIRST_PID, FakeHttp, FakeLoginSession, FakeOpener, FakeProcessTree, FakeSpawner, FakeWindows, Gate, Shown, Signal,

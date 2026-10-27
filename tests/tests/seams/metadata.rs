@@ -10,13 +10,14 @@ use nexus_ui_api::ImageRef;
 #[tokio::test]
 async fn the_first_library_load_waits_for_the_stores_descriptions() {
     let t = FakeHost::new()
-        .plugin(games("emu-a", vec!["Alpha", "Beta"]))
-        .plugin(store(
-            "store",
-            vec![("CUSA00000", 4.5, "")],
-            Some("https://art.example/alpha.png".into()),
-            Duration::from_millis(300),
-        ))
+        .plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha", "Beta"]).build())
+        .plugin(
+            FakeStore::new("store")
+                .knows("CUSA00000", 4.5, "")
+                .icon("https://art.example/alpha.png")
+                .delay(Duration::from_millis(300))
+                .build(),
+        )
         .boot_core()
         .await;
 
@@ -36,13 +37,8 @@ async fn the_first_library_load_waits_for_the_stores_descriptions() {
 #[tokio::test]
 async fn a_game_the_store_does_not_know_keeps_its_own_details() {
     let t = FakeHost::new()
-        .plugin(games("emu-a", vec!["Alpha", "Beta"]))
-        .plugin(store(
-            "store",
-            vec![("CUSA00000", 4.5, "")],
-            Some("https://art.example/alpha.png".into()),
-            Duration::ZERO,
-        ))
+        .plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha", "Beta"]).build())
+        .plugin(FakeStore::new("store").knows("CUSA00000", 4.5, "").icon("https://art.example/alpha.png").build())
         .boot_core()
         .await;
 
@@ -57,8 +53,8 @@ async fn a_game_the_store_does_not_know_keeps_its_own_details() {
 #[tokio::test]
 async fn the_library_has_no_in_game_filter_and_sorts_by_rating_and_release() {
     let t = FakeHost::new()
-        .plugin(games("emu-a", vec!["Alpha", "Beta", "Gamma"]))
-        .plugin(store("store", vec![("CUSA00000", 3.0, ""), ("CUSA00001", 4.8, "")], None, Duration::ZERO))
+        .plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha", "Beta", "Gamma"]).build())
+        .plugin(FakeStore::new("store").knows("CUSA00000", 3.0, "").knows("CUSA00001", 4.8, "").build())
         .boot_core()
         .await;
     t.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
@@ -86,8 +82,8 @@ async fn a_slow_store_holds_the_first_load_ten_seconds_on_the_clock_and_no_more(
     let t = FakeHost::new()
         // Longer than the boot's own limit, so that limit is the one that ends the wait.
         .call_timeout(Duration::from_secs(60))
-        .plugin(games("emu-a", vec!["Alpha"]))
-        .plugin(store("store", vec![("CUSA00000", 4.5, "")], None, Duration::from_secs(30)))
+        .plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha"]).build())
+        .plugin(FakeStore::new("store").knows("CUSA00000", 4.5, "").delay(Duration::from_secs(30)).build())
         .boot_core()
         .await;
     let core = t.core.clone();

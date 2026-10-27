@@ -5,12 +5,8 @@ use super::*;
 #[test]
 fn the_menu_watches_the_store_s_trailer() {
     let mut host = composed(|h| {
-        h.plugin(games("emu-a", vec!["Alpha"])).plugin(store(
-            "store",
-            vec![("CUSA00000", 4.5, "")],
-            None,
-            std::time::Duration::ZERO,
-        ))
+        h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha"]).build())
+            .plugin(FakeStore::new("store").knows("CUSA00000", 4.5, "").build())
     });
     host.ui.start().unwrap();
     home_line(&mut host);
@@ -33,12 +29,8 @@ fn the_menu_watches_the_store_s_trailer() {
 fn the_game_hub_has_a_trailer_button_when_the_game_has_a_trailer() {
     use slint::platform::Key;
     let mut host = composed(|h| {
-        h.plugin(games("emu-a", vec!["Alpha"])).plugin(store(
-            "store",
-            vec![("CUSA00000", 4.5, "")],
-            None,
-            std::time::Duration::ZERO,
-        ))
+        h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha"]).build())
+            .plugin(FakeStore::new("store").knows("CUSA00000", 4.5, "").build())
     });
     host.ui.start().unwrap();
     home_line(&mut host);
@@ -66,12 +58,8 @@ fn a_trailer_plays_in_the_window_when_the_app_can() {
     use nexus_ui_host::{TrailerRequest, TrailerStatus, UiRequest};
     use slint::platform::Key;
     let mut host = composed(|h| {
-        h.plugin(games("emu-a", vec!["Alpha"])).plugin(store(
-            "store",
-            vec![("CUSA00000", 4.5, "")],
-            None,
-            std::time::Duration::ZERO,
-        ))
+        h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha"]).build())
+            .plugin(FakeStore::new("store").knows("CUSA00000", 4.5, "").build())
     });
     host.ui.set_trailers_available(true);
     host.ui.start().unwrap();
@@ -120,12 +108,8 @@ fn a_trailer_plays_in_the_window_when_the_app_can() {
 fn right_to_left_the_trailer_s_progress_fills_from_the_right() {
     use nexus_ui_host::TrailerStatus;
     let mut host = composed(|h| {
-        h.plugin(games("emu-a", vec!["Alpha"])).plugin(store(
-            "store",
-            vec![("CUSA00000", 4.5, "")],
-            None,
-            std::time::Duration::ZERO,
-        ))
+        h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha"]).build())
+            .plugin(FakeStore::new("store").knows("CUSA00000", 4.5, "").build())
     });
     host.ui.set_trailers_available(true);
     host.ui.start().unwrap();
@@ -151,12 +135,8 @@ fn right_to_left_the_trailer_s_progress_fills_from_the_right() {
 fn the_trailer_s_controls_hide_while_it_plays_and_a_key_shows_them() {
     use nexus_ui_host::TrailerStatus;
     let mut host = composed(|h| {
-        h.plugin(games("emu-a", vec!["Alpha"])).plugin(store(
-            "store",
-            vec![("CUSA00000", 4.5, "")],
-            None,
-            std::time::Duration::ZERO,
-        ))
+        h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha"]).build())
+            .plugin(FakeStore::new("store").knows("CUSA00000", 4.5, "").build())
     });
     host.ui.set_trailers_available(true);
     host.ui.start().unwrap();

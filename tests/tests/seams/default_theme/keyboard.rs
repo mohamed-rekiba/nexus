@@ -272,7 +272,8 @@ export component EmulatorsScreen inherits Rectangle {
 "#,
         )],
     );
-    let mut host = composed(|h| h.discover(dir.path()).plugin(games("emu-a", vec!["Alpha"])));
+    let mut host =
+        composed(|h| h.discover(dir.path()).plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha"]).build()));
     host.ui.switch(&id("secrets")).expect("the test theme loads");
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.resize(1600.0, 900.0);

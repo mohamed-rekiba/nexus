@@ -13,8 +13,8 @@ fn the_catalog_s_view_builds_and_binds_in_time() {
         return;
     }
     let mut host = composed(|h| {
-        h.plugin(games_on("emu-kyty", "PS5", vec!["Alpha"]).console("PS5"))
-            .plugin(games_on("emu-shadps4", "PS4", vec!["Beta"]).console("PS4"))
+        h.plugin(FakeCatalog::new("emu-kyty").system("PS5").games(["Alpha"]).build().console("PS5"))
+            .plugin(FakeCatalog::new("emu-shadps4").system("PS4").games(["Beta"]).build().console("PS4"))
             .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();

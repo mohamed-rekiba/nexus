@@ -501,7 +501,7 @@ fn shoot_this_pc(window: &MinimalSoftwareWindow, out: &Path) {
             h.home(home.path())
                 .hardware(this_pc(vulkan))
                 .free_space(10_000_000_000)
-                .plugin(offering_emulator("vulkan = \"1.3\""))
+                .plugin(FakeCatalog::kyty().playable().requires("vulkan = \"1.3\"").build())
                 .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         });
         host.ui.start().unwrap();
@@ -538,7 +538,7 @@ fn shoot_releases(window: &MinimalSoftwareWindow, out: &Path) {
         let home = tempfile::tempdir().unwrap();
         let mut host = composed_on_current_platform(|h| {
             h.home(home.path())
-                .plugin(offering_emulator("vulkan = \"1.3\""))
+                .plugin(FakeCatalog::kyty().playable().requires("vulkan = \"1.3\"").build())
                 .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
         });
         host.ui.start().unwrap();
@@ -579,7 +579,9 @@ fn shoot_releases(window: &MinimalSoftwareWindow, out: &Path) {
 /// ⮝  ⮟, are the same size.
 fn shoot_pad_hints(window: &MinimalSoftwareWindow, out: &Path) {
     use nexus_ui_host::PadButton;
-    let mut host = composed_on_current_platform(|h| h.plugin(games("emu-a", vec!["Alpha", "Beta"])));
+    let mut host = composed_on_current_platform(|h| {
+        h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha", "Beta"]).build())
+    });
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.load_images();
@@ -610,12 +612,8 @@ fn shoot_genres(window: &MinimalSoftwareWindow, out: &Path) {
     window.set_size(slint::PhysicalSize::new(640, 900));
     for (direction, prefix) in [("ltr", "default"), ("rtl", "default-rtl")] {
         let mut host = composed_on_current_platform(|h| {
-            h.plugin(games("emu-a", vec!["Alpha"])).plugin(store(
-                "store",
-                vec![("CUSA00000", 4.5, "")],
-                None,
-                Duration::ZERO,
-            ))
+            h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha"]).build())
+                .plugin(FakeStore::new("store").knows("CUSA00000", 4.5, "").build())
         });
         host.ui.start().unwrap();
         host.dispatch(Command::Pref(Pref::Scale, 1.4.into()));
@@ -644,12 +642,8 @@ fn shoot_trailer(window: &MinimalSoftwareWindow, out: &Path) {
     use nexus_ui_host::TrailerStatus;
     for (direction, prefix) in [("ltr", "default"), ("rtl", "default-rtl")] {
         let mut host = composed_on_current_platform(|h| {
-            h.plugin(games("emu-a", vec!["Alpha"])).plugin(store(
-                "store",
-                vec![("CUSA00000", 4.5, "")],
-                None,
-                Duration::ZERO,
-            ))
+            h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha"]).build())
+                .plugin(FakeStore::new("store").knows("CUSA00000", 4.5, "").build())
         });
         host.ui.set_trailers_available(true);
         host.ui.start().unwrap();
@@ -682,7 +676,9 @@ fn shoot_trailer(window: &MinimalSoftwareWindow, out: &Path) {
 /// `default-rtl-keyboard.png`. The keys are drawn on whole pixels at every one of them.
 fn shoot_keyboard(window: &MinimalSoftwareWindow, out: &Path) {
     use nexus_ui_host::PadButton;
-    let mut host = composed_on_current_platform(|h| h.plugin(games_on("emu-a", "PS5", vec!["Astro Drift"])));
+    let mut host = composed_on_current_platform(|h| {
+        h.plugin(FakeCatalog::new("emu-a").system("PS5").games(["Astro Drift"]).build())
+    });
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     let pad = |host: &mut Composed, button: PadButton| {
@@ -756,7 +752,7 @@ fn shoot_system(window: &MinimalSoftwareWindow, out: &Path) {
     let place = Place { whole_screen: true, nexus_os: true, stick: false };
     let plugin = system.plugin();
     let mut host = composed_on_current_platform(|h| {
-        h.place(place).plugin(plugin).plugin(games_on("emu-a", "PS5", vec!["Astro Drift"]))
+        h.place(place).plugin(plugin).plugin(FakeCatalog::new("emu-a").system("PS5").games(["Astro Drift"]).build())
     });
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
@@ -806,14 +802,13 @@ fn shoot_system(window: &MinimalSoftwareWindow, out: &Path) {
 /// The launch splash of an emulator that lists its keyboard keys, left to right and right to
 /// left, as `default[-rtl]-splash-keys.png`.
 fn shoot_splash(window: &MinimalSoftwareWindow, out: &Path) {
-    let keymap: String = emu_kyty::KEYS
+    let emulator = emu_kyty::KEYS
         .iter()
-        .map(|(button, keys)| format!("[[keymap]]\nbutton = \"{button}\"\nkeys = \"{keys}\"\n"))
-        .collect();
+        .fold(FakeCatalog::new("emu-a").playable(), |emulator, (button, keys)| emulator.key(button, keys))
+        .games(["Alpha"]);
     for (direction, prefix) in [("ltr", "default"), ("rtl", "default-rtl")] {
-        let keymap = keymap.clone();
-        let mut host =
-            composed_on_current_platform(move |h| h.plugin(playable_games_with("emu-a", vec!["Alpha"], &keymap)));
+        let emulator = emulator.clone();
+        let mut host = composed_on_current_platform(move |h| h.plugin(emulator.build()));
         host.ui.start().unwrap();
         host.dispatch(Command::SetThemeOption { key: "direction".into(), value: direction.into() });
         host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
@@ -833,8 +828,28 @@ fn shoot_console_names(window: &MinimalSoftwareWindow, out: &Path) {
     for (direction, prefix) in [("ltr", "default"), ("rtl", "default-rtl")] {
         let mut host = composed_on_current_platform(|h| {
             h.first_run()
-                .plugin(console_emulator("emu-k", "PS5", "KytyPS5", "KytyPS5-2026-10-21-e2dd48a", vec!["Astro Drift"]))
-                .plugin(console_emulator("emu-s", "PS4", "shadPS4", "v.0.20.0", vec![]))
+                .plugin(
+                    FakeCatalog::new("emu-k")
+                        .named("PS5")
+                        .emulator("KytyPS5")
+                        .platform("PS5")
+                        .without_slots()
+                        .playable()
+                        .installed("KytyPS5-2026-10-21-e2dd48a")
+                        .games(["Astro Drift"])
+                        .build(),
+                )
+                .plugin(
+                    FakeCatalog::new("emu-s")
+                        .named("PS4")
+                        .emulator("shadPS4")
+                        .platform("PS5")
+                        .without_slots()
+                        .playable()
+                        .installed("v.0.20.0")
+                        .games([])
+                        .build(),
+                )
         });
         host.ui.start().unwrap();
         host.dispatch(Command::SetThemeOption { key: "direction".into(), value: direction.into() });
@@ -848,7 +863,17 @@ fn shoot_console_names(window: &MinimalSoftwareWindow, out: &Path) {
         drop(host);
         // KytyPS5 not installed yet: a first play asks to install it.
         let mut host = composed_on_current_platform(|h| {
-            h.plugin(console_emulator("emu-k", "PS5", "KytyPS5", "", vec!["Astro Drift"]))
+            h.plugin(
+                FakeCatalog::new("emu-k")
+                    .named("PS5")
+                    .emulator("KytyPS5")
+                    .platform("PS5")
+                    .without_slots()
+                    .playable()
+                    .installed("")
+                    .games(["Astro Drift"])
+                    .build(),
+            )
         });
         host.ui.start().unwrap();
         host.dispatch(Command::SetThemeOption { key: "direction".into(), value: direction.into() });
@@ -876,12 +901,8 @@ fn ps4_box_art() -> Vec<u8> {
 fn shoot_ps4_cover(window: &MinimalSoftwareWindow, out: &Path) {
     use slint::platform::Key;
     let mut host = composed_on_current_platform(|h| {
-        h.plugin(tested_games("emu-b", vec!["Paper Knights", "Quiet Orbit"])).plugin(store(
-            "store",
-            vec![("CUSA00000", 4.5, "")],
-            Some("https://art.example/ps4.png".into()),
-            Duration::ZERO,
-        ))
+        h.plugin(FakeCatalog::new("emu-b").tested().games(["Paper Knights", "Quiet Orbit"]).build())
+            .plugin(FakeStore::new("store").knows("CUSA00000", 4.5, "").icon("https://art.example/ps4.png").build())
     });
     host.test.http.serve("https://art.example/ps4.png", ps4_box_art());
     host.ui.start().unwrap();
@@ -951,13 +972,20 @@ fn library(home: &Path) -> Composed {
         h.home(home)
             .hardware(this_pc((1, 3)))
             .discover(&fixture_themes())
-            .plugin(games_on("emu-a", "PS5", vec!["Astro Drift", "Deep Lantern", "Ember Peaks", "Neon Harbor"]))
-            .plugin(games_on("emu-b", "PS4", vec!["Paper Knights", "Quiet Orbit"]))
+            .plugin(
+                FakeCatalog::new("emu-a")
+                    .system("PS5")
+                    .games(["Astro Drift", "Deep Lantern", "Ember Peaks", "Neon Harbor"])
+                    .build(),
+            )
+            .plugin(FakeCatalog::new("emu-b").system("PS4").games(["Paper Knights", "Quiet Orbit"]).build())
             // The real KytyPS5 plugin, for its Settings section and Emulators block.
             .built_in(nexus_api::PluginBox::code(emu_kyty::KytyPlugin))
-            .plugin(games_needing_an_emulator("emu-x", vec!["Starfall"]))
-            .plugin(playable_games("emu-p", vec!["Lumen Gate"]))
-            .plugin(games_on("emu-pc", "PC", vec![]).console("PC"))
+            .plugin(
+                FakeCatalog::new("emu-x").named("Emu").playable().needing_its_emulator().games(["Starfall"]).build(),
+            )
+            .plugin(FakeCatalog::new("emu-p").playable().games(["Lumen Gate"]).build())
+            .plugin(FakeCatalog::new("emu-pc").system("PC").games([]).build().console("PC"))
             // The game catalog, for the games it offers.
             .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });

@@ -27,7 +27,10 @@ fn default_theme() -> Composed {
 /// [`default_theme`], with more plugins.
 fn default_theme_with(more: impl FnOnce(nexus_testkit::FakeHost) -> nexus_testkit::FakeHost) -> Composed {
     let mut host = composed(|h| {
-        more(h.plugin(games_on("emu-a", "PS4", vec!["Alpha", "Beta"])).plugin(games_on("emu-b", "PS5", vec!["Gamma"])))
+        more(
+            h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha", "Beta"]).build())
+                .plugin(FakeCatalog::new("emu-b").system("PS5").games(["Gamma"]).build()),
+        )
     });
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
@@ -124,7 +127,7 @@ fn lit(host: &Composed, label: &str) -> bool {
 
 /// An emulator with no games of its own that installs from the packages folder.
 fn installing_emulator() -> nexus_testkit::StubPlugin {
-    offering_emulator("")
+    FakeCatalog::kyty().playable().build()
 }
 
 const ASTRO_HASH: &str = "c12fe1c06bba254a9dc9f519b335aa7c1367a88a";

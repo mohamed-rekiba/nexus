@@ -39,7 +39,9 @@ fn machine() -> FakeSystem {
 /// The default theme over `system`, at `place`, with the machine read once.
 fn shown(system: &FakeSystem, place: Place) -> Composed {
     let plugin = system.plugin();
-    let mut host = composed(|h| h.place(place).plugin(plugin).plugin(games_on("emu-a", "PS4", vec!["Alpha"])));
+    let mut host = composed(|h| {
+        h.place(place).plugin(plugin).plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha"]).build())
+    });
     host.ui.start().unwrap();
     host.resize(1600.0, 900.0);
     host.dispatch(Command::System(SystemCommand::Refresh));

@@ -50,7 +50,8 @@ fn groups(host: &Composed) -> Vec<(String, f64, Vec<String>, f64)> {
 
 fn two_platforms() -> Composed {
     let mut host = composed(|h| {
-        h.plugin(games_on("emu-a", "PS4", vec!["Alpha", "Beta"])).plugin(games_on("emu-b", "PS5", vec!["Gamma"]))
+        h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha", "Beta"]).build())
+            .plugin(FakeCatalog::new("emu-b").system("PS5").games(["Gamma"]).build())
     });
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
@@ -101,7 +102,9 @@ fn notices(host: &Composed) -> Vec<String> {
 
 #[test]
 fn details_that_failed_to_load_are_not_asked_for_again() {
-    let mut host = composed(|h| h.plugin(games_without_details("emu-a", vec!["Alpha", "Beta"])));
+    let mut host = composed(|h| {
+        h.plugin(FakeCatalog::new("emu-a").system("PS4").without_details().games(["Alpha", "Beta"]).build())
+    });
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     for game in ["emu-a:G0", "emu-a:G1", "emu-a:G0"] {
@@ -113,7 +116,9 @@ fn details_that_failed_to_load_are_not_asked_for_again() {
 
 #[test]
 fn of_quick_selections_only_the_last_loads_its_details() {
-    let mut host = composed(|h| h.plugin(games_without_details("emu-a", vec!["Alpha", "Beta", "Gamma"])));
+    let mut host = composed(|h| {
+        h.plugin(FakeCatalog::new("emu-a").system("PS4").without_details().games(["Alpha", "Beta", "Gamma"]).build())
+    });
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     // The first game was selected, and its details failed, as the library loaded. The two

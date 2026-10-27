@@ -6,7 +6,8 @@ use nexus_ui_api::ScreenId;
 use nexus_ui_host::{PadButton, vm_text};
 
 fn tv() -> Composed {
-    let mut host = composed(|h| h.plugin(games("emu-a", vec!["Alpha", "Beta", "Gamma"])));
+    let mut host =
+        composed(|h| h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha", "Beta", "Gamma"]).build()));
     host.ui.start().unwrap();
     host.resize(1920.0, 1080.0);
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
@@ -57,7 +58,7 @@ fn the_d_pad_moves_the_selection_and_the_buttons_open_and_go_back() {
 #[test]
 fn the_shoulder_button_goes_to_the_next_section_and_the_guide_button_home() {
     let mut host = composed(|h| {
-        h.plugin(games("emu-a", vec!["Alpha", "Beta", "Gamma"]))
+        h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha", "Beta", "Gamma"]).build())
             .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
     host.ui.start().unwrap();
@@ -72,7 +73,7 @@ fn the_shoulder_button_goes_to_the_next_section_and_the_guide_button_home() {
 
 #[test]
 fn while_a_game_is_in_front_the_pad_is_the_game_s_and_a_ps_button_tap_too() {
-    let mut host = composed(|h| h.plugin(playable_games("emu-a", vec!["Alpha"])));
+    let mut host = composed(|h| h.plugin(FakeCatalog::new("emu-a").playable().games(["Alpha"]).build()));
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::Session(SessionCmd::Launch("emu-a:G0".parse().unwrap())));
@@ -95,7 +96,7 @@ fn while_a_game_is_in_front_the_pad_is_the_game_s_and_a_ps_button_tap_too() {
 #[test]
 fn holding_the_ps_button_closes_a_running_game_at_once_and_opens_no_power_menu() {
     use nexus_testkit::Signal;
-    let mut host = composed(|h| h.plugin(playable_games("emu-a", vec!["Alpha"])));
+    let mut host = composed(|h| h.plugin(FakeCatalog::new("emu-a").playable().games(["Alpha"]).build()));
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::Session(SessionCmd::Launch("emu-a:G0".parse().unwrap())));
@@ -132,7 +133,7 @@ fn while_the_launcher_s_window_is_not_focused_the_pad_is_the_other_window_s() {
 
 #[test]
 fn after_a_game_closes_the_launcher_asks_how_far_it_got() {
-    let mut host = composed(|h| h.plugin(playable_games("emu-a", vec!["Alpha"])));
+    let mut host = composed(|h| h.plugin(FakeCatalog::new("emu-a").playable().games(["Alpha"]).build()));
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::Session(SessionCmd::Launch("emu-a:G0".parse().unwrap())));
