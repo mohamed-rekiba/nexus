@@ -435,14 +435,14 @@ impl Core {
                         copies.push(CatalogCopy { service: service.clone(), emulator: emulator.clone(), list })
                     }
                     Ok(None) => {}
-                    Err(e) => self.problem(e.to_string()),
+                    Err(e) => self.notices().problem(e.to_string()),
                 }
             }
             if let Some(slots) = &provided.slots {
                 let request = nexus_api::SlotRequest { slot: nexus_api::SlotId::CatalogAction, game: None };
                 match kernel.guard(&service, "slots.items", slots.items(&request)).await {
                     Ok(items) => buttons.push((service.clone(), items)),
-                    Err(e) => self.problem(e.to_string()),
+                    Err(e) => self.notices().problem(e.to_string()),
                 }
             }
         }
@@ -451,7 +451,7 @@ impl Core {
         let added = self.library().set_catalogs(copies, buttons, offers, installed);
         if added > 0 {
             let s = if added == 1 { "" } else { "s" };
-            self.notice_opening(
+            self.notices().opening(
                 nexus_ui_api::NoticeKind::Info,
                 crate::app::Route::Catalog,
                 format!("{added} new release{s} in the Catalog"),
@@ -529,7 +529,7 @@ impl Core {
                     })
                 };
                 if installed {
-                    self.notice(format!("{} is installed", install.title));
+                    self.notices().info(format!("{} is installed", install.title));
                 }
             }
         }

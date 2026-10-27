@@ -98,7 +98,7 @@ pub(crate) async fn session(core: &Core, command: SessionCmd) -> CoreResult<()> 
     // The player pressed Play: say why nothing started.
     if let Err(error) = &result {
         let why = cant_start(core, &game, error);
-        core.notice_opening(NoticeKind::Error, Route::GameDetail(game.clone()), why);
+        core.notices().opening(NoticeKind::Error, Route::GameDetail(game.clone()), why);
     }
     result
 }
@@ -170,7 +170,7 @@ async fn finish(
         && !ended.stopping
     {
         let waited = core.kernel().host().hand_over_timeout.as_secs();
-        core.game_problem(
+        core.notices().game_problem(
             game,
             format!("{} didn't start: its game didn't show up within {waited} seconds", ended.title),
         );
@@ -180,7 +180,7 @@ async fn finish(
         && !exit.success
         && !ended.stopping
     {
-        core.game_problem(game, crash_notice(&ended.title, &exit, played, &ended.log));
+        core.notices().game_problem(game, crash_notice(&ended.title, &exit, played, &ended.log));
     }
     // The player says how far it got, once for each build, unless they stopped it at once.
     if let Some(ended) = ended

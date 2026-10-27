@@ -565,7 +565,7 @@ impl Core {
             })
             .collect();
         let Some(message) = crate::hardware::blocked_notice(&blocked) else { return };
-        self.notice_opening(NoticeKind::Error, Route::Settings, message);
+        self.notices().opening(NoticeKind::Error, Route::Settings, message);
         if let Err(e) = self.preferences().save(Pref::PcNoticed, Value::String(summary)) {
             tracing::warn!(error = %e, "could not save the PC the notice was for");
         }
@@ -616,7 +616,7 @@ impl Core {
     /// What the sessions subsystem says the core must do.
     fn session_event(&self, event: crate::sessions::SessionEvent) {
         match event {
-            crate::sessions::SessionEvent::Problem(problem) => self.notice(problem),
+            crate::sessions::SessionEvent::Problem(problem) => self.notices().info(problem),
         }
     }
 
@@ -650,31 +650,6 @@ impl Core {
     pub(crate) fn changed(&self, area: Area) {
         self.inner.changes.publish(area);
         self.inner.kernel.events().publish(Event::StateChanged);
-    }
-
-    /// Posts a notice. The change that goes with it publishes [`Event::StateChanged`].
-    fn post(&self, kind: NoticeKind, message: String, route: Option<Route>, game: Option<GameKey>) {
-        self.notices().post(kind, message, route, game);
-    }
-
-    /// A notice of the default kind, `Info`.
-    pub(crate) fn notice(&self, message: String) {
-        self.post(NoticeKind::Info, message, None, None);
-    }
-
-    /// A notice of the `Error` kind: something failed.
-    pub(crate) fn problem(&self, message: String) {
-        self.post(NoticeKind::Error, message, None, None);
-    }
-
-    /// A notice whose subject `route` shows: clicking it opens that screen.
-    pub(crate) fn notice_opening(&self, kind: NoticeKind, route: Route, message: String) {
-        self.post(kind, message, Some(route), None);
-    }
-
-    /// A problem with one game: its card shows the game's art.
-    pub(crate) fn game_problem(&self, game: &GameKey, message: String) {
-        self.post(NoticeKind::Error, message, None, Some(game.clone()));
     }
 
     /// Shows the player a problem outside the core, such as a theme's logic failing.
@@ -751,7 +726,7 @@ impl Core {
                     Ok(()) => self.changed(Area::Library),
                     Err(e) => {
                         self.library().detail_failed(&game);
-                        self.problem(e.to_string());
+                        self.notices().problem(e.to_string());
                     }
                 }
                 Ok(())
@@ -927,7 +902,7 @@ impl Core {
         for plugin in self.inner.kernel.providers(capability) {
             match self.inner.kernel.provided(&plugin).await {
                 Ok(provided) => out.push((plugin, provided)),
-                Err(e) => self.problem(e.to_string()),
+                Err(e) => self.notices().problem(e.to_string()),
             }
         }
         out
@@ -1005,11 +980,11 @@ impl Core {
                     emu.own = list.iter().any(|v| v.own);
                     emu.installed = list.into_iter().map(|v| v.version).collect();
                 }
-                Err(e) => self.problem(e.to_string()),
+                Err(e) => self.notices().problem(e.to_string()),
             }
             match kernel.guard(plugin, "installer.available", installer.available()).await {
                 Ok(list) => emu.available = list.into_iter().map(|v| v.version).collect(),
-                Err(e) => self.problem(e.to_string()),
+                Err(e) => self.notices().problem(e.to_string()),
             }
         }
         if let Some(slots) = &provided.slots {
@@ -1089,7 +1064,7 @@ impl Core {
                 // Saved again under its own key, then removed when it ends.
                 let _ = core.inner.kernel.config().remove(&["app", "downloads", &key]);
                 if let Err(e) = core.download(&record.plugin, record.request).await {
-                    core.notice_opening(
+                    core.notices().opening(
                         NoticeKind::Error,
                         Route::Downloads,
                         format!("Could not resume a download for {}: {e}", record.plugin),
@@ -1161,7 +1136,7 @@ impl Core {
             Ok(()) => self.set_install(plugin, None, InstallPhase::Installed, &version),
             Err(e) => {
                 self.set_install(plugin, None, InstallPhase::Failed, &version);
-                self.notice_opening(
+                self.notices().opening(
                     NoticeKind::Error,
                     Route::Plugin(plugin.clone()),
                     format!("Could not install {plugin} {version}: {e}"),
@@ -1213,7 +1188,7 @@ impl Core {
             crate::running::open_link(self, opening).await.map_err(CoreError::Invalid)?;
             let store = crate::view::system_of(&self.inner.kernel, &platform).name;
             tracing::info!(%game, %link, "asked the store to uninstall");
-            self.notice(format!("{store} is uninstalling {title}: it leaves your Library when it's done"));
+            self.notices().info(format!("{store} is uninstalling {title}: it leaves your Library when it's done"));
             self.changed(Area::Library);
             return Ok(());
         }
@@ -1236,7 +1211,7 @@ impl Core {
             }
         }
         self.refresh_library().await?;
-        self.notice(format!("Uninstalled {title}"));
+        self.notices().info(format!("Uninstalled {title}"));
         self.changed(Area::Library);
         Ok(())
     }
@@ -1480,7 +1455,7 @@ impl Core {
                 continue;
             }
             if let Err(e) = self.update(&plugin).await {
-                self.problem(e.to_string());
+                self.notices().problem(e.to_string());
             }
         }
         self.changed(Area::Downloads);
@@ -1499,7 +1474,7 @@ impl Core {
         let (core, plugin) = (self.clone(), plugin.clone());
         tokio::spawn(async move {
             if let Err(e) = core.update(&plugin).await {
-                core.problem(e.to_string());
+                core.notices().problem(e.to_string());
             }
             core.changed(Area::Downloads);
         });

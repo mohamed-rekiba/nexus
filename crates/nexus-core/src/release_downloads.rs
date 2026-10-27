@@ -129,7 +129,7 @@ impl Core {
                 // when the player closed the sheet.
                 if let Err(e) = &started {
                     self.torrents().set_download_error(Some((offer, e.to_string())));
-                    self.problem(e.to_string());
+                    self.notices().problem(e.to_string());
                 }
                 started
             }
@@ -161,18 +161,18 @@ impl Core {
                 if waiting {
                     self.installs().unpack(&id, false);
                 }
-                self.notice_opening(
+                self.notices().opening(
                     nexus_ui_api::NoticeKind::Success,
                     crate::Route::Downloads,
                     format!("Download complete: {title}. Install it from Downloads."),
                 );
             }
-            TorrentEvent::Stopped { title } => self.notice_opening(
+            TorrentEvent::Stopped { title } => self.notices().opening(
                 nexus_ui_api::NoticeKind::Error,
                 crate::Route::Downloads,
                 format!("Download stopped: {title}. Open Downloads to see why"),
             ),
-            TorrentEvent::Problem(message) => self.problem(message),
+            TorrentEvent::Problem(message) => self.notices().problem(message),
             TorrentEvent::VpnsRead(vpns) => self.vpn().keep(vpns),
             // Not in the VPN check: the catalogs' fetches would hold up the kill switch.
             TorrentEvent::VpnBack => {
@@ -221,7 +221,8 @@ impl Core {
         tracing::info!(%offer, link = %release.store, "asked the store to install");
         // The store writes its install down a moment later: its progress is read often for now.
         self.state().store_watch_until = Some(self.ports().clock.now() + std::time::Duration::from_secs(60));
-        self.notice(format!("{store} is installing {}: it shows in your Library when it's done", release.title));
+        self.notices()
+            .info(format!("{store} is installing {}: it shows in your Library when it's done", release.title));
         self.changed(Area::Downloads);
         Ok(())
     }
@@ -350,14 +351,14 @@ impl Core {
                     tracing::warn!(error = %e, "library refresh after an install failed");
                 }
             }
-            InstallEvent::Failed(error) => self.notice_opening(
+            InstallEvent::Failed(error) => self.notices().opening(
                 nexus_ui_api::NoticeKind::Error,
                 crate::Route::Downloads,
                 format!("The install failed: {error}"),
             ),
             InstallEvent::Unpacked { plugin, source, into, title } => {
                 if let Err(e) = self.install_game(&plugin, source, into).await {
-                    self.notice_opening(
+                    self.notices().opening(
                         nexus_ui_api::NoticeKind::Error,
                         crate::Route::Downloads,
                         format!("{title} couldn't install: {e}"),

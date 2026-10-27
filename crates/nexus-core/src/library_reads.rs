@@ -43,7 +43,7 @@ impl Core {
             let page = match kernel.guard(&plugin, "catalog.list", catalog.list(PageRequest::ALL)).await {
                 Ok(page) => page,
                 Err(e) => {
-                    self.problem(e.to_string());
+                    self.notices().problem(e.to_string());
                     continue;
                 }
             };
@@ -55,7 +55,7 @@ impl Core {
                         Ok(items) => {
                             badges.insert(key.clone(), items);
                         }
-                        Err(e) => self.problem(e.to_string()),
+                        Err(e) => self.notices().problem(e.to_string()),
                     }
                 }
                 library.push(Entry { key, summary });
@@ -84,7 +84,7 @@ impl Core {
         {
             if let Err(e) = self.load_detail(&game).await {
                 self.library().detail_failed(&game);
-                self.problem(e.to_string());
+                self.notices().problem(e.to_string());
             }
             self.changed(Area::Library);
         }
@@ -226,7 +226,7 @@ impl Core {
         if let Some(compat) = &provided.compatibility {
             match kernel.guard(&plugin, "compatibility.status", compat.status(&game.local)).await {
                 Ok(info) => detail.compat = Some(info),
-                Err(e) => self.problem(e.to_string()),
+                Err(e) => self.notices().problem(e.to_string()),
             }
         }
         if let Some(slots) = &provided.slots {
@@ -238,7 +238,7 @@ impl Core {
                         SlotId::GameDetailSection => detail.sections = items,
                         _ => badges = Some(items),
                     },
-                    Err(e) => self.problem(e.to_string()),
+                    Err(e) => self.notices().problem(e.to_string()),
                 }
             }
         }
