@@ -1,0 +1,590 @@
+import { Vm, Host } from "../types.slint";
+import { Commands } from "../commands.slint";
+import { Assets } from "../assets.slint";
+import { Tokens } from "../tokens.slint";
+import { Look } from "look.slint";
+import { Prefs, Row, Value, Editor, FolderRow } from "settings-rows.slint";
+import { Sys } from "system-panel.slint";
+import { Setup } from "install-os.slint";
+
+// The rows of each of Settings' tabs, one component for each. A row that isn't always there
+// (Start at login, Screen, a VPN, the System rows) moves the rows after it, so `Prefs` counts the
+// rows of a tab (`Prefs.rows`) with the same conditions. Each component hands the row that took
+// the focus to `reveal`, for the sheet to scroll to it.
+
+// The game folders, and a rescan.
+export component GamesSection inherits VerticalLayout {
+    callback reveal(length, length);
+
+        for folder[i] in Vm.folders : FolderRow {
+            folder: folder;
+            section: 0;
+            index: i;
+            first: i == 0;
+            reveal(y, h) => { root.reveal(y, h); }
+        }
+        Row {
+            label: "Rescan game folders";
+            hint: Look.games(Vm.home.games.length) + " found";
+            focused: Prefs.is(0, Vm.folders.length);
+            first: Vm.folders.length == 0;
+            last: true;
+            accessible-role: button;
+            accessible-label: "rescan";
+            accessible-action-default => { Commands.refresh-library(); }
+            reveal(y, h) => { root.reveal(y, h); }
+            clicked => { Prefs.section = 0; Prefs.row = Vm.folders.length; Commands.refresh-library(); }
+            property <int> seen: Prefs.serial;
+            changed seen => { if (self.focused && Prefs.pending == 0) { Commands.refresh-library(); } }
+            Value { text: Vm.home.loading ? "Scanning…" : ""; }
+        }
+}
+
+// Emulator updates, and Nexus's own.
+export component UpdatesSection inherits VerticalLayout {
+    callback reveal(length, length);
+
+        // Each emulator's builds and settings are on its page, from Plugins.
+        Row {
+            label: "Update automatically";
+            hint: "Checks every few hours · an update waits until you close your game";
+            focused: Prefs.is(1, 0);
+            first: true;
+            last: false;
+            accessible-role: button;
+            accessible-label: "auto-update";
+            accessible-value: Vm.auto-update ? "on" : "off";
+            accessible-action-default => { Commands.set-auto-update(!Vm.auto-update); }
+            reveal(y, h) => { root.reveal(y, h); }
+            clicked => { Prefs.section = 1; Prefs.row = 0; Commands.set-auto-update(!Vm.auto-update); }
+            property <int> seen: Prefs.serial;
+            changed seen => {
+                if (self.focused && (Prefs.pending == 0 || (Prefs.pending > 0) != Vm.auto-update)) { Commands.set-auto-update(!Vm.auto-update); }
+            }
+            Value { kind: "toggle"; on: Vm.auto-update; }
+        }
+        // Nexus itself: check, download, then restart to put it in. A packaged install's
+        // package manager puts it in at once ("installed"); on Nexus OS it comes with the
+        // system's update ("system").
+        update := Row {
+            property <string> state: Vm.launcher-update.state;
+            label: "Nexus updates";
+            hint: Vm.launcher-update.text;
+            focused: Prefs.is(1, 1);
+            last: true;
+            accessible-role: button;
+            accessible-label: "launcher-update";
+            accessible-value: self.state;
+            accessible-action-default => { self.act(); }
+            reveal(y, h) => { root.reveal(y, h); }
+            clicked => { Prefs.section = 1; Prefs.row = 1; self.act(); }
+            property <int> seen: Prefs.serial;
+            changed seen => { if (self.focused && Prefs.pending == 0) { self.act(); } }
+            function act() {
+                if (self.state == "available") { Commands.download-launcher-update(); }
+                else if (self.state == "ready" || self.state == "installed") { Host.restart(); }
+                else if (self.state != "off" && self.state != "checking" && self.state != "downloading") { Commands.check-launcher-update(); }
+            }
+            Value {
+                text: update.state == "available" ? (Vm.launcher-update.method == "package" ? "Update" : "Download")
+                    : update.state == "ready" || update.state == "installed" ? "Restart"
+                    : update.state == "off" || update.state == "checking" || update.state == "downloading" ? "" : "Check now";
+                tone: update.state == "ready" || update.state == "installed" || update.state == "available" ? 3 : 0;
+            }
+        }
+}
+
+// How the launcher looks and behaves.
+export component LauncherSection inherits VerticalLayout {
+    callback reveal(length, length);
+
+        // The theme and its options are in Themes.
+        Row {
+            label: "Full screen";
+            hint: "Fills the screen, as a console does";
+            focused: Prefs.is(2, 0);
+            first: true;
+            accessible-role: button;
+            accessible-label: "fullscreen";
+            accessible-value: Vm.fullscreen ? "on" : "off";
+            accessible-action-default => { Commands.set-fullscreen(!Vm.fullscreen); }
+            reveal(y, h) => { root.reveal(y, h); }
+            clicked => { Prefs.section = 2; Prefs.row = 0; Commands.set-fullscreen(!Vm.fullscreen); }
+            property <int> seen: Prefs.serial;
+            changed seen => {
+                if (self.focused && (Prefs.pending == 0 || (Prefs.pending > 0) != Vm.fullscreen)) { Commands.set-fullscreen(!Vm.fullscreen); }
+            }
+            Value { kind: "toggle"; on: Vm.fullscreen; }
+        }
+        // The size of everything, a tenth at a time from 0.8 to 1.4. Return and a click go
+        // round; left and right stop at the ends.
+        size := Row {
+            // In tenths: 8 to 14.
+            property <int> tenths: Math.round(Vm.scale * 10);
+            label: "Size of everything";
+            hint: Vm.viewport.size > 0 && Vm.viewport.size != Vm.scale ? "NEXUS_SCALE sets it for this run"
+                : "Text, art and space, bigger or smaller";
+            focused: Prefs.is(2, 1);
+            accessible-role: button;
+            accessible-label: "scale";
+            accessible-description: self.hint;
+            accessible-value: Math.floor(self.tenths / 10) + "." + Math.mod(self.tenths, 10);
+            accessible-action-default => { self.step(1, true); }
+            reveal(y, h) => { root.reveal(y, h); }
+            clicked => { Prefs.section = 2; Prefs.row = 1; self.step(1, true); }
+            property <int> seen: Prefs.serial;
+            changed seen => { if (self.focused) { self.step(Prefs.pending == 0 ? 1 : Prefs.pending, Prefs.pending == 0); } }
+            function step(delta: int, round: bool) {
+                let next = round && self.tenths + delta > 14 ? 8 : Math.clamp(self.tenths + delta, 8, 14);
+                Commands.set-scale(next / 10);
+            }
+            Value { kind: "choice"; text: (size.tenths * 10) + "%"; focused: parent.focused; }
+        }
+        Row {
+            label: "Back to the launcher";
+            hint: "When a game closes, the launcher comes to the front";
+            focused: Prefs.is(2, 2);
+            accessible-role: button;
+            accessible-label: "return-on-exit";
+            accessible-value: Vm.return-on-exit ? "on" : "off";
+            accessible-action-default => { Commands.set-return-on-exit(!Vm.return-on-exit); }
+            reveal(y, h) => { root.reveal(y, h); }
+            clicked => { Prefs.section = 2; Prefs.row = 2; Commands.set-return-on-exit(!Vm.return-on-exit); }
+            property <int> seen: Prefs.serial;
+            changed seen => {
+                if (self.focused && (Prefs.pending == 0 || (Prefs.pending > 0) != Vm.return-on-exit)) { Commands.set-return-on-exit(!Vm.return-on-exit); }
+            }
+            Value { kind: "toggle"; on: Vm.return-on-exit; }
+        }
+        Row {
+            label: "Interface sounds";
+            focused: Prefs.is(2, 3);
+            accessible-role: button;
+            accessible-label: "sounds";
+            accessible-value: Vm.sounds ? "on" : "off";
+            accessible-action-default => { Commands.set-sounds(!Vm.sounds); }
+            last: !Vm.can-start-at-login && Vm.monitors.length <= 1;
+            reveal(y, h) => { root.reveal(y, h); }
+            clicked => { Prefs.section = 2; Prefs.row = 3; Commands.set-sounds(!Vm.sounds); }
+            property <int> seen: Prefs.serial;
+            changed seen => {
+                if (self.focused && (Prefs.pending == 0 || (Prefs.pending > 0) != Vm.sounds)) { Commands.set-sounds(!Vm.sounds); }
+            }
+            Value { kind: "toggle"; on: Vm.sounds; }
+        }
+        // In an installed build only: `cargo run`'s binary moves.
+        if Vm.can-start-at-login : Row {
+            label: "Start at login";
+        last: Vm.monitors.length <= 1;
+            hint: Vm.start-at-login-error != "" ? Vm.start-at-login-error : "Nexus opens when you log in";
+            hint-kind: Vm.start-at-login-error != "" ? 2 : 0;
+            focused: Prefs.is(2, 4);
+            accessible-role: button;
+            accessible-label: "start-at-login";
+            accessible-value: Vm.start-at-login ? "on" : "off";
+            accessible-description: Vm.start-at-login-error;
+            accessible-action-default => { Commands.set-start-at-login(!Vm.start-at-login); }
+            reveal(y, h) => { root.reveal(y, h); }
+            clicked => { Prefs.section = 2; Prefs.row = 4; Commands.set-start-at-login(!Vm.start-at-login); }
+            property <int> seen: Prefs.serial;
+            changed seen => {
+                if (self.focused && (Prefs.pending == 0 || (Prefs.pending > 0) != Vm.start-at-login)) { Commands.set-start-at-login(!Vm.start-at-login); }
+            }
+            Value { kind: "toggle"; on: Vm.start-at-login; }
+        }
+        // With two monitors or more: which one the launcher goes on.
+        if Vm.monitors.length > 1 : Row {
+            property <int> at: Vm.monitor == "" ? -1 : self.find(Vm.monitor);
+            label: "Screen";
+        last: true;
+            hint: "The monitor Nexus fills";
+            focused: Prefs.is(2, Prefs.screen-row);
+            accessible-role: button;
+            accessible-label: "monitor";
+            accessible-value: Vm.monitor;
+            accessible-action-default => { self.step(1); }
+            reveal(y, h) => { root.reveal(y, h); }
+            clicked => { Prefs.section = 2; Prefs.row = Prefs.screen-row; self.step(1); }
+            property <int> seen: Prefs.serial;
+            changed seen => { if (self.focused) { self.step(Prefs.pending == 0 ? 1 : Prefs.pending); } }
+            function find(name: string) -> int {
+                // At most a few monitors: the first match.
+                Vm.monitors[0] == name ? 0 : Vm.monitors.length > 1 && Vm.monitors[1] == name ? 1
+                    : Vm.monitors.length > 2 && Vm.monitors[2] == name ? 2 : Vm.monitors.length > 3 && Vm.monitors[3] == name ? 3 : -1
+            }
+            function step(delta: int) {
+                let next = Math.mod(Math.max(self.at, 0) + delta + Vm.monitors.length, Vm.monitors.length);
+                Commands.set-monitor(Vm.monitors[next]);
+            }
+            Value { kind: "choice"; text: Vm.monitor != "" ? Vm.monitor : "The one it is on"; focused: parent.focused; }
+        }
+}
+
+// The catalogs' downloads: through the player's own VPN only, and sharing.
+export component DownloadsSection inherits VerticalLayout {
+    callback reveal(length, length);
+
+        // The catalogs' downloads: through the player's own VPN only, and sharing.
+        Row {
+            label: "Download only through a VPN";
+            hint: Vm.vpn.problem != "" ? Vm.vpn.problem
+                : !Vm.vpn.only ? "Hides your IP address from other peers · uses your own VPN"
+                : Vm.vpn.route != "" ? "Protected · downloads only use " + Vm.vpn.route
+                : !Vm.vpn.finds && Vm.vpn.chosen == "" ? "Downloads wait until you pick the network your VPN uses"
+                : "Downloads wait until your VPN is connected";
+            hint-kind: Vm.vpn.problem != "" || !Vm.vpn.only ? 0 : Vm.vpn.route != "" ? 1 : 2;
+            focused: Prefs.is(3, 0);
+            first: true;
+            accessible-role: button;
+            accessible-label: "vpn-only";
+            accessible-value: Vm.vpn.only ? "on" : "off";
+            accessible-description: self.hint;
+            accessible-action-default => { self.flip(); }
+            reveal(y, h) => { root.reveal(y, h); }
+            clicked => { Prefs.section = 3; Prefs.row = 0; self.flip(); }
+            property <int> seen: Prefs.serial;
+            changed seen => {
+                if (self.focused && (Prefs.pending == 0 || (Prefs.pending > 0) != Vm.vpn.only)) { self.flip(); }
+            }
+            function flip() {
+                if (Vm.vpn.problem == "") { Commands.set-vpn-only(!Vm.vpn.only); }
+            }
+            Value { kind: "toggle"; on: Vm.vpn.only; }
+        }
+        // Where the system finds VPNs, Enter connects or disconnects one it can switch.
+        // Where it can't (macOS), each network with an address is listed, and Enter
+        // picks the one the VPN uses.
+        for vpn[i] in Vm.vpn.vpns : Row {
+            property <bool> picked: vpn.name == Vm.vpn.chosen;
+            property <bool> in-use: Vm.vpn.route != "" && Vm.vpn.route == vpn.name;
+            label: vpn.name;
+            hint: vpn.kind + (vpn.connected ? " · connected" : " · not connected")
+                + (self.in-use ? " · downloads use it" : self.picked ? " · picked" : "");
+            hint-kind: self.in-use ? 1 : 0;
+            focused: Prefs.is(3, 1 + i);
+            accessible-role: button;
+            accessible-label: "vpn";
+            accessible-value: vpn.name;
+            accessible-description: self.hint;
+            accessible-action-default => { self.act(); }
+            reveal(y, h) => { root.reveal(y, h); }
+            clicked => { Prefs.section = 3; Prefs.row = 1 + i; self.act(); }
+            property <int> seen: Prefs.serial;
+            changed seen => { if (self.focused && Prefs.pending == 0) { self.act(); } }
+            function act() {
+                if (!Vm.vpn.finds) {
+                    Commands.set-vpn(self.picked ? "" : vpn.name);
+                } else if (vpn.switchable && vpn.connected) {
+                    Commands.disconnect-vpn(vpn.name);
+                } else if (vpn.switchable) {
+                    Commands.connect-vpn(vpn.name);
+                }
+            }
+            Value {
+                text: !Vm.vpn.finds ? (parent.picked ? "Picked" : "Use")
+                    : vpn.switchable ? (vpn.connected ? "Disconnect" : "Connect") : "";
+                tone: !Vm.vpn.finds && parent.picked ? 1 : 3;
+            }
+        }
+        if Vm.vpn.problem == "" && Vm.vpn.vpns.length == 0 : Row {
+            label: "Your VPN";
+            hint: Vm.vpn.can-import ? "Connect it with its own app, or add it from your provider's file below"
+                : "Connect it with its own app";
+            focused: Prefs.is(3, 1);
+            accessible-role: text;
+            accessible-label: "vpn-none";
+            reveal(y, h) => { root.reveal(y, h); }
+            clicked => { Prefs.section = 3; Prefs.row = 1; }
+            Value { text: Vm.vpn.finds ? "None found" : "No network found"; }
+        }
+        // Linux: NetworkManager adds the VPN from the file the player types, and
+        // connects it.
+        if Prefs.vpn-import : import := Row {
+            property <bool> typing: Prefs.editing && self.focused;
+            label: "Add a VPN";
+            hint: Vm.vpn.error != "" ? Vm.vpn.error : "Type the path of your provider's WireGuard .conf or OpenVPN .ovpn file";
+            hint-kind: Vm.vpn.error != "" ? 2 : 0;
+            focused: Prefs.is(3, Prefs.import-row);
+            accessible-role: button;
+            accessible-label: "vpn-import";
+            accessible-description: Vm.vpn.error;
+            accessible-action-default => { Prefs.tabs = false; Prefs.section = 3; Prefs.row = Prefs.import-row; self.open(); }
+            reveal(y, h) => { root.reveal(y, h); }
+            clicked => { Prefs.section = 3; Prefs.row = Prefs.import-row; self.open(); }
+            property <int> seen: Prefs.serial;
+            changed seen => { if (self.focused && Prefs.pending == 0 && !Prefs.editing) { self.open(); } }
+            function open() {
+                Prefs.edit-text = "";
+                Prefs.editing = true;
+            }
+            if !import.typing : Value { text: "Add"; tone: 3; }
+            if import.typing : Editor { horizontal-stretch: 2; done(text) => { Commands.import-vpn(text); } }
+        }
+        Row {
+            label: "Keep sharing finished downloads";
+            hint: "Other players download from you, at most 128 KB/s";
+            focused: Prefs.is(3, Prefs.share-row);
+            last: true;
+            accessible-role: button;
+            accessible-label: "seed-downloads";
+            accessible-value: Vm.seed-downloads ? "on" : "off";
+            accessible-action-default => { Commands.set-seed-downloads(!Vm.seed-downloads); }
+            reveal(y, h) => { root.reveal(y, h); }
+            clicked => { Prefs.section = 3; Prefs.row = Prefs.share-row; Commands.set-seed-downloads(!Vm.seed-downloads); }
+            property <int> seen: Prefs.serial;
+            changed seen => {
+                if (self.focused && (Prefs.pending == 0 || (Prefs.pending > 0) != Vm.seed-downloads)) { Commands.set-seed-downloads(!Vm.seed-downloads); }
+            }
+            Value { kind: "toggle"; on: Vm.seed-downloads; }
+        }
+}
+
+// What this computer has, and how each emulator's games run on it. It only shows.
+export component PcSection inherits VerticalLayout {
+    callback reveal(length, length);
+
+        // What this computer has, then how each emulator's games run on it. The rows
+        // only show; they take the focus so a pad can scroll to them.
+        if !Vm.hardware.known : Row {
+            inert: true;
+            label: "Checking this PC…";
+
+            first: true;
+            last: true;
+
+        }
+        if Vm.hardware.known : Row {
+            inert: true;
+            label: "Processor";
+
+            first: true;
+            accessible-role: text;
+            accessible-label: "pc-cpu";
+            accessible-value: Vm.hardware.cpu;
+
+            Value { text: Vm.hardware.cpu != "" ? Vm.hardware.cpu : "—"; }
+        }
+        if Vm.hardware.known : Row {
+            inert: true;
+            label: "Memory";
+
+            accessible-role: text;
+            accessible-label: "pc-memory";
+            accessible-value: Vm.hardware.memory;
+
+            Value { text: Vm.hardware.memory != "" ? Vm.hardware.memory : "—"; }
+        }
+        for gpu[i] in Vm.hardware.graphics : Row {
+            inert: true;
+            label: i == 0 ? "Graphics" : "";
+
+            last: i == Vm.hardware.graphics.length - 1 && Vm.hardware.verdicts.length == 0;
+            accessible-role: text;
+            accessible-label: "pc-graphics";
+            accessible-value: gpu;
+
+            Value { text: gpu; }
+        }
+        for run[i] in Vm.hardware.verdicts : Row {
+            inert: true;
+            label: run.emulator + " games";
+            hint: run.why;
+
+            last: i == Vm.hardware.verdicts.length - 1;
+            accessible-role: text;
+            accessible-label: "pc-verdict";
+            accessible-value: run.emulator + ": " + run.headline + (run.why != "" ? " · " + run.why : "");
+            // The last row brings the About card under it into view too.
+
+            Value {
+                text: run.headline;
+                tone: run.level == "good" ? 1 : run.level == "no" ? 2 : run.level == "slow" ? 4 : 0;
+            }
+        }
+
+        Rectangle { height: 24 * Look.px; }
+        Rectangle {
+            border-radius: 14 * Look.px;
+            background: #ffffff0b;
+            HorizontalLayout {
+                padding: 18 * Look.px;
+                spacing: 16 * Look.px;
+                Image { source: Assets.logo; width: 60 * Look.px; height: 60 * Look.px; image-fit: contain; }
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 4 * Look.px;
+                    horizontal-stretch: 1;
+                    Text { text: "Nexus"; font-size: 19 * Look.tpx; font-weight: 600; color: Tokens.color-text; }
+                    Text { text: Vm.plugins.length + (Vm.plugins.length == 1 ? " plugin · " : " plugins · ") + Vm.emulators.length + (Vm.emulators.length == 1 ? " emulator" : " emulators"); font-size: 15 * Look.tpx; color: Look.text3; }
+                    Text { text: "Games from every emulator, in one place"; font-size: 15 * Look.tpx; color: Look.text3; }
+                }
+            }
+        }
+}
+
+// When Nexus is the whole screen: the machine's settings. Internet, Sound and Bluetooth open their panels, as their icons in the top bar do.
+export component SystemSection inherits VerticalLayout {
+    callback reveal(length, length);
+
+        // When Nexus is the whole screen: the machine's settings. Internet, Sound and
+        // Bluetooth open their panels, as their icons in the top bar do.
+        Row {
+            label: "Internet";
+            hint: Vm.system.network-available ? "" : Vm.system.network-reason;
+            focused: Prefs.is(5, 0);
+            first: true;
+            accessible-role: button;
+            accessible-label: "system-internet";
+            accessible-value: Vm.system.connection;
+            accessible-action-default => { Sys.show(0); }
+            reveal(y, h) => { root.reveal(y, h); }
+            clicked => { Prefs.section = 5; Prefs.row = 0; Sys.show(0); }
+            property <int> seen: Prefs.serial;
+            changed seen => { if (self.focused && Prefs.pending == 0) { Sys.show(0); } }
+            Value {
+                kind: "choice";
+                focused: parent.focused;
+                text: Vm.system.connection == "wifi" ? "Wi-Fi · " + Vm.system.network-name
+                    : Vm.system.connection == "wired" ? "Cable" : "Not connected";
+            }
+        }
+        Row {
+            label: "Sound";
+            hint: Vm.system.audio-available ? "" : Vm.system.audio-reason;
+            focused: Prefs.is(5, 1);
+            accessible-role: button;
+            accessible-label: "system-sound";
+            accessible-value: Vm.system.muted ? "muted" : Vm.system.volume;
+            accessible-action-default => { Sys.show(1); }
+            reveal(y, h) => { root.reveal(y, h); }
+            clicked => { Prefs.section = 5; Prefs.row = 1; Sys.show(1); }
+            property <int> seen: Prefs.serial;
+            changed seen => { if (self.focused && Prefs.pending == 0) { Sys.show(1); } }
+            Value { kind: "choice"; focused: parent.focused; text: Vm.system.muted ? "Muted" : Vm.system.volume + "%"; }
+        }
+        Row {
+            label: "Bluetooth";
+            hint: Vm.system.bluetooth-available ? "Controllers and headsets" : Vm.system.bluetooth-reason;
+            focused: Prefs.is(5, 2);
+            last: Prefs.system-rows == 3;
+            accessible-role: button;
+            accessible-label: "system-bluetooth";
+            accessible-value: Vm.system.bluetooth-on ? "on" : "off";
+            accessible-action-default => { Sys.show(2); }
+            reveal(y, h) => { root.reveal(y, h); }
+            clicked => { Prefs.section = 5; Prefs.row = 2; Sys.show(2); }
+            property <int> seen: Prefs.serial;
+            changed seen => { if (self.focused && Prefs.pending == 0) { Sys.show(2); } }
+            Value {
+                kind: "choice";
+                focused: parent.focused;
+                text: !Vm.system.bluetooth-on ? "Off" : Vm.system.connected-devices + " connected";
+            }
+        }
+        if Prefs.os-row >= 0 : Row {
+            label: "Nexus OS updates";
+        last: Prefs.install-row < 0;
+            hint: Vm.system.os-update-text;
+            focused: Prefs.is(5, Prefs.os-row);
+            accessible-role: button;
+            accessible-label: "system-os-update";
+            accessible-value: Vm.system.os-update;
+            accessible-action-default => { self.act(); }
+            reveal(y, h) => { root.reveal(y, h); }
+            clicked => { Prefs.section = 5; Prefs.row = Prefs.os-row; self.act(); }
+            property <int> seen: Prefs.serial;
+            changed seen => { if (self.focused && Prefs.pending == 0) { self.act(); } }
+            function act() {
+                if (Vm.system.os-update == "staged") { Commands.restart-pc(); } else { Commands.check-os-update(); }
+            }
+            Value {
+                text: Vm.system.os-update == "staged" ? "Restart" : Vm.system.os-update == "checking" ? "" : "Check now";
+                tone: Vm.system.os-update == "staged" ? 3 : 0;
+            }
+        }
+        if Prefs.install-row >= 0 : Row {
+            label: "Install Nexus OS on this PC";
+            hint: "From this USB stick";
+            focused: Prefs.is(5, Prefs.install-row);
+            last: true;
+            accessible-role: button;
+            accessible-label: "system-install";
+            accessible-action-default => { Setup.go("disks"); }
+            reveal(y, h) => { root.reveal(y, h); }
+            clicked => { Prefs.section = 5; Prefs.row = Prefs.install-row; Setup.go("disks"); }
+            property <int> seen: Prefs.serial;
+            changed seen => { if (self.focused && Prefs.pending == 0) { Setup.go("disks"); } }
+            Value { text: "Install"; tone: 3; }
+        }
+}
+
+// Leaving Nexus, and the machine's power. Log out, Restart and Shut down ask again: the first press arms them, the second acts.
+export component PowerSection inherits VerticalLayout {
+    callback reveal(length, length);
+
+        // As the whole screen, the session starts Nexus again after it quits: there the row
+        // says so. Log out and the power rows in SYSTEM leave the session.
+        Row {
+            label: Vm.system.whole-screen ? "Restart Nexus" : "Quit Nexus";
+            hint: Vm.system.whole-screen ? "Starts Nexus again · Ctrl+Q" : "Ctrl+Q";
+            focused: Prefs.is(Prefs.power-section, 0);
+            danger: true;
+            first: true;
+        last: Prefs.power-rows == 1;
+            accessible-role: button;
+            accessible-label: Vm.system.whole-screen ? "restart-nexus" : "quit";
+            accessible-action-default => { Host.quit(); }
+            reveal(y, h) => { root.reveal(y, h); }
+            clicked => { Prefs.section = Prefs.power-section; Prefs.row = 0; Host.quit(); }
+            property <int> seen: Prefs.serial;
+            changed seen => { if (self.focused && Prefs.pending == 0) { Host.quit(); } }
+        }
+        // Log out, Restart and Shut down ask again: the first press arms them, the second
+        // acts.
+        if Prefs.logout-row >= 0 : Row {
+            property <bool> armed;
+            label: "Log out";
+            hint: "Press twice · back to the login screen";
+            focused: Prefs.is(Prefs.power-section, Prefs.logout-row);
+            last: Prefs.power-rows == Prefs.logout-row + 1;
+            danger: self.armed;
+            accessible-role: button;
+            accessible-label: "system-log-out";
+            accessible-value: self.armed ? "armed" : "";
+            accessible-action-default => { self.act(); }
+            changed focused => { if (!self.focused) { self.armed = false; } }
+            reveal(y, h) => { root.reveal(y, h + (self.last ? 180 * Look.px : 0)); }
+            clicked => { Prefs.section = Prefs.power-section; Prefs.row = Prefs.logout-row; self.act(); }
+            property <int> seen: Prefs.serial;
+            changed seen => { if (self.focused && Prefs.pending == 0) { self.act(); } }
+            function act() {
+                if (!self.armed) { self.armed = true; return; }
+                self.armed = false;
+                Host.log-out();
+            }
+            Value { text: parent.armed ? "Press again to log out" : ""; tone: 2; }
+        }
+        for power[i] in Vm.system.whole-screen && Vm.system.power-available ? ["Restart", "Shut down"] : [] : Row {
+            property <bool> armed;
+            label: power;
+            hint: "Press twice";
+            focused: Prefs.is(Prefs.power-section, Prefs.restart-row + i);
+            last: i == 1;
+            danger: self.armed;
+            accessible-role: button;
+            accessible-label: i == 0 ? "system-restart" : "system-shut-down";
+            accessible-value: self.armed ? "armed" : "";
+            accessible-action-default => { self.act(); }
+            changed focused => { if (!self.focused) { self.armed = false; } }
+            reveal(y, h) => { root.reveal(y, h + (self.last ? 180 * Look.px : 0)); }
+            clicked => { Prefs.section = Prefs.power-section; Prefs.row = Prefs.restart-row + i; self.act(); }
+            property <int> seen: Prefs.serial;
+            changed seen => { if (self.focused && Prefs.pending == 0) { self.act(); } }
+            function act() {
+                if (!self.armed) { self.armed = true; return; }
+                self.armed = false;
+                if (i == 0) { Commands.restart-pc(); } else { Commands.shut-down-pc(); }
+            }
+            Value { text: parent.armed ? "Press again to " + (i == 0 ? "restart" : "shut down") : ""; tone: 2; }
+        }
+}

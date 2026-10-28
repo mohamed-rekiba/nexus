@@ -146,7 +146,7 @@ fn shoot_default(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path
             // Up to the tabs, then along them, as a pad does.
             let (along, tabs) = (
                 if prefix.contains("rtl") { Key::LeftArrow } else { Key::RightArrow },
-                ["updates", "launcher", "downloads", "this-pc"],
+                ["updates", "launcher", "downloads", "this-pc", "power"],
             );
             key(host, Key::UpArrow);
             for tab in tabs {
