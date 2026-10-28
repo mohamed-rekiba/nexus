@@ -318,11 +318,11 @@ fn a_theme_s_sheet_in_themes_has_its_options_while_it_is_in_use() {
     host.settle();
 
     assert_eq!(host.first("theme-current").accessible_value().as_deref(), Some("on"));
-    assert_eq!(host.first("option:direction").accessible_value().as_deref(), Some("ltr"));
-    host.first("option:direction").invoke_accessible_default_action();
+    assert_eq!(host.first("option:motion").accessible_value().as_deref(), Some("on"));
+    host.first("option:motion").invoke_accessible_default_action();
     host.pump();
     host.settle();
-    assert_eq!(host.first("option:direction").accessible_value().as_deref(), Some("rtl"));
+    assert_eq!(host.first("option:motion").accessible_value().as_deref(), Some("off"));
 }
 
 #[test]

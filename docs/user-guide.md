@@ -333,6 +333,5 @@ has tabs, as Settings does: General, Settings and Folders.
 Themes lists the built-in theme, `default`, and the themes in `<data-dir>/extensions` (one folder
 each) and in `extensions/` next to the program. Open one and choose "Use this theme". Switching the
 theme keeps the screen you are on, your selection, the downloads and a running game. The default
-theme's options are "Layout direction" (right to left) and "Animations" (off makes the transitions
-cuts). Third-party plugins are themes only: they are data and run no code. To write a theme, see
+theme's option is "Animations" (off makes the transitions cuts). Third-party plugins are themes only: they are data and run no code. To write a theme, see
 [themes.md](themes.md).
