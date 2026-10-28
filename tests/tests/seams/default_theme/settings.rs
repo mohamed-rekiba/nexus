@@ -114,8 +114,7 @@ fn the_keys_move_through_settings_tabs_and_change_the_focused_row() {
     host.navigate(Key::DownArrow);
     assert_eq!(host.count("seed-downloads"), 1);
 
-    // Back up to the tabs and Left to LAUNCHER: Down to "Interface sounds", "Start at login"
-    // and "Quit Nexus".
+    // Back up to the tabs and Left to LAUNCHER: Down to "Interface sounds" and "Start at login".
     for _ in 0..4 {
         host.navigate(Key::UpArrow);
     }
@@ -130,6 +129,13 @@ fn the_keys_move_through_settings_tabs_and_change_the_focused_row() {
     assert_eq!(host.first("sounds").accessible_value().as_deref(), Some("off"), "Enter turns the sounds off");
     host.navigate(Key::DownArrow);
     assert_eq!(host.first("start-at-login").accessible_value().as_deref(), Some("off"));
+    // Up to the tabs and Right to POWER: "Quit Nexus".
+    for _ in 0..5 {
+        host.navigate(Key::UpArrow);
+    }
+    for _ in 0..3 {
+        host.navigate(Key::RightArrow);
+    }
     host.navigate(Key::DownArrow);
     assert_eq!(host.count("option:direction"), 0, "no theme options in Settings");
     let text: slint::SharedString = Key::Return.into();

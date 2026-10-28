@@ -14,17 +14,17 @@ import { Osk, TextField } from "keyboard.slint";
 //   0   GAMES: the game folders, then "Rescan game folders"
 //   1   UPDATES: "Update automatically", "Nexus updates"
 //   2   LAUNCHER: full screen, size of everything, back to the launcher, interface sounds,
-//       start at login (in an installed build), the screen (with two monitors or more), quit
-//       ("Restart Nexus" when Nexus is the whole screen: the session starts it again)
+//       start at login (in an installed build), the screen (with two monitors or more)
 //   3   DOWNLOADS: "Download only through a VPN", one row per VPN (one that says none when
 //       there is none), "Add a VPN" where the system can, then "Keep sharing finished
 //       downloads". Where the system can't bind downloads to a VPN: the switch and sharing.
 //   4   THIS PC: processor, memory, graphics, then one verdict per emulator, and About. It only
 //       shows: it has no rows to focus
 //   5   SYSTEM, when Nexus is the whole screen: Internet, Sound, Bluetooth (each opens its
-//       panel), Nexus OS updates (on Nexus OS), "Install Nexus OS on this PC" (on its USB
-//       stick), then Log out (the Nexus session on a desktop), Restart and Shut down, which
-//       ask again before they act
+//       panel), Nexus OS updates (on Nexus OS), "Install Nexus OS on this PC" (on its USB stick)
+//   5/6 POWER, the last tab (6 after SYSTEM): "Quit Nexus" ("Restart Nexus" when Nexus is the
+//       whole screen: the session starts it again), then Log out (the Nexus session on a
+//       desktop), Restart and Shut down, which ask again before they act
 // On a theme's page:
 //   0   "Use this theme"
 //   1   its options, when it is the one in use
@@ -47,6 +47,10 @@ export global Prefs {
     // the keys, so the focused row sees each one.
     in-out property <int> pending;
     in-out property <int> serial;
+    // A tab with no rows to focus (THIS PC) scrolls with Up and Down: `scroll-by` is the last
+    // step (-1 or 1), and `scroll-serial` counts them, so the sheet sees each one.
+    in-out property <int> scroll-by;
+    in-out property <int> scroll-serial;
 
     out property <bool> page: Vm.screen == "plugin";
     // A game's own settings: one section, its fields.
@@ -59,7 +63,9 @@ export global Prefs {
     out property <int> sections: root.game-page ? 1
         : root.theme-page ? (Vm.plugin-page.current ? 2 : 1)
         : root.page ? (root.on ? 3 + root.panels : 1)
-        : 5 + (Vm.system.whole-screen ? 1 : 0);
+        : 6 + (Vm.system.whole-screen ? 1 : 0);
+    // Power is the last tab: after System when Nexus is the whole screen.
+    out property <int> power-section: Vm.system.whole-screen ? 6 : 5;
     // The page's build rows: the build, then "Uninstall" when it is installed.
     out property <int> builds: !root.page || root.theme-page || !root.on || !Vm.plugin-page.has-emulator || !Vm.plugin-page.emulator.has-builds ? 0
         : Vm.plugin-page.emulator.installed.length > 0 ? 2 : 1;
@@ -67,10 +73,9 @@ export global Prefs {
     out property <int> actions: !root.page || root.theme-page || !root.on
         || (Vm.plugin-page.has-emulator && root.builds == 0) ? 0 : Vm.plugin-page.actions.length;
 
-    // LAUNCHER's rows after the fixed four: the screen and quit move down when "Start at
-    // login" shows.
+    // LAUNCHER's rows after the fixed four: the screen moves down when "Start at login" shows.
     out property <int> screen-row: Vm.can-start-at-login ? 5 : 4;
-    out property <int> quit-row: root.screen-row + (Vm.monitors.length > 1 ? 1 : 0);
+    out property <int> launcher-rows: root.screen-row + (Vm.monitors.length > 1 ? 1 : 0);
     // DOWNLOADS' rows after the VPN switch: the VPNs, "Add a VPN", then sharing.
     out property <int> vpn-rows: Vm.vpn.problem != "" ? 0 : Math.max(1, Vm.vpn.vpns.length);
     out property <bool> vpn-import: Vm.vpn.problem == "" && Vm.vpn.can-import;
@@ -79,11 +84,12 @@ export global Prefs {
     // SYSTEM's rows after Internet, Sound and Bluetooth (-1 for one that doesn't show).
     out property <int> os-row: Vm.system.os-update != "" ? 3 : -1;
     out property <int> install-row: Vm.system.stick ? 3 + (root.os-row >= 0 ? 1 : 0) : -1;
-    // Log out only on a desktop: on Nexus OS the session would just start again.
-    out property <int> logout-row: Vm.system.nexus-os ? -1 : 3 + (root.os-row >= 0 ? 1 : 0) + (root.install-row >= 0 ? 1 : 0);
-    out property <int> restart-row: 3 + (root.os-row >= 0 ? 1 : 0) + (root.install-row >= 0 ? 1 : 0)
-        + (root.logout-row >= 0 ? 1 : 0);
-    out property <int> system-rows: Vm.system.power-available ? root.restart-row + 2 : root.restart-row;
+    out property <int> system-rows: 3 + (root.os-row >= 0 ? 1 : 0) + (root.install-row >= 0 ? 1 : 0);
+    // POWER's rows after "Quit Nexus" ("Restart Nexus" when Nexus is the whole screen: the session
+    // starts it again). Log out only on a desktop: on Nexus OS the session would just start again.
+    out property <int> logout-row: Vm.system.whole-screen && !Vm.system.nexus-os ? 1 : -1;
+    out property <int> restart-row: 1 + (root.logout-row >= 0 ? 1 : 0);
+    out property <int> power-rows: Vm.system.whole-screen && Vm.system.power-available ? root.restart-row + 2 : root.restart-row;
 
     public pure function rows(section: int) -> int {
         root.game-page ? (Vm.detail.settings.length > 0 ? Vm.detail.settings[0].fields.length : 0)
@@ -94,9 +100,10 @@ export global Prefs {
                 : Vm.plugin-page.folders.length)
             : section == 0 ? Vm.folders.length + 1
             : section == 1 ? 2
-            : section == 2 ? root.quit-row + 1
+            : section == 2 ? root.launcher-rows
             : section == 3 ? root.share-row + 1
             : section == 4 ? 0
+            : section == root.power-section ? root.power-rows
             : root.system-rows
     }
     // Back to the first row, as a sheet opens.
@@ -175,6 +182,14 @@ export global Prefs {
         if (root.tabs) {
             if (text == Key.LeftArrow) { if (root.tab-step(Look.rtl ? 1 : -1)) { Host.play-sound("move"); } return true; }
             if (text == Key.RightArrow) { if (root.tab-step(Look.rtl ? -1 : 1)) { Host.play-sound("move"); } return true; }
+            if (root.rows(root.section) == 0) {
+                if (text == Key.DownArrow || text == Key.UpArrow) {
+                    root.scroll-by = text == Key.DownArrow ? 1 : -1;
+                    root.scroll-serial += 1;
+                    return true;
+                }
+                return false;
+            }
             if (text == Key.DownArrow || text == Key.Return || text == " ") { root.enter(); Host.play-sound("move"); return true; }
             // Nothing is above the tabs.
             return text == Key.UpArrow;
