@@ -83,7 +83,7 @@ Stop work as for any game, and Steam keeps running.
    game, set its Launch Options in Steam to `gamemoderun %command%`.
 4. Set nothing for your Steam libraries: Nexus reads Steam's folder and every library Steam lists
    (`steamapps/libraryfolders.vdf`), on any drive. A library you add in Steam shows at the next
-   rescan (Settings, GAMES, **Rescan game folders**). **Steam libraries** in Settings is only for
+   rescan (Settings, Games, **Rescan game folders**). **Steam libraries** in Settings is only for
    reading other folders. Once set, it replaces Steam's list.
 
 A Steam game's Game Hub has Steam's store's words, genres, developer, release date, screenshots and
@@ -153,7 +153,7 @@ The log goes to the terminal. `RUST_LOG` filters it (`info` by default).
 
 ## Game folders and packages folders
 
-Settings, GAMES, has two lists of folders. Separate several folders with `;`, and start a path with
+Settings, Games, has two lists of folders. Separate several folders with `;`, and start a path with
 `~` for your home folder.
 
 - **Game folders**, `~/Games` until you change it: games of any console, in any layout up to three
@@ -176,7 +176,7 @@ which reads its files first. Press Download there to start it.
 - A download goes on while Nexus is open, also minimized, and stops when it closes. Unfinished
   downloads come back paused at the next start. Nexus remembers which pieces it checked, so a start
   does not read every finished download again.
-- With Settings, DOWNLOADS, "Keep sharing finished downloads" on (the default), a finished download
+- With Settings, Downloads, "Keep sharing finished downloads" on (the default), a finished download
   goes on sharing, at most 128 KB/s. **Stop sharing** stops it until the next start.
 - **Cancel** never deletes the downloaded files. **Remove** asks first: "Remove from Downloads" keeps
   the folder, and "Delete files too" also deletes the download's own folder with its unpacked
@@ -231,7 +231,7 @@ A PC game you already have, unpacked and ready to run, needs no install:
    game; keep the game's own files as they are inside it.
 2. Optional: put its cover in the game's folder, named `cover.jpg`, `cover.png` or `cover.webp` (a
    portrait picture, as on a box).
-3. In Settings, GAMES, choose **Rescan game folders**, or restart Nexus. The game shows in the
+3. In Settings, Games, choose **Rescan game folders**, or restart Nexus. The game shows in the
    Library, named after its folder.
 
 ```text
@@ -284,7 +284,10 @@ come to the front on each system is in [reference/desktop.md](reference/desktop.
 
 ## Settings
 
-Changes save as you make them.
+Changes save as you make them. Settings has one tab for each section: Games, Updates, Launcher,
+Downloads and This PC, and System when Nexus is the whole screen. With a controller or keyboard,
+press Up from the first row to reach the tabs, Left and Right to choose one, and Down to go into its
+rows. With a mouse, click a tab.
 
 | Section | Setting | What it does |
 |---|---|---|

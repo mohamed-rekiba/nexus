@@ -24,11 +24,8 @@ fn settings_show_this_pc_and_how_each_emulator_runs_on_it() {
     host.until(Area::Hardware, |core| core.view().settings.hardware.known);
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
     host.settle();
+    host.settings_tab("This PC");
 
-    // Down to the end of the sheet, as a pad does: the rows take the focus, so it scrolls.
-    for _ in 0..20 {
-        host.navigate(slint::platform::Key::DownArrow);
-    }
     assert_eq!(host.values("pc-cpu"), ["Apple M4 Max · 14 cores"]);
     assert_eq!(host.values("pc-memory"), ["36 GB"]);
     assert_eq!(host.values("pc-graphics"), ["Apple M4 Max · shared memory · Vulkan 1.3"]);
@@ -41,7 +38,7 @@ fn with_two_monitors_settings_choose_the_one_the_launcher_fills() {
     host.ui.set_monitors(vec!["Built-in Retina Display".into(), "LEN G32qc-10".into()]);
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
     host.settle();
-    host.down_to("monitor", 40);
+    host.settings_tab("Launcher");
     host.press("monitor", "");
     assert_eq!(host.core().prefs().monitor.as_deref(), Some("LEN G32qc-10"), "the next monitor after the one it is on");
     host.ui.render().unwrap();
@@ -78,7 +75,7 @@ fn the_options_are_the_layout_direction_and_animations() {
 }
 
 #[test]
-fn the_keys_move_through_settings_and_change_the_focused_row() {
+fn the_keys_move_through_settings_tabs_and_change_the_focused_row() {
     use slint::platform::Key;
     let mut host = default_theme();
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
@@ -95,43 +92,51 @@ fn the_keys_move_through_settings_and_change_the_focused_row() {
     assert!(asked, "Enter on Rescan asks the core to scan");
     host.pump();
 
-    // Down to the end, THIS PC, then up past its rows into DOWNLOADS: its last row, "Keep
-    // sharing finished downloads", then up past the VPN rows to "Download only through a
-    // VPN". The theme's options are in Themes now.
-    for _ in 0..30 {
-        host.navigate(Key::DownArrow);
+    // Up from the first row goes to the tabs, Right three times to DOWNLOADS, Down into its
+    // rows: "Download only through a VPN", then down past the row that says there is no VPN and
+    // "Add a VPN" to "Keep sharing finished downloads".
+    host.navigate(Key::UpArrow);
+    for _ in 0..3 {
+        host.navigate(Key::RightArrow);
     }
-    let pc = host.core().view().settings.hardware;
-    let pc_rows = if pc.known { 2 + pc.graphics.len() + pc.verdicts.len() } else { 1 };
-    for _ in 0..pc_rows {
-        host.navigate(Key::UpArrow);
+    assert_eq!(host.count("seed-downloads"), 1, "the tab shows its rows");
+    assert_eq!(host.count("sounds"), 0, "and no other tab's");
+    host.navigate(Key::DownArrow);
+    host.navigate(Key::Return);
+    assert_eq!(host.first("vpn-only").accessible_value().as_deref(), Some("on"), "Enter turns the VPN switch on");
+    for _ in 0..3 {
+        host.navigate(Key::DownArrow);
     }
     assert_eq!(host.first("seed-downloads").accessible_value().as_deref(), Some("on"));
     host.navigate(Key::Return);
     assert_eq!(host.first("seed-downloads").accessible_value().as_deref(), Some("off"), "Enter stops sharing");
-    // Up past "Add a VPN" and the row that says there is no VPN.
-    for _ in 0..3 {
+    // Down at the last row stays there: it doesn't go on to another tab.
+    host.navigate(Key::DownArrow);
+    assert_eq!(host.count("seed-downloads"), 1);
+
+    // Back up to the tabs and Left to LAUNCHER: Down to "Interface sounds", "Start at login"
+    // and "Quit Nexus".
+    for _ in 0..4 {
         host.navigate(Key::UpArrow);
     }
-    host.navigate(Key::Return);
-    assert_eq!(host.first("vpn-only").accessible_value().as_deref(), Some("on"), "Enter turns the VPN switch on");
-
-    // Up once more, "Quit Nexus".
     host.navigate(Key::UpArrow);
+    host.navigate(Key::LeftArrow);
+    host.navigate(Key::DownArrow);
+    for _ in 0..3 {
+        host.navigate(Key::DownArrow);
+    }
+    assert_eq!(host.first("sounds").accessible_value().as_deref(), Some("on"));
+    host.navigate(Key::Return);
+    assert_eq!(host.first("sounds").accessible_value().as_deref(), Some("off"), "Enter turns the sounds off");
+    host.navigate(Key::DownArrow);
+    assert_eq!(host.first("start-at-login").accessible_value().as_deref(), Some("off"));
+    host.navigate(Key::DownArrow);
     assert_eq!(host.count("option:direction"), 0, "no theme options in Settings");
     let text: slint::SharedString = Key::Return.into();
     host.instance().window().dispatch_event(slint::platform::WindowEvent::KeyPressed { text });
     let quit = host.requests.borrow().iter().any(|r| matches!(r, nexus_ui_host::UiRequest::Quit));
     assert!(quit, "Enter on Quit closes the launcher");
     host.pump();
-
-    // Up one, "Start at login", and one more, "Interface sounds".
-    host.navigate(Key::UpArrow);
-    assert_eq!(host.first("start-at-login").accessible_value().as_deref(), Some("off"));
-    host.navigate(Key::UpArrow);
-    assert_eq!(host.first("sounds").accessible_value().as_deref(), Some("on"));
-    host.navigate(Key::Return);
-    assert_eq!(host.first("sounds").accessible_value().as_deref(), Some("off"), "Enter turns the sounds off");
 }
 
 #[test]
@@ -140,6 +145,7 @@ fn settings_keep_the_launcher_behind_a_closed_game() {
     host.ui.start().unwrap();
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
     host.settle();
+    host.settings_tab("Launcher");
     assert_eq!(host.first("return-on-exit").accessible_value().as_deref(), Some("on"), "on by default");
 
     host.first("return-on-exit").invoke_accessible_default_action();
@@ -159,6 +165,7 @@ fn settings_turn_automatic_updates_off() {
     host.ui.start().unwrap();
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
     host.settle();
+    host.settings_tab("Updates");
     assert_eq!(host.first("auto-update").accessible_value().as_deref(), Some("on"));
     host.first("auto-update").invoke_accessible_default_action();
     host.pump();
@@ -173,6 +180,7 @@ fn settings_change_the_size_of_everything_and_the_rows_grow_with_it() {
     let mut host = default_theme();
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
     host.settle();
+    host.settings_tab("Launcher");
     assert_eq!(host.values("scale"), ["1.0"]);
     let before = host.first("fullscreen").size().height;
 
@@ -181,10 +189,8 @@ fn settings_change_the_size_of_everything_and_the_rows_grow_with_it() {
     assert_eq!(host.values("scale"), ["1.1"]);
     assert!(host.first("fullscreen").size().height > before, "everything draws bigger at once");
 
-    // Down past the game folders, Rescan, UPDATES' two rows and Full screen to the size:
-    // right is bigger, left smaller.
-    let folders = host.core().view().settings.folders.len();
-    for _ in 0..folders + 4 {
+    // Down past Full screen to the size: right is bigger, left smaller.
+    for _ in 0..2 {
         host.navigate(Key::DownArrow);
     }
     host.navigate(Key::RightArrow);
@@ -204,6 +210,7 @@ fn nexus_scale_wins_over_the_setting_for_the_run() {
     let mut host = default_theme();
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
     host.settle();
+    host.settings_tab("Launcher");
     let before = host.first("fullscreen").size().height;
     host.ui.set_size(1.3);
     host.ui.render().unwrap();
@@ -219,6 +226,7 @@ fn settings_start_the_launcher_at_login_and_say_why_the_system_refused() {
     let mut host = default_theme();
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
     host.settle();
+    host.settings_tab("Launcher");
     host.press("start-at-login", "off");
     assert_eq!(host.values("start-at-login"), ["on"]);
     assert_eq!(host.test.login_session.logins(), [true]);
@@ -248,6 +256,7 @@ fn settings_hide_start_at_login_for_a_build_that_isn_t_installed() {
     host.ui.start().unwrap();
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
     host.settle();
+    host.settings_tab("Launcher");
     assert_eq!(host.count("start-at-login"), 0);
 }
 
@@ -269,6 +278,7 @@ fn the_window_is_full_screen_by_default_and_settings_turn_it_off() {
     assert!(host.instance().window().is_fullscreen(), "full screen by default, as in the old launcher");
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
     host.settle();
+    host.settings_tab("Launcher");
     assert_eq!(host.first("fullscreen").accessible_value().as_deref(), Some("on"));
     host.first("fullscreen").invoke_accessible_default_action();
     host.pump();
@@ -287,7 +297,7 @@ fn downloads_settings(vpns: impl FnOnce(&nexus_testkit::FakeNetwork)) -> Compose
     host.resize(1600.0, 900.0);
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
     host.settle();
-    host.down_to("seed-downloads", 40);
+    host.settings_tab("Downloads");
     host
 }
 
@@ -368,7 +378,7 @@ fn a_packaged_install_updates_from_settings_then_offers_a_restart() {
     host.ui.start().unwrap();
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
     host.settle();
-    host.down_to("launcher-update", 40);
+    host.settings_tab("Updates");
 
     host.first("launcher-update").invoke_accessible_default_action();
     host.pump();

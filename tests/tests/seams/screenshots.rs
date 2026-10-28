@@ -139,9 +139,23 @@ fn shoot_default(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path
         (Route::Themes, "themes"),
         (Route::Settings, "settings"),
     ] {
-        host.dispatch(Command::Navigate(route));
+        host.dispatch(Command::Navigate(route.clone()));
         host.load_images();
         shoot(window, &out.join(format!("{prefix}-{name}.png")));
+        if route == Route::Settings {
+            // Up to the tabs, then along them, as a pad does.
+            let (along, tabs) = (
+                if prefix.contains("rtl") { Key::LeftArrow } else { Key::RightArrow },
+                ["updates", "launcher", "downloads", "this-pc"],
+            );
+            key(host, Key::UpArrow);
+            for tab in tabs {
+                key(host, along);
+                host.load_images();
+                shoot(window, &out.join(format!("{prefix}-settings-tab-{tab}.png")));
+            }
+            key(host, Key::Escape);
+        }
     }
     // A game the bundled catalog offers, when it offers any: its Game Hub with its releases.
     host.dispatch(Command::Navigate(Route::Catalog));
@@ -328,10 +342,12 @@ fn shoot_vpn(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path, pr
     host.dispatch(Command::Vpn(nexus_core::VpnCmd::SetOnly(true)));
     host.dispatch(Command::Navigate(Route::Settings));
     host.load_images();
-    // Down past GAMES, UPDATES' two rows and LAUNCHER's six to the VPN switch.
-    for _ in 0..host.core().view().settings.folders.len() + 9 {
-        key(host, Key::DownArrow);
+    // Up to the tabs, three to the right to DOWNLOADS, then down to the VPN switch.
+    key(host, Key::UpArrow);
+    for _ in 0..3 {
+        key(host, Key::RightArrow);
     }
+    key(host, Key::DownArrow);
     shoot(window, &out.join(format!("{prefix}-settings-downloads.png")));
     // Down past the VPNs and "Add a VPN" to sharing.
     for _ in 0..4 {
@@ -403,13 +419,15 @@ fn shoot_sizes(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path) 
     use slint::platform::Key;
     host.dispatch(Command::Navigate(Route::Settings));
     host.load_images();
-    // Down past the game folders, Rescan, UPDATES' two rows and Full screen.
-    for _ in 0..host.core().view().settings.folders.len() + 4 {
-        key(host, Key::DownArrow);
+    // Up to the tabs, two to the right to LAUNCHER, then down to Full screen.
+    key(host, Key::UpArrow);
+    for _ in 0..2 {
+        key(host, Key::RightArrow);
     }
+    key(host, Key::DownArrow);
     shoot(window, &out.join("default-settings-launcher.png"));
-    // Down past Back to the launcher and Interface sounds to Start at login.
-    for _ in 0..3 {
+    // Down past the size, Back to the launcher and Interface sounds to Start at login.
+    for _ in 0..4 {
         key(host, Key::DownArrow);
     }
     shoot(window, &out.join("default-settings-login.png"));

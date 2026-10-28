@@ -169,14 +169,12 @@ fn settings_system_opens_the_panels_and_restart_asks_again_first() {
     let mut host = shown(&system, WHOLE_SCREEN);
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
     host.settle();
-    host.down_to("system-internet", 60);
+    host.settings_tab("System");
     assert_eq!(host.value("system-internet"), "wired");
-    host.down_to("system-sound", 60);
     host.press_first("system-sound");
     assert_eq!(host.value("system-panel"), "sound");
     host.navigate(slint::platform::Key::Escape);
 
-    host.down_to("system-restart", 60);
     host.press_first("system-restart");
     assert_eq!(host.value("system-restart"), "armed");
     assert_eq!(system.read(|m| m.restarts), 0, "the first press only asks");
@@ -190,7 +188,7 @@ fn in_the_nexus_session_log_out_asks_again_then_leaves_for_the_login_screen() {
     let mut host = shown(&system, Place { whole_screen: true, nexus_os: false, stick: false });
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
     host.settle();
-    host.down_to("system-log-out", 60);
+    host.settings_tab("System");
     let asked = |host: &Composed| host.requests.borrow().contains(&nexus_ui_host::UiRequest::LogOut);
     host.first("system-log-out").invoke_accessible_default_action();
     host.settle();
@@ -209,7 +207,7 @@ fn as_the_whole_screen_quit_is_restart_nexus_since_the_session_starts_it_again()
         let mut host = shown(&system, place);
         host.dispatch(Command::Navigate(nexus_core::Route::Settings));
         host.settle();
-        host.down_to(row, 60);
+        host.settings_tab("Launcher");
         assert_eq!(host.count(if row == "quit" { "restart-nexus" } else { "quit" }), 0, "{place:?}");
         host.first(row).invoke_accessible_default_action();
         assert!(host.requests.borrow().contains(&nexus_ui_host::UiRequest::Quit), "{place:?}");
@@ -222,7 +220,7 @@ fn on_nexus_os_there_is_no_log_out_its_session_would_only_start_again() {
     let mut host = shown(&system, WHOLE_SCREEN);
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
     host.settle();
-    host.down_to("system-shut-down", 60);
+    host.settings_tab("System");
     assert_eq!(host.count("system-log-out"), 0);
 }
 
@@ -348,7 +346,7 @@ fn on_the_stick_try_it_leaves_the_launcher_and_choose_partitions_starts_that_ins
 
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
     host.settle();
-    host.down_to("system-install", 60);
+    host.settings_tab("System");
     host.press_first("system-install");
     assert_eq!(host.value("install-os"), "disks");
     // No disk: "Choose partitions instead" is first.
