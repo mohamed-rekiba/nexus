@@ -7,7 +7,10 @@ import { Switch } from "widgets.slint";
 import { Osk, TextField } from "keyboard.slint";
 
 // The rows of a settings sheet (Settings, and a plugin's page), and where the keys are in it.
-// A sheet is a list of sections; each has rows. In Settings:
+// A sheet is a list of sections; each has rows. Settings shows one section at a time, under a
+// row of tabs: Up from a section's first row goes to the tabs, Left and Right choose the tab,
+// Down or Return goes into its rows. A plugin's page is one scroll, and the keys cross its
+// sections. In Settings:
 //   0   GAMES: the game folders, then "Rescan game folders"
 //   1   UPDATES: "Update automatically", "Nexus updates"
 //   2   LAUNCHER: full screen, size of everything, back to the launcher, interface sounds,
@@ -16,7 +19,8 @@ import { Osk, TextField } from "keyboard.slint";
 //   3   DOWNLOADS: "Download only through a VPN", one row per VPN (one that says none when
 //       there is none), "Add a VPN" where the system can, then "Keep sharing finished
 //       downloads". Where the system can't bind downloads to a VPN: the switch and sharing.
-//   4   THIS PC: processor, memory, graphics, then one verdict per emulator (they only show)
+//   4   THIS PC: processor, memory, graphics, then one verdict per emulator, and About. It only
+//       shows: it has no rows to focus
 //   5   SYSTEM, when Nexus is the whole screen: Internet, Sound, Bluetooth (each opens its
 //       panel), Nexus OS updates (on Nexus OS), "Install Nexus OS on this PC" (on its USB
 //       stick), then Log out (the Nexus session on a desktop), Restart and Shut down, which
@@ -34,6 +38,8 @@ import { Osk, TextField } from "keyboard.slint";
 export global Prefs {
     in-out property <int> section;
     in-out property <int> row;
+    // The focus is on Settings' tabs, not on a row.
+    in-out property <bool> tabs;
     // A text row is open for typing.
     in-out property <bool> editing;
     in-out property <string> edit-text;
@@ -46,6 +52,8 @@ export global Prefs {
     // A game's own settings: one section, its fields.
     out property <bool> game-page: Vm.screen == "game-settings";
     out property <bool> theme-page: root.page && Vm.plugin-page.plugin.kind == "theme";
+    // Settings: one section at a time, under its tabs.
+    out property <bool> tabbed: Vm.screen == "settings";
     out property <bool> on: Vm.plugin-page.plugin.enabled;
     out property <int> panels: root.page && !root.theme-page && root.on ? Vm.plugin-page.settings.length : 0;
     out property <int> sections: root.game-page ? 1
@@ -88,20 +96,51 @@ export global Prefs {
             : section == 1 ? 2
             : section == 2 ? root.quit-row + 1
             : section == 3 ? root.share-row + 1
-            : section == 4 ? (Vm.hardware.known ? 2 + Vm.hardware.graphics.length + Vm.hardware.verdicts.length : 1)
+            : section == 4 ? 0
             : root.system-rows
     }
     // Back to the first row, as a sheet opens.
     public function reset() {
         root.section = 0;
         root.row = 0;
+        root.tabs = false;
         root.editing = false;
     }
     public pure function is(section: int, row: int) -> bool {
-        root.section == section && root.row == row
+        !root.tabs && root.section == section && root.row == row
     }
 
+    // Settings: choose a tab. Its rows start at the first.
+    public function show(section: int) {
+        root.section = section;
+        root.row = 0;
+        root.editing = false;
+    }
+    // Into the rows of the tab, if it has any.
+    function enter() {
+        if (root.rows(root.section) > 0) {
+            root.tabs = false;
+            root.row = 0;
+        }
+    }
+    function tab-step(delta: int) {
+        let next = root.section + delta;
+        if (next >= 0 && next < root.sections) {
+            root.section = next;
+            root.row = 0;
+        }
+    }
     function step(delta: int) {
+        if (root.tabbed) {
+            if (delta > 0 && root.row + 1 < root.rows(root.section)) {
+                root.row += 1;
+            } else if (delta < 0 && root.row > 0) {
+                root.row -= 1;
+            } else if (delta < 0) {
+                root.tabs = true;
+            }
+            return;
+        }
         if (delta > 0 && root.row + 1 < root.rows(root.section)) {
             root.row += 1;
             return;
@@ -130,6 +169,13 @@ export global Prefs {
             if (text == Key.Escape) { root.editing = false; return true; }
             return false;
         }
+        if (root.tabs) {
+            if (text == Key.LeftArrow) { root.tab-step(Look.rtl ? 1 : -1); Host.play-sound("move"); return true; }
+            if (text == Key.RightArrow) { root.tab-step(Look.rtl ? -1 : 1); Host.play-sound("move"); return true; }
+            if (text == Key.DownArrow || text == Key.Return || text == " ") { root.enter(); Host.play-sound("move"); return true; }
+            // Nothing is above the tabs.
+            return text == Key.UpArrow;
+        }
         if (text == Key.DownArrow) { root.step(1); Host.play-sound("move"); return true; }
         if (text == Key.UpArrow) { root.step(-1); Host.play-sound("move"); return true; }
         if (text == Key.LeftArrow) { root.act(Look.rtl ? 1 : -1); return true; }
@@ -140,6 +186,37 @@ export global Prefs {
     public function act(delta: int) {
         Prefs.pending = delta;
         Prefs.serial += 1;
+    }
+}
+
+// One tab of Settings: a section's name. The tab in use is lit; the focus ring shows when the
+// keys are on the tabs.
+export component Tab inherits Rectangle {
+    in property <string> text;
+    in property <int> section;
+    property <bool> current: Prefs.section == root.section;
+    property <bool> focused: Prefs.tabs && root.current;
+    background: root.current ? #ffffff1f : (touch.has-hover ? #ffffff0f : #ffffff00);
+    border-radius: 12 * Look.px;
+    border-width: root.focused ? 3 * Look.px : 0;
+    border-color: #ffffff;
+    min-height: 48 * Look.tpx;
+    animate background { duration: Tokens.motion-fast; }
+    accessible-role: tab;
+    accessible-label: "settings-tab:" + root.text;
+    accessible-checked: root.current;
+    accessible-action-default => { Prefs.show(root.section); Prefs.tabs = true; }
+    touch := TouchArea { mouse-cursor: pointer; clicked => { Osk.pad = false; Prefs.show(root.section); Prefs.tabs = true; } }
+    HorizontalLayout {
+        padding-left: 20 * Look.px;
+        padding-right: 20 * Look.px;
+        Text {
+            text: root.text;
+            font-size: 18 * Look.tpx;
+            font-weight: root.current ? 600 : 500;
+            color: root.current ? Tokens.color-text : Look.text3;
+            vertical-alignment: center;
+        }
     }
 }
 
@@ -190,7 +267,7 @@ export component Row inherits Rectangle {
         background: Look.line;
     }
     // A click is not the controller: a text box it opens doesn't open the on-screen keyboard.
-    TouchArea { mouse-cursor: pointer; clicked => { Osk.pad = false; root.clicked(); } }
+    TouchArea { mouse-cursor: pointer; clicked => { Osk.pad = false; Prefs.tabs = false; root.clicked(); } }
     body := VerticalLayout {
         padding-left: 18 * Look.px;
         padding-right: 18 * Look.px;
@@ -266,7 +343,7 @@ export component Value inherits HorizontalLayout {
         vertical-alignment: center;
         horizontal-alignment: Look.rtl ? left : right;
         overflow: elide;
-        max-width: 360 * Look.tpx;
+        max-width: 480 * Look.tpx;
     }
     if root.kind == "choice" : Icon {
         name: "chevr";

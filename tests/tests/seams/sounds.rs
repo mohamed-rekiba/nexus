@@ -40,6 +40,8 @@ fn the_player_can_turn_sounds_off_on_the_settings_screen() {
     let mut host = tv();
     assert!(host.ui.sound("move").is_some());
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
+    host.settle();
+    host.settings_tab("Launcher");
 
     host.first("sounds").invoke_accessible_default_action();
     host.pump();

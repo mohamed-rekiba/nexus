@@ -5,7 +5,7 @@ import { Tokens } from "../tokens.slint";
 import { Look } from "../components/look.slint";
 import { Icon } from "../components/icon.slint";
 import { BackButton } from "../components/widgets.slint";
-import { Prefs, Header, Row, Value, Editor, FieldRow, FolderRow } from "../components/settings-rows.slint";
+import { Prefs, Tab, Row, Value, Editor, FieldRow, FolderRow } from "../components/settings-rows.slint";
 import { Sys } from "../components/system-panel.slint";
 import { Setup } from "../components/install-os.slint";
 
@@ -30,9 +30,14 @@ export component SettingsScreen inherits Rectangle {
     animate background { duration: Tokens.motion-normal; }
     TouchArea { enabled: root.open; clicked => { Commands.back(); } }
 
+    // Back to the top when the tab changes.
+    property <int> tab: Prefs.section;
+    changed tab => { flick.viewport-y = 0; }
+
     sheet-panel := Rectangle {
-        // Sized by the text scale, so on a small window the panel keeps its text readable.
-        property <length> panel-width: Math.min(root.width, 760 * Look.tpx);
+        // Sized by the text scale, so on a small window the panel keeps its text readable. The
+        // tabs need the room.
+        property <length> panel-width: Math.min(root.width, 1000 * Look.tpx);
         x: (Look.rtl ? 0 : root.width - self.panel-width)
             + (root.in-view ? 0 : (Look.rtl ? -1 : 1) * (self.panel-width + 48 * Look.px));
         opacity: root.in-view ? 1 : 0;
@@ -44,32 +49,46 @@ export component SettingsScreen inherits Rectangle {
         border-color: Look.line;
         TouchArea {}
 
-        flick := Flickable {
+        VerticalLayout {
+            padding-left: 56 * Look.px;
+            padding-right: 56 * Look.px;
+            padding-top: 64 * Look.px;
+            spacing: 0;
 
-            // Up and down only: nothing drags sideways.
-
-            viewport-width: self.width;
-            viewport-height: sheet.preferred-height;
-            animate viewport-y { duration: Tokens.motion-normal; easing: ease-out-quad; }
-
-            sheet := VerticalLayout {
-                width: parent.width;
-                padding-left: 56 * Look.px;
-                padding-right: 56 * Look.px;
-                padding-top: 64 * Look.px;
-                padding-bottom: 120 * Look.px;
-                spacing: 0;
-
-                HorizontalLayout {
-                    alignment: Look.rtl ? end : start;
-                    padding-bottom: 20 * Look.px;
-                    BackButton { pad: Vm.input-mode == "gamepad"; clicked => { Commands.back(); } }
+            // The title and the tabs stay; the rows of a tab scroll under them.
+            HorizontalLayout {
+                alignment: Look.rtl ? end : start;
+                padding-bottom: 20 * Look.px;
+                BackButton { pad: Vm.input-mode == "gamepad"; clicked => { Commands.back(); } }
+            }
+            Text { text: "Settings"; font-size: 44 * Look.px; font-weight: 600; color: Tokens.color-text; horizontal-alignment: Look.rtl ? right : left; }
+            Text { text: "Changes are saved automatically"; font-size: 18 * Look.tpx; color: Look.text3; horizontal-alignment: Look.rtl ? right : left; }
+            // In right-to-left the first tab is on the right.
+            HorizontalLayout {
+                padding-top: 28 * Look.px;
+                padding-bottom: 20 * Look.px;
+                spacing: 8 * Look.px;
+                alignment: Look.rtl ? end : start;
+                for i in Prefs.sections : Tab {
+                    property <int> at: Look.rtl ? Prefs.sections - 1 - i : i;
+                    section: self.at;
+                    text: self.at == 0 ? "Games" : self.at == 1 ? "Updates" : self.at == 2 ? "Launcher"
+                        : self.at == 3 ? "Downloads" : self.at == 4 ? "This PC" : "System";
                 }
-                Text { text: "Settings"; font-size: 44 * Look.px; font-weight: 600; color: Tokens.color-text; horizontal-alignment: Look.rtl ? right : left; }
-                Text { text: "Changes are saved automatically"; font-size: 18 * Look.tpx; color: Look.text3; horizontal-alignment: Look.rtl ? right : left; }
+            }
 
-                // ---------------------------------------------------------------- GAMES
-                Header { text: "GAMES"; }
+            flick := Flickable {
+                // Up and down only: nothing drags sideways.
+                viewport-width: self.width;
+                viewport-height: sheet.preferred-height;
+                animate viewport-y { duration: Tokens.motion-normal; easing: ease-out-quad; }
+
+                sheet := VerticalLayout {
+                    width: parent.width;
+                    padding-bottom: 80 * Look.px;
+                    spacing: 0;
+
+                if Prefs.section == 0 : VerticalLayout {
                 for folder[i] in Vm.folders : FolderRow {
                     folder: folder;
                     section: 0;
@@ -92,10 +111,10 @@ export component SettingsScreen inherits Rectangle {
                     changed seen => { if (self.focused && Prefs.pending == 0) { Commands.refresh-library(); } }
                     Value { text: Vm.home.loading ? "Scanning…" : ""; }
                 }
+                }
 
-                // ---------------------------------------------------------------- UPDATES
+                if Prefs.section == 1 : VerticalLayout {
                 // Each emulator's builds and settings are on its page, from Plugins.
-                Header { text: "UPDATES"; }
                 Row {
                     label: "Update automatically";
                     hint: "Checks every few hours · an update waits until you close your game";
@@ -143,9 +162,9 @@ export component SettingsScreen inherits Rectangle {
                         tone: update.state == "ready" || update.state == "installed" || update.state == "available" ? 3 : 0;
                     }
                 }
+                }
 
-                // ---------------------------------------------------------------- LAUNCHER
-                Header { text: "LAUNCHER"; }
+                if Prefs.section == 2 : VerticalLayout {
                 // The theme and its options are in Themes.
                 Row {
                     label: "Full screen";
@@ -280,10 +299,10 @@ export component SettingsScreen inherits Rectangle {
                     property <int> seen: Prefs.serial;
                     changed seen => { if (self.focused && Prefs.pending == 0) { Host.quit(); } }
                 }
+                }
 
-                // ---------------------------------------------------------------- DOWNLOADS
+                if Prefs.section == 3 : VerticalLayout {
                 // The catalogs' downloads: through the player's own VPN only, and sharing.
-                Header { text: "DOWNLOADS"; }
                 Row {
                     label: "Download only through a VPN";
                     hint: Vm.vpn.problem != "" ? Vm.vpn.problem
@@ -367,7 +386,7 @@ export component SettingsScreen inherits Rectangle {
                     accessible-role: button;
                     accessible-label: "vpn-import";
                     accessible-description: Vm.vpn.error;
-                    accessible-action-default => { Prefs.section = 3; Prefs.row = Prefs.import-row; self.open(); }
+                    accessible-action-default => { Prefs.tabs = false; Prefs.section = 3; Prefs.row = Prefs.import-row; self.open(); }
                     reveal(y, h) => { root.reveal(y, h); }
                     clicked => { Prefs.section = 3; Prefs.row = Prefs.import-row; self.open(); }
                     property <int> seen: Prefs.serial;
@@ -396,72 +415,87 @@ export component SettingsScreen inherits Rectangle {
                     }
                     Value { kind: "toggle"; on: Vm.seed-downloads; }
                 }
+                }
 
-                // ---------------------------------------------------------------- THIS PC
+                if Prefs.section == 4 : VerticalLayout {
                 // What this computer has, then how each emulator's games run on it. The rows
                 // only show; they take the focus so a pad can scroll to them.
-                Header { text: "THIS PC"; }
                 if !Vm.hardware.known : Row {
                     label: "Checking this PC…";
-                    focused: Prefs.is(4, 0);
+
                     first: true;
                     last: true;
-                    reveal(y, h) => { root.reveal(y, h); }
+
                 }
                 if Vm.hardware.known : Row {
                     label: "Processor";
-                    focused: Prefs.is(4, 0);
+
                     first: true;
                     accessible-role: text;
                     accessible-label: "pc-cpu";
                     accessible-value: Vm.hardware.cpu;
-                    reveal(y, h) => { root.reveal(y, h); }
-                    clicked => { Prefs.section = 4; Prefs.row = 0; }
+
                     Value { text: Vm.hardware.cpu != "" ? Vm.hardware.cpu : "—"; }
                 }
                 if Vm.hardware.known : Row {
                     label: "Memory";
-                    focused: Prefs.is(4, 1);
+
                     accessible-role: text;
                     accessible-label: "pc-memory";
                     accessible-value: Vm.hardware.memory;
-                    reveal(y, h) => { root.reveal(y, h); }
-                    clicked => { Prefs.section = 4; Prefs.row = 1; }
+
                     Value { text: Vm.hardware.memory != "" ? Vm.hardware.memory : "—"; }
                 }
                 for gpu[i] in Vm.hardware.graphics : Row {
                     label: i == 0 ? "Graphics" : "";
-                    focused: Prefs.is(4, 2 + i);
+
                     last: i == Vm.hardware.graphics.length - 1 && Vm.hardware.verdicts.length == 0;
                     accessible-role: text;
                     accessible-label: "pc-graphics";
                     accessible-value: gpu;
-                    reveal(y, h) => { root.reveal(y, h); }
-                    clicked => { Prefs.section = 4; Prefs.row = 2 + i; }
+
                     Value { text: gpu; }
                 }
                 for run[i] in Vm.hardware.verdicts : Row {
                     label: run.emulator + " games";
                     hint: run.why;
-                    focused: Prefs.is(4, 2 + Vm.hardware.graphics.length + i);
+
                     last: i == Vm.hardware.verdicts.length - 1;
                     accessible-role: text;
                     accessible-label: "pc-verdict";
                     accessible-value: run.emulator + ": " + run.headline + (run.why != "" ? " · " + run.why : "");
                     // The last row brings the About card under it into view too.
-                    reveal(y, h) => { root.reveal(y, h + (self.last ? 180 * Look.px : 0)); }
-                    clicked => { Prefs.section = 4; Prefs.row = 2 + Vm.hardware.graphics.length + i; }
+
                     Value {
                         text: run.headline;
                         tone: run.level == "good" ? 1 : run.level == "no" ? 2 : run.level == "slow" ? 4 : 0;
                     }
                 }
 
-                // ---------------------------------------------------------------- SYSTEM
+                Rectangle { height: 24 * Look.px; }
+                Rectangle {
+                    border-radius: 14 * Look.px;
+                    background: #ffffff0b;
+                    HorizontalLayout {
+                        padding: 18 * Look.px;
+                        spacing: 16 * Look.px;
+                        Image { source: Assets.logo; width: 60 * Look.px; height: 60 * Look.px; image-fit: contain; }
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 4 * Look.px;
+                            horizontal-stretch: 1;
+                            Text { text: "Nexus"; font-size: 19 * Look.tpx; font-weight: 600; color: Tokens.color-text; }
+                            Text { text: Vm.plugins.length + (Vm.plugins.length == 1 ? " plugin · " : " plugins · ") + Vm.emulators.length + (Vm.emulators.length == 1 ? " emulator" : " emulators"); font-size: 15 * Look.tpx; color: Look.text3; }
+                            Text { text: "Games from every emulator, in one place"; font-size: 15 * Look.tpx; color: Look.text3; }
+                        }
+                    }
+                }
+                }
+
+                if Prefs.section == 5 && Vm.system.whole-screen : VerticalLayout {
                 // When Nexus is the whole screen: the machine's settings. Internet, Sound and
                 // Bluetooth open their panels, as their icons in the top bar do.
-                if Vm.system.whole-screen : Header { text: "SYSTEM"; }
-                if Vm.system.whole-screen : Row {
+                Row {
                     label: "Internet";
                     hint: Vm.system.network-available ? "" : Vm.system.network-reason;
                     focused: Prefs.is(5, 0);
@@ -481,7 +515,7 @@ export component SettingsScreen inherits Rectangle {
                             : Vm.system.connection == "wired" ? "Cable" : "Not connected";
                     }
                 }
-                if Vm.system.whole-screen : Row {
+                Row {
                     label: "Sound";
                     hint: Vm.system.audio-available ? "" : Vm.system.audio-reason;
                     focused: Prefs.is(5, 1);
@@ -495,7 +529,7 @@ export component SettingsScreen inherits Rectangle {
                     changed seen => { if (self.focused && Prefs.pending == 0) { Sys.show(1); } }
                     Value { kind: "choice"; focused: parent.focused; text: Vm.system.muted ? "Muted" : Vm.system.volume + "%"; }
                 }
-                if Vm.system.whole-screen : Row {
+                Row {
                     label: "Bluetooth";
                     hint: Vm.system.bluetooth-available ? "Controllers and headsets" : Vm.system.bluetooth-reason;
                     focused: Prefs.is(5, 2);
@@ -514,7 +548,7 @@ export component SettingsScreen inherits Rectangle {
                         text: !Vm.system.bluetooth-on ? "Off" : Vm.system.connected-devices + " connected";
                     }
                 }
-                if Vm.system.whole-screen && Prefs.os-row >= 0 : Row {
+                if Prefs.os-row >= 0 : Row {
                     label: "Nexus OS updates";
                     hint: Vm.system.os-update-text;
                     focused: Prefs.is(5, Prefs.os-row);
@@ -534,7 +568,7 @@ export component SettingsScreen inherits Rectangle {
                         tone: Vm.system.os-update == "staged" ? 3 : 0;
                     }
                 }
-                if Vm.system.whole-screen && Prefs.install-row >= 0 : Row {
+                if Prefs.install-row >= 0 : Row {
                     label: "Install Nexus OS on this PC";
                     hint: "From this USB stick";
                     focused: Prefs.is(5, Prefs.install-row);
@@ -550,10 +584,10 @@ export component SettingsScreen inherits Rectangle {
                 }
                 // Log out, Restart and Shut down ask again: the first press arms them, the second
                 // acts.
-                if Vm.system.whole-screen && Prefs.logout-row >= 0 : Row {
+                if Prefs.logout-row >= 0 : Row {
                     property <bool> armed;
                     label: "Log out";
-                    hint: "Back to the login screen";
+                    hint: "Press twice · back to the login screen";
                     focused: Prefs.is(5, Prefs.logout-row);
                     last: Prefs.system-rows == Prefs.logout-row + 1;
                     danger: self.armed;
@@ -576,6 +610,7 @@ export component SettingsScreen inherits Rectangle {
                 for power[i] in Vm.system.whole-screen && Vm.system.power-available ? ["Restart", "Shut down"] : [] : Row {
                     property <bool> armed;
                     label: power;
+                    hint: "Press twice";
                     focused: Prefs.is(5, Prefs.restart-row + i);
                     last: i == 1;
                     danger: self.armed;
@@ -595,29 +630,13 @@ export component SettingsScreen inherits Rectangle {
                     }
                     Value { text: parent.armed ? "Press again to " + (i == 0 ? "restart" : "shut down") : ""; tone: 2; }
                 }
+                }
 
-                // ---------------------------------------------------------------- ABOUT
-                Header { text: "ABOUT"; }
-                Rectangle {
-                    border-radius: 14 * Look.px;
-                    background: #ffffff0b;
-                    HorizontalLayout {
-                        padding: 18 * Look.px;
-                        spacing: 16 * Look.px;
-                        Image { source: Assets.logo; width: 60 * Look.px; height: 60 * Look.px; image-fit: contain; }
-                        VerticalLayout {
-                            alignment: center;
-                            spacing: 4 * Look.px;
-                            horizontal-stretch: 1;
-                            Text { text: "Nexus"; font-size: 19 * Look.tpx; font-weight: 600; color: Tokens.color-text; }
-                            Text { text: Vm.plugins.length + (Vm.plugins.length == 1 ? " plugin · " : " plugins · ") + Vm.emulators.length + (Vm.emulators.length == 1 ? " emulator" : " emulators"); font-size: 15 * Look.tpx; color: Look.text3; }
-                            Text { text: "Games from every emulator, in one place"; font-size: 15 * Look.tpx; color: Look.text3; }
-                        }
-                    }
                 }
             }
         }
     }
+
 
     // Scrolls the sheet so a row at `y` (absolute) and `h` high is in view.
     function reveal(y: length, h: length) {
