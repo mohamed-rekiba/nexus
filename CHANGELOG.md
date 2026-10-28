@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.8.0](https://github.com/mohamed-rekiba/nexus/compare/v0.7.0...v0.8.0) (2026-10-28)
+
+
+### Features
+
+* a plugin's page has tabs for its settings and folders ([fbf5f68](https://github.com/mohamed-rekiba/nexus/commit/fbf5f68e791b1fb7ccfe9dddcf2bfeef92f96075))
+* a theme option can be hidden, and the default theme hides Layout direction for now ([1531a11](https://github.com/mohamed-rekiba/nexus/commit/1531a11e38d59fe5d449c67cf4fa9c78343bdf58))
+* action buttons and path lines in the Settings rows, and one frame for every sheet ([22415ad](https://github.com/mohamed-rekiba/nexus/commit/22415add9bf15384749c346984360c25af5dcbf3))
+* Launcher is the first tab, each tab's row places are in settings-layout.slint, and the Settings screenshot is from the app ([23ef1d6](https://github.com/mohamed-rekiba/nexus/commit/23ef1d6d014c92f496566570f6f44cd513f23a49))
+* Settings has a Power tab, one component for each tab, and This PC scrolls with the keys ([b9e107f](https://github.com/mohamed-rekiba/nexus/commit/b9e107fb57ff540627d35a6372914c80845fab43))
+* Settings shows one section at a time under tabs ([0c6f96b](https://github.com/mohamed-rekiba/nexus/commit/0c6f96b1e5edd5ed7242d330c752e4185b706f4d))
+* THIS PC rows are inert, and the screenshots show Settings at 80% and 140% ([d0e1a59](https://github.com/mohamed-rekiba/nexus/commit/d0e1a594e96479789f949def913fd7b88e2cd4df))
+
+
+### Bug Fixes
+
+* the tabs stay silent at their ends, and a tab that goes away leaves the last one ([e2ae500](https://github.com/mohamed-rekiba/nexus/commit/e2ae5001de3329175c5b1671c15d8e608e08e3f6))
+
 ## [0.7.0](https://github.com/mohamed-rekiba/nexus/compare/v0.6.2...v0.7.0) (2026-10-27)
 
 
