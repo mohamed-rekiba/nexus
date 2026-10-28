@@ -255,6 +255,8 @@ export component Header inherits Text {
 export component Row inherits Rectangle {
     in property <string> label;
     in property <string> hint;
+    // A line under the label for a long value, such as a path: it has the row's width.
+    in property <string> detail;
     // 0 dim, 1 good, 2 bad
     in property <int> hint-kind;
     in property <bool> focused;
@@ -320,6 +322,13 @@ export component Row inherits Rectangle {
                 horizontal-alignment: Look.rtl ? right : left;
             }
         }
+        if root.detail != "" : Text {
+            text: root.detail;
+            font-size: 17 * Look.tpx;
+            color: Tokens.color-text-muted;
+            overflow: elide;
+            horizontal-alignment: Look.rtl ? right : left;
+        }
         if root.hint != "" : Text {
             text: root.hint;
             font-size: 15 * Look.tpx;
@@ -333,7 +342,7 @@ export component Row inherits Rectangle {
 // The value at the end of a row: plain, a switch, or ‹ a choice ›.
 export component Value inherits HorizontalLayout {
     in property <string> text;
-    // text | toggle | choice | action
+    // text | toggle | choice | action (a button: "Check now", "Install")
     in property <string> kind: "text";
     in property <bool> on;
     in property <bool> focused;
@@ -349,7 +358,27 @@ export component Value inherits HorizontalLayout {
         height: 22 * Look.px;
         y: (parent.height - self.height) / 2;
     }
-    if root.kind != "toggle" : Text {
+    if root.kind == "action" && root.text != "" : Rectangle {
+        background: #ffffff1a;
+        border-radius: 10 * Look.px;
+        VerticalLayout {
+            padding-left: 16 * Look.px;
+            padding-right: 16 * Look.px;
+            padding-top: 6 * Look.px;
+            padding-bottom: 6 * Look.px;
+            alignment: center;
+            Text {
+                text: root.text;
+                font-size: 17 * Look.tpx;
+                font-weight: 600;
+                font-family: Tokens.font-family;
+                color: root.tone == 3 ? Tokens.color-info : Tokens.color-text;
+                vertical-alignment: center;
+                horizontal-alignment: center;
+            }
+        }
+    }
+    if root.kind != "toggle" && root.kind != "action" : Text {
         text: root.text;
         font-size: (root.kind == "choice" ? 19 : 17) * Look.tpx;
         font-weight: root.tone == 3 ? 600 : 400;
@@ -472,7 +501,7 @@ export component FolderRow inherits Row {
     accessible-label: "folder:" + root.folder.name;
     accessible-value: root.folder.text;
     clicked => { Prefs.section = root.section; Prefs.row = root.index; Prefs.act(0); }
-    if !root.typing : Value { text: root.folder.shown != "" ? root.folder.shown : "—"; }
+    detail: root.typing ? "" : root.folder.shown != "" ? root.folder.shown : "—";
     if root.typing : Editor { horizontal-stretch: 2; title: root.label; done(text) => { Commands.set-folder(root.folder.name, text); } }
     property <int> seen: Prefs.serial;
     changed seen => {

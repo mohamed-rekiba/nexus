@@ -1,31 +1,14 @@
 import { Vm, Host } from "../types.slint";
 import { Commands } from "../commands.slint";
+import { SheetFrame } from "../components/sheet-frame.slint";
 import { Tokens } from "../tokens.slint";
 import { Look } from "../components/look.slint";
 import { BackButton } from "../components/widgets.slint";
 import { Prefs, Tab } from "../components/settings-rows.slint";
 import { GamesSection, UpdatesSection, LauncherSection, DownloadsSection, PcSection, SystemSection, PowerSection } from "../components/settings-sections.slint";
 
-export component SettingsScreen inherits Rectangle {
-    // False while it slides out.
-    in property <bool> open: true;
-    property <bool> entered;
-    // Slint animates a change from a value it already worked out: read the start (off the
-    // edge) now, then slide in after the first frame.
-    property <length> start-x;
-    property <float> start-opacity;
-    property <brush> start-wash;
-    init => {
-        root.start-x = sheet-panel.x;
-        root.start-opacity = sheet-panel.opacity;
-        root.start-wash = root.background;
-    }
-    Timer { interval: 16ms; running: !root.entered; triggered => { root.entered = true; } }
-    // Slid in: from the edge when it opens, back out when it closes.
-    property <bool> in-view: root.entered && root.open;
-    background: root.in-view ? #03050ccc : #03050c00;
-    animate background { duration: Tokens.motion-normal; }
-    TouchArea { enabled: root.open; clicked => { Commands.back(); } }
+export component SettingsScreen inherits SheetFrame {
+    panel-width: 1000 * Look.tpx;
 
     // Back to the top when the tab changes.
     property <int> tab: Prefs.section;
@@ -39,71 +22,57 @@ export component SettingsScreen inherits Rectangle {
     property <int> count: Prefs.sections;
     changed count => { if (Prefs.section >= self.count) { Prefs.show(self.count - 1); } }
 
-    sheet-panel := Rectangle {
-        // Sized by the text scale, so on a small window the panel keeps its text readable. The
-        // tabs need the room.
-        property <length> panel-width: Math.min(root.width, 1000 * Look.tpx);
-        x: (Look.rtl ? 0 : root.width - self.panel-width)
-            + (root.in-view ? 0 : (Look.rtl ? -1 : 1) * (self.panel-width + 48 * Look.px));
-        opacity: root.in-view ? 1 : 0;
-        animate x { duration: Tokens.motion-slow; easing: ease-out-expo; }
-        animate opacity { duration: Look.timed(Tokens.motion-normal - 40ms); easing: ease-out-quad; }
-        width: self.panel-width;
-        background: @linear-gradient(180deg, #111a33 0%, #0a1024 100%);
-        border-width: 1px;
-        border-color: Look.line;
-        TouchArea {}
 
-        VerticalLayout {
-            padding-left: 56 * Look.px;
-            padding-right: 56 * Look.px;
-            padding-top: 64 * Look.px;
-            spacing: 0;
+    VerticalLayout {
+        padding-left: 56 * Look.px;
+        padding-right: 56 * Look.px;
+        padding-top: 64 * Look.px;
+        spacing: 0;
 
-            // The title and the tabs stay; the rows of a tab scroll under them.
-            HorizontalLayout {
-                alignment: Look.rtl ? end : start;
-                padding-bottom: 20 * Look.px;
-                BackButton { pad: Vm.input-mode == "gamepad"; clicked => { Commands.back(); } }
+        // The title and the tabs stay; the rows of a tab scroll under them.
+        HorizontalLayout {
+            alignment: Look.rtl ? end : start;
+            padding-bottom: 20 * Look.px;
+            BackButton { pad: Vm.input-mode == "gamepad"; clicked => { Commands.back(); } }
+        }
+        Text { text: "Settings"; font-size: 44 * Look.px; font-weight: 600; color: Tokens.color-text; horizontal-alignment: Look.rtl ? right : left; }
+        Text { text: "Changes are saved automatically"; font-size: 18 * Look.tpx; color: Look.text3; horizontal-alignment: Look.rtl ? right : left; }
+        // In right-to-left the first tab is on the right.
+        HorizontalLayout {
+            padding-top: 28 * Look.px;
+            padding-bottom: 20 * Look.px;
+            spacing: 8 * Look.px;
+            alignment: Look.rtl ? end : start;
+            for i in Prefs.sections : Tab {
+                property <int> at: Look.rtl ? Prefs.sections - 1 - i : i;
+                section: self.at;
+                text: self.at == 0 ? "Games" : self.at == 1 ? "Updates" : self.at == 2 ? "Launcher"
+                    : self.at == 3 ? "Downloads" : self.at == 4 ? "This PC" : self.at == 5 && Vm.system.whole-screen ? "System" : "Power";
             }
-            Text { text: "Settings"; font-size: 44 * Look.px; font-weight: 600; color: Tokens.color-text; horizontal-alignment: Look.rtl ? right : left; }
-            Text { text: "Changes are saved automatically"; font-size: 18 * Look.tpx; color: Look.text3; horizontal-alignment: Look.rtl ? right : left; }
-            // In right-to-left the first tab is on the right.
-            HorizontalLayout {
-                padding-top: 28 * Look.px;
-                padding-bottom: 20 * Look.px;
-                spacing: 8 * Look.px;
-                alignment: Look.rtl ? end : start;
-                for i in Prefs.sections : Tab {
-                    property <int> at: Look.rtl ? Prefs.sections - 1 - i : i;
-                    section: self.at;
-                    text: self.at == 0 ? "Games" : self.at == 1 ? "Updates" : self.at == 2 ? "Launcher"
-                        : self.at == 3 ? "Downloads" : self.at == 4 ? "This PC" : self.at == 5 && Vm.system.whole-screen ? "System" : "Power";
-                }
-            }
+        }
 
-            flick := Flickable {
-                // Up and down only: nothing drags sideways.
-                viewport-width: self.width;
-                viewport-height: sheet.preferred-height;
-                animate viewport-y { duration: Tokens.motion-normal; easing: ease-out-quad; }
+        flick := Flickable {
+            // Up and down only: nothing drags sideways.
+            viewport-width: self.width;
+            viewport-height: sheet.preferred-height;
+            animate viewport-y { duration: Tokens.motion-normal; easing: ease-out-quad; }
 
-                sheet := VerticalLayout {
-                    width: parent.width;
-                    padding-bottom: 80 * Look.px;
-                    spacing: 0;
+            sheet := VerticalLayout {
+                width: parent.width;
+                padding-bottom: 80 * Look.px;
+                spacing: 0;
 
-                if Prefs.section == 0 : GamesSection { reveal(y, h) => { root.reveal(y, h); } }
-                if Prefs.section == 1 : UpdatesSection { reveal(y, h) => { root.reveal(y, h); } }
-                if Prefs.section == 2 : LauncherSection { reveal(y, h) => { root.reveal(y, h); } }
-                if Prefs.section == 3 : DownloadsSection { reveal(y, h) => { root.reveal(y, h); } }
-                if Prefs.section == 4 : PcSection { reveal(y, h) => { root.reveal(y, h); } }
-                if Prefs.section == 5 && Vm.system.whole-screen : SystemSection { reveal(y, h) => { root.reveal(y, h); } }
-                if Prefs.section == Prefs.power-section : PowerSection { reveal(y, h) => { root.reveal(y, h); } }
-                }
+            if Prefs.section == 0 : GamesSection { reveal(y, h) => { root.reveal(y, h); } }
+            if Prefs.section == 1 : UpdatesSection { reveal(y, h) => { root.reveal(y, h); } }
+            if Prefs.section == 2 : LauncherSection { reveal(y, h) => { root.reveal(y, h); } }
+            if Prefs.section == 3 : DownloadsSection { reveal(y, h) => { root.reveal(y, h); } }
+            if Prefs.section == 4 : PcSection { reveal(y, h) => { root.reveal(y, h); } }
+            if Prefs.section == 5 && Vm.system.whole-screen : SystemSection { reveal(y, h) => { root.reveal(y, h); } }
+            if Prefs.section == Prefs.power-section : PowerSection { reveal(y, h) => { root.reveal(y, h); } }
             }
         }
     }
+
 
     // Scrolls the sheet so a row at `y` (absolute) and `h` high is in view.
     function reveal(y: length, h: length) {
