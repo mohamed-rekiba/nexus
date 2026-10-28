@@ -123,12 +123,15 @@ export global Prefs {
             root.row = 0;
         }
     }
-    function tab-step(delta: int) {
+    // Whether it moved: at the first and last tab it stays.
+    function tab-step(delta: int) -> bool {
         let next = root.section + delta;
         if (next >= 0 && next < root.sections) {
             root.section = next;
             root.row = 0;
+            return true;
         }
+        false
     }
     function step(delta: int) {
         if (root.tabbed) {
@@ -170,8 +173,8 @@ export global Prefs {
             return false;
         }
         if (root.tabs) {
-            if (text == Key.LeftArrow) { root.tab-step(Look.rtl ? 1 : -1); Host.play-sound("move"); return true; }
-            if (text == Key.RightArrow) { root.tab-step(Look.rtl ? -1 : 1); Host.play-sound("move"); return true; }
+            if (text == Key.LeftArrow) { if (root.tab-step(Look.rtl ? 1 : -1)) { Host.play-sound("move"); } return true; }
+            if (text == Key.RightArrow) { if (root.tab-step(Look.rtl ? -1 : 1)) { Host.play-sound("move"); } return true; }
             if (text == Key.DownArrow || text == Key.Return || text == " ") { root.enter(); Host.play-sound("move"); return true; }
             // Nothing is above the tabs.
             return text == Key.UpArrow;

@@ -33,6 +33,9 @@ export component SettingsScreen inherits Rectangle {
     // Back to the top when the tab changes.
     property <int> tab: Prefs.section;
     changed tab => { flick.viewport-y = 0; }
+    // The System tab goes when Nexus is no longer the whole screen: back to the last tab.
+    property <int> count: Prefs.sections;
+    changed count => { if (Prefs.section >= self.count) { Prefs.show(self.count - 1); } }
 
     sheet-panel := Rectangle {
         // Sized by the text scale, so on a small window the panel keeps its text readable. The
