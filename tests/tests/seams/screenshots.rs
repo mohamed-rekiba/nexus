@@ -820,6 +820,24 @@ fn shoot_system(window: &MinimalSoftwareWindow, out: &Path) {
         follow(&mut host);
     }
     shoot(window, &out.join("default-system-install.png"));
+    drop(host);
+
+    // Settings' System and Power tabs in a desktop's Nexus session, where Log out shows.
+    let place = Place { whole_screen: true, nexus_os: false, stick: false };
+    let plugin = system.plugin();
+    let mut host = composed_on_current_platform(|h| h.place(place).plugin(plugin));
+    host.ui.start().unwrap();
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
+    host.dispatch(Command::System(SystemCommand::Refresh));
+    host.dispatch(Command::Navigate(Route::Settings));
+    follow(&mut host);
+    key(&mut host, slint::platform::Key::UpArrow);
+    for tab in ["games", "updates", "launcher", "downloads", "this-pc", "system", "power"].iter().skip(1) {
+        key(&mut host, slint::platform::Key::RightArrow);
+        if matches!(*tab, "system" | "power") {
+            shoot(window, &out.join(format!("default-settings-tab-{tab}-session.png")));
+        }
+    }
 }
 
 /// The launch splash of an emulator that lists its keyboard keys, left to right and right to
