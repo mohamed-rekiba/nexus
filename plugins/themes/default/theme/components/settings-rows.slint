@@ -9,8 +9,9 @@ import { Osk, TextField } from "keyboard.slint";
 // The rows of a settings sheet (Settings, and a plugin's page), and where the keys are in it.
 // A sheet is a list of sections; each has rows. Settings shows one section at a time, under a
 // row of tabs: Up from a section's first row goes to the tabs, Left and Right choose the tab,
-// Down or Return goes into its rows. A plugin's page is one scroll, and the keys cross its
-// sections. In Settings:
+// Down or Return goes into its rows. A plugin's page has tabs too when it has settings or
+// folders (`tab-count`): General holds its sections 0 and 1, and the keys cross those two. A
+// theme's page and a game's own settings are one scroll. In Settings:
 //   0   GAMES: the game folders, then "Rescan game folders"
 //   1   UPDATES: "Update automatically", "Nexus updates"
 //   2   LAUNCHER: full screen, size of everything, back to the launcher, interface sounds,
@@ -56,8 +57,21 @@ export global Prefs {
     // A game's own settings: one section, its fields.
     out property <bool> game-page: Vm.screen == "game-settings";
     out property <bool> theme-page: root.page && Vm.plugin-page.plugin.kind == "theme";
-    // Settings: one section at a time, under its tabs.
-    out property <bool> tabbed: Vm.screen == "settings";
+    // The page's tabs. Settings: one for each section. A plugin's page: "General" (Turned on, the
+    // build, the actions and the blocks), one for each settings panel, then its folders, when it
+    // is on and has more than one. A page with no tabs is one scroll.
+    out property <int> tab-count: root.page && !root.theme-page && root.on
+        ? 1 + root.panels + (Vm.plugin-page.folders.length > 0 ? 1 : 0)
+        : root.sections;
+    out property <bool> tabbed: Vm.screen == "settings" || (root.page && !root.theme-page && root.tab-count > 1);
+    // The tab a section's rows are in, and a tab's first section.
+    public pure function tab-of(section: int) -> int {
+        root.page ? (section <= 1 ? 0 : section - 1) : section
+    }
+    public pure function first-section(tab: int) -> int {
+        root.page ? (tab == 0 ? 0 : tab + 1) : tab
+    }
+    out property <int> current-tab: root.tabbed ? root.tab-of(root.section) : 0;
     out property <bool> on: Vm.plugin-page.plugin.enabled;
     out property <int> panels: root.page && !root.theme-page && root.on ? Vm.plugin-page.settings.length : 0;
     out property <int> sections: root.game-page ? 1
@@ -117,9 +131,9 @@ export global Prefs {
         !root.tabs && root.section == section && root.row == row
     }
 
-    // Settings: choose a tab. Its rows start at the first.
-    public function show(section: int) {
-        root.section = section;
+    // Choose a tab. Its rows start at the first.
+    public function show(tab: int) {
+        root.section = root.first-section(tab);
         root.row = 0;
         root.editing = false;
     }
@@ -132,9 +146,9 @@ export global Prefs {
     }
     // Whether it moved: at the first and last tab it stays.
     function tab-step(delta: int) -> bool {
-        let next = root.section + delta;
-        if (next >= 0 && next < root.sections) {
-            root.section = next;
+        let next = root.tab-of(root.section) + delta;
+        if (next >= 0 && next < root.tab-count) {
+            root.section = root.first-section(next);
             root.row = 0;
             return true;
         }
@@ -142,10 +156,19 @@ export global Prefs {
     }
     function step(delta: int) {
         if (root.tabbed) {
+            // Rows move on through the sections of the tab, never into another tab.
+            let next = root.section + delta;
+            let more = next >= 0 && next < root.sections && root.tab-of(next) == root.tab-of(root.section) && root.rows(next) > 0;
             if (delta > 0 && root.row + 1 < root.rows(root.section)) {
                 root.row += 1;
+            } else if (delta > 0 && more) {
+                root.section = next;
+                root.row = 0;
             } else if (delta < 0 && root.row > 0) {
                 root.row -= 1;
+            } else if (delta < 0 && more) {
+                root.section = next;
+                root.row = root.rows(next) - 1;
             } else if (delta < 0) {
                 root.tabs = true;
             }
@@ -211,8 +234,9 @@ export global Prefs {
 // keys are on the tabs.
 export component Tab inherits Rectangle {
     in property <string> text;
+    // The tab's number.
     in property <int> section;
-    property <bool> current: Prefs.section == root.section;
+    property <bool> current: Prefs.current-tab == root.section;
     property <bool> focused: Prefs.tabs && root.current;
     background: root.current ? #ffffff1f : (touch.has-hover ? #ffffff0f : #ffffff00);
     border-radius: 12 * Look.px;

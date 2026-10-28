@@ -5,7 +5,7 @@ import { Tokens } from "../tokens.slint";
 import { Look } from "../components/look.slint";
 import { BackButton } from "../components/widgets.slint";
 import { SlotSections } from "../components/slot-sections.slint";
-import { Prefs, Header, Row, Value, FieldRow, FolderRow } from "../components/settings-rows.slint";
+import { Prefs, Tab, Header, Row, Value, FieldRow, FolderRow } from "../components/settings-rows.slint";
 import { PluginList } from "../components/plugin-list.slint";
 
 // One plugin's sheet, opened from Emulators or Themes and drawn at the edge beside the list.
@@ -21,6 +21,9 @@ export component PluginScreen inherits SheetFrame {
     wash: false;
     property <bool> on: Vm.plugin-page.plugin.enabled;
     property <bool> theme: Vm.plugin-page.plugin.kind == "theme";
+    // Back to the top when the tab changes.
+    property <int> tab: Prefs.current-tab;
+    changed tab => { flick.viewport-y = 0; }
     property <bool> installed: Vm.plugin-page.emulator.installed.length > 0;
 
 
@@ -55,6 +58,20 @@ export component PluginScreen inherits SheetFrame {
                 font-size: 18 * Look.tpx;
                 color: Look.text3;
                 horizontal-alignment: Look.rtl ? right : left;
+            }
+
+            // The tabs of a page with settings or folders; a page without is one scroll.
+            if Prefs.tabbed : HorizontalLayout {
+                padding-top: 28 * Look.px;
+                padding-bottom: 8 * Look.px;
+                spacing: 8 * Look.px;
+                alignment: Look.rtl ? end : start;
+                for i in Prefs.tab-count : Tab {
+                    property <int> at: Look.rtl ? Prefs.tab-count - 1 - i : i;
+                    section: self.at;
+                    text: self.at == 0 ? "General"
+                        : self.at <= Prefs.panels ? (Prefs.panels == 1 ? "Settings" : Vm.plugin-page.settings[self.at - 1].slot.label) : "Folders";
+                }
             }
 
             // ---------------------------------------------------------------- THEME
@@ -98,6 +115,7 @@ export component PluginScreen inherits SheetFrame {
                 horizontal-alignment: Look.rtl ? right : left;
             }
 
+            if Prefs.current-tab == 0 : VerticalLayout {
             // ---------------------------------------------------------------- PLUGIN
             if !root.theme : Header { text: "PLUGIN"; }
             if !root.theme && Vm.plugin-page.plugin.note != "" : Text {
@@ -198,12 +216,14 @@ export component PluginScreen inherits SheetFrame {
                 Value { text: "›"; }
             }
 
+            }
+
             // ---------------------------------------------------------------- SETTINGS
             for panel[p] in (root.on ? Vm.plugin-page.settings : []) : VerticalLayout {
                 accessible-role: text;
                 accessible-label: panel.slot.label;
-                Header { text: "SETTINGS"; }
-                for field[i] in panel.fields : FieldRow {
+                if Prefs.current-tab == p + 1 : Header { text: "SETTINGS"; }
+                for field[i] in (Prefs.current-tab == p + 1 ? panel.fields : []) : FieldRow {
                     field: field;
                     section: p + 2;
                     index: i;
@@ -215,8 +235,8 @@ export component PluginScreen inherits SheetFrame {
             }
 
             // ---------------------------------------------------------------- FOLDERS
-            if root.on && Vm.plugin-page.folders.length > 0 : Header { text: "FOLDERS"; }
-            for folder[i] in (root.on ? Vm.plugin-page.folders : []) : FolderRow {
+            if root.on && Vm.plugin-page.folders.length > 0 && Prefs.current-tab == Prefs.panels + 1 : Header { text: "FOLDERS"; }
+            for folder[i] in (root.on && Prefs.current-tab == Prefs.panels + 1 ? Vm.plugin-page.folders : []) : FolderRow {
                 folder: folder;
                 section: Prefs.panels + 2;
                 index: i;
@@ -226,7 +246,7 @@ export component PluginScreen inherits SheetFrame {
             }
 
             // ---------------------------------------------------------------- BLOCKS
-            if root.on && !root.theme : VerticalLayout {
+            if root.on && !root.theme && Prefs.current-tab == 0 : VerticalLayout {
                 padding-top: 48 * Look.px;
                 spacing: 22 * Look.px;
                 // Tests find the blocks by this label.
