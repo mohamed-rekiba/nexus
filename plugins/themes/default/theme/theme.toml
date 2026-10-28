@@ -82,8 +82,10 @@ motion-normal = 260
 motion-slow = 420
 layout-direction = "ltr"
 
+# Hidden for now: the right-to-left layout is not finished, so Settings does not offer it.
 [theme.options.direction]
 label = "Layout direction"
+hidden = true
 type = "choice"
 default = "ltr"
 

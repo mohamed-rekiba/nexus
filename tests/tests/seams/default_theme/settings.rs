@@ -60,7 +60,7 @@ fn the_direction_option_moves_the_top_bar_to_the_right() {
 }
 
 #[test]
-fn the_options_are_the_layout_direction_and_animations() {
+fn the_layout_direction_option_exists_but_the_theme_page_does_not_offer_it() {
     let host = default_theme();
     let options = &host.ui.resolved().unwrap().merged.option_values;
     let mut names: Vec<&str> = options.keys().map(String::as_str).collect();
@@ -72,6 +72,12 @@ fn the_options_are_the_layout_direction_and_animations() {
     };
     assert_eq!(choice("direction"), "ltr");
     assert_eq!(choice("motion"), "on");
+    // The theme's page lists Animations only.
+    let mut host = host;
+    host.dispatch(Command::Navigate(nexus_core::Route::Plugin("default".parse().unwrap())));
+    host.settle();
+    assert_eq!(host.count("option:motion"), 1);
+    assert_eq!(host.count("option:direction"), 0, "Layout direction is hidden for now");
 }
 
 #[test]
