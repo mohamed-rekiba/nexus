@@ -6,6 +6,7 @@ members = [
     "crates/nexus-core",
     "crates/nexus-ui-host",
     "crates/nexus-testkit",
+    "plugins/shared/emulator-kit",
 ]
 # Vendored, and kept as it came: not formatted or linted with the workspace.
 exclude = ["third_party/oozextract"]
