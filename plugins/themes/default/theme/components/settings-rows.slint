@@ -5,6 +5,7 @@ import { Look } from "look.slint";
 import { Icon } from "icon.slint";
 import { Switch } from "widgets.slint";
 import { Osk, TextField } from "keyboard.slint";
+import { LauncherRows, DownloadsRows, SystemRows, PowerRows } from "settings-layout.slint";
 
 // The rows of a settings sheet (Settings, and a plugin's page), and where the keys are in it.
 // A sheet is a list of sections; each has rows. Settings shows one section at a time, under a
@@ -12,10 +13,10 @@ import { Osk, TextField } from "keyboard.slint";
 // Down or Return goes into its rows. A plugin's page has tabs too when it has settings or
 // folders (`tab-count`): General holds its sections 0 and 1, and the keys cross those two. A
 // theme's page and a game's own settings are one scroll. In Settings:
-//   0   GAMES: the game folders, then "Rescan game folders"
-//   1   UPDATES: "Update automatically", "Nexus updates"
-//   2   LAUNCHER: full screen, size of everything, back to the launcher, interface sounds,
+//   0   LAUNCHER: full screen, size of everything, back to the launcher, interface sounds,
 //       start at login (in an installed build), the screen (with two monitors or more)
+//   1   GAMES: the game folders, then "Rescan game folders"
+//   2   UPDATES: "Update automatically", "Nexus updates"
 //   3   DOWNLOADS: "Download only through a VPN", one row per VPN (one that says none when
 //       there is none), "Add a VPN" where the system can, then "Keep sharing finished
 //       downloads". Where the system can't bind downloads to a VPN: the switch and sharing.
@@ -87,24 +88,6 @@ export global Prefs {
     out property <int> actions: !root.page || root.theme-page || !root.on
         || (Vm.plugin-page.has-emulator && root.builds == 0) ? 0 : Vm.plugin-page.actions.length;
 
-    // LAUNCHER's rows after the fixed four: the screen moves down when "Start at login" shows.
-    out property <int> screen-row: Vm.can-start-at-login ? 5 : 4;
-    out property <int> launcher-rows: root.screen-row + (Vm.monitors.length > 1 ? 1 : 0);
-    // DOWNLOADS' rows after the VPN switch: the VPNs, "Add a VPN", then sharing.
-    out property <int> vpn-rows: Vm.vpn.problem != "" ? 0 : Math.max(1, Vm.vpn.vpns.length);
-    out property <bool> vpn-import: Vm.vpn.problem == "" && Vm.vpn.can-import;
-    out property <int> import-row: 1 + root.vpn-rows;
-    out property <int> share-row: root.import-row + (root.vpn-import ? 1 : 0);
-    // SYSTEM's rows after Internet, Sound and Bluetooth (-1 for one that doesn't show).
-    out property <int> os-row: Vm.system.os-update != "" ? 3 : -1;
-    out property <int> install-row: Vm.system.stick ? 3 + (root.os-row >= 0 ? 1 : 0) : -1;
-    out property <int> system-rows: 3 + (root.os-row >= 0 ? 1 : 0) + (root.install-row >= 0 ? 1 : 0);
-    // POWER's rows after "Quit Nexus" ("Restart Nexus" when Nexus is the whole screen: the session
-    // starts it again). Log out only on a desktop: on Nexus OS the session would just start again.
-    out property <int> logout-row: Vm.system.whole-screen && !Vm.system.nexus-os ? 1 : -1;
-    out property <int> restart-row: 1 + (root.logout-row >= 0 ? 1 : 0);
-    out property <int> power-rows: Vm.system.whole-screen && Vm.system.power-available ? root.restart-row + 2 : root.restart-row;
-
     public pure function rows(section: int) -> int {
         root.game-page ? (Vm.detail.settings.length > 0 ? Vm.detail.settings[0].fields.length : 0)
             : root.theme-page ? (section == 0 ? 1 : Vm.theme-options.length)
@@ -112,13 +95,13 @@ export global Prefs {
                 : section == 1 ? root.builds + root.actions
                 : section <= root.panels + 1 ? Vm.plugin-page.settings[section - 2].fields.length
                 : Vm.plugin-page.folders.length)
-            : section == 0 ? Vm.folders.length + 1
-            : section == 1 ? 2
-            : section == 2 ? root.launcher-rows
-            : section == 3 ? root.share-row + 1
+            : section == 0 ? LauncherRows.count
+            : section == 1 ? Vm.folders.length + 1
+            : section == 2 ? 2
+            : section == 3 ? DownloadsRows.count
             : section == 4 ? 0
-            : section == root.power-section ? root.power-rows
-            : root.system-rows
+            : section == root.power-section ? PowerRows.count
+            : SystemRows.count
     }
     // Back to the first row, as a sheet opens.
     public function reset() {

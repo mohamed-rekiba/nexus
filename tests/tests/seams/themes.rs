@@ -210,6 +210,7 @@ fn the_default_settings_screen_maps_a_folder_through_the_host() {
     let games = tempfile::tempdir().unwrap();
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
     host.settle();
+    host.settings_tab("Games");
 
     assert_eq!(host.count("folder:games"), 1, "a row for the folder");
     // As the theme sends the folder's text.
@@ -283,6 +284,8 @@ fn the_default_settings_screen_edits_a_folder_with_the_keys() {
     host.ui.start().unwrap();
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
     host.settle();
+    host.settings_tab("Games");
+    host.navigate(slint::platform::Key::DownArrow);
     let press = |host: &Composed, text: slint::SharedString| {
         use slint_interpreter::ComponentHandle;
         host.instance().window().dispatch_event(WindowEvent::KeyPressed { text: text.clone() });

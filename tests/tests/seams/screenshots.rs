@@ -146,7 +146,7 @@ fn shoot_default(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path
             // Up to the tabs, then along them, as a pad does.
             let (along, tabs) = (
                 if prefix.contains("rtl") { Key::LeftArrow } else { Key::RightArrow },
-                ["updates", "launcher", "downloads", "this-pc", "power"],
+                ["games", "updates", "downloads", "this-pc", "power"],
             );
             key(host, Key::UpArrow);
             for tab in tabs {
@@ -419,11 +419,8 @@ fn shoot_sizes(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path) 
     use slint::platform::Key;
     host.dispatch(Command::Navigate(Route::Settings));
     host.load_images();
-    // Up to the tabs, two to the right to LAUNCHER, then down to Full screen.
+    // Up to the tabs, then down into LAUNCHER, the first tab, to Full screen.
     key(host, Key::UpArrow);
-    for _ in 0..2 {
-        key(host, Key::RightArrow);
-    }
     key(host, Key::DownArrow);
     shoot(window, &out.join("default-settings-launcher.png"));
     // Down past the size, Back to the launcher and Interface sounds to Start at login.
@@ -832,9 +829,9 @@ fn shoot_system(window: &MinimalSoftwareWindow, out: &Path) {
     host.dispatch(Command::Navigate(Route::Settings));
     follow(&mut host);
     key(&mut host, slint::platform::Key::UpArrow);
-    for tab in ["games", "updates", "launcher", "downloads", "this-pc", "system", "power"].iter().skip(1) {
+    for tab in ["games", "updates", "downloads", "this-pc", "system", "power"] {
         key(&mut host, slint::platform::Key::RightArrow);
-        if matches!(*tab, "system" | "power") {
+        if matches!(tab, "system" | "power") {
             shoot(window, &out.join(format!("default-settings-tab-{tab}-session.png")));
         }
     }

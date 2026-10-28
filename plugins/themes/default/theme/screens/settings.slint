@@ -46,7 +46,7 @@ export component SettingsScreen inherits SheetFrame {
             for i in Prefs.tab-count : Tab {
                 property <int> at: Look.rtl ? Prefs.tab-count - 1 - i : i;
                 section: self.at;
-                text: self.at == 0 ? "Games" : self.at == 1 ? "Updates" : self.at == 2 ? "Launcher"
+                text: self.at == 0 ? "Launcher" : self.at == 1 ? "Games" : self.at == 2 ? "Updates"
                     : self.at == 3 ? "Downloads" : self.at == 4 ? "This PC" : self.at == 5 && Vm.system.whole-screen ? "System" : "Power";
             }
         }
@@ -62,9 +62,9 @@ export component SettingsScreen inherits SheetFrame {
                 padding-bottom: 80 * Look.px;
                 spacing: 0;
 
-            if Prefs.section == 0 : GamesSection { reveal(y, h) => { root.reveal(y, h); } }
-            if Prefs.section == 1 : UpdatesSection { reveal(y, h) => { root.reveal(y, h); } }
-            if Prefs.section == 2 : LauncherSection { reveal(y, h) => { root.reveal(y, h); } }
+            if Prefs.section == 1 : GamesSection { reveal(y, h) => { root.reveal(y, h); } }
+            if Prefs.section == 2 : UpdatesSection { reveal(y, h) => { root.reveal(y, h); } }
+            if Prefs.section == 0 : LauncherSection { reveal(y, h) => { root.reveal(y, h); } }
             if Prefs.section == 3 : DownloadsSection { reveal(y, h) => { root.reveal(y, h); } }
             if Prefs.section == 4 : PcSection { reveal(y, h) => { root.reveal(y, h); } }
             if Prefs.section == 5 && Vm.system.whole-screen : SystemSection { reveal(y, h) => { root.reveal(y, h); } }
