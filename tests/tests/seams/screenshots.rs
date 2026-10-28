@@ -232,9 +232,9 @@ fn shoot_default(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path
     host.dispatch(Command::Navigate(Route::Plugin("emu-kyty".parse().unwrap())));
     host.load_images();
     shoot(window, &out.join(format!("{prefix}-plugin.png")));
-    for _ in 0..9 {
-        key(host, Key::DownArrow);
-    }
+    // Up to the tabs and along to its settings.
+    key(host, Key::UpArrow);
+    key(host, if prefix.contains("rtl") { Key::LeftArrow } else { Key::RightArrow });
     shoot(window, &out.join(format!("{prefix}-plugin-settings.png")));
     // The Game Catalog's page: its settings, the catalog sources and the catalog refresh.
     host.dispatch(Command::Navigate(Route::Plugin("release-catalog".parse().unwrap())));

@@ -104,11 +104,30 @@ fn a_plugin_s_page_opens_from_plugins_and_runs_its_actions() {
 #[test]
 fn a_plugin_s_page_changes_its_settings() {
     let mut host = kyty_page();
+    host.settings_tab("Settings");
     assert_eq!(host.first("setting:own_build").accessible_value().as_deref(), Some("false"));
     host.first("setting:own_build").invoke_accessible_default_action();
     host.pump();
     host.settle();
     assert_eq!(host.first("setting:own_build").accessible_value().as_deref(), Some("true"));
+}
+
+#[test]
+fn the_keys_move_along_a_plugin_page_s_tabs_and_into_the_rows_of_one() {
+    use slint::platform::Key;
+    let mut host = kyty_page();
+    assert_eq!(host.count("setting:own_build"), 0, "General shows no settings");
+    // Up from the first row to the tabs, Right to Settings, Down into its first row.
+    host.navigate(Key::UpArrow);
+    host.navigate(Key::RightArrow);
+    assert_eq!(host.count("plugin-enabled"), 0, "and Settings shows no General rows");
+    host.navigate(Key::DownArrow);
+    host.navigate(Key::Return);
+    assert_eq!(host.first("setting:own_build").accessible_value().as_deref(), Some("true"), "Enter changes the row");
+    // Left goes back to General, which is where Turned on is.
+    host.navigate(Key::UpArrow);
+    host.navigate(Key::LeftArrow);
+    assert_eq!(host.count("plugin-enabled"), 1);
 }
 
 #[test]

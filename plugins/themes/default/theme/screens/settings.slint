@@ -11,7 +11,7 @@ export component SettingsScreen inherits SheetFrame {
     panel-width: 1000 * Look.tpx;
 
     // Back to the top when the tab changes.
-    property <int> tab: Prefs.section;
+    property <int> tab: Prefs.current-tab;
     changed tab => { flick.viewport-y = 0; }
     // A tab with no rows to focus scrolls a step at a time.
     property <int> nudged: Prefs.scroll-serial;
@@ -19,8 +19,8 @@ export component SettingsScreen inherits SheetFrame {
         flick.viewport-y = Math.min(0, Math.max(flick.height - flick.viewport-height, flick.viewport-y - Prefs.scroll-by * 160 * Look.px));
     }
     // The System tab goes when Nexus is no longer the whole screen: back to the last tab.
-    property <int> count: Prefs.sections;
-    changed count => { if (Prefs.section >= self.count) { Prefs.show(self.count - 1); } }
+    property <int> count: Prefs.tab-count;
+    changed count => { if (Prefs.current-tab >= self.count) { Prefs.show(self.count - 1); } }
 
 
     VerticalLayout {
@@ -43,8 +43,8 @@ export component SettingsScreen inherits SheetFrame {
             padding-bottom: 20 * Look.px;
             spacing: 8 * Look.px;
             alignment: Look.rtl ? end : start;
-            for i in Prefs.sections : Tab {
-                property <int> at: Look.rtl ? Prefs.sections - 1 - i : i;
+            for i in Prefs.tab-count : Tab {
+                property <int> at: Look.rtl ? Prefs.tab-count - 1 - i : i;
                 section: self.at;
                 text: self.at == 0 ? "Games" : self.at == 1 ? "Updates" : self.at == 2 ? "Launcher"
                     : self.at == 3 ? "Downloads" : self.at == 4 ? "This PC" : self.at == 5 && Vm.system.whole-screen ? "System" : "Power";

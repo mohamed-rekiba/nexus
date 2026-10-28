@@ -311,7 +311,8 @@ The command-line options are listed by `nexus --help` and in [development.md](de
 
 Emulators lists each plugin by the console it plays: PS5 (KytyPS5), PS4 (shadPS4) and PC, and the
 services: Game Catalog and PlayStation Store (official art and details for PS4 and PS5 games). Each
-page has "Turned on", the build, its actions, settings, folders and keys.
+page has "Turned on", the build, its actions, settings, folders and keys. With settings or folders it
+has tabs, as Settings does: General, Settings and Folders.
 
 - **Official builds.** Nexus downloads them from GitHub, runs each new one once with `--help` to
   check it, and keeps the build before it. The "Release repo" and "Pre-releases" settings change
