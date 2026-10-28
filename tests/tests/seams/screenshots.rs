@@ -437,6 +437,11 @@ fn shoot_sizes(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path) 
         host.dispatch(Command::Navigate(Route::Home));
         host.load_images();
         shoot(window, &out.join(format!("default-home-{name}.png")));
+        // Settings at the size: the tabs and the longest rows.
+        host.dispatch(Command::Navigate(Route::Settings));
+        host.load_images();
+        shoot(window, &out.join(format!("default-settings-{name}.png")));
+        key(host, Key::Escape);
     }
     host.dispatch(Command::Pref(Pref::Scale, 1.0.into()));
 }

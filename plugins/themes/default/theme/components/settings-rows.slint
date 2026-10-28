@@ -243,6 +243,8 @@ export component Row inherits Rectangle {
     in property <bool> first;
     in property <bool> last;
     in property <bool> danger;
+    // A row that only shows: a click does nothing and the pointer stays an arrow.
+    in property <bool> inert;
     // The row is in the sheet's viewport: the sheet scrolls to it when it gets the focus.
     callback reveal(length, length);
     callback clicked();
@@ -267,7 +269,7 @@ export component Row inherits Rectangle {
         background: Look.line;
     }
     // A click is not the controller: a text box it opens doesn't open the on-screen keyboard.
-    TouchArea { mouse-cursor: pointer; clicked => { Osk.pad = false; Prefs.tabs = false; root.clicked(); } }
+    TouchArea { enabled: !root.inert; mouse-cursor: root.inert ? MouseCursor.default : MouseCursor.pointer; clicked => { Osk.pad = false; Prefs.tabs = false; root.clicked(); } }
     body := VerticalLayout {
         padding-left: 18 * Look.px;
         padding-right: 18 * Look.px;
