@@ -81,7 +81,9 @@ fn the_keys_move_through_settings_tabs_and_change_the_focused_row() {
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
     host.settle();
 
-    // Enter on the first row, "Rescan game folders", scans the folders again.
+    // The Games tab, down to its first row: Enter on "Rescan game folders" scans the folders again.
+    host.settings_tab("Games");
+    host.navigate(Key::DownArrow);
     let text: slint::SharedString = Key::Return.into();
     host.instance().window().dispatch_event(slint::platform::WindowEvent::KeyPressed { text });
     let asked = host
@@ -92,11 +94,11 @@ fn the_keys_move_through_settings_tabs_and_change_the_focused_row() {
     assert!(asked, "Enter on Rescan asks the core to scan");
     host.pump();
 
-    // Up from the first row goes to the tabs, Right three times to DOWNLOADS, Down into its
+    // Up from the first row goes to the tabs, Right twice to DOWNLOADS, Down into its
     // rows: "Download only through a VPN", then down past the row that says there is no VPN and
     // "Add a VPN" to "Keep sharing finished downloads".
     host.navigate(Key::UpArrow);
-    for _ in 0..3 {
+    for _ in 0..2 {
         host.navigate(Key::RightArrow);
     }
     assert_eq!(host.count("seed-downloads"), 1, "the tab shows its rows");
@@ -114,12 +116,15 @@ fn the_keys_move_through_settings_tabs_and_change_the_focused_row() {
     host.navigate(Key::DownArrow);
     assert_eq!(host.count("seed-downloads"), 1);
 
-    // Back up to the tabs and Left to LAUNCHER: Down to "Interface sounds" and "Start at login".
+    // Back up to the tabs and Left to LAUNCHER, the first tab: Down to "Interface sounds" and
+    // "Start at login".
     for _ in 0..4 {
         host.navigate(Key::UpArrow);
     }
     host.navigate(Key::UpArrow);
-    host.navigate(Key::LeftArrow);
+    for _ in 0..3 {
+        host.navigate(Key::LeftArrow);
+    }
     host.navigate(Key::DownArrow);
     for _ in 0..3 {
         host.navigate(Key::DownArrow);
@@ -133,7 +138,7 @@ fn the_keys_move_through_settings_tabs_and_change_the_focused_row() {
     for _ in 0..5 {
         host.navigate(Key::UpArrow);
     }
-    for _ in 0..3 {
+    for _ in 0..5 {
         host.navigate(Key::RightArrow);
     }
     host.navigate(Key::DownArrow);
@@ -272,6 +277,7 @@ fn settings_have_no_emulator_settings() {
     host.ui.start().unwrap();
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
     host.settle();
+    host.settings_tab("Games");
     assert_eq!(host.count("setting:fullscreen"), 0, "they are on the plugin's page");
     assert_eq!(host.count("folder:kyty-build"), 0, "and so are its own folders");
     assert_eq!(host.count("folder:games"), 1, "the game folders stay");
