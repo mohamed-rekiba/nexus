@@ -630,6 +630,9 @@ layout-direction = "ltr"
 layout-direction = "rtl"
 ```
 
+An option with `hidden = true` stays out of the Settings list. It still works when something else
+sets it. The default theme hides "Layout direction" for now.
+
 Until the player sets an option, the theme's own `[theme.tokens]` stay in force. The option's
 `default` only names the value `Options` shows. Once the player sets an option, `merge_chain`
 applies it on top of the tokens.

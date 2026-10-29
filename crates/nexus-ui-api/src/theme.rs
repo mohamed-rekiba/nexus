@@ -79,6 +79,9 @@ pub struct ThemeAssets {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ThemeOption {
     pub label: String,
+    /// Kept out of the Settings list. The option still works, for a build that sets it itself.
+    #[serde(default)]
+    pub hidden: bool,
     #[serde(flatten)]
     pub kind: OptionKind,
 }
@@ -357,6 +360,7 @@ pub fn merge_options(chain: &[&ThemeManifest]) -> BTreeMap<String, ThemeOption> 
 pub fn options_schema(options: &BTreeMap<String, ThemeOption>) -> serde_json::Value {
     let properties: serde_json::Map<String, serde_json::Value> = options
         .iter()
+        .filter(|(_, option)| !option.hidden)
         .map(|(name, option)| {
             let schema = match &option.kind {
                 OptionKind::Color { default, .. } => {
@@ -437,6 +441,21 @@ mod tests {
 
         let schema = options_schema(&picked.options);
         assert_eq!(schema["properties"]["density"]["enum"], serde_json::json!(["compact", "cozy"]));
+    }
+
+    #[test]
+    fn a_hidden_option_is_not_in_the_settings_list_and_still_sets_its_tokens() {
+        let base = manifest(
+            "base",
+            &format!(
+                "{}\n[theme.options.density]\nlabel = \"Density\"\ntype = \"choice\"\ndefault = \"cozy\"\nhidden = true\n\
+                 [theme.options.density.choices.cozy]\nspace-m = 16\n[theme.options.density.choices.compact]\nspace-m = 8\n",
+                all_tokens()
+            ),
+        );
+        let picked = merge_chain(&[&base], &serde_json::json!({"density": "compact"})).unwrap();
+        assert_eq!(picked.tokens["space-m"], TokenValue::Length(8.0), "it still works");
+        assert!(options_schema(&picked.options)["properties"].as_object().unwrap().is_empty());
     }
 
     #[test]

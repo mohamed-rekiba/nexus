@@ -1,0 +1,39 @@
+import { Vm } from "../types.slint";
+
+// Where the rows of each of Settings' tabs are. A row that isn't always there (Start at login,
+// Screen, a VPN, the System rows) moves the rows after it, so each tab counts its rows here, with
+// the same conditions as the rows in settings-sections.slint. `Prefs.rows` reads the counts, to
+// know where the keys stop. A row's number is a row's place in its tab; -1 is a row that doesn't
+// show.
+
+// LAUNCHER: the first four rows are fixed. The screen moves down when "Start at login" shows.
+export global LauncherRows {
+    out property <int> screen: Vm.can-start-at-login ? 5 : 4;
+    out property <int> count: root.screen + (Vm.monitors.length > 1 ? 1 : 0);
+}
+
+// DOWNLOADS: the VPN switch, then the VPNs (or the row that says there is none), "Add a VPN"
+// where the system can, then sharing.
+export global DownloadsRows {
+    out property <int> vpns: Vm.vpn.problem != "" ? 0 : Math.max(1, Vm.vpn.vpns.length);
+    out property <bool> import: Vm.vpn.problem == "" && Vm.vpn.can-import;
+    out property <int> import-row: 1 + root.vpns;
+    out property <int> share-row: root.import-row + (root.import ? 1 : 0);
+    out property <int> count: root.share-row + 1;
+}
+
+// SYSTEM: Internet, Sound and Bluetooth, then the Nexus OS update and the install, when they show.
+export global SystemRows {
+    out property <int> os: Vm.system.os-update != "" ? 3 : -1;
+    out property <int> install: Vm.system.stick ? 3 + (root.os >= 0 ? 1 : 0) : -1;
+    out property <int> count: 3 + (root.os >= 0 ? 1 : 0) + (root.install >= 0 ? 1 : 0);
+}
+
+// POWER: "Quit Nexus" ("Restart Nexus" when Nexus is the whole screen: the session starts it
+// again), then Log out only on a desktop (on Nexus OS the session would just start again), then
+// Restart and Shut down.
+export global PowerRows {
+    out property <int> logout: Vm.system.whole-screen && !Vm.system.nexus-os ? 1 : -1;
+    out property <int> restart: 1 + (root.logout >= 0 ? 1 : 0);
+    out property <int> count: Vm.system.whole-screen && Vm.system.power-available ? root.restart + 2 : root.restart;
+}

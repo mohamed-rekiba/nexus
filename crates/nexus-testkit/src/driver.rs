@@ -147,6 +147,11 @@ pub trait ThemeDriver {
         panic!("no {label} after {most} rows down");
     }
 
+    /// Settings: chooses the tab called `name`, as a click does. The focus stays on the tabs.
+    fn settings_tab(&mut self, name: &str) {
+        self.press_first(&format!("settings-tab:{name}"));
+    }
+
     /// Characters typed on a physical keyboard, one key each, and nothing more.
     fn send_text(&self, text: &str) {
         for ch in text.chars() {

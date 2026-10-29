@@ -83,7 +83,7 @@ Stop work as for any game, and Steam keeps running.
    game, set its Launch Options in Steam to `gamemoderun %command%`.
 4. Set nothing for your Steam libraries: Nexus reads Steam's folder and every library Steam lists
    (`steamapps/libraryfolders.vdf`), on any drive. A library you add in Steam shows at the next
-   rescan (Settings, GAMES, **Rescan game folders**). **Steam libraries** in Settings is only for
+   rescan (Settings, Games, **Rescan game folders**). **Steam libraries** in Settings is only for
    reading other folders. Once set, it replaces Steam's list.
 
 A Steam game's Game Hub has Steam's store's words, genres, developer, release date, screenshots and
@@ -153,7 +153,7 @@ The log goes to the terminal. `RUST_LOG` filters it (`info` by default).
 
 ## Game folders and packages folders
 
-Settings, GAMES, has two lists of folders. Separate several folders with `;`, and start a path with
+Settings, Games, has two lists of folders. Separate several folders with `;`, and start a path with
 `~` for your home folder.
 
 - **Game folders**, `~/Games` until you change it: games of any console, in any layout up to three
@@ -176,7 +176,7 @@ which reads its files first. Press Download there to start it.
 - A download goes on while Nexus is open, also minimized, and stops when it closes. Unfinished
   downloads come back paused at the next start. Nexus remembers which pieces it checked, so a start
   does not read every finished download again.
-- With Settings, DOWNLOADS, "Keep sharing finished downloads" on (the default), a finished download
+- With Settings, Downloads, "Keep sharing finished downloads" on (the default), a finished download
   goes on sharing, at most 128 KB/s. **Stop sharing** stops it until the next start.
 - **Cancel** never deletes the downloaded files. **Remove** asks first: "Remove from Downloads" keeps
   the folder, and "Delete files too" also deletes the download's own folder with its unpacked
@@ -231,7 +231,7 @@ A PC game you already have, unpacked and ready to run, needs no install:
    game; keep the game's own files as they are inside it.
 2. Optional: put its cover in the game's folder, named `cover.jpg`, `cover.png` or `cover.webp` (a
    portrait picture, as on a box).
-3. In Settings, GAMES, choose **Rescan game folders**, or restart Nexus. The game shows in the
+3. In Settings, Games, choose **Rescan game folders**, or restart Nexus. The game shows in the
    Library, named after its folder.
 
 ```text
@@ -284,22 +284,26 @@ come to the front on each system is in [reference/desktop.md](reference/desktop.
 
 ## Settings
 
-Changes save as you make them.
+Changes save as you make them. Settings has one tab for each section: Launcher, Games, Updates,
+Downloads and This PC, then System when Nexus is the whole screen, and Power. With a controller or keyboard,
+press Up from the first row to reach the tabs, Left and Right to choose one, and Down to go into its
+rows. With a mouse, click a tab.
 
 | Section | Setting | What it does |
 |---|---|---|
-| UPDATES | Update automatically | Checks for emulator updates every few hours. An update waits until you close your game |
-| UPDATES | Nexus updates | Check now, Download, then Restart to put the new version in. Only for an installed package, AppImage or app |
 | LAUNCHER | Full screen | On by default. `--windowed` opens a normal window for one run |
 | LAUNCHER | Size of everything | Text, art and space from 80% to 140%. `NEXUS_SCALE=<0.8 to 1.4>` sets it for one run |
 | LAUNCHER | Back to the launcher | When a game closes, Nexus comes to the front |
 | LAUNCHER | Interface sounds | The theme's sounds for moves, selects, back, starts and errors |
 | LAUNCHER | Start at login | Only in an installed build |
 | LAUNCHER | Screen | With two monitors or more: the one Nexus fills |
+| UPDATES | Update automatically | Checks for emulator updates every few hours. An update waits until you close your game |
+| UPDATES | Nexus updates | Check now, Download, then Restart to put the new version in. Only for an installed package, AppImage or app |
 | DOWNLOADS | Download only through a VPN | Binds the catalog downloads to your VPN, and pauses them while it is down |
 | DOWNLOADS | Your VPN, Add a VPN | On Linux, WireGuard and OpenVPN interfaces are found by themselves. With NetworkManager you connect, disconnect and add one from a `.conf` or `.ovpn` file. On macOS, pick the network your VPN app made |
 | DOWNLOADS | Keep sharing finished downloads | Other players download from you, at most 128 KB/s |
 | THIS PC | | Your processor, memory and graphics, and whether each emulator's games should run well |
+| POWER | Quit Nexus | Closes Nexus. As the whole screen it says Restart Nexus, and the session starts it again. Log out, Restart and Shut down show there too, where the system allows them, and ask you to press twice |
 
 The command-line options are listed by `nexus --help` and in [development.md](development.md).
 
@@ -307,7 +311,8 @@ The command-line options are listed by `nexus --help` and in [development.md](de
 
 Emulators lists each plugin by the console it plays: PS5 (KytyPS5), PS4 (shadPS4) and PC, and the
 services: Game Catalog and PlayStation Store (official art and details for PS4 and PS5 games). Each
-page has "Turned on", the build, its actions, settings, folders and keys.
+page has "Turned on", the build, its actions, settings, folders and keys. With settings or folders it
+has tabs, as Settings does: General, Settings and Folders.
 
 - **Official builds.** Nexus downloads them from GitHub, runs each new one once with `--help` to
   check it, and keeps the build before it. The "Release repo" and "Pre-releases" settings change
@@ -328,6 +333,5 @@ page has "Turned on", the build, its actions, settings, folders and keys.
 Themes lists the built-in theme, `default`, and the themes in `<data-dir>/extensions` (one folder
 each) and in `extensions/` next to the program. Open one and choose "Use this theme". Switching the
 theme keeps the screen you are on, your selection, the downloads and a running game. The default
-theme's options are "Layout direction" (right to left) and "Animations" (off makes the transitions
-cuts). Third-party plugins are themes only: they are data and run no code. To write a theme, see
+theme's option is "Animations" (off makes the transitions cuts). Third-party plugins are themes only: they are data and run no code. To write a theme, see
 [themes.md](themes.md).

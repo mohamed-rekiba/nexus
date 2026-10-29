@@ -302,9 +302,12 @@ fn a_settings_text_box_opened_with_the_controller_types_on_the_keyboard_too() {
     host.ui.start().unwrap();
     host.resize(1600.0, 900.0);
     host.settle();
-    // L1 from Home: Settings, on the game folders' row; Cross opens it for typing.
+    // L1 from Home: Settings, on its first tab. The Games tab, down to the game folders' row;
+    // Cross opens it for typing.
     host.pad(PadButton::LeftShoulder);
     assert_eq!(host.core().view().screen, nexus_ui_api::ScreenId::Settings);
+    host.settings_tab("Games");
+    host.navigate(slint::platform::Key::DownArrow);
     assert_eq!(host.count("folder:games"), 1);
     host.pad(PadButton::South);
     assert_eq!(host.count("osk"), 1, "the text box opened the keyboard");

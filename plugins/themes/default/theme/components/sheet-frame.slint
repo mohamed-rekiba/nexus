@@ -1,0 +1,53 @@
+import { Commands } from "../commands.slint";
+import { Tokens } from "../tokens.slint";
+import { Look } from "look.slint";
+
+// The frame of a side sheet: the wash over the screen behind it, and the panel that slides in
+// from the edge (the far side in right-to-left). A click on the wash goes back. Settings, a
+// plugin's page and a game's own settings are sheets; each puts its rows in the panel.
+export component SheetFrame inherits Rectangle {
+    // False while it slides out.
+    in property <bool> open: true;
+    // The panel's width, at most the window's.
+    in property <length> panel-width: 760 * Look.tpx;
+    // The Plugins sheet beside which a plugin's page opens keeps the wash and a shadow.
+    in property <bool> shadow;
+    // False where the screen behind draws the wash and closes the sheet on a click outside.
+    in property <bool> wash: true;
+    in property <color> panel-top: #111a33;
+    in property <color> panel-bottom: #0a1024;
+    property <bool> entered;
+    // Slint animates a change from a value it already worked out: read the start (off the
+    // edge) now, then slide in after the first frame.
+    property <length> start-x;
+    property <float> start-opacity;
+    property <brush> start-wash;
+    init => {
+        root.start-x = panel.x;
+        root.start-opacity = panel.opacity;
+        root.start-wash = root.background;
+    }
+    Timer { interval: 16ms; running: !root.entered; triggered => { root.entered = true; } }
+    // Slid in: from the edge when it opens, back out when it closes.
+    property <bool> in-view: root.entered && root.open;
+    background: root.wash && root.in-view ? #03050ccc : #03050c00;
+    animate background { duration: Tokens.motion-normal; }
+    TouchArea { enabled: root.open && root.wash; clicked => { Commands.back(); } }
+
+    panel := Rectangle {
+        property <length> width-now: Math.min(root.width, root.panel-width);
+        x: (Look.rtl ? 0 : root.width - self.width-now)
+            + (root.in-view ? 0 : (Look.rtl ? -1 : 1) * (self.width-now + 48 * Look.px));
+        opacity: root.in-view ? 1 : 0;
+        animate x { duration: Tokens.motion-slow; easing: ease-out-expo; }
+        animate opacity { duration: Look.timed(Tokens.motion-normal - 40ms); easing: ease-out-quad; }
+        width: self.width-now;
+        background: @linear-gradient(180deg, root.panel-top 0%, root.panel-bottom 100%);
+        drop-shadow-blur: root.shadow ? 40 * Look.px : 0;
+        drop-shadow-color: #00000099;
+        border-width: 1px;
+        border-color: Look.line;
+        TouchArea {}
+        @children
+    }
+}

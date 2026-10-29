@@ -139,9 +139,23 @@ fn shoot_default(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path
         (Route::Themes, "themes"),
         (Route::Settings, "settings"),
     ] {
-        host.dispatch(Command::Navigate(route));
+        host.dispatch(Command::Navigate(route.clone()));
         host.load_images();
         shoot(window, &out.join(format!("{prefix}-{name}.png")));
+        if route == Route::Settings {
+            // Up to the tabs, then along them, as a pad does.
+            let (along, tabs) = (
+                if prefix.contains("rtl") { Key::LeftArrow } else { Key::RightArrow },
+                ["games", "updates", "downloads", "this-pc", "power"],
+            );
+            key(host, Key::UpArrow);
+            for tab in tabs {
+                key(host, along);
+                host.load_images();
+                shoot(window, &out.join(format!("{prefix}-settings-tab-{tab}.png")));
+            }
+            key(host, Key::Escape);
+        }
     }
     // A game the bundled catalog offers, when it offers any: its Game Hub with its releases.
     host.dispatch(Command::Navigate(Route::Catalog));
@@ -218,9 +232,9 @@ fn shoot_default(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path
     host.dispatch(Command::Navigate(Route::Plugin("emu-kyty".parse().unwrap())));
     host.load_images();
     shoot(window, &out.join(format!("{prefix}-plugin.png")));
-    for _ in 0..9 {
-        key(host, Key::DownArrow);
-    }
+    // Up to the tabs and along to its settings.
+    key(host, Key::UpArrow);
+    key(host, if prefix.contains("rtl") { Key::LeftArrow } else { Key::RightArrow });
     shoot(window, &out.join(format!("{prefix}-plugin-settings.png")));
     // The Game Catalog's page: its settings, the catalog sources and the catalog refresh.
     host.dispatch(Command::Navigate(Route::Plugin("release-catalog".parse().unwrap())));
@@ -328,10 +342,12 @@ fn shoot_vpn(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path, pr
     host.dispatch(Command::Vpn(nexus_core::VpnCmd::SetOnly(true)));
     host.dispatch(Command::Navigate(Route::Settings));
     host.load_images();
-    // Down past GAMES, UPDATES' two rows and LAUNCHER's six to the VPN switch.
-    for _ in 0..host.core().view().settings.folders.len() + 9 {
-        key(host, Key::DownArrow);
+    // Up to the tabs, three to the right to DOWNLOADS, then down to the VPN switch.
+    key(host, Key::UpArrow);
+    for _ in 0..3 {
+        key(host, Key::RightArrow);
     }
+    key(host, Key::DownArrow);
     shoot(window, &out.join(format!("{prefix}-settings-downloads.png")));
     // Down past the VPNs and "Add a VPN" to sharing.
     for _ in 0..4 {
@@ -403,13 +419,12 @@ fn shoot_sizes(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path) 
     use slint::platform::Key;
     host.dispatch(Command::Navigate(Route::Settings));
     host.load_images();
-    // Down past the game folders, Rescan, UPDATES' two rows and Full screen.
-    for _ in 0..host.core().view().settings.folders.len() + 4 {
-        key(host, Key::DownArrow);
-    }
+    // Up to the tabs, then down into LAUNCHER, the first tab, to Full screen.
+    key(host, Key::UpArrow);
+    key(host, Key::DownArrow);
     shoot(window, &out.join("default-settings-launcher.png"));
-    // Down past Back to the launcher and Interface sounds to Start at login.
-    for _ in 0..3 {
+    // Down past the size, Back to the launcher and Interface sounds to Start at login.
+    for _ in 0..4 {
         key(host, Key::DownArrow);
     }
     shoot(window, &out.join("default-settings-login.png"));
@@ -419,6 +434,11 @@ fn shoot_sizes(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path) 
         host.dispatch(Command::Navigate(Route::Home));
         host.load_images();
         shoot(window, &out.join(format!("default-home-{name}.png")));
+        // Settings at the size: the tabs and the longest rows.
+        host.dispatch(Command::Navigate(Route::Settings));
+        host.load_images();
+        shoot(window, &out.join(format!("default-settings-{name}.png")));
+        key(host, Key::Escape);
     }
     host.dispatch(Command::Pref(Pref::Scale, 1.0.into()));
 }
@@ -797,6 +817,24 @@ fn shoot_system(window: &MinimalSoftwareWindow, out: &Path) {
         follow(&mut host);
     }
     shoot(window, &out.join("default-system-install.png"));
+    drop(host);
+
+    // Settings' System and Power tabs in a desktop's Nexus session, where Log out shows.
+    let place = Place { whole_screen: true, nexus_os: false, stick: false };
+    let plugin = system.plugin();
+    let mut host = composed_on_current_platform(|h| h.place(place).plugin(plugin));
+    host.ui.start().unwrap();
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
+    host.dispatch(Command::System(SystemCommand::Refresh));
+    host.dispatch(Command::Navigate(Route::Settings));
+    follow(&mut host);
+    key(&mut host, slint::platform::Key::UpArrow);
+    for tab in ["games", "updates", "downloads", "this-pc", "system", "power"] {
+        key(&mut host, slint::platform::Key::RightArrow);
+        if matches!(tab, "system" | "power") {
+            shoot(window, &out.join(format!("default-settings-tab-{tab}-session.png")));
+        }
+    }
 }
 
 /// The launch splash of an emulator that lists its keyboard keys, left to right and right to
