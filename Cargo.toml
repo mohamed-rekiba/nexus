@@ -9,6 +9,7 @@ members = [
     "plugins/shared/emulator-kit",
     "plugins/emulators/kytyps5",
     "plugins/emulators/shadps4",
+    "plugins/emulators/lichii",
 ]
 # Vendored, and kept as it came: not formatted or linted with the workspace.
 exclude = ["third_party/oozextract"]

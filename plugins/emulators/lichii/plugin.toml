@@ -1,0 +1,75 @@
+id = "emu-lichii"
+kind = "emulator"
+# The plugin is shown by the console it plays.
+name = "Switch"
+# The program the plugin installs and runs. Sentences about the program name it.
+emulator = "Lichii"
+version = "0.1.0"
+host_api = "^0.2"
+# The official build this plugin installs: the Linux AppImage. Lichii's Windows and macOS
+# builds are not wired yet.
+platforms = ["linux"]
+# The console it plays: it gets that console's catalog (switch.json).
+console = "Switch"
+capabilities = ["catalog", "downloader", "installer", "configurator", "launcher", "slots", "game_installer", "backup"]
+# What the install sheet says this emulator installs from.
+install_note = "Installs a Switch game from its game files (.nsp, .nsz, .xci, .xcz, .nup), with its update and DLC files, into the Switch folder of your game folders. A solid .nsz, which Lichii can't play, becomes the .nsp it was made from. Lichii needs your own keys and firmware in ~/.local/share/eden; Nexus doesn't provide them."
+
+[permissions]
+# GitHub's API, release downloads and the CDN they redirect to.
+network = ["api.github.com", "github.com", "*.githubusercontent.com"]
+# The AppImage is unpacked once, so running it needs no FUSE.
+# The host runs the downloaded AppImage once, to unpack it.
+# Your own build: in the folder you map as lichii-build, or on your PATH.
+process = [
+    "builds/*/squashfs-root/AppRun",
+    # Games start in Lichii's command-line program, with Nexus's settings file (-c).
+    "builds/*/squashfs-root/usr/bin/eden-cli",
+    "builds/*/*.AppImage",
+    "folder:lichii-build",
+    "system:lichii",
+]
+
+# The player's game folders, shared with other emulators (the host's default is ~/Games).
+# Switch game files are found anywhere in them; installs go to Switch/ in the first one.
+[[permissions.filesystem]]
+folder = "games"
+write = true
+
+# Switch game files to install, in its Switch folder, and downloads of Switch releases. Read only.
+[[permissions.filesystem]]
+folder = "packages"
+
+# Lichii's settings, as its window saves them (qt-config.ini): games start with them, and with
+# players 1 to 4 on the controllers you have. Read only; a restore from Settings → Backup
+# writes it, as the host.
+[[permissions.filesystem]]
+folder = "eden-config"
+default = "~/.config/eden"
+title = "Lichii settings"
+after = "own_build"
+
+# Eden's data folder: keys, firmware, saves and mods, which every Lichii build shares. Read only:
+# Settings → Backup saves it, and a restore writes it, as the host.
+[[permissions.filesystem]]
+folder = "eden-data"
+default = "~/.local/share/eden"
+default_on = { macos = "~/Library/Application Support/eden", windows = "~/AppData/Roaming/eden" }
+title = "Lichii data"
+after = "own_build"
+
+# A Lichii you built or installed yourself. Read only.
+[[permissions.filesystem]]
+folder = "lichii-build"
+title = "Your own Lichii build"
+after = "own_build"
+
+# The system its games show under: what the Library and a card call it, and its color.
+# Its id is the catalog's console, upper case.
+[system]
+id = "SWITCH"
+name = "Nintendo Switch"
+# The system's pictures, in assets/ (made by scripts/make-system-art.sh).
+icon = "icon.png"
+cover = "cover.jpg"
+color = "#e60012"

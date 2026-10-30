@@ -1,0 +1,17 @@
+[package]
+name = "emu-lichii"
+description = "Lichii, the Switch and Switch 2 emulator: its Linux AppImage from GitHub, and Switch game files in the game folders."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+aes.workspace = true
+emulator-kit.workspace = true
+nexus-api.workspace = true
+zstd.workspace = true
+
+[lints]
+workspace = true
