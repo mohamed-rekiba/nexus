@@ -963,6 +963,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "emu-pc"
+version = "0.14.0"
+dependencies = [
+ "emulator-kit",
+ "nexus-api",
+ "sha2",
+ "tar",
+]
+
+[[package]]
 name = "emu-shadps4"
 version = "0.14.0"
 dependencies = [

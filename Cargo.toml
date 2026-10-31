@@ -10,6 +10,7 @@ members = [
     "plugins/emulators/kytyps5",
     "plugins/emulators/shadps4",
     "plugins/emulators/lichii",
+    "plugins/emulators/pc",
 ]
 # Vendored, and kept as it came: not formatted or linted with the workspace.
 exclude = ["third_party/oozextract"]
