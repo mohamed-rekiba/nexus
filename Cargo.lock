@@ -988,6 +988,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "emu-steam"
+version = "0.14.0"
+dependencies = [
+ "nexus-api",
+]
+
+[[package]]
 name = "emulator-kit"
 version = "0.14.0"
 dependencies = [
