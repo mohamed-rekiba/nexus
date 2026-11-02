@@ -12,6 +12,7 @@ members = [
     "plugins/emulators/lichii",
     "plugins/emulators/pc",
     "plugins/emulators/steam",
+    "plugins/services/playstation-store",
     "plugins/services/release-catalog",
 ]
 # Vendored, and kept as it came: not formatted or linted with the workspace.
