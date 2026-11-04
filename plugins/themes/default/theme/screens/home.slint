@@ -1,0 +1,241 @@
+import { Vm, Host } from "../types.slint";
+import { Tokens } from "../tokens.slint";
+import { Assets } from "../assets.slint";
+import { Look } from "../kit/look.slint";
+import { Nav } from "../components/nav.slint";
+import { FocusRing, Cover } from "../kit/widgets.slint";
+import { LibraryView } from "../components/library-view.slint";
+
+// A system's cover over the whole screen: "" is All games' own, else the cover of the emulator
+// whose system it is. Each system has a layer over All games' cover, and fades in and out. With
+// `library`, a darker wash keeps the Library's cards readable on it.
+component SystemsCover inherits Rectangle {
+    in property <string> system;
+    in property <bool> library;
+    background: Tokens.color-bg;
+    // All games' cover is always under the others: a system with no emulator of its own (no
+    // cover) shows it too.
+    Image {
+        width: parent.width;
+        height: parent.height;
+        source: Assets.all-games-cover;
+        image-fit: cover;
+        // The cover the screen shows, for tests and screen readers: its system's name.
+        accessible-role: text;
+        accessible-label: root.system == "" ? "systems-background" : "";
+        accessible-value: "All games";
+    }
+    for e in Vm.emulators : Image {
+        width: parent.width;
+        height: parent.height;
+        source: e.cover;
+        image-fit: cover;
+        property <bool> mine: root.system != "" && root.system == e.system;
+        opacity: self.mine ? 1 : 0;
+        visible: self.opacity > 0 || self.mine;
+        animate opacity { duration: Look.timed(Tokens.motion-slow); easing: ease-out-quad; }
+        accessible-role: text;
+        accessible-label: self.mine ? "systems-background" : "";
+        accessible-value: e.system-name != "" ? e.system-name : e.name;
+    }
+    // Dark behind the list and under the top bar, so both read on any cover; over the whole
+    // cover under the Library's cards.
+    if !Look.rtl && !root.library : Rectangle { background: @linear-gradient(270deg, #05070ff5 0%, #05070fd8 30%, #05070f70 55%, #05070f00 78%); }
+    if Look.rtl && !root.library : Rectangle { background: @linear-gradient(90deg, #05070ff5 0%, #05070fd8 30%, #05070f70 55%, #05070f00 78%); }
+    Rectangle { background: @linear-gradient(180deg, #05070fcc 0%, #05070f00 18%); }
+    Rectangle {
+        background: #05070fc4;
+        opacity: root.library ? 1 : 0;
+        animate opacity { duration: Look.timed(Tokens.motion-normal); easing: ease-out-quad; }
+    }
+}
+
+// The Default theme's Home: a column of systems on the far side of the reading direction, "All
+// games" first, then each emulator in `Vm.emulators`. The focused system's cover fills the
+// screen behind it (SystemsCover). Enter or a click opens the Library on the system's games
+// (`Nav`), with the system's cover still behind.
+component SystemsView inherits Rectangle {
+    // The tiles: the focused one big, the others small, as the default Home's row.
+    property <length> big: 150 * Look.px;
+    property <length> small: 96 * Look.px;
+    property <length> gap: 18 * Look.px;
+    // From the window's far edge to the tiles.
+    property <length> edge: 96 * Look.px;
+    property <length> top: 150 * Look.px;
+    // A game that starts gives the keys to `actions`, which is the list here too.
+    property <bool> keys: Nav.zone == "row" || Nav.zone == "actions";
+    // The corners of a tile `size` wide: the icons' own (27 of 128), so the clip, the ring and
+    // the playing frame follow them.
+    pure function corner(size: length) -> length {
+        size * 27 / 128
+    }
+
+    // Each entry's pictures and words: 0 is All games, `i` is `Vm.emulators[i - 1]`.
+    pure function icon-of(i: int) -> image {
+        i == 0 ? Assets.all-games-icon : Vm.emulators[i - 1].icon
+    }
+    pure function title-of(i: int) -> string {
+        i == 0 ? "All games"
+            : Vm.emulators[i - 1].system-name != "" ? Vm.emulators[i - 1].system-name
+            : Vm.emulators[i - 1].name
+    }
+    // How entry `i`'s emulator is: `playing` (the running game is its), `failed` (it didn't
+    // load), `missing` (it has no build installed), or "".
+    pure function state-of(i: int) -> string {
+        i == 0 ? ""
+            : Vm.has-running && Vm.running.plugin == Vm.emulators[i - 1].plugin ? "playing"
+            : Vm.emulators[i - 1].status == "failed" ? "failed"
+            : Vm.emulators[i - 1].has-builds && Vm.emulators[i - 1].installed.length == 0 ? "missing"
+            : ""
+    }
+    // The tag under the name for a `state`, and its color.
+    pure function tag-text(state: string) -> string {
+        state == "playing" ? "● PLAYING" : state == "failed" ? "Didn't load" : state == "missing" ? "Not installed" : ""
+    }
+    pure function tag-color(state: string) -> color {
+        state == "playing" ? Tokens.color-success : state == "failed" ? Tokens.color-danger : Tokens.color-text-muted
+    }
+
+    // Where entry `i` starts, from the top of the list, before the scroll.
+    pure function at-y(i: int) -> length {
+        i <= Nav.entry ? i * (root.small + root.gap)
+            : Nav.entry * (root.small + root.gap) + root.big + root.gap + (i - Nav.entry - 1) * (root.small + root.gap)
+    }
+    // The list moves up so the focused tile stays on screen, over the hints at the bottom.
+    property <length> scroll: Math.max(0, root.at-y(Nav.entry) + root.big - (root.height - root.top - 150 * Look.px));
+
+    // The cover follows the focus a moment after the last move, so a held key doesn't flash
+    // each one: each move starts the wait again. `shown-system` is the system it shows.
+    property <int> shown: 0;
+    out property <string> shown-system: Nav.system-of(root.shown);
+    property <int> entry: Nav.entry;
+    changed entry => {
+        root.waiting = true;
+        cover-wait.restart();
+    }
+    property <bool> waiting;
+    cover-wait := Timer {
+        interval: 150ms;
+        running: root.waiting;
+        triggered => {
+            root.waiting = false;
+            root.shown = Nav.entry;
+        }
+    }
+
+
+    list := Rectangle {
+        y: root.top;
+        height: root.height - root.top;
+        // The mouse wheel moves along the list, an entry a notch. Under the tiles, so their
+        // clicks stay theirs.
+        TouchArea {
+            scroll-event(event) => {
+                let delta = (event.delta-y + event.delta-x) / 1px;
+                if (Math.abs(delta) < 1) { return reject; }
+                Nav.step-row(delta > 0 ? -1 : 1);
+                Nav.zone = "row";
+                accept
+            }
+        }
+        for i in Nav.entries : row := Rectangle {
+            property <bool> focused: i == Nav.entry;
+            property <length> size: self.focused ? root.big : root.small;
+            // The tile's place from the far edge: right to left, the list is on the left.
+            property <length> tile-x: Look.rtl ? root.edge : root.width - root.edge - self.size;
+            y: root.at-y(i) - root.scroll;
+            height: self.size;
+            visible: self.y + self.height > 0 && self.y < parent.height;
+            animate y, height { duration: Look.timed(Tokens.motion-slow - 60ms); easing: ease-out-expo; }
+
+            tile := Rectangle {
+                x: row.tile-x;
+                width: row.size;
+                height: row.size;
+                accessible-role: button;
+                accessible-label: "systems-tile";
+                accessible-value: root.title-of(i);
+                accessible-item-selected: row.focused;
+                accessible-action-default => { Nav.entry = i; Nav.open-entry(); }
+                opacity: root.state-of(i) == "missing" && !row.focused ? 0.6 : 1;
+                animate x, width, height { duration: Look.timed(Tokens.motion-slow - 60ms); easing: ease-out-expo; }
+                FocusRing { w: parent.width; h: parent.height; on: (row.focused && root.keys) || touch.has-hover; radius: root.corner(row.size); }
+                Cover {
+                    radius: root.corner(row.size);
+                    source: root.icon-of(i);
+                    state: "";
+                    title: root.title-of(i);
+                    system-color: transparent;
+                    name-size: parent.width * 0.14;
+                }
+                // The running game's system: a green frame, as the default Home's tile.
+                if root.state-of(i) == "playing" : Rectangle {
+                    border-radius: root.corner(row.size);
+                    border-width: 3 * Look.px;
+                    border-color: Tokens.color-success;
+                }
+                touch := TouchArea {
+                    mouse-cursor: pointer;
+                    // One click opens the system, focused or not.
+                    clicked => {
+                        Nav.entry = i;
+                        Nav.zone = "row";
+                        Nav.open-entry();
+                    }
+                }
+            }
+            // The name, on the near side of the tile.
+            VerticalLayout {
+                x: Look.rtl ? row.tile-x + row.size + 24 * Look.px : row.tile-x - self.width - 24 * Look.px;
+                width: 460 * Look.px;
+                alignment: center;
+                spacing: 4 * Look.px;
+                Text {
+                    text: root.title-of(i);
+                    font-size: (row.focused ? 32 : 22) * Look.px;
+                    font-weight: row.focused ? 600 : 500;
+                    color: row.focused ? Tokens.color-text : Tokens.color-text-muted;
+                    overflow: elide;
+                    horizontal-alignment: Look.rtl ? left : right;
+                    animate color { duration: Look.timed(Tokens.motion-fast); }
+                }
+                if root.state-of(i) != "" : Text {
+                    text: root.tag-text(root.state-of(i));
+                    font-size: 16 * Look.px;
+                    font-weight: 700;
+                    letter-spacing: 1 * Look.px;
+                    color: root.tag-color(root.state-of(i));
+                    horizontal-alignment: Look.rtl ? left : right;
+                    accessible-role: text;
+                    accessible-label: "systems-tag";
+                    accessible-value: root.title-of(i) + ": " + self.text;
+                }
+            }
+        }
+    }
+}
+
+export component HomeScreen inherits Rectangle {
+    // The focused system's cover on the list; in the Library, the cover of the system whose
+    // games it shows.
+    SystemsCover {
+        system: Nav.library ? Nav.lib-system : list.shown-system;
+        library: Nav.library;
+    }
+    list := SystemsView {
+        opacity: Nav.view == "home" ? 1 : 0;
+        visible: self.opacity > 0;
+        animate opacity { duration: Look.timed(Tokens.motion-normal); easing: ease-out-quad; }
+    }
+    // Made each time the Library opens, so its cards come in again.
+    if Nav.view == "library" : LibraryView {
+        active: Vm.screen == "home";
+        property <bool> shown;
+        // After the first frame, so the entry animates from its start.
+        Timer { interval: 16ms; running: !parent.shown; triggered => { parent.shown = true; } }
+        opacity: self.shown ? 1 : 0;
+        x: self.shown ? 0 : 40 * Look.px * (Look.rtl ? -1 : 1);
+        animate opacity { duration: Look.timed(Tokens.motion-normal); easing: ease-out-quad; }
+        animate x { duration: Look.timed(Tokens.motion-slow); easing: ease-out-expo; }
+    }
+}
