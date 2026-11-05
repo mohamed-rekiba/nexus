@@ -301,9 +301,10 @@ fn a_settings_text_box_opened_with_the_controller_types_on_the_keyboard_too() {
     host.ui.start().unwrap();
     host.resize(1600.0, 900.0);
     host.settle();
-    // L1 from Home: Settings, on its last tab. The Games tab, down to the game folders' row;
+    // Settings, on its first tab. The Games tab, down to the game folders' row;
     // Cross opens it for typing.
-    host.pad(PadButton::LeftShoulder);
+    host.dispatch(Command::Navigate(nexus_core::Route::Settings));
+    host.settle();
     assert_eq!(host.core().view().screen, nexus_ui_api::ScreenId::Settings);
     host.settings_tab("Games");
     host.navigate(slint::platform::Key::DownArrow);
@@ -338,13 +339,14 @@ fn lit_settings_tab(host: &Composed) -> String {
 }
 
 #[test]
-fn l1_from_home_opens_settings_on_its_last_tab_and_l1_and_r1_go_round_every_tab() {
+fn l1_and_r1_go_round_every_tab_of_settings() {
     use nexus_ui_host::PadButton;
     let mut host = composed(|h| h.built_in(nexus_api::PluginBox::code(emu_kyty::KytyPlugin)));
     host.ui.start().unwrap();
     host.resize(1600.0, 900.0);
     host.settle();
-    host.pad(PadButton::LeftShoulder);
+    host.dispatch(Command::Navigate(nexus_core::Route::Settings));
+    host.settle();
     assert_eq!(host.core().view().screen, nexus_ui_api::ScreenId::Settings);
     let mut back = vec![lit_settings_tab(&host)];
     for _ in 0..6 {
@@ -353,10 +355,10 @@ fn l1_from_home_opens_settings_on_its_last_tab_and_l1_and_r1_go_round_every_tab(
     }
     assert_eq!(
         back,
-        ["Power", "This PC", "Downloads", "Updates", "Games", "Launcher", "Power"],
+        ["Launcher", "Power", "This PC", "Downloads", "Updates", "Games", "Launcher"],
         "L1 reaches every tab and wraps"
     );
     assert_eq!(host.core().view().screen, nexus_ui_api::ScreenId::Settings, "and stays in Settings");
     host.pad(PadButton::RightShoulder);
-    assert_eq!(lit_settings_tab(&host), "Launcher", "R1 wraps from the last tab to the first");
+    assert_eq!(lit_settings_tab(&host), "Games", "and R1 goes forward");
 }

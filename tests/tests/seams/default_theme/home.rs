@@ -150,7 +150,7 @@ fn the_key_hints_name_the_trailer_and_options_and_hide_over_the_grids() {
     });
     host.ui.start().unwrap();
     home_line(&mut host);
-    assert_eq!(host.values("hint"), ["Select", "Search", "Trailer", "Options"], "Home, on a game with a trailer");
+    assert_eq!(host.values("hint"), ["Select", "Top bar", "Trailer", "Options"], "Home, on a game with a trailer");
 
     host.dispatch(Command::OpenGame("emu-a:G0".parse().unwrap()));
     host.settle();

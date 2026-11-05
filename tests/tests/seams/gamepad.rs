@@ -56,7 +56,7 @@ fn the_d_pad_moves_the_selection_and_the_buttons_open_and_go_back() {
 }
 
 #[test]
-fn the_shoulder_button_goes_to_the_next_section_and_the_guide_button_home() {
+fn the_shoulder_button_goes_to_the_next_top_bar_item_and_the_guide_button_home() {
     let mut host = composed(|h| {
         h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha", "Beta", "Gamma"]).build())
             .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
@@ -64,7 +64,11 @@ fn the_shoulder_button_goes_to_the_next_section_and_the_guide_button_home() {
     host.ui.start().unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
 
+    // R1 moves along the top bar: Library, then Search, which Cross opens.
     press(&mut host, PadButton::RightShoulder);
+    press(&mut host, PadButton::RightShoulder);
+    assert_eq!(host.core().view().screen, ScreenId::Home, "R1 only moves the focus");
+    press(&mut host, PadButton::South);
     assert_eq!(host.core().view().screen, ScreenId::Catalog);
     host.dispatch(Command::Navigate(Route::Downloads));
     press(&mut host, PadButton::Guide);

@@ -54,8 +54,6 @@ export global Prefs {
     in-out property <int> scroll-by;
     in-out property <int> scroll-serial;
 
-    // The next sheet opens on its last tab.
-    in-out property <bool> enter-last;
     out property <bool> page: Vm.screen == "plugin";
     // A game's own settings: one section, its fields.
     out property <bool> game-page: Vm.screen == "game-settings";
@@ -110,9 +108,7 @@ export global Prefs {
     }
     // Back to the first row, as a sheet opens.
     public function reset() {
-        // L1 from Home opens Settings on its last tab, so L1 walks back through all of them.
-        root.section = root.enter-last && Vm.screen == "settings" ? root.first-section(root.tab-count - 1) : 0;
-        root.enter-last = false;
+        root.section = 0;
         root.row = 0;
         root.tabs = false;
         root.editing = false;

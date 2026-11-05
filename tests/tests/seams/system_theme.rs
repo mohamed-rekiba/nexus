@@ -369,3 +369,26 @@ fn the_keys_reach_the_icons_at_the_end_of_the_top_bar_and_move_between_panels() 
     host.navigate(Key::Escape);
     assert_eq!(host.count("system-panel"), 0);
 }
+
+#[test]
+fn l1_and_r1_reach_every_item_of_the_top_bar_again_and_again_round_the_ends() {
+    let system = machine();
+    let mut host = shown(&system, WHOLE_SCREEN);
+    use slint::platform::Key;
+    // Without a catalog the bar has nine stops: Home, Library, four screen buttons and the
+    // three icons. R1 eight times from Home is Bluetooth, the last.
+    for _ in 0..8 {
+        host.navigate(Key::Tab);
+    }
+    host.navigate(Key::Return);
+    assert_eq!(host.value("system-panel"), "bluetooth");
+    host.navigate(Key::Escape);
+    // One more is Home again, and L1 goes back to the last. Twice round, still there.
+    host.navigate(Key::Tab);
+    host.navigate(Key::Backtab);
+    for _ in 0..9 {
+        host.navigate(Key::Backtab);
+    }
+    host.navigate(Key::Return);
+    assert_eq!(host.value("system-panel"), "bluetooth", "L1 wraps and every stop answers again");
+}
