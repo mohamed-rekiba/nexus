@@ -388,6 +388,7 @@ fn full_view() -> AppView {
             sections: vec![slot()],
             actions: vec![slot()],
             folders: vec![folder()],
+            folders_after: 0,
             current: true,
         }),
         running: Some(RunningVm {

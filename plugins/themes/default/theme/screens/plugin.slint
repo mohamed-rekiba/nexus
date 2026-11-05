@@ -219,24 +219,48 @@ export component PluginScreen inherits SheetFrame {
             }
 
             // ---------------------------------------------------------------- SETTINGS
-            for panel[p] in (root.on ? Vm.plugin-page.settings : []) : VerticalLayout {
+            for panel[p] in (root.on ? Vm.plugin-page.settings : []) : panelrows := VerticalLayout {
                 accessible-role: text;
                 accessible-label: panel.slot.label;
+                // The first panel holds the page's folders, right after one field.
+                property <int> held: p == 0 ? Vm.plugin-page.folders.length : 0;
+                property <int> after: p == 0 && panelrows.held > 0 ? Vm.plugin-page.folders-after : panel.fields.length - 1;
                 if Prefs.current-tab == p + 1 : Header { text: "SETTINGS"; }
-                for field[i] in (Prefs.current-tab == p + 1 ? panel.fields : []) : FieldRow {
-                    field: field;
-                    section: p + 2;
-                    index: i;
-                    first: i == 0;
-                    last: i == panel.fields.length - 1;
+                for field[i] in (Prefs.current-tab == p + 1 ? panel.fields : []) : VerticalLayout {
+                    if i <= panelrows.after : FieldRow {
+                        field: field;
+                        section: p + 2;
+                        index: i;
+                        first: i == 0;
+                        last: i == panel.fields.length - 1 && panelrows.held == 0;
+                        reveal(y, h) => { root.reveal(y, h); }
+                        set(value) => { Commands.set-setting(panel.slot.plugin, panel.slot.scope, field.key, value); }
+                    }
+                }
+                for folder[k] in (Prefs.current-tab == p + 1 ? (p == 0 ? Vm.plugin-page.folders : []) : []) : FolderRow {
+                    folder: folder;
+                    section: 2;
+                    index: panelrows.after + 1 + k;
+                    first: panelrows.after < 0 && k == 0;
+                    last: panelrows.after == panel.fields.length - 1 && k == panelrows.held - 1;
                     reveal(y, h) => { root.reveal(y, h); }
-                    set(value) => { Commands.set-setting(panel.slot.plugin, panel.slot.scope, field.key, value); }
+                }
+                for field[i] in (Prefs.current-tab == p + 1 ? panel.fields : []) : VerticalLayout {
+                    if i > panelrows.after : FieldRow {
+                        field: field;
+                        section: p + 2;
+                        index: i + panelrows.held;
+                        first: false;
+                        last: i == panel.fields.length - 1;
+                        reveal(y, h) => { root.reveal(y, h); }
+                        set(value) => { Commands.set-setting(panel.slot.plugin, panel.slot.scope, field.key, value); }
+                    }
                 }
             }
 
             // ---------------------------------------------------------------- FOLDERS
-            if root.on && Vm.plugin-page.folders.length > 0 && Prefs.current-tab == Prefs.panels + 1 : Header { text: "FOLDERS"; }
-            for folder[i] in (root.on && Prefs.current-tab == Prefs.panels + 1 ? Vm.plugin-page.folders : []) : FolderRow {
+            if root.on && Prefs.folders-tab && Prefs.current-tab == Prefs.panels + 1 : Header { text: "FOLDERS"; }
+            for folder[i] in (root.on && Prefs.folders-tab && Prefs.current-tab == Prefs.panels + 1 ? Vm.plugin-page.folders : []) : FolderRow {
                 folder: folder;
                 section: Prefs.panels + 2;
                 index: i;

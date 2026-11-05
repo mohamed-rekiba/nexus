@@ -14,16 +14,21 @@ fn with_the_game_catalog_turned_off_the_ways_to_the_catalog_go() {
     host.load_images();
     host.settle();
     assert_eq!(host.count("Search"), 1, "with a catalog, the top bar's Search");
-    assert_eq!(key_asks(&mut host, Key::Tab), [Command::Navigate(nexus_core::Route::Catalog)]);
+    // R1 moves along the top bar: Library, then Search. Enter opens it.
+    assert_eq!(key_asks(&mut host, Key::Tab), []);
+    assert_eq!(key_asks(&mut host, Key::Tab), []);
+    assert_eq!(key_asks(&mut host, Key::Return), [Command::Navigate(nexus_core::Route::Catalog)]);
     host.dispatch(Command::Navigate(nexus_core::Route::Home));
+    host.navigate(Key::Escape);
 
     host.dispatch(Command::SetPluginEnabled { plugin: id("release-catalog"), enabled: false });
     host.settle();
 
     assert_eq!(host.count("Search"), 0, "no Search in the top bar");
-    let hints = host.values("hint");
-    assert!(hints.contains(&"Downloads".to_owned()) && !hints.contains(&"Search".to_owned()), "R1's hint: {hints:?}");
-    assert_eq!(key_asks(&mut host, Key::Tab), [Command::Navigate(nexus_core::Route::Downloads)], "R1 skips it");
+    assert!(host.values("hint").contains(&"Top bar".to_owned()), "the hint says L1 and R1 move along it");
+    assert_eq!(key_asks(&mut host, Key::Tab), []);
+    assert_eq!(key_asks(&mut host, Key::Tab), []);
+    assert_eq!(key_asks(&mut host, Key::Return), [Command::Navigate(nexus_core::Route::Downloads)], "R1 skips it");
     host.dispatch(Command::Navigate(nexus_core::Route::Downloads));
     host.settle();
     assert_eq!(key_asks(&mut host, Key::Backtab), [Command::Navigate(nexus_core::Route::Home)], "and L1");

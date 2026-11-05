@@ -1290,6 +1290,7 @@ fn plugin_page_vm(s: &Snapshot, plugin: &PluginId) -> Option<PluginPageVm> {
             sections: Vec::new(),
             actions: Vec::new(),
             folders: Vec::new(),
+            folders_after: 0,
             current: false,
         });
     }
@@ -1298,9 +1299,18 @@ fn plugin_page_vm(s: &Snapshot, plugin: &PluginId) -> Option<PluginPageVm> {
         .manifest(plugin)
         .map(|m| m.permissions.filesystem.iter().map(|g| g.folder.as_str()).collect())
         .unwrap_or_default();
+    let panels: Vec<SettingsPanelVm> =
+        state.settings.iter().filter(|p| &p.plugin == plugin).map(settings_panel_vm).collect();
+    // The folders follow the field the manifest names, else the last one.
+    let after_key =
+        s.plugins.manifest(plugin).and_then(|m| m.permissions.filesystem.iter().find_map(|g| g.after.as_deref()));
+    let fields = panels.first().map(|p| p.fields.as_slice()).unwrap_or_default();
+    let folders_after = after_key
+        .and_then(|key| fields.iter().position(|f| f.key == key))
+        .unwrap_or(fields.len().saturating_sub(1)) as i32;
     Some(PluginPageVm {
         emulator: all.emulators.into_iter().find(|e| &e.plugin == plugin),
-        panels: state.settings.iter().filter(|p| &p.plugin == plugin).map(settings_panel_vm).collect(),
+        panels,
         sections: state
             .emulators
             .get(plugin)
@@ -1311,6 +1321,7 @@ fn plugin_page_vm(s: &Snapshot, plugin: &PluginId) -> Option<PluginPageVm> {
             .filter(|f| nexus_api::shared_folder(&f.name).is_none() && asks.contains(&f.name.as_str()))
             .collect(),
         actions: Vec::new(),
+        folders_after,
         current: false,
         plugin: row,
     })

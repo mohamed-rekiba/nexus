@@ -281,6 +281,8 @@ A filesystem grant (`PathGrant`) has a `folder` name and these options:
   `~/` means the home folder.
 - `default_on`: another default for one platform.
 - `title` and `help`: the words Settings shows.
+- `after`: the key of a setting. On the plugin's page, the folder is a row in Settings right after
+  that setting, and the page has no Folders tab. Needs the plugin to have settings.
 - `listed_in`: more folders, read from a file inside the default folder, while the player has not
   set the folder. The Steam plugin uses it to find libraries on other drives.
 

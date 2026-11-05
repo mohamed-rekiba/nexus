@@ -99,11 +99,14 @@ default = "~/.local/share/shadPS4"
 default_on = { macos = "~/Library/Application Support/shadPS4" }
 title = "shadPS4 data"
 write = true
+# On its page, the folders are in Settings, under Use your own build.
+after = "own_build"
 
 # A shadPS4 you built or installed yourself. Read only.
 [[permissions.filesystem]]
 folder = "shadps4-build"
 title = "Your own shadPS4 build"
+after = "own_build"
 
 # The system its games show under: what the Library and a card call it, and its color.
 [system]
