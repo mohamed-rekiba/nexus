@@ -62,8 +62,10 @@ export global Prefs {
     // build, the actions and the blocks), one for each settings panel, then its folders, when it
     // is on and has more than one. A page with no tabs is one scroll.
     out property <int> tab-count: root.page && !root.theme-page && root.on
-        ? 1 + root.panels + (Vm.plugin-page.folders.length > 0 ? 1 : 0)
+        ? 1 + root.panels + (root.folders-tab ? 1 : 0)
         : root.sections;
+    // With settings panels, the page's folders are rows in the first panel; else they are a tab.
+    out property <bool> folders-tab: root.panels == 0 && Vm.plugin-page.folders.length > 0;
     out property <bool> tabbed: Vm.screen == "settings" || (root.page && !root.theme-page && root.tab-count > 1);
     // The tab a section's rows are in, and a tab's first section.
     public pure function tab-of(section: int) -> int {
@@ -94,6 +96,7 @@ export global Prefs {
             : root.page ? (section == 0 ? 1
                 : section == 1 ? root.builds + root.actions
                 : section <= root.panels + 1 ? Vm.plugin-page.settings[section - 2].fields.length
+                    + (section == 2 ? Vm.plugin-page.folders.length : 0)
                 : Vm.plugin-page.folders.length)
             : section == 0 ? LauncherRows.count
             : section == 1 ? Vm.folders.length + 1
@@ -133,6 +136,15 @@ export global Prefs {
         if (next >= 0 && next < root.tab-count) {
             root.section = root.first-section(next);
             root.row = 0;
+            return true;
+        }
+        false
+    }
+    // L1 and R1: the next or the previous tab. At the first and last tab it does nothing and says
+    // so, and the shell goes on to the next screen.
+    public function bar-step(delta: int) -> bool {
+        if (root.tab-step(delta)) {
+            Host.play-sound("move");
             return true;
         }
         false

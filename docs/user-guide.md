@@ -269,7 +269,7 @@ again.
 | Options | Menu | The game's menu (Game settings, Open game folder, View emulator log, Rate how it runs, Uninstall) |
 | Triangle | `/` | Search |
 | Square | T | The game's trailer. The letter T works outside the Library's search box and the Catalog |
-| L1, R1 | Shift+Tab, Tab | The screen before and after |
+| L1, R1 | Shift+Tab, Tab | The screen before and after. On a page with tabs: the tab before and after, until the first or last tab |
 | L2, R2 | Page Up, Page Down | A page up or down |
 | Create (Share, View) | Delete | Close the newest notice |
 | PS (Guide) | | Hold: closes the running game, or with no game running opens the power menu. Tap: back to Home; nothing while a game runs |
@@ -312,7 +312,7 @@ The command-line options are listed by `nexus --help` and in [development.md](de
 Emulators lists each plugin by the console it plays: PS5 (KytyPS5), PS4 (shadPS4) and PC, and the
 services: Game Catalog and PlayStation Store (official art and details for PS4 and PS5 games). Each
 page has "Turned on", the build, its actions, settings, folders and keys. With settings or folders it
-has tabs, as Settings does: General, Settings and Folders.
+has tabs, as Settings does: General and Settings. A plugin with no settings has a Folders tab. L1 and R1 choose the tab.
 
 - **Official builds.** Nexus downloads them from GitHub, runs each new one once with `--help` to
   check it, and keeps the build before it. The "Release repo" and "Pre-releases" settings change

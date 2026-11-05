@@ -131,6 +131,60 @@ fn the_keys_move_along_a_plugin_page_s_tabs_and_into_the_rows_of_one() {
 }
 
 #[test]
+fn l1_and_r1_choose_the_tab_of_a_plugin_page() {
+    use slint::platform::Key;
+    let mut host = kyty_page();
+    assert_eq!(host.count("plugin-enabled"), 1, "General is first");
+    host.navigate(Key::Tab);
+    assert_eq!(host.count("plugin-enabled"), 0, "R1 is the next tab");
+    assert_eq!(host.count("setting:own_build"), 1);
+    host.navigate(Key::Backtab);
+    assert_eq!(host.count("plugin-enabled"), 1, "and L1 the one before");
+}
+
+#[test]
+fn kytyps5_s_own_build_folder_is_a_row_in_its_settings_under_the_release_repo() {
+    use slint::platform::Key;
+    let mut host = kyty_page();
+    assert_eq!(host.count("settings-tab:Folders"), 0, "the page has no Folders tab");
+    host.settings_tab("Settings");
+    assert_eq!(host.count("folder:kyty-build"), 1);
+    // Own build, Release repo, then the folder, then Prereleases.
+    host.navigate(Key::DownArrow);
+    for _ in 0..3 {
+        host.navigate(Key::DownArrow);
+    }
+    let before = host.first("setting:prereleases").accessible_value().map(|v| v.to_string());
+    host.navigate(Key::Return);
+    let after = host.first("setting:prereleases").accessible_value().map(|v| v.to_string());
+    assert_ne!(before, after, "the row after the folder is Prereleases");
+}
+
+#[test]
+fn shadps4_s_folders_are_rows_in_its_settings_under_use_your_own_build() {
+    use slint::platform::Key;
+    let mut host = composed(|h| h.built_in(nexus_api::PluginBox::code(emu_shadps4::ShadPlugin)));
+    host.ui.start().unwrap();
+    host.dispatch(Command::Navigate(nexus_core::Route::Emulators));
+    host.settle();
+    host.first("plugin:emu-shadps4").invoke_accessible_default_action();
+    host.pump();
+    host.settle();
+    assert_eq!(host.count("settings-tab:Folders"), 0, "the page has no Folders tab");
+    host.settings_tab("Settings");
+    assert_eq!((host.count("folder:shadps4-data"), host.count("folder:shadps4-build")), (1, 1));
+    // Own build, the two folders, then Full screen.
+    host.navigate(Key::DownArrow);
+    for _ in 0..3 {
+        host.navigate(Key::DownArrow);
+    }
+    let before = host.first("setting:fullscreen").accessible_value().map(|v| v.to_string());
+    host.navigate(Key::Return);
+    let after = host.first("setting:fullscreen").accessible_value().map(|v| v.to_string());
+    assert_ne!(before, after, "the row after the folders is Full screen");
+}
+
+#[test]
 fn a_plugin_turned_off_on_its_page_shows_only_the_switch() {
     let mut host = kyty_page();
     host.first("plugin-enabled").invoke_accessible_default_action();

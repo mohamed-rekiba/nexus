@@ -844,6 +844,9 @@ pub struct PluginPageVm {
     pub actions: Vec<SlotVm>,
     /// The folders it asks for, but not the game folders: those are in Settings.
     pub folders: Vec<FolderVm>,
+    /// With settings, `folders` are rows in the first panel, right after the field at this
+    /// index (the last one when the plugin names none).
+    pub folders_after: i32,
     /// A theme that is the one shown.
     pub current: bool,
 }

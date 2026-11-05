@@ -98,6 +98,8 @@ folder = "packages"
 [[permissions.filesystem]]
 folder = "kyty-build"
 title = "Your own KytyPS5 build"
+# On its page, this folder is in Settings, under Release repo.
+after = "release_repo"
 default = [
     "~/KytyPS5", "~/kyty", "~/Kyty",
     "~/projects/KytyPS5", "~/projects/kyty", "~/projects/Kyty",

@@ -201,6 +201,10 @@ pub struct PathGrant {
     /// A line under the title in Settings.
     #[serde(default)]
     pub help: Option<String>,
+    /// On the plugin's page: the key of the setting this folder's row follows. At the end of
+    /// the plugin's settings if none. Needs the plugin to have settings.
+    #[serde(default)]
+    pub after: Option<String>,
     /// More folders, from a list in a default folder, while the player hasn't set the folder:
     /// Steam's own folder lists its libraries on other drives.
     #[serde(default)]

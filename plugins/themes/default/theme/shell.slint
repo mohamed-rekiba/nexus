@@ -210,6 +210,12 @@ export component Shell inherits Window {
                 Trailers.watch();
                 return accept;
             }
+            // L1 and R1 choose the tab of a sheet that has tabs, until its first or last tab.
+            if (!root.list && root.sheet && Prefs.tabbed && !Prefs.editing
+                && (event.text == Key.Backtab || event.text == Key.Tab)
+                && Prefs.bar-step(event.text == Key.Tab ? 1 : -1)) {
+                return accept;
+            }
             // L1 or Shift+Tab: the screen before.
             if (event.text == Key.Backtab && !Prefs.editing) {
                 Commands.navigate(root.home ? "settings"
@@ -388,6 +394,11 @@ export component Shell inherits Window {
                 { pad: "⮝  ⮟", key: "↑ ↓", label: "Move" },
                 { pad: "⮜  ⮞", key: "← →", label: "Buttons" },
                 { pad: "✕", key: "Enter", label: "Select" },
+                { pad: "○", key: "Esc", label: "Back" },
+            ]
+            : root.sheet && !root.list && Prefs.tabbed ? [
+                { pad: "✕", key: "Enter", label: "Change" },
+                { pad: "L1  R1", key: "Tab", label: "Tabs" },
                 { pad: "○", key: "Esc", label: "Back" },
             ]
             : root.sheet ? [

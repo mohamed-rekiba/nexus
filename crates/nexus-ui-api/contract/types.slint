@@ -329,7 +329,7 @@ export struct PluginRow { id: string, name: string, kind: string, version: strin
 // in the `emulator.panel` slot, for an emulator and for a service. actions: the action slots
 // of `sections`, for one row each. current: a theme that is the one shown (its options are
 // `Vm.theme-options`). A plugin that is turned off has only `plugin`.
-export struct PluginPage { plugin: PluginRow, has-emulator: bool, emulator: Emulator, sections: [Slot], actions: [Slot], settings: [SettingsPanel], folders: [Folder], current: bool }
+export struct PluginPage { plugin: PluginRow, has-emulator: bool, emulator: Emulator, sections: [Slot], actions: [Slot], settings: [SettingsPanel], folders: [Folder], folders-after: int, current: bool }
 
 // One of the emulator's keyboard keys: the console's button and its keys.
 export struct KeyBinding { button: string, keys: string }
