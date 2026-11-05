@@ -6,6 +6,7 @@ members = [
     "crates/nexus-core",
     "crates/nexus-ui-host",
     "crates/nexus-testkit",
+    "plugins/themes/classic",
     "plugins/themes/default",
     "plugins/shared/emulator-kit",
     "plugins/emulators/kytyps5",
