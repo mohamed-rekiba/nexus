@@ -269,7 +269,7 @@ again.
 | Options | Menu | The game's menu (Game settings, Open game folder, View emulator log, Rate how it runs, Uninstall) |
 | Triangle | `/` | Search |
 | Square | T | The game's trailer. The letter T works outside the Library's search box and the Catalog |
-| L1, R1 | Shift+Tab, Tab | The screen before and after. On a page with tabs: the tab before and after, until the first or last tab |
+| L1, R1 | Shift+Tab, Tab | The screen before and after. On Settings and a plugin page: the tab before and after, round the ends. Back leaves. L1 from Home opens Settings on its last tab |
 | L2, R2 | Page Up, Page Down | A page up or down |
 | Create (Share, View) | Delete | Close the newest notice |
 | PS (Guide) | | Hold: closes the running game, or with no game running opens the power menu. Tap: back to Home; nothing while a game runs |

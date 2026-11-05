@@ -54,6 +54,8 @@ export global Prefs {
     in-out property <int> scroll-by;
     in-out property <int> scroll-serial;
 
+    // The next sheet opens on its last tab.
+    in-out property <bool> enter-last;
     out property <bool> page: Vm.screen == "plugin";
     // A game's own settings: one section, its fields.
     out property <bool> game-page: Vm.screen == "game-settings";
@@ -108,7 +110,9 @@ export global Prefs {
     }
     // Back to the first row, as a sheet opens.
     public function reset() {
-        root.section = 0;
+        // L1 from Home opens Settings on its last tab, so L1 walks back through all of them.
+        root.section = root.enter-last && Vm.screen == "settings" ? root.first-section(root.tab-count - 1) : 0;
+        root.enter-last = false;
         root.row = 0;
         root.tabs = false;
         root.editing = false;
@@ -130,18 +134,14 @@ export global Prefs {
             root.row = 0;
         }
     }
-    // Whether it moved: at the first and last tab it stays.
+    // Whether it moved: past the last tab is the first, and before the first the last.
     function tab-step(delta: int) -> bool {
-        let next = root.tab-of(root.section) + delta;
-        if (next >= 0 && next < root.tab-count) {
-            root.section = root.first-section(next);
-            root.row = 0;
-            return true;
-        }
-        false
+        if (root.tab-count < 2) { return false; }
+        root.section = root.first-section(Math.mod(root.tab-of(root.section) + delta + root.tab-count, root.tab-count));
+        root.row = 0;
+        return true;
     }
-    // L1 and R1: the next or the previous tab. At the first and last tab it does nothing and says
-    // so, and the shell goes on to the next screen.
+    // L1 and R1: the previous or the next tab, round the ends.
     public function bar-step(delta: int) -> bool {
         if (root.tab-step(delta)) {
             Host.play-sound("move");

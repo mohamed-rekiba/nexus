@@ -278,7 +278,9 @@ export global Nav {
         let next = root.tab + delta;
         // Search's place, with no Catalog: the next one on.
         let skipped = next == root.tabs && !Vm.catalog-available ? next + delta : next;
-        root.tab = Math.clamp(skipped, 0, root.tabs + root.buttons - 1);
+        // Round the ends: past the last item is the first.
+        let count = root.tabs + root.buttons;
+        root.tab = Math.mod(skipped + count, count);
         Host.play-sound("move");
     }
     // The button under the game at `action`.

@@ -274,10 +274,9 @@ export component EmulatorsScreen inherits Rectangle {
 fn a_password_field_hides_its_text_and_the_show_key_shows_it() {
     use nexus_ui_host::PadButton;
     let (_dir, mut host) = with_a_password_field();
-    // L1 three times: Settings, Themes, Emulators.
-    for _ in 0..3 {
-        host.pad(PadButton::LeftShoulder);
-    }
+    host.dispatch(Command::Navigate(nexus_core::Route::Emulators));
+    host.settle();
+    host.pad(PadButton::Down);
     assert_eq!(host.core().view().screen, nexus_ui_api::ScreenId::Emulators);
     host.press("focus-password", "password");
     assert_eq!(host.count("osk"), 1, "the last input was the controller");
@@ -302,7 +301,7 @@ fn a_settings_text_box_opened_with_the_controller_types_on_the_keyboard_too() {
     host.ui.start().unwrap();
     host.resize(1600.0, 900.0);
     host.settle();
-    // L1 from Home: Settings, on its first tab. The Games tab, down to the game folders' row;
+    // L1 from Home: Settings, on its last tab. The Games tab, down to the game folders' row;
     // Cross opens it for typing.
     host.pad(PadButton::LeftShoulder);
     assert_eq!(host.core().view().screen, nexus_ui_api::ScreenId::Settings);
@@ -321,4 +320,43 @@ fn a_settings_text_box_opened_with_the_controller_types_on_the_keyboard_too() {
     assert_eq!(host.values("folder:games"), [format!("{before}{typed}")]);
     assert_eq!(host.count("osk"), 0);
     assert_eq!(host.count("editor"), 0, "the row is closed");
+}
+
+/// The lit tab of Settings.
+fn lit_settings_tab(host: &Composed) -> String {
+    ["Launcher", "Games", "Updates", "Downloads", "This PC", "System", "Power"]
+        .into_iter()
+        .find(|name| {
+            i_slint_backend_testing::ElementHandle::find_by_accessible_label(
+                host.instance(),
+                &format!("settings-tab:{name}"),
+            )
+            .any(|e| e.accessible_checked() == Some(true))
+        })
+        .expect("one tab is lit")
+        .to_owned()
+}
+
+#[test]
+fn l1_from_home_opens_settings_on_its_last_tab_and_l1_and_r1_go_round_every_tab() {
+    use nexus_ui_host::PadButton;
+    let mut host = composed(|h| h.built_in(nexus_api::PluginBox::code(emu_kyty::KytyPlugin)));
+    host.ui.start().unwrap();
+    host.resize(1600.0, 900.0);
+    host.settle();
+    host.pad(PadButton::LeftShoulder);
+    assert_eq!(host.core().view().screen, nexus_ui_api::ScreenId::Settings);
+    let mut back = vec![lit_settings_tab(&host)];
+    for _ in 0..6 {
+        host.pad(PadButton::LeftShoulder);
+        back.push(lit_settings_tab(&host));
+    }
+    assert_eq!(
+        back,
+        ["Power", "This PC", "Downloads", "Updates", "Games", "Launcher", "Power"],
+        "L1 reaches every tab and wraps"
+    );
+    assert_eq!(host.core().view().screen, nexus_ui_api::ScreenId::Settings, "and stays in Settings");
+    host.pad(PadButton::RightShoulder);
+    assert_eq!(lit_settings_tab(&host), "Launcher", "R1 wraps from the last tab to the first");
 }

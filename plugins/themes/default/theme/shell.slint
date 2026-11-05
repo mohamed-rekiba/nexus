@@ -210,14 +210,15 @@ export component Shell inherits Window {
                 Trailers.watch();
                 return accept;
             }
-            // L1 and R1 choose the tab of a sheet that has tabs, until its first or last tab.
+            // L1 and R1 choose the tab of a sheet that has tabs, round the ends. Back (○) leaves.
             if (!root.list && root.sheet && Prefs.tabbed && !Prefs.editing
-                && (event.text == Key.Backtab || event.text == Key.Tab)
-                && Prefs.bar-step(event.text == Key.Tab ? 1 : -1)) {
+                && (event.text == Key.Backtab || event.text == Key.Tab)) {
+                Prefs.bar-step(event.text == Key.Tab ? 1 : -1);
                 return accept;
             }
             // L1 or Shift+Tab: the screen before.
             if (event.text == Key.Backtab && !Prefs.editing) {
+                Prefs.enter-last = root.home;
                 Commands.navigate(root.home ? "settings"
                     : Vm.screen == "settings" ? "themes"
                     : Vm.screen == "themes" ? "emulators"

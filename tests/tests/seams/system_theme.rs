@@ -360,10 +360,8 @@ fn the_keys_reach_the_icons_at_the_end_of_the_top_bar_and_move_between_panels() 
     let mut host = shown(&system, WHOLE_SCREEN);
     use slint::platform::Key;
     host.navigate(Key::UpArrow);
-    // Past the tabs and the screen buttons, the last stop is Bluetooth.
-    for _ in 0..12 {
-        host.navigate(Key::RightArrow);
-    }
+    // Left of the first item is the last, Bluetooth: the bar goes round.
+    host.navigate(Key::LeftArrow);
     host.navigate(Key::Return);
     assert_eq!(host.value("system-panel"), "bluetooth");
     host.navigate(Key::LeftArrow);
