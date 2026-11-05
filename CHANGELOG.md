@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.9.0](https://github.com/mohamed-rekiba/nexus/compare/v0.8.0...v0.9.0) (2026-11-05)
+
+
+### Features
+
+* a plugin's folders can be rows in its Settings, and L1 and R1 choose a sheet's tab ([f1b45c5](https://github.com/mohamed-rekiba/nexus/commit/f1b45c5eb91ae413acc699a8ff7a1ba7e1c52da2))
+* KytyPS5 gets --addcont-dir &lt;game folder&gt;/addcont when a build knows it ([8736721](https://github.com/mohamed-rekiba/nexus/commit/8736721b5b4396d387f50ba1749a7f5875f0a772))
+
+
+### Bug Fixes
+
+* L1 and R1 go round every tab of a sheet, the home top bar goes round its ends, and L1 from Home opens Settings on its last tab ([0ed75bb](https://github.com/mohamed-rekiba/nexus/commit/0ed75bbead11f70a9d3a5163a69bb59cd7063313))
+* L1 and R1 on Home move along the top bar, round its ends ([99a9e46](https://github.com/mohamed-rekiba/nexus/commit/99a9e4645948dc2ad50b58c29024f064e89c2526))
+
 ## [0.8.0](https://github.com/mohamed-rekiba/nexus/compare/v0.7.0...v0.8.0) (2026-10-28)
 
 
