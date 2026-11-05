@@ -240,12 +240,22 @@ impl emulator_kit::settings::Settings for Settings {
     }
 }
 
-/// The command line KytyPS5 gets for a game. The window size only sizes the window;
+/// The command line KytyPS5 gets for a game. `addcont` is the game's DLC folder (`--addcont-dir`).
+/// The window size only sizes the window;
 /// `--video-out-resolution` is what the game is told its screen is. Extra arguments come last.
 /// `supported`: the options the build knows (its `--help`); a setting it doesn't know is left
 /// out, since KytyPS5 stops at an unknown option. `None` keeps them all.
-pub fn kyty_args(settings: &Settings, game: LaunchArg, supported: Option<&BTreeSet<String>>) -> Vec<LaunchArg> {
+pub fn kyty_args(
+    settings: &Settings,
+    game: LaunchArg,
+    addcont: LaunchArg,
+    supported: Option<&BTreeSet<String>>,
+) -> Vec<LaunchArg> {
     let mut out: Vec<LaunchArg> = vec!["--game".into(), game];
+    if supported.is_none_or(|known| known.contains(ADDCONT_OPTION)) {
+        out.push(ADDCONT_OPTION.into());
+        out.push(addcont);
+    }
     for (option, value) in setting_options(settings) {
         if supported.is_some_and(|known| !known.contains(option)) {
             continue;
@@ -256,6 +266,9 @@ pub fn kyty_args(settings: &Settings, game: LaunchArg, supported: Option<&BTreeS
     out.extend(args::shell_split(&settings.extra_args).into_iter().map(LaunchArg::from));
     out
 }
+
+/// The option for the folder of a game's DLC: `<game folder>/addcont`.
+const ADDCONT_OPTION: &str = "--addcont-dir";
 
 /// The options the settings become, each with its value if it takes one.
 fn setting_options(settings: &Settings) -> Vec<(&'static str, Option<String>)> {
@@ -527,14 +540,18 @@ impl Kyty {
         tag: Option<&str>,
         settings: &Settings,
         game: LaunchArg,
+        addcont: LaunchArg,
     ) -> Vec<LaunchArg> {
         let known = self.options(binary, tag).await;
         if let Some(known) = &known {
+            if !known.contains(ADDCONT_OPTION) {
+                self.emu.host().log.info(&format!("KytyPS5 at {binary} has no {ADDCONT_OPTION}: it is left out"));
+            }
             for (option, _) in setting_options(settings).into_iter().filter(|(o, _)| !known.contains(*o)) {
                 self.emu.host().log.info(&format!("KytyPS5 at {binary} has no {option}: that setting is left out"));
             }
         }
-        kyty_args(settings, game, known.as_ref())
+        kyty_args(settings, game, addcont, known.as_ref())
     }
 }
 
@@ -547,7 +564,9 @@ impl Launcher for Kyty {
         // fields are optional, so null ones fall back to the emulator's.
         let settings = builds.settings().for_launch(config).await;
         let run = builds.run().await?;
-        let args = self.args_for(&run.program, run.tag.as_deref(), &settings, LaunchArg::path(found.dir)).await;
+        let addcont = LaunchArg::path(found.dir.join("addcont")?);
+        let args =
+            self.args_for(&run.program, run.tag.as_deref(), &settings, LaunchArg::path(found.dir), addcont).await;
         Ok(LaunchSpec { program: run.program, args, env: Default::default(), cwd: run.cwd, game_process: None })
     }
 }
@@ -583,7 +602,7 @@ mod tests {
         let settings = Settings { video_out: VideoOut::FullHd, ..Settings::default() };
         let known: BTreeSet<String> =
             ["--game", "--screen-width", "--screen-height", "--present-mode"].map(String::from).into();
-        let args = texts(kyty_args(&settings, "/g/PPSA1".into(), Some(&known)));
+        let args = texts(kyty_args(&settings, "/g/PPSA1".into(), "/g/PPSA1/addcont".into(), Some(&known)));
         assert_eq!(
             args,
             ["--game", "/g/PPSA1", "--screen-width", "1920", "--screen-height", "1080", "--present-mode", "Mailbox"]
@@ -593,7 +612,7 @@ mod tests {
     #[test]
     fn the_command_line_puts_extra_arguments_last() {
         let settings = Settings { amd_cpu: true, extra_args: "--x 'a b'".into(), ..Settings::default() };
-        let args: Vec<String> = kyty_args(&settings, "/g/PPSA1".into(), None)
+        let args: Vec<String> = kyty_args(&settings, "/g/PPSA1".into(), "/g/PPSA1/addcont".into(), None)
             .into_iter()
             .map(|a| match a {
                 LaunchArg::Text(t) => t,
@@ -605,6 +624,8 @@ mod tests {
             [
                 "--game",
                 "/g/PPSA1",
+                "--addcont-dir",
+                "/g/PPSA1/addcont",
                 "--screen-width",
                 "1920",
                 "--screen-height",
