@@ -18,6 +18,7 @@ members = [
     "plugins/services/playstation-store",
     "plugins/services/release-catalog",
     "plugins/system/host",
+    "tests",
 ]
 # Vendored, and kept as it came: not formatted or linted with the workspace.
 exclude = ["third_party/oozextract"]

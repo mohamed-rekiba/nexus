@@ -1,0 +1,13 @@
+import { Vm } from "../types.slint";
+import { Tokens } from "../tokens.slint";
+
+// A game is starting or running: its title over the library.
+export component RunningScreen inherits Rectangle {
+    background: Tokens.color-overlay;
+    Text {
+        text: Vm.running.title;
+        color: Tokens.color-text;
+        font-size: Tokens.font-size-xl;
+        font-weight: Tokens.font-weight-bold;
+    }
+}

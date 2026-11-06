@@ -1,0 +1,89 @@
+import { Vm, Host } from "../types.slint";
+import { Commands } from "../kit/commands.slint";
+import { SheetFrame } from "../kit/sheet-frame.slint";
+import { Tokens } from "../tokens.slint";
+import { Look } from "../kit/look.slint";
+import { BackButton } from "../kit/widgets.slint";
+import { Prefs, Tab } from "../kit/settings-rows.slint";
+import { GamesSection, UpdatesSection, LauncherSection, DownloadsSection, PcSection, SystemSection, BackupSection, PowerSection } from "../kit/settings-sections.slint";
+
+export component SettingsScreen inherits SheetFrame {
+    panel-width: 1000 * Look.tpx;
+
+    // Back to the top when the tab changes.
+    property <int> tab: Prefs.current-tab;
+    changed tab => { flick.viewport-y = 0; }
+    // A tab with no rows to focus scrolls a step at a time.
+    property <int> nudged: Prefs.scroll-serial;
+    changed nudged => {
+        flick.viewport-y = Math.min(0, Math.max(flick.height - flick.viewport-height, flick.viewport-y - Prefs.scroll-by * 160 * Look.px));
+    }
+    // The System tab goes when Nexus is no longer the whole screen: back to the last tab.
+    property <int> count: Prefs.tab-count;
+    changed count => { if (Prefs.current-tab >= self.count) { Prefs.show(self.count - 1); } }
+
+
+    VerticalLayout {
+        padding-left: 56 * Look.px;
+        padding-right: 56 * Look.px;
+        padding-top: 64 * Look.px;
+        spacing: 0;
+
+        // The title and the tabs stay; the rows of a tab scroll under them.
+        HorizontalLayout {
+            alignment: Look.rtl ? end : start;
+            padding-bottom: 20 * Look.px;
+            BackButton { pad: Vm.input-mode == "gamepad"; clicked => { Commands.back(); } }
+        }
+        Text { text: "Settings"; font-size: 44 * Look.px; font-weight: 600; color: Tokens.color-text; horizontal-alignment: Look.rtl ? right : left; }
+        Text { text: "Changes are saved automatically"; font-size: 18 * Look.tpx; color: Look.text3; horizontal-alignment: Look.rtl ? right : left; }
+        // In right-to-left the first tab is on the right.
+        HorizontalLayout {
+            padding-top: 28 * Look.px;
+            padding-bottom: 20 * Look.px;
+            spacing: 8 * Look.px;
+            alignment: Look.rtl ? end : start;
+            for i in Prefs.tab-count : Tab {
+                property <int> at: Look.rtl ? Prefs.tab-count - 1 - i : i;
+                section: self.at;
+                text: self.at == 0 ? "Launcher" : self.at == 1 ? "Games" : self.at == 2 ? "Updates"
+                    : self.at == 3 ? "Downloads" : self.at == 4 ? "This PC" : self.at == 5 && Vm.system.whole-screen ? "System"
+                    : self.at == Prefs.backup-section ? "Backup" : "Power";
+            }
+        }
+
+        flick := Flickable {
+            // Up and down only: nothing drags sideways.
+            viewport-width: self.width;
+            viewport-height: sheet.preferred-height;
+            animate viewport-y { duration: Tokens.motion-normal; easing: ease-out-quad; }
+
+            sheet := VerticalLayout {
+                width: parent.width;
+                padding-bottom: 80 * Look.px;
+                spacing: 0;
+
+            if Prefs.section == 1 : GamesSection { reveal(y, h) => { root.reveal(y, h); } }
+            if Prefs.section == 2 : UpdatesSection { reveal(y, h) => { root.reveal(y, h); } }
+            if Prefs.section == 0 : LauncherSection { reveal(y, h) => { root.reveal(y, h); } }
+            if Prefs.section == 3 : DownloadsSection { reveal(y, h) => { root.reveal(y, h); } }
+            if Prefs.section == 4 : PcSection { reveal(y, h) => { root.reveal(y, h); } }
+            if Prefs.section == 5 && Vm.system.whole-screen : SystemSection { reveal(y, h) => { root.reveal(y, h); } }
+            if Prefs.section == Prefs.backup-section : BackupSection { reveal(y, h) => { root.reveal(y, h); } }
+            if Prefs.section == Prefs.power-section : PowerSection { reveal(y, h) => { root.reveal(y, h); } }
+            }
+        }
+    }
+
+
+    // Scrolls the sheet so a row at `y` (absolute) and `h` high is in view.
+    function reveal(y: length, h: length) {
+        let top = y - flick.absolute-position.y;
+        let margin = 120 * Look.px;
+        if (top + h > flick.height - margin) {
+            flick.viewport-y = Math.max(flick.height - flick.viewport-height, flick.viewport-y - (top + h - flick.height + margin));
+        } else if (top < margin) {
+            flick.viewport-y = Math.min(0, flick.viewport-y + (margin - top));
+        }
+    }
+}

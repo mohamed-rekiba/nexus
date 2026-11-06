@@ -1,0 +1,25 @@
+import { Vm, Host, Json } from "../types.slint";
+import { Tokens } from "../tokens.slint";
+import { Card } from "../components/card.slint";
+
+// The catalogs' games as a plain grid.
+export component CatalogScreen inherits Rectangle {
+    property <length> cell: 168px;
+    property <length> gap: Tokens.space-m;
+    property <int> columns: Math.max(2, Math.floor((self.width - 2 * Tokens.space-l + root.gap) / (root.cell + root.gap)));
+
+    Flickable {
+        x: Tokens.space-l;
+        y: Tokens.space-l;
+        width: parent.width - 2 * Tokens.space-l;
+        height: parent.height - 2 * Tokens.space-l;
+        viewport-height: Math.ceil(Vm.catalog.games.length / root.columns) * (268px + root.gap);
+        for game[i] in Vm.catalog.games : Card {
+            x: Math.mod(i, root.columns) * (root.cell + root.gap);
+            y: Math.floor(i / root.columns) * (268px + root.gap);
+            width: root.cell;
+            game: game;
+            activated => { Host.command("OpenGame", Json.text(game.key)); }
+        }
+    }
+}
