@@ -8,8 +8,10 @@ publish.workspace = true
 license.workspace = true
 
 [dependencies]
+aes.workspace = true
 emulator-kit.workspace = true
 nexus-api.workspace = true
+zstd.workspace = true
 
 [lints]
 workspace = true

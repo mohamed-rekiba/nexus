@@ -306,3 +306,74 @@ async fn games_start_in_eden_cli_with_a_settings_file_that_gives_each_controller
     assert!(!file.contains("engine:keyboard,code:67"), "player 1's keyboard keys give way to the controller");
     assert!(!file.contains("player_2_button_a="), "no third controller: player 3 stays as it was");
 }
+
+/// A PFS0 of `files`, as an NSP or an NSZ holds them.
+fn pfs0(files: &[(&str, Vec<u8>)]) -> Vec<u8> {
+    let (mut names, mut entries, mut offset) = (Vec::new(), Vec::new(), 0u64);
+    for (name, data) in files {
+        entries.extend_from_slice(&offset.to_le_bytes());
+        entries.extend_from_slice(&(data.len() as u64).to_le_bytes());
+        entries.extend_from_slice(&(names.len() as u32).to_le_bytes());
+        entries.extend_from_slice(&[0; 4]);
+        names.extend_from_slice(name.as_bytes());
+        names.push(0);
+        offset += data.len() as u64;
+    }
+    let mut out = b"PFS0".to_vec();
+    out.extend_from_slice(&(files.len() as u32).to_le_bytes());
+    out.extend_from_slice(&(names.len() as u32).to_le_bytes());
+    out.extend_from_slice(&[0; 4]);
+    out.extend(entries);
+    out.extend(names);
+    for (_, data) in files {
+        out.extend_from_slice(data);
+    }
+    out
+}
+
+#[tokio::test]
+async fn a_solid_nsz_installs_as_the_nsp_lichii_can_play() {
+    let (test, games) = boot().await;
+    // An NCA of a header and one section that isn't encrypted, and its solid NCZ, as nsz makes it.
+    let header = vec![0x5Au8; 0x4000];
+    let body: Vec<u8> = (0..0x2000u32).map(|i| (i % 256) as u8).collect();
+    let mut ncz = header.clone();
+    ncz.extend_from_slice(b"NCZSECTN");
+    ncz.extend_from_slice(&1u64.to_le_bytes());
+    for field in [0x4000u64, body.len() as u64, 1, 0] {
+        ncz.extend_from_slice(&field.to_le_bytes());
+    }
+    ncz.extend_from_slice(&[0; 32]);
+    ncz.extend(zstd::encode_all(body.as_slice(), 3).unwrap());
+    let nsz = pfs0(&[("program.ncz", ncz), ("game.tik", b"ticket".to_vec())]);
+    let packages = tempfile::tempdir().unwrap();
+    std::fs::create_dir(packages.path().join("Switch")).unwrap();
+    std::fs::write(packages.path().join("Switch/Hades [0100535012974000][v0].nsz"), nsz).unwrap();
+    test.core
+        .dispatch(Command::SetFolders { name: "packages".into(), paths: vec![packages.path().into()] })
+        .await
+        .unwrap();
+    test.core.dispatch(Command::Navigate(nexus_core::Route::Emulators)).await.unwrap();
+    let view = test.core.view();
+    let emu = view.emulators.emulators.iter().find(|e| e.plugin == lichii()).unwrap();
+    let offer = emu.panels.iter().find(|p| p.action.as_deref() == Some(HOST_INSTALL_GAME)).unwrap();
+
+    let start =
+        Command::RunAction { plugin: lichii(), action: HOST_INSTALL_GAME.into(), game: None, args: offer.args.clone() };
+    test.core.dispatch(start).await.unwrap();
+    test.until(nexus_core::Area::Installs, |core| {
+        core.view().downloads.jobs.first().is_some_and(|j| j.state != "installing")
+    })
+    .await;
+    let job = test.core.view().downloads.jobs.into_iter().next().unwrap();
+    assert_eq!(job.state, "done", "{}", job.error);
+
+    let folder = games.path().join("Switch/Hades");
+    assert!(!folder.join("Hades [0100535012974000][v0].nsz").exists(), "no solid NSZ, which Lichii can't play");
+    let nsp = std::fs::read(folder.join("Hades [0100535012974000][v0].nsp")).unwrap();
+    let nca = [header, body].concat();
+    assert_eq!(&nsp[..4], b"PFS0");
+    assert!(nsp.windows(b"program.nca".len()).any(|w| w == b"program.nca"), "the NCZ is an NCA again");
+    assert_eq!(&nsp[nsp.len() - nca.len() - 6..nsp.len() - 6], nca.as_slice(), "the NCA, then the ticket");
+    assert_eq!(&nsp[nsp.len() - 6..], b"ticket");
+}
