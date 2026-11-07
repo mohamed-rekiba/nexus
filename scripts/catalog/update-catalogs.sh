@@ -21,6 +21,10 @@
 # are copied to dist/catalog/backup/<UTC time>/. The run stops at the first forum whose listing
 # is partial, and never copies a file that is not complete and English.
 #
+# A full run that stopped after it read every listing page keeps its listing in
+# dist/catalog/<key>-topics.json.partial.json. A full run in the next day goes on from it and reads
+# only the topic pages left. Delete that file to read the forum again from its first page.
+#
 # --dry-run prints each command and copy without doing it.
 #
 # The files in assets/catalog/ are your data: don't commit them.
@@ -45,7 +49,7 @@ while [ $# -gt 0 ]; do
       shift
       ;;
     -h | --help)
-      sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -110,12 +114,22 @@ if [ "$refresh" = 0 ]; then
   for key in $forums; do
     echo "== $key: read the forum (a Chrome window opens; do the Cloudflare check when it shows)"
     status=0
-    run node "$here/list.mjs" --platform "$key" --include-magnets || status=$?
+    partial="$dist/$key-topics.json.partial.json"
+    # A partial run of the last day that read every listing page left only topic pages to read:
+    # go on from it.
+    if [ -n "$(find "$partial" -mmin -1440 2>/dev/null)" ] && jq -e '(.pages_remaining // []) == [] and (.topics // []) != []' "$partial" >/dev/null; then
+      echo "== $key: going on from $partial ($(jq '[.topics[] | select(.magnet_status != "available" or .game_info_status != "available")] | length' "$partial") topics left to read)"
+      run node "$here/list.mjs" --platform "$key" --enrich-existing "$partial" || status=$?
+    else
+      run node "$here/list.mjs" --platform "$key" --include-magnets || status=$?
+    fi
     if [ "$status" = 2 ]; then
-      fail "the $key listing is partial (verification, login or an HTTP failure): see $dist/$key-topics.json.partial.json. Nothing was copied into $assets. Run again to read it once more."
+      fail "the $key listing is partial (verification, login or an HTTP failure): see $partial. Nothing was copied into $assets. Run again to go on from it."
     elif [ "$status" != 0 ]; then
       fail "list.mjs failed for $key (exit $status). Nothing was copied into $assets."
     fi
+    # The partial file is used up: the next run reads the forum again.
+    if [ "$dry" = 0 ]; then rm -f "$partial"; fi
     # The new listing becomes the Russian source. translate.mjs and steam.mjs then work from it,
     # not from the source of an earlier run.
     run cp "$dist/$key-topics.json" "$dist/$key-topics.json.ru-backup.json"

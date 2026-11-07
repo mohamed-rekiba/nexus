@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { chromium } from 'playwright-core';
 import { readListing, mergeTopics } from './listing.mjs';
-import { collectMagnetBatch, applyMagnets, normalizeGameInfo } from './magnets.mjs';
+import { collectMagnetBatch, applyMagnets, normalizeGameInfo, resumedReport } from './magnets.mjs';
 import { PLATFORMS } from './platforms.mjs';
 
 // The configured forums' origin (catalog-sources.json). The tests serve its pages themselves.
@@ -387,4 +387,20 @@ test('releases the launcher cannot play are left out by their tag', async () => 
     'My Friend Peppa Pig [EUR/RUS]', '[PS5] Ghost of Tsushima', '[PS4] Vampyr [EUR]', '[PS4] Moving Out [EUR]',
     '[Nintendo Switch] Detention [NSZ][ENG] [1.07 GB]', '[NSW2] Kirby Air Riders [NUP][ENG] [19.84 GB]', '[Nintendo Switch] Minecraft [NSP][RUS/Multi11]'])
     assert.ok(!UNPLAYABLE.test(title), title);
+});
+
+test('a resumed listing is complete when its listing was and this run read the rest', () => {
+  const partial = { source: 'https://xyz.net/forum/viewforum.php?f=1605', complete: false, pages_remaining: [],
+    failures: [{ status: 'browser_error', message: 'Target page, context or browser has been closed' }], topics: [] };
+  const done = resumedReport(partial, { complete: true, failures: [] });
+  assert.equal(done.complete, true, 'the earlier run\'s failure was in the part read again');
+  assert.deepEqual(done.failures, []);
+  assert.equal(done.source, partial.source, 'the rest of the listing stays');
+
+  const failedAgain = resumedReport(partial, { complete: false, failures: [{ status: 'cancelled' }] });
+  assert.equal(failedAgain.complete, false);
+  assert.deepEqual(failedAgain.failures, [{ status: 'cancelled' }], 'this run\'s failures');
+
+  const short = { ...partial, pages_remaining: ['https://xyz.net/forum/viewforum.php?f=1605&start=50'] };
+  assert.equal(resumedReport(short, { complete: true, failures: [] }).complete, false, 'listing pages were never read');
 });

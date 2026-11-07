@@ -6,7 +6,7 @@ import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { evaluateThroughNavigation, findChrome } from './chrome.mjs';
 import { readListing, mergeTopics } from './listing.mjs';
-import { collectMagnetBatch, applyMagnets } from './magnets.mjs';
+import { collectMagnetBatch, applyMagnets, resumedReport } from './magnets.mjs';
 import { distFile, platformFrom } from './platforms.mjs';
 
 const args = process.argv.slice(2);
@@ -147,7 +147,7 @@ try {
 
 const topics = mergeTopics(pages);
 const complete = !interrupted && failures.length === 0 && pending.size === 0;
-let report = existing ? { ...existing } : {
+let report = existing ? resumedReport(existing, { complete, failures }) : {
   source: platform.source,
   platform: platform.key,
   collected_at: new Date().toISOString(),
@@ -167,7 +167,7 @@ if (includeMagnets) {
 await mkdir(dirname(output), { recursive: true });
 const temporary = `${output}.${process.pid}.tmp`;
 await writeFile(temporary, JSON.stringify(report, null, 2) + '\n');
-const successful = complete && (!includeMagnets || (report.magnet_collection.complete && report.game_info_collection.complete));
+const successful = report.complete && (!includeMagnets || (report.magnet_collection.complete && report.game_info_collection.complete));
 if (successful) {
   await rename(temporary, output);
 } else {
