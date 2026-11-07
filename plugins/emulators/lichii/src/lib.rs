@@ -146,6 +146,7 @@ impl Flavor for LichiiFlavor {
     const CONSOLE: &'static str = CONSOLE;
     const FOLDER: &'static str = FOLDER;
     const TEST_RUN: bool = false;
+    const HAS_WINDOW: bool = true;
 
     fn release_source(&self, _settings: &Settings) -> PluginResult<ReleaseSource> {
         Ok(ReleaseSource { url: RELEASES.into(), cache: RelPath::new("cache/releases.json")?, prereleases: true })
@@ -237,6 +238,16 @@ impl Launcher for Lichii {
         args.extend(["-g".into(), LaunchArg::path(found.file.unwrap_or(found.dir))]);
         let env = [("EDEN_NX2_SPLIT".to_owned(), settings.gpu_split.value().into())].into();
         Ok(LaunchSpec { program: run.program, args, env, cwd: run.cwd, game_process: None })
+    }
+
+    /// Lichii's window: its controls, keys, firmware and graphics settings. A game started from
+    /// it gets the same GPU split as one Nexus starts.
+    async fn open_emulator(&self, config: &Value) -> PluginResult<Option<LaunchSpec>> {
+        let builds = self.emu.builds();
+        let settings = builds.settings().for_launch(config).await;
+        let run = builds.run().await?;
+        let env = [("EDEN_NX2_SPLIT".to_owned(), settings.gpu_split.value().into())].into();
+        Ok(Some(LaunchSpec { program: run.program, args: Vec::new(), env, cwd: run.cwd, game_process: None }))
     }
 }
 

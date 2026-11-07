@@ -289,6 +289,13 @@ pub trait Launcher: Send + Sync {
     /// `config` is the game's merged settings (emulator settings, then game settings).
     async fn prepare(&self, game: &str, config: &serde_json::Value) -> PluginResult<LaunchSpec>;
 
+    /// The emulator's own window, without a game: for the settings only it has, such as its
+    /// controls or a console's keys. `config` is the emulator's settings. `None`, the default,
+    /// for an emulator with no window of its own.
+    async fn open_emulator(&self, _config: &serde_json::Value) -> PluginResult<Option<LaunchSpec>> {
+        Ok(None)
+    }
+
     async fn on_exit(&self, game: &str, exit: &ExitInfo) -> PluginResult<()> {
         let _ = (game, exit);
         Ok(())
