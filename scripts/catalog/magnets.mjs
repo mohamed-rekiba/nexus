@@ -210,3 +210,12 @@ export function applyMagnets(report, batches) {
     failures: [...results.values()].filter(result => !['available', 'not_found'].includes(result.magnet_status)),
   } };
 }
+
+/** The report of a run that read the magnets and details of an earlier listing (`existing`,
+ * from `--enrich-existing`). The listing stays; `complete` and `failures` are this run's, since
+ * the earlier run's failures were in the part read again. It is complete only when this run is
+ * and the earlier listing has no listing pages left to read. */
+export function resumedReport(existing, run) {
+  const listed = (existing.pages_remaining ?? []).length === 0;
+  return { ...existing, complete: run.complete && listed, failures: run.failures };
+}

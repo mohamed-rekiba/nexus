@@ -112,6 +112,10 @@ The script guards the current files:
   there. `make clean` removes `dist/`, and the backups with it.
 - It stops at the first forum whose listing is partial (`list.mjs` exit 2), before it copies
   anything into `assets/catalog/`.
+- A run that stopped after it read every listing page (Chrome closed while it read topic pages,
+  for example) leaves `dist/catalog/<key>-topics.json.partial.json`. A full run in the next day
+  goes on from that file with `list.mjs --enrich-existing`: it reads only the topic pages left,
+  then deletes the file. Delete it yourself to read the forum again from its first page.
 - It checks every new file before the first copy, and copies only complete, English files that
   this run wrote.
 
@@ -194,7 +198,9 @@ Other options: `--output <file>`, `--max-pages <1-200>` (default 200),
 `--verification-timeout <seconds>` (default 180), `--concurrency <1-4>`, `--headless`. Use
 `--headless` only to look for faults: the check page stops a run without a window. Exit code 0
 means every page was read; 2 means the listing is partial and went to
-`<key>-topics.json.partial.json`.
+`<key>-topics.json.partial.json`. With `--enrich-existing <file>`, the listing comes from that file
+and only its topic pages are read; the result is complete when that file has no listing pages
+left and this run read every topic.
 
 ## Translation
 
