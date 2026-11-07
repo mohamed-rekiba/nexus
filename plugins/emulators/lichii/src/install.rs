@@ -5,16 +5,11 @@
 
 use std::sync::Arc;
 
-use emulator_kit::games::{SWITCH_FILES, switch_file};
+use emulator_kit::games::{is_switch_file, switch_file};
 use emulator_kit::installs::{self, DownloadFile, HostTree, Tree};
 use nexus_api::*;
 
 use crate::{FOLDER, Lichii};
-
-/// Whether `name` is a Switch game file of any kind: a game, an update or DLC.
-fn is_switch_file(name: &str) -> bool {
-    name.rsplit_once('.').is_some_and(|(_, e)| SWITCH_FILES.iter().any(|s| e.eq_ignore_ascii_case(s)))
-}
 
 /// The file name of `path`.
 fn file_name(path: &HostPath) -> String {
@@ -22,7 +17,8 @@ fn file_name(path: &HostPath) -> String {
 }
 
 /// The Switch files to install from `source`, each named by its own file name, and the title of
-/// the one game among them. A download with no game, or with two games, is refused.
+/// the one game among them. A download with no game, with two games, or with two files of one
+/// name in different folders is refused.
 async fn files(folders: &dyn Folders, source: &HostPath) -> PluginResult<(Vec<DownloadFile>, String)> {
     let files: Vec<DownloadFile> = match installs::Download::scan(folders, source).await? {
         Some(download) => download
@@ -36,6 +32,13 @@ async fn files(folders: &dyn Folders, source: &HostPath) -> PluginResult<(Vec<Do
             vec![DownloadFile { path: source.clone(), rel: file_name(source), size }]
         }
     };
+    let mut names = std::collections::HashSet::new();
+    if let Some(twice) = files.iter().find(|f| !names.insert(f.rel.to_ascii_lowercase())) {
+        return Err(PluginError::InvalidInput(format!(
+            "Two files are named {} in {}; choose a single release folder",
+            twice.rel, source.path
+        )));
+    }
     let games: Vec<String> = files.iter().filter_map(|f| switch_file(&f.rel).map(|(title, ..)| title)).collect();
     match games.as_slice() {
         [] => Err(PluginError::InvalidInput(format!(

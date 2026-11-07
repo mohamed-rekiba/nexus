@@ -106,6 +106,7 @@ impl Flavor for LichiiFlavor {
     type Settings = Settings;
     const NAME: &'static str = "Lichii";
     const CONSOLE: &'static str = CONSOLE;
+    const FOLDER: &'static str = FOLDER;
     const TEST_RUN: bool = false;
 
     fn release_source(&self, _settings: &Settings) -> PluginResult<ReleaseSource> {
@@ -195,7 +196,7 @@ impl Launcher for Lichii {
         if settings.fullscreen {
             args.push("-f".into());
         }
-        args.extend(["-g".into(), LaunchArg::path(found.dir)]);
+        args.extend(["-g".into(), LaunchArg::path(found.file.unwrap_or(found.dir))]);
         Ok(LaunchSpec { program: run.program, args, env: Default::default(), cwd: run.cwd, game_process: None })
     }
 }

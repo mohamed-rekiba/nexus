@@ -80,18 +80,25 @@ impl<F: Flavor> ConsoleEmulator<F> {
     }
 
     /// The packages to install in this console's folder of each packages folder, as installs go
-    /// to its folder of the games folder.
+    /// to its folder of the games folder. For the Switch, its game files (not updates or DLC).
     pub async fn candidates(&self) -> PluginResult<Vec<Installable>> {
         let folders = &self.host.folders;
         let mut out = Vec::new();
         for root in folders.roots(PACKAGES_FOLDER).await? {
-            let dir = HostPath::new(PACKAGES_FOLDER, root.root, RelPath::new(F::CONSOLE)?);
+            let dir = HostPath::new(PACKAGES_FOLDER, root.root, RelPath::new(F::FOLDER)?);
             let Ok(entries) = folders.list(&dir).await else { continue };
             for entry in entries {
                 if entry.is_dir {
                     continue;
                 }
                 let file = dir.join(&entry.name)?;
+                // A Switch game file is known by its name; its contents are encrypted.
+                if self.spec.console == Console::Switch {
+                    if games::switch_file(&entry.name).is_some() {
+                        out.push(Installable { source: file, label: entry.name });
+                    }
+                    continue;
+                }
                 let head = folders.read_range(&file, 0, 512).await.unwrap_or_default();
                 if installs::format(&head).is_some_and(|f| self.spec.packages.contains(&f)) {
                     out.push(Installable { source: file, label: entry.name });

@@ -34,7 +34,7 @@ process = [
 folder = "games"
 write = true
 
-# Downloads of Switch releases, which install from here. Read only.
+# Switch game files to install, in its Switch folder, and downloads of Switch releases. Read only.
 [[permissions.filesystem]]
 folder = "packages"
 

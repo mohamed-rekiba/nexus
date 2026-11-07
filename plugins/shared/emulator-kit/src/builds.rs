@@ -79,6 +79,9 @@ pub trait Flavor: Send + Sync + 'static {
     /// The console's name ("PS5"). It names the console's page on the Emulators screen, its
     /// games' platform, and its folder inside the games and packages folders.
     const CONSOLE: &'static str;
+    /// The console's folder inside the games and packages folders, when it isn't [`Flavor::CONSOLE`]
+    /// (Lichii's games are SWITCH, in `Switch/`).
+    const FOLDER: &'static str = Self::CONSOLE;
     /// Your own build's page shows its version, from its `--help` ([`Flavor::version`]).
     const OWN_VERSION: bool = false;
     /// A new build runs once with `--help` before it becomes current ([`Flavor::runs`]). Off
