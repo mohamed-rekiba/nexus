@@ -2,8 +2,8 @@
 //! files (but not their updates) from the player's folder, and the launch.
 
 use emu_lichii::{LichiiPlugin, RELEASES};
-use nexus_api::HOST_OPEN_EMULATOR;
 use nexus_api::*;
+use nexus_api::{Controller, HOST_OPEN_EMULATOR};
 use nexus_core::{Command, SessionCmd};
 use nexus_testkit::{FakeHost, FakeHttp, FakeSpawner, TestCore, contract};
 
@@ -226,4 +226,83 @@ async fn open_lichii_starts_its_own_window_without_a_game_and_no_game_starts_mea
     process.exit(0);
     test.until(nexus_core::Area::Sessions, |core| core.view().running.is_none()).await;
     assert!(test.core.view().home.games.iter().all(|g| g.last_played.is_empty()), "the window is not play time");
+}
+
+/// Where the build of `tag` keeps Lichii's program.
+fn app_run(test: &TestCore) -> std::path::PathBuf {
+    test.data_dir().join("plugins/emu-lichii/builds").join(TAG).join("squashfs-root/AppRun")
+}
+
+/// An Xbox 360 pad as SDL maps it on Linux, from SDL's controller database.
+fn xbox(port: u32) -> Controller {
+    Controller {
+        name: "Xbox 360 Controller".into(),
+        guid: "030000005e0400008e02000014010000".into(),
+        port,
+        mapping: "a:b0,b:b1,back:b6,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,guide:b8,leftshoulder:b4,\
+                  leftstick:b9,lefttrigger:a2,leftx:a0,lefty:a1,rightshoulder:b5,rightstick:b10,righttrigger:a5,\
+                  rightx:a3,righty:a4,start:b7,x:b2,y:b3"
+            .into(),
+    }
+}
+
+/// Lichii's own settings file, as its window writes it: the keyboard for player 1.
+const QT_CONFIG: &str = "[Renderer]\nbackend\\default=false\nbackend=1\n\n[Controls]\n\
+player_0_connected\\default=true\nplayer_0_connected=true\n\
+player_0_button_a\\default=true\nplayer_0_button_a=\"engine:keyboard,code:67,toggle:0\"\n";
+
+#[tokio::test]
+async fn games_start_in_eden_cli_with_a_settings_file_that_gives_each_controller_a_player() {
+    let host = FakeHost::new().platform(Some(Platform::Linux)).controllers(vec![xbox(0), xbox(1)]);
+    let releases = serde_json::json!([release(host.http(), TAG)]);
+    host.http().serve(RELEASES, serde_json::to_vec(&releases).unwrap());
+    let games = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(games.path().join("Switch")).unwrap();
+    std::fs::write(games.path().join("Switch/Celeste [01002B30028F6000][v0].nsp"), b"PFS0 game").unwrap();
+    let eden = tempfile::tempdir().unwrap();
+    std::fs::write(eden.path().join("qt-config.ini"), QT_CONFIG).unwrap();
+    let test = host.built_in(nexus_api::PluginBox::code(LichiiPlugin)).boot_core().await;
+    extract_appimages(test.spawner.clone());
+    for (name, path) in [("games", games.path()), ("eden-config", eden.path())] {
+        test.core.dispatch(Command::SetFolders { name: name.into(), paths: vec![path.into()] }).await.unwrap();
+    }
+    test.core.dispatch(Command::InstallEmulator { plugin: lichii(), version: None }).await.unwrap();
+    std::fs::create_dir_all(app_run(&test).parent().unwrap().join("usr/bin")).unwrap();
+    std::fs::write(app_run(&test).parent().unwrap().join("usr/bin/eden-cli"), b"\x7fELF eden-cli").unwrap();
+    test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
+
+    test.core
+        .dispatch(Command::Session(SessionCmd::Launch("emu-lichii:01002B30028F6000".parse().unwrap())))
+        .await
+        .unwrap();
+
+    let process = test.spawner.wait_for(2).await;
+    assert_eq!(process.command.program, app_run(&test).parent().unwrap().join("usr/bin/eden-cli"));
+    let args = &process.command.args;
+    assert_eq!(args[0], "-c");
+    let game = games.path().join("Switch/Celeste [01002B30028F6000][v0].nsp").display().to_string();
+    assert_eq!(args[2..], ["-f".to_owned(), "-g".to_owned(), game]);
+    let file = std::fs::read_to_string(&args[1]).unwrap();
+    let guid = "030000005e0400008e02000014010000";
+    for line in [
+        "[Renderer]".to_owned(),
+        "backend=1".to_owned(),
+        "player_0_connected=true".to_owned(),
+        "player_0_button_a\\default=false".to_owned(),
+        format!("player_0_button_a=\"engine:sdl,port:0,guid:{guid},button:1\""),
+        format!("player_0_button_b=\"engine:sdl,port:0,guid:{guid},button:0\""),
+        format!("player_0_button_x=\"engine:sdl,port:0,guid:{guid},button:3\""),
+        format!("player_0_button_zl=\"engine:sdl,port:0,guid:{guid},axis:2,threshold:0.5,invert:+\""),
+        format!("player_0_button_dup=\"engine:sdl,port:0,guid:{guid},hat:0,direction:up\""),
+        format!(
+            "player_0_lstick=\"engine:sdl,port:0,guid:{guid},axis_x:0,axis_y:1,offset_x:0.000000,offset_y:0.000000,invert_x:+,invert_y:+\""
+        ),
+        "player_1_connected\\default=false".to_owned(),
+        "player_1_connected=true".to_owned(),
+        format!("player_1_button_a=\"engine:sdl,port:1,guid:{guid},button:1\""),
+    ] {
+        assert!(file.lines().any(|l| l == line), "{line} in:\n{file}");
+    }
+    assert!(!file.contains("engine:keyboard,code:67"), "player 1's keyboard keys give way to the controller");
+    assert!(!file.contains("player_2_button_a="), "no third controller: player 3 stays as it was");
 }

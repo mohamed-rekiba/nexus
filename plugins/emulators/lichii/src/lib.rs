@@ -24,6 +24,7 @@ use nexus_api::serde::{Deserialize, Serialize};
 use nexus_api::serde_json::Value;
 use nexus_api::*;
 
+mod controls;
 mod install;
 
 const MANIFEST: &str = include_str!("../plugin.toml");
@@ -33,6 +34,10 @@ pub const RELEASES: &str = "https://api.github.com/repos/zortos293/Lichii/releas
 const CONSOLE: &str = "SWITCH";
 /// The folder of Switch games in the games folder.
 pub const FOLDER: &str = "Switch";
+/// Lichii's settings folder, where its window saves `qt-config.ini`.
+pub const CONFIG: &str = "eden-config";
+/// The settings file games start with, in the plugin's folder (see [`controls`]).
+const GAME_SETTINGS: &str = "eden-cli/config.ini";
 
 /// Lichii settings. Its other settings live in its own config file.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -202,7 +207,8 @@ impl CodePlugin for LichiiPlugin {
             own_row: false,
         };
         let emu = Arc::new(ConsoleEmulator::start(LichiiFlavor { platform: host.platform }, spec, host).await?);
-        let lichii = Arc::new(Lichii { emu: emu.clone() });
+        let controllers = ctx.services().get::<Controllers>().map(|c| (*c).clone());
+        let lichii = Arc::new(Lichii { emu: emu.clone(), controllers });
         Ok(Provided {
             catalog: Some(emu.clone()),
             downloader: Some(emu.builds().clone()),
@@ -220,6 +226,36 @@ inventory::submit! { PluginFactory::code(|| Box::new(LichiiPlugin)) }
 
 struct Lichii {
     emu: Arc<ConsoleEmulator<LichiiFlavor>>,
+    /// The host's controllers; `None` on a host without them.
+    controllers: Option<Controllers>,
+}
+
+impl Lichii {
+    /// The command-line program of the official build `tag`, when it has one.
+    async fn cli(&self, tag: &str) -> Option<RelPath> {
+        let cli = versions::folder(tag).ok()?.join("squashfs-root/usr/bin/eden-cli").ok()?;
+        self.emu.host().storage.exists(&cli).await.ok()?.then_some(cli)
+    }
+
+    /// Writes the settings file games start with: Lichii's own settings, with players 1 to 4
+    /// on the controllers connected now.
+    async fn game_settings(&self) -> PluginResult<RelPath> {
+        let folders = &self.emu.host().folders;
+        let mut base = String::new();
+        if let Some(root) = folders.roots(CONFIG).await.unwrap_or_default().first() {
+            let file = HostPath::new(CONFIG, root.root, RelPath::new("qt-config.ini")?);
+            if let Ok(bytes) = folders.read_range(&file, 0, MAX_FOLDER_READ).await {
+                base = String::from_utf8_lossy(&bytes).into_owned();
+            }
+        }
+        let connected = match &self.controllers {
+            Some(controllers) => controllers.connected().await,
+            None => Vec::new(),
+        };
+        let path = RelPath::new(GAME_SETTINGS)?;
+        self.emu.host().storage.write(&path, controls::settings_file(&base, &connected).as_bytes()).await?;
+        Ok(path)
+    }
 }
 
 #[async_trait]
@@ -230,14 +266,28 @@ impl Launcher for Lichii {
         // `config` is the emulator settings with the game's settings on top.
         let settings = builds.settings().for_launch(config).await;
         let run = builds.run().await?;
-        // Lichii takes the game file with -g; -f starts it in full screen.
+        // An official build starts the game in its command-line program: no Lichii window
+        // before or after, and the controllers from Nexus's settings file. Your own build
+        // starts Lichii as it is.
+        let cli = match &run.tag {
+            Some(tag) => self.cli(tag).await,
+            None => None,
+        };
         let mut args = Vec::new();
+        let program = match cli {
+            Some(cli) => {
+                args.extend(["-c".into(), LaunchArg::path(Location::Data(self.game_settings().await?))]);
+                Location::Data(cli)
+            }
+            None => run.program,
+        };
+        // Lichii takes the game file with -g; -f starts it in full screen.
         if settings.fullscreen {
             args.push("-f".into());
         }
         args.extend(["-g".into(), LaunchArg::path(found.file.unwrap_or(found.dir))]);
         let env = [("EDEN_NX2_SPLIT".to_owned(), settings.gpu_split.value().into())].into();
-        Ok(LaunchSpec { program: run.program, args, env, cwd: run.cwd, game_process: None })
+        Ok(LaunchSpec { program, args, env, cwd: run.cwd, game_process: None })
     }
 
     /// Lichii's window: its controls, keys, firmware and graphics settings. A game started from

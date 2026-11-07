@@ -478,6 +478,10 @@ asks again.
 
 - `HostInfo`: `api_version`, `platform`, `safe_mode`, `runs_32bit`.
 - `VpnGate`: `check()` tells whether the plugin may fetch now under "Download only through a VPN".
+- `Controllers`: `connected()` lists the game controllers the computer has now, as SDL3 reads them
+  with the hints Eden and its forks set: each one's name, SDL GUID, port and SDL mapping. The host
+  runs a probe (`nexus --probe-controllers`) each time, so it takes up to a second; without
+  SDL3 the list is empty. Lichii writes its players 1 to 4 from it.
   A plugin asks it before bulk fetches. It reports on the VPN only: the plugin's own HTTP does not
   go through the VPN's interface.
 
