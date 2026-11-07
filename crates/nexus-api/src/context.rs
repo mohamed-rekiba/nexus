@@ -89,8 +89,9 @@ pub trait Folders: Send + Sync {
     async fn roots(&self, folder: &str) -> PluginResult<Vec<FolderRoot>>;
     /// Entries of a folder, sorted by name. Empty when it doesn't exist.
     async fn list(&self, dir: &HostPath) -> PluginResult<Vec<DirEntry>>;
-    /// The bytes of every file under `dir`, counting at most [`MAX_SIZE_FILES`] entries.
-    /// Linked folders are not entered. 0 when it doesn't exist.
+    /// The bytes of every file under `dir`, counting at most [`MAX_SIZE_FILES`] entries, or
+    /// the bytes of `dir` when it is a file. Linked folders are not entered. 0 when it doesn't
+    /// exist.
     async fn size(&self, dir: &HostPath) -> PluginResult<u64>;
     async fn exists(&self, path: &HostPath) -> PluginResult<bool>;
     /// Up to `len` bytes from `offset`, at most [`MAX_FOLDER_READ`]. Fewer at the end of the

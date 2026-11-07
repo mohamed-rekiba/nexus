@@ -35,7 +35,8 @@ pub struct ConsoleSpec {
     pub console: Console,
     /// The package formats it installs games from.
     pub packages: &'static [Format],
-    pub compat: CompatList,
+    /// `None` for an emulator without one: its games have no compatibility badge.
+    pub compat: Option<CompatList>,
     /// Its default keyboard keys, as (button, keys).
     pub keys: &'static [(&'static str, &'static str)],
     /// The id of its section on a game's page.
@@ -103,7 +104,7 @@ impl<F: Flavor> ConsoleEmulator<F> {
     async fn compat_list(&self) -> HashMap<String, CompatInfo> {
         let Ok(cache) = RelPath::new("cache/compatibility.json") else { return Default::default() };
         let host = &self.host;
-        let list = &self.spec.compat;
+        let Some(list) = &self.spec.compat else { return Default::default() };
         match cache::cached_json(host.storage.as_ref(), host.http.as_ref(), &host.log, list.url, &cache, LISTS_TTL)
             .await
         {
@@ -149,7 +150,7 @@ impl<F: Flavor> Catalog for ConsoleEmulator<F> {
 impl<F: Flavor> Compatibility for ConsoleEmulator<F> {
     async fn status(&self, game: &str) -> PluginResult<CompatInfo> {
         let found = self.games.find(self.host.folders.as_ref(), game).await?;
-        let page = Some(self.spec.compat.page.to_owned());
+        let page = self.spec.compat.as_ref().map(|c| c.page.to_owned());
         Ok(match self.compat_list().await.remove(&found.title_id.to_uppercase()) {
             Some(info) => CompatInfo { page, ..info },
             None => CompatInfo { level: CompatLevel::Unknown, notes: None, source: None, page, tested: None },
@@ -177,7 +178,7 @@ impl<F: Flavor> Slots for ConsoleEmulator<F> {
     async fn items(&self, request: &SlotRequest) -> PluginResult<Vec<SlotItem>> {
         let item = |id: &str, content| SlotItem { id: id.into(), order: Order::default(), content };
         Ok(match (request.slot, request.game.as_deref()) {
-            (SlotId::GameBadge, Some(game)) => {
+            (SlotId::GameBadge, Some(game)) if self.spec.compat.is_some() => {
                 vec![item("compat", games::compat_badge(&self.status(game).await?, self.host.platform))]
             }
             (SlotId::GameDetailSection, Some(game)) => {
