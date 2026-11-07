@@ -5,7 +5,7 @@
 use std::path::Path;
 
 /// The list `BUNDLED_NAMES` in `src/lib.rs` reads too.
-const NAMES: [&str; 3] = include!("bundled-names.rs");
+const NAMES: [&str; 4] = include!("bundled-names.rs");
 
 fn main() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../assets/catalog");

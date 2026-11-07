@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Writes the catalog files Nexus reads, one for each console: `ps5.json`, `ps4.json` and `pc.json`
-// (the native Linux and Wine forums together), as catalog-sources.json lists them, from the
+// Writes the catalog files Nexus reads, one for each console: `ps5.json`, `ps4.json`,
+// `pc.json` (the native Linux and Wine forums together) and `switch.json`, as catalog-sources.json lists them, from the
 // complete, English listings in DIST. Nexus fetches them from `<catalog address>/<name>`. Nexus bundles no
 // catalog: the files go to DIST/publish/, not into assets/.
 import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';

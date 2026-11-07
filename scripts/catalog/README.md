@@ -1,16 +1,16 @@
 # Catalog collector
 
 These scripts make the catalog files that Nexus's Game Catalog plugin
-(`plugins/services/release-catalog`) reads, one for each console: `ps5.json`, `ps4.json` and
-`pc.json`. Each file lists the release topics of one or more RuTracker forums, in English, with
+(`plugins/services/release-catalog`) reads, one for each console: `ps5.json`, `ps4.json`,
+`pc.json` and `switch.json`. Each file lists the release topics of one or more RuTracker forums, in English, with
 their magnet links and game facts.
 
 ## How the catalogs reach Nexus
 
 - `assets/catalog-sources.json` names the forums each catalog comes from. The collector reads it,
   and the plugin's `build.rs` compiles the same file into Nexus.
-- `assets/catalog/ps5.json`, `ps4.json` and `pc.json` are the bundled catalogs. The plugin's
-  `build.rs` compiles these three into Nexus (the list is in `bundled-names.rs`); a build fails
+- `assets/catalog/ps5.json`, `ps4.json`, `pc.json` and `switch.json` are the bundled catalogs.
+  The plugin's `build.rs` compiles these four into Nexus (the list is in `bundled-names.rs`); a build fails
   when one is missing. Git holds a full set; `make catalog` and `make catalog-refresh` replace
   them, and the next build bundles the new ones.
 - In Nexus, the plugin uses the bundled catalog while its **Catalog address** setting is empty.
@@ -44,6 +44,14 @@ forum has:
 | `ps4` | f=973, PS4 games | `ps4.json` |
 | `linux` | f=1992, native Linux games | `pc.json` |
 | `wine` | f=2059, Linux games with Wine | `pc.json` |
+| `switch` | f=1605, Switch and Switch 2 games | `switch.json` |
+
+The Switch forum's titles start with `[Nintendo Switch]` or `[NSW2]`. Its `tag` is the first;
+every release has a torrent, so the second needs no tag. Its `[NRO]` topics are homebrew
+programs (PC ports, emulators), not games: the collector and the plugin leave them out.
+
+The bundled `switch.json` starts empty. Run `make catalog CONSOLE=switch` once to fill it; after
+that, `make catalog-refresh` updates it too.
 
 The plugin also reads the bundled file to learn what a listing's topics are for. It finds the
 forum by the `f=` number in the listing's `source`, else by the listing's `platform` key, and

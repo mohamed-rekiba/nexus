@@ -380,9 +380,11 @@ test('a release without details borrows the game facts of another release of the
 test('releases the launcher cannot play are left out by their tag', async () => {
   const { UNPLAYABLE } = await import('./platforms.mjs');
   for (const title of ['[PS VR Only] GORN [USA]', '[PS4 VR] Dreams', '[PS VR+PS Move] Job Simulator', '[PS4 Exclusive VR Only] Blood & Truth',
-    '[PS4 PS2 Classics] God of War [NTSC-U]', '[PS4 PS2 Classis] Star Wars', '[PSP-PS4] LocoRoco', '[PS4 PSX Classics] Ape Escape', '[PS4 homebrew] Store'])
+    '[PS4 PS2 Classics] God of War [NTSC-U]', '[PS4 PS2 Classis] Star Wars', '[PSP-PS4] LocoRoco', '[PS4 PSX Classics] Ape Escape', '[PS4 homebrew] Store',
+    '[Nintendo Switch] Prototype 2 (порт) [NRO][RUS/ENG] [7.38 GB]', '[Nintendo Switch] Mega Man X Regenesis (хоумбрю) [NRO][ENG]'])
     assert.ok(UNPLAYABLE.test(title), title);
   for (const title of ['[PS4] Firewatch [EUR]', '[PS4 Exclusive] God of War III (3) Remastered [EUR]', '[PS4 Exclusive PlayLink] That\'s You!',
-    'My Friend Peppa Pig [EUR/RUS]', '[PS5] Ghost of Tsushima', '[PS4] Vampyr [EUR]', '[PS4] Moving Out [EUR]'])
+    'My Friend Peppa Pig [EUR/RUS]', '[PS5] Ghost of Tsushima', '[PS4] Vampyr [EUR]', '[PS4] Moving Out [EUR]',
+    '[Nintendo Switch] Detention [NSZ][ENG] [1.07 GB]', '[NSW2] Kirby Air Riders [NUP][ENG] [19.84 GB]', '[Nintendo Switch] Minecraft [NSP][RUS/Multi11]'])
     assert.ok(!UNPLAYABLE.test(title), title);
 });

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Makes or updates the catalogs Nexus bundles: assets/catalog/ps5.json, ps4.json and pc.json.
+# Makes or updates the catalogs Nexus bundles: assets/catalog/ps5.json, ps4.json, pc.json and
+# switch.json.
 #
-#   scripts/catalog/update-catalogs.sh [--console ps5|ps4|pc] [--refresh] [--dry-run]
+#   scripts/catalog/update-catalogs.sh [--console ps5|ps4|pc|switch] [--refresh] [--dry-run]
 #
 # --console reads only that catalog's forums, and replaces only that catalog. Without it, every
 # catalog in assets/catalog-sources.json is made.
@@ -44,7 +45,7 @@ while [ $# -gt 0 ]; do
       shift
       ;;
     -h | --help)
-      sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
