@@ -26,6 +26,7 @@ use nexus_api::*;
 
 mod controls;
 mod install;
+mod nsz;
 
 const MANIFEST: &str = include_str!("../plugin.toml");
 /// Every release is a pre-release; a build comes out several times a day.

@@ -13,7 +13,7 @@ platforms = ["linux"]
 console = "Switch"
 capabilities = ["catalog", "downloader", "installer", "configurator", "launcher", "slots", "game_installer"]
 # What the install sheet says this emulator installs from.
-install_note = "Installs a Switch game from its game files (.nsp, .nsz, .xci, .xcz, .nup), with its update and DLC files, into the Switch folder of your game folders. Lichii needs your own keys and firmware in ~/.local/share/eden; Nexus doesn't provide them."
+install_note = "Installs a Switch game from its game files (.nsp, .nsz, .xci, .xcz, .nup), with its update and DLC files, into the Switch folder of your game folders. A solid .nsz, which Lichii can't play, becomes the .nsp it was made from. Lichii needs your own keys and firmware in ~/.local/share/eden; Nexus doesn't provide them."
 
 [permissions]
 # GitHub's API, release downloads and the CDN they redirect to.

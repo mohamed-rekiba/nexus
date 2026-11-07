@@ -49,6 +49,8 @@ release-catalog = { path = "plugins/services/release-catalog" }
 system-host = { path = "plugins/system/host" }
 
 aes = "0.9"
+# Solid NSZ files (Switch packages compressed whole), decompressed into NSPs by the Lichii plugin.
+zstd = { version = "0.14", default-features = false }
 async-trait = "0.1"
 cbc = "0.2"
 ed25519-dalek = "3"
