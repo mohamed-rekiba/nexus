@@ -31,8 +31,9 @@ pub fn is_switch_file(name: &str) -> bool {
 /// The Switch game in the file `name`, from the name alone: its files are encrypted, and their
 /// keys are the player's. A name like `Title [0100ABCDEF012000][v131072].nsp` gives the title,
 /// the title id and the version. `None` for another kind of file, and for an update or DLC: a
-/// base game's title id ends in `000`, and a name without a title id says "update", "upd" or
-/// "dlc".
+/// base game's title id ends in `000`, a tag that says "DLC" is never the game (a standalone app
+/// such as an art book has a game's title id), and a name without a title id says "update",
+/// "upd" or "dlc".
 pub fn switch_file(name: &str) -> Option<(String, String, String)> {
     if !is_switch_file(name) {
         return None;
@@ -47,9 +48,14 @@ pub fn switch_file(name: &str) -> Option<(String, String, String)> {
     if !title_id.is_empty() && !title_id.ends_with("000") {
         return None;
     }
-    let lower = stem.to_ascii_lowercase();
-    let mut words = lower.split(|c: char| !c.is_ascii_alphanumeric());
-    if title_id.is_empty() && words.any(|w| matches!(w, "update" | "upd" | "dlc")) {
+    let words = |text: &str| -> Vec<String> {
+        text.to_ascii_lowercase().split(|c: char| !c.is_ascii_alphanumeric()).map(str::to_owned).collect()
+    };
+    // A tag that says DLC: a release's standalone apps (an art book) have a game's title id.
+    if groups.iter().any(|g| words(g).iter().any(|w| w == "dlc")) {
+        return None;
+    }
+    if title_id.is_empty() && words(stem).iter().any(|w| matches!(w.as_str(), "update" | "upd" | "dlc")) {
         return None;
     }
     let version = groups
@@ -439,6 +445,10 @@ mod tests {
         );
         assert_eq!(game("Celeste [01002B30028F6800][v262144].nsp"), None, "an update");
         assert_eq!(game("Celeste DLC [01002B30028F7001][v0].nsp"), None, "an add-on");
+        let art_book =
+            "Sonic x Shadow Generation [Standalone DLC Digital Art Book] [010021301E9A4000][v0] (0.48 GB).nsz";
+        assert_eq!(game(art_book), None, "a standalone app the release calls DLC");
+        assert_eq!(game("Kirby Air Riders Update 1.1.nsp"), None, "an update by its name");
         assert_eq!(game("readme.txt"), None);
         assert_eq!(game("nsp"), None);
     }

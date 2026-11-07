@@ -644,6 +644,8 @@ async fn a_finished_switch_download_installs_its_game_files_and_shows_the_game_i
     let files: &[(&str, &[u8])] = &[
         ("Celeste/Celeste [01002B30028F6000][v0].nsp", b"PFS0 game"),
         ("Celeste/Updates/Celeste [01002B30028F6800][v262144].nsp", b"PFS0 update"),
+        // A standalone app sold as DLC: its title id ends in 000, like a game's.
+        ("Celeste/5 DLC/Celeste [Standalone DLC Digital Art Book] [010021301E9A4000][v0].nsz", b"NCZ art book"),
         ("Celeste/readme.nfo", b"release notes"),
     ];
     let info = serde_json::json!({ "name": "Celeste" });
