@@ -54,9 +54,10 @@ export const PLATFORMS = Object.fromEntries(Object.entries(SOURCES).flatMap(([na
 
 /** Console releases the launcher can't play, by their title's tag: games that need a VR headset
  * ("[PS VR Only]", "[PS4 VR]", "[PS VR+PS Move]"), PS2/PS1/PSP/retro re-releases ("[PS4 PS2
- * Classics]", "[PSP-PS4]"; shadPS4's compatibility list has none of them), and homebrew apps.
- * Mirrored in listing.mjs, which runs in the browser on its own. */
-export const UNPLAYABLE = /^\s*\[[^\]]*\b(?:VR|Move|homebrew|classics?|classis|PSP|PSX|PS2|PS1|SNES|Saturn)\b[^\]]*\]/i;
+ * Classics]", "[PSP-PS4]"; shadPS4's compatibility list has none of them), homebrew apps, and
+ * Switch homebrew programs ("[NRO]": PC ports and emulators for the console). The Game Catalog
+ * plugin leaves NRO topics out too (`is_game` in its `format.rs`). Mirrored in listing.mjs, which runs in the browser on its own. */
+export const UNPLAYABLE = /^\s*\[[^\]]*\b(?:VR|Move|homebrew|classics?|classis|PSP|PSX|PS2|PS1|SNES|Saturn)\b[^\]]*\]|\[NRO\]/i;
 
 /** `--platform <forum key>` from command-line arguments. The default is the first forum in
  * catalog-sources.json. */

@@ -17,7 +17,7 @@ function option(name, fallback) {
   return args[index + 1];
 }
 if (args.includes('--help')) {
-  console.log('Usage: node list.mjs [--platform ps5|ps4|linux|wine] [--output path] [--max-pages 200] [--verification-timeout 180] [--headless] [--include-magnets] [--enrich-existing path] [--concurrency 1-4]\n'
+  console.log('Usage: node list.mjs [--platform ps5|ps4|linux|wine|switch] [--output path] [--max-pages 200] [--verification-timeout 180] [--headless] [--include-magnets] [--enrich-existing path] [--concurrency 1-4]\n'
     + 'Reads listing/topic HTML only. Complete verification/login manually. Never opens magnet links or downloads torrents.');
   process.exit(0);
 }

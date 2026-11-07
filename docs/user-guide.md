@@ -189,7 +189,7 @@ which reads its files first. Press Download there to start it.
   one you do not, which opens its Game Hub on its releases.
 
 The catalogs come from the Game Catalog plugin (Emulators, then Game Catalog). It uses the copies
-bundled in `assets/catalog/` (`ps5.json`, `ps4.json`, `pc.json`), or newer ones from its **Catalog
+bundled in `assets/catalog/` (`ps5.json`, `ps4.json`, `pc.json`, `switch.json`), or newer ones from its **Catalog
 address** setting. With **Refresh from the forums** on, it brings each catalog up to date from the
 forums named in `assets/catalog-sources.json` (or the **Sources address**). Its page shows the last
 refresh and has Refresh now. Its "Show PS5 games" setting (one for each console you have an emulator

@@ -1,0 +1,10 @@
+{
+  "source": "https://rutracker.net/forum/viewforum.php?f=1605",
+  "platform": "switch",
+  "collected_at": "2026-11-07T00:00:00Z",
+  "complete": true,
+  "scope": "Placeholder until the first full run: make catalog CONSOLE=switch",
+  "translation": { "language": "en" },
+  "topic_count": 0,
+  "topics": []
+}
