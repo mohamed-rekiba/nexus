@@ -544,6 +544,7 @@ async fn downloaded(
         .built_in(PluginBox::code(emu_shadps4::ShadPlugin))
         .built_in(PluginBox::code(emu_kyty::KytyPlugin))
         .built_in(PluginBox::code(emu_pc::PcPlugin))
+        .built_in(PluginBox::code(emu_lichii::LichiiPlugin))
         .built_in(PluginBox::code(release_catalog::ReleaseCatalog::default()))
         .boot_core()
         .await;
@@ -554,7 +555,7 @@ async fn downloaded(
     // releases push this one off the Catalog's first page.
     let empty = serde_json::json!({ "complete": true, "translation": { "language": "en" }, "topic_count": 0,
         "topics": [] });
-    for other in ["pc", "ps4", "ps5"].into_iter().filter(|c| *c != console.to_ascii_lowercase()) {
+    for other in ["pc", "ps4", "ps5", "switch"].into_iter().filter(|c| *c != console.to_ascii_lowercase()) {
         t.http.serve(&format!("https://xyz.dev/c/{other}.json"), empty.to_string());
     }
     t.torrents.has(HASH, "Game", files);
@@ -578,7 +579,9 @@ async fn downloaded(
         .await
         .unwrap();
     let ready = until(&t, "ready").await;
-    assert!(ready.install_note.starts_with(&format!("Installs a {console} game from")), "{}", ready.install_note);
+    // The note names the console as a player reads it: the catalog's SWITCH is "Switch".
+    let shown = if console == "SWITCH" { "Switch" } else { console };
+    assert!(ready.install_note.starts_with(&format!("Installs a {shown} game from")), "{}", ready.install_note);
     act(&t, TorrentAction::Start).await;
     t.torrents.complete(HASH);
     until(&t, "complete").await;
@@ -634,6 +637,18 @@ async fn a_finished_ps5_download_installs_and_shows_in_the_library() {
     let info = serde_json::json!({ "name": "Unpacked", "title_id": "PPSA33333", "region": "EUR", "version": "v01.00" });
     let games = download_and_install("PS5", topic("[PS5] Unpacked [EUR / v01.00]", info), files).await;
     assert!(games.contains(&"PS5 Unpacked".to_owned()), "{games:?}");
+}
+
+#[tokio::test]
+async fn a_finished_switch_download_installs_its_game_files_and_shows_the_game_in_the_library() {
+    let files: &[(&str, &[u8])] = &[
+        ("Celeste/Celeste [01002B30028F6000][v0].nsp", b"PFS0 game"),
+        ("Celeste/Updates/Celeste [01002B30028F6800][v262144].nsp", b"PFS0 update"),
+        ("Celeste/readme.nfo", b"release notes"),
+    ];
+    let info = serde_json::json!({ "name": "Celeste" });
+    let games = download_and_install("SWITCH", topic("[Nintendo Switch] Celeste [NSP][ENG] [1 GB]", info), files).await;
+    assert!(games.contains(&"SWITCH Celeste".to_owned()), "{games:?}");
 }
 
 #[tokio::test]

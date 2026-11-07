@@ -318,11 +318,14 @@ fn is_game(title: &str, genre: &str, title_id: &str, magnet: &str) -> bool {
     !app && !thread && !named && !homebrew
 }
 
-/// The console a topic is for: its game info's, else the `[PS5]` tag in its title, else its
-/// title id's.
+/// The consoles a topic may name itself, upper case.
+const CONSOLES: [&str; 4] = ["PS5", "PS4", "PC", "SWITCH"];
+
+/// The console a topic is for: its game info's, else the `[PS5]` tag in its title (`[Nintendo
+/// Switch]` or `[NSW2]` for a Switch game), else its title id's.
 fn platform(info: &GameInfo, title: &str, title_id: &str) -> String {
     let named = text(&info.platform).to_ascii_uppercase();
-    if named == "PS5" || named == "PS4" || named == "PC" {
+    if CONSOLES.contains(&named.as_str()) {
         return named;
     }
     let upper = title.to_ascii_uppercase();
@@ -330,6 +333,8 @@ fn platform(info: &GameInfo, title: &str, title_id: &str) -> String {
         "PS5".into()
     } else if upper.contains("[PS4]") {
         "PS4".into()
+    } else if upper.contains("[NINTENDO SWITCH]") || upper.contains("[NSW2]") {
+        "SWITCH".into()
     } else if title_id.starts_with("PPSA") {
         "PS5".into()
     } else if title_id.starts_with("CUSA") {
@@ -342,12 +347,12 @@ fn platform(info: &GameInfo, title: &str, title_id: &str) -> String {
 }
 
 /// What a topic says it is for in its own fields, as the collector's published files write
-/// them: its console (`platform`: `PS5`, `PS4` or `PC`) and the system a PC release is for
+/// them: its console (`platform`: `PS5`, `PS4`, `PC` or `SWITCH`) and the system a PC release is for
 /// (`system`). `None` for a field it doesn't have. Its `wine_packed` is read by
 /// [`packed_with_wine`].
 fn declared(topic: &Topic) -> (Option<String>, Option<String>) {
     let platform = text(&topic.platform).to_ascii_uppercase();
-    let platform = ["PS5", "PS4", "PC"].contains(&platform.as_str()).then_some(platform);
+    let platform = CONSOLES.contains(&platform.as_str()).then_some(platform);
     let system = Some(text(&topic.system).to_ascii_lowercase()).filter(|s| !s.is_empty());
     (platform, system)
 }

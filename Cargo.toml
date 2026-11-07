@@ -11,6 +11,7 @@ members = [
     "plugins/shared/emulator-kit",
     "plugins/emulators/kytyps5",
     "plugins/emulators/shadps4",
+    "plugins/emulators/lichii",
     "plugins/emulators/pc",
     "plugins/emulators/steam",
     "plugins/services/playstation-store",
@@ -40,6 +41,7 @@ theme-default = { path = "plugins/themes/default" }
 emulator-kit = { path = "plugins/shared/emulator-kit" }
 emu-kyty = { path = "plugins/emulators/kytyps5" }
 emu-shadps4 = { path = "plugins/emulators/shadps4" }
+emu-lichii = { path = "plugins/emulators/lichii" }
 emu-pc = { path = "plugins/emulators/pc" }
 emu-steam = { path = "plugins/emulators/steam" }
 playstation-store = { path = "plugins/services/playstation-store" }

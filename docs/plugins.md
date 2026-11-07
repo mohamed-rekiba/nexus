@@ -772,8 +772,8 @@ it, so a plugin does not name the host's screens. `PluginError` converts from `I
 
 ## Shared code: emulator-kit
 
-`emulator-kit` (`plugins/shared/emulator-kit`) is a crate, not a plugin. Two emulators use it
-as a whole (KytyPS5 and shadPS4), and the PC plugin uses parts of it. It depends on `nexus-api` like
+`emulator-kit` (`plugins/shared/emulator-kit`) is a crate, not a plugin. Three emulators use it
+as a whole (KytyPS5, shadPS4 and Lichii), and the PC plugin uses parts of it. It depends on `nexus-api` like
 a plugin, plus `tokio` and the Kraken decoder for PS5 packages.
 
 A console emulator describes itself, and the kit runs the rest:

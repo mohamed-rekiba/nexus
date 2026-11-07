@@ -16,6 +16,7 @@ mod groups;
 mod hardware;
 mod kyty;
 mod launcher_update;
+mod lichii;
 mod lifecycle;
 mod metadata;
 mod pc;
