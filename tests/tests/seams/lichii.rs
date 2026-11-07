@@ -116,6 +116,30 @@ async fn the_appimage_installs_without_a_test_run_and_starts_the_game_file_in_fu
     assert_eq!(process.command.program, app_run);
     let game = games.path().join("Switch/Celeste/Celeste [01002B30028F6000][v0].nsp").display().to_string();
     assert_eq!(process.command.args, ["-f".to_owned(), "-g".to_owned(), game]);
+    // Lichii's split GPU thread leaves Switch 2 games black on some PCs: off unless turned on.
+    assert_eq!(process.command.env.get("EDEN_NX2_SPLIT").map(String::as_str), Some("0"));
+}
+
+#[tokio::test]
+async fn a_game_whose_settings_choose_another_gpu_split_starts_with_it() {
+    let (test, _games) = boot().await;
+    test.core.dispatch(Command::InstallEmulator { plugin: lichii(), version: None }).await.unwrap();
+    test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
+    let game = "emu-lichii:01002B30028F6000";
+    test.core
+        .dispatch(Command::SetConfig {
+            plugin: lichii(),
+            // A game's settings are under its id in the plugin.
+            scope: ConfigScope::Game("01002B30028F6000".into()),
+            value: serde_json::json!({ "gpu_split": "2" }),
+        })
+        .await
+        .unwrap();
+
+    test.core.dispatch(Command::Session(SessionCmd::Launch(game.parse().unwrap()))).await.unwrap();
+
+    let process = test.spawner.wait_for(2).await;
+    assert_eq!(process.command.env.get("EDEN_NX2_SPLIT").map(String::as_str), Some("2"));
 }
 
 #[tokio::test]

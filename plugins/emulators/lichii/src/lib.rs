@@ -37,11 +37,16 @@ pub const FOLDER: &str = "Switch";
 /// Lichii settings. Its other settings live in its own config file.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(crate = "nexus_api::serde", deny_unknown_fields)]
-#[schemars(crate = "nexus_api::schemars", extend("x-order" = ["own_build", "fullscreen"]))]
+#[schemars(crate = "nexus_api::schemars", extend("x-order" = ["own_build", "fullscreen", "gpu_split"]))]
 pub struct Settings {
     #[serde(default = "yes")]
     #[schemars(title = "Full screen")]
     pub fullscreen: bool,
+    /// How Lichii splits a Switch 2 game's GPU work between threads (EDEN_NX2_SPLIT). It wins
+    /// over Lichii's nx2_switches.txt files.
+    #[serde(default)]
+    #[schemars(title = "Split the GPU work")]
+    pub gpu_split: GpuSplit,
     /// Runs the Lichii you built or installed: from the folder you map as lichii-build, or
     /// from your PATH. Installing an official build turns this off. Saves are shared: Lichii
     /// keeps them in Eden's folder.
@@ -56,7 +61,7 @@ fn yes() -> bool {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { fullscreen: true, own_build: false }
+        Self { fullscreen: true, gpu_split: GpuSplit::default(), own_build: false }
     }
 }
 
@@ -76,6 +81,39 @@ pub struct GameSettings {
     #[serde(default)]
     #[schemars(title = "Full screen")]
     pub fullscreen: Option<bool>,
+    #[serde(default)]
+    #[schemars(title = "Split the GPU work")]
+    pub gpu_split: Option<GpuSplit>,
+}
+
+/// Lichii's split of a Switch 2 game's GPU work (EDEN_NX2_SPLIT, NX2_GPU_THREAD_SPLIT.md in
+/// Lichii). Lichii's own default, 2, leaves some games black on some PCs (Mario Kart World on
+/// AMD with Mesa's radv, build 94), so Nexus starts from one thread.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(crate = "nexus_api::serde")]
+#[schemars(crate = "nexus_api::schemars")]
+pub enum GpuSplit {
+    /// One thread (works in every game)
+    #[default]
+    #[serde(rename = "0")]
+    Off,
+    /// Engine work on a second thread
+    #[serde(rename = "1")]
+    Methods,
+    /// Engine work and macros on a second thread (fastest; black screen in some games)
+    #[serde(rename = "2")]
+    Macros,
+}
+
+impl GpuSplit {
+    /// The value of EDEN_NX2_SPLIT.
+    pub fn value(self) -> &'static str {
+        match self {
+            Self::Off => "0",
+            Self::Methods => "1",
+            Self::Macros => "2",
+        }
+    }
 }
 
 /// The official build for this system and processor: the Linux AppImage, not the `-pgo` one.
@@ -197,7 +235,8 @@ impl Launcher for Lichii {
             args.push("-f".into());
         }
         args.extend(["-g".into(), LaunchArg::path(found.file.unwrap_or(found.dir))]);
-        Ok(LaunchSpec { program: run.program, args, env: Default::default(), cwd: run.cwd, game_process: None })
+        let env = [("EDEN_NX2_SPLIT".to_owned(), settings.gpu_split.value().into())].into();
+        Ok(LaunchSpec { program: run.program, args, env, cwd: run.cwd, game_process: None })
     }
 }
 
