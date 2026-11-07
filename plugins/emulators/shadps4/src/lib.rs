@@ -202,7 +202,7 @@ impl CodePlugin for ShadPlugin {
         let spec = ConsoleSpec {
             console: Console::Ps4,
             packages: &[Format::Ps4Package],
-            compat: CompatList { url: COMPATIBILITY, page: LIST_PAGE, parse: compat::shad },
+            compat: Some(CompatList { url: COMPATIBILITY, page: LIST_PAGE, parse: compat::shad }),
             keys: KEYS,
             section: "shadps4",
             version_row: true,

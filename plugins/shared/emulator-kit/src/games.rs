@@ -1,5 +1,5 @@
 //! Installed console games in a named host folder: folders with `sce_sys/param.json` (PS5)
-//! or `sce_sys/param.sfo` (PS4).
+//! or `sce_sys/param.sfo` (PS4), and Switch game files (see [`switch_file`]).
 //!
 //! Each of the player's folders is searched three folders down, for layouts like
 //! `Games/PS5/<Title>/<PPSAxxxxx-app0>`.
@@ -15,6 +15,40 @@ use crate::sfo;
 pub enum Console {
     Ps5,
     Ps4,
+    /// Switch and Switch 2 games, each one file.
+    Switch,
+}
+
+/// The extensions of a Switch game file: a package (`.nsp`), a cartridge image (`.xci`),
+/// their compressed forms (`.nsz`, `.xcz`), and a Switch 2 package (`.nup`).
+pub const SWITCH_FILES: [&str; 5] = ["nsp", "nsz", "xci", "xcz", "nup"];
+
+/// The Switch game in the file `name`, from the name alone: its files are encrypted, and their
+/// keys are the player's. A name like `Title [0100ABCDEF012000][v131072].nsp` gives the title,
+/// the title id and the version. `None` for another kind of file, and for an update or DLC: a
+/// base game's title id ends in `000`.
+pub fn switch_file(name: &str) -> Option<(String, String, String)> {
+    let (stem, extension) = name.rsplit_once('.')?;
+    if !SWITCH_FILES.iter().any(|e| extension.eq_ignore_ascii_case(e)) {
+        return None;
+    }
+    let groups: Vec<&str> = stem.split('[').skip(1).filter_map(|g| g.split_once(']').map(|(g, _)| g.trim())).collect();
+    let title_id = groups
+        .iter()
+        .find(|g| g.len() == 16 && g.chars().all(|c| c.is_ascii_hexdigit()))
+        .map(|g| g.to_ascii_uppercase())
+        .unwrap_or_default();
+    if !title_id.is_empty() && !title_id.ends_with("000") {
+        return None;
+    }
+    let version = groups
+        .iter()
+        .find(|g| g.len() > 1 && g[..1].eq_ignore_ascii_case("v") && g[1..].chars().all(|c| c.is_ascii_digit()))
+        .map(|g| g.to_ascii_lowercase())
+        .unwrap_or_default();
+    let title = stem.split('[').next().unwrap_or(stem).trim();
+    let title = if title.is_empty() { stem.trim() } else { title };
+    Some((title.to_owned(), title_id, version))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -70,6 +104,8 @@ pub fn ps5_param(bytes: &[u8]) -> Option<(String, String)> {
 pub async fn read_game(folders: &dyn Folders, console: Console, dir: &HostPath) -> Option<FoundGame> {
     let sce = dir.join("sce_sys").ok()?;
     match console {
+        // A Switch game is a file: see `scan`.
+        Console::Switch => None,
         Console::Ps5 => {
             let p: Value = serde_json::from_slice(&read(folders, &sce.join("param.json").ok()?).await?).ok()?;
             let localized = &p["localizedParameters"];
@@ -140,8 +176,26 @@ pub async fn scan(folders: &dyn Folders, folder: &str, console: Console) -> Plug
                 }
                 // A root that can't be listed (not there yet) holds no games.
                 for child in folders.list(&dir).await.unwrap_or_default() {
-                    if child.is_dir && !child.name.starts_with('.') {
+                    if child.name.starts_with('.') {
+                        continue;
+                    }
+                    if child.is_dir {
                         next.push(dir.join(&child.name)?);
+                    } else if console == Console::Switch
+                        && let Some((title, title_id, version)) = switch_file(&child.name)
+                    {
+                        let file = dir.join(&child.name)?;
+                        found.push(FoundGame {
+                            id: String::new(),
+                            title,
+                            title_id,
+                            content_id: String::new(),
+                            version,
+                            age: None,
+                            dir: file,
+                            icon: None,
+                            background: None,
+                        });
                     }
                 }
             }
@@ -265,7 +319,16 @@ impl FoundGame {
         if !self.content_id.is_empty() {
             facts.push(GameFact::new("content-id", "Content ID", &self.content_id));
         }
-        facts.push(GameFact::new("folder", "Folder", self.dir.path.as_str()));
+        let file = self
+            .dir
+            .path
+            .as_str()
+            .rsplit_once('.')
+            .is_some_and(|(_, e)| SWITCH_FILES.contains(&e.to_ascii_lowercase().as_str()));
+        match file {
+            true => facts.push(GameFact::new("file", "File", self.dir.path.as_str())),
+            false => facts.push(GameFact::new("folder", "Folder", self.dir.path.as_str())),
+        }
         nexus_api::GameDetails {
             folder: Some(self.dir.clone()),
             also: Vec::new(),
@@ -326,5 +389,27 @@ fn level_badge(level: nexus_api::CompatLevel) -> (&'static str, nexus_api::Tone)
         CompatLevel::Boots => ("Boots", Tone::Warning),
         CompatLevel::Nothing => ("Doesn't start", Tone::Danger),
         CompatLevel::Unknown => ("Not tested", Tone::Neutral),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_switch_file_s_name_gives_its_title_id_and_version_and_updates_are_not_games() {
+        let game = switch_file;
+        let owned = |t: &str, id: &str, v: &str| Some((t.to_owned(), id.to_owned(), v.to_owned()));
+        assert_eq!(game("Celeste [01002b30028f6000][v0].nsp"), owned("Celeste", "01002B30028F6000", "v0"));
+        assert_eq!(game("Kirby Air Riders [NUP].NUP"), owned("Kirby Air Riders", "", ""));
+        assert_eq!(game("Detention.xcz"), owned("Detention", "", ""));
+        assert_eq!(
+            game("Dark Souls II (2) [0100ABCDEF012000][US][v65536].xci"),
+            owned("Dark Souls II (2)", "0100ABCDEF012000", "v65536")
+        );
+        assert_eq!(game("Celeste [01002B30028F6800][v262144].nsp"), None, "an update");
+        assert_eq!(game("Celeste DLC [01002B30028F7001][v0].nsp"), None, "an add-on");
+        assert_eq!(game("readme.txt"), None);
+        assert_eq!(game("nsp"), None);
     }
 }

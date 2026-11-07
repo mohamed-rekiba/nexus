@@ -81,6 +81,10 @@ pub trait Flavor: Send + Sync + 'static {
     const CONSOLE: &'static str;
     /// Your own build's page shows its version, from its `--help` ([`Flavor::version`]).
     const OWN_VERSION: bool = false;
+    /// A new build runs once with `--help` before it becomes current ([`Flavor::runs`]). Off
+    /// for an emulator whose `--help` opens its window and never ends (Lichii): its build
+    /// becomes current once its program is there.
+    const TEST_RUN: bool = true;
     /// The style of "Switch to official builds" on the page.
     const OFFICIAL_STYLE: ActionStyle = ActionStyle::Secondary;
 
@@ -408,8 +412,11 @@ impl<F: Flavor> Installer for BuildManager<F> {
         // Downloads can lose the flag.
         storage.set_executable(&program).await?;
         // Before anything moves, so a build that doesn't run never takes the data.
-        let ran = self.help(&Location::Data(program), MAX_PROGRAM_TIME).await;
-        if !ran.is_some_and(|help| self.flavor.runs(&help)) {
+        let ran = match F::TEST_RUN {
+            true => self.help(&Location::Data(program), MAX_PROGRAM_TIME).await.is_some_and(|h| self.flavor.runs(&h)),
+            false => true,
+        };
+        if !ran {
             self.versions.discard(version).await?;
             return Err(PluginError::Precondition(format!(
                 "{} {} does not run on this system",

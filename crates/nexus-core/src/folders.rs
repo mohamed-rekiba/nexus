@@ -280,6 +280,12 @@ impl HostFolders {
 /// The bytes of every file under `dir`, at most `MAX_SIZE_FILES` entries, without entering
 /// linked folders.
 fn folder_size(dir: &std::path::Path) -> u64 {
+    // A game that is one file (a Switch game) is its own size.
+    if let Ok(meta) = std::fs::metadata(dir)
+        && meta.is_file()
+    {
+        return meta.len();
+    }
     let (mut total, mut entries, mut todo) = (0u64, 0usize, vec![dir.to_path_buf()]);
     while let Some(dir) = todo.pop() {
         let Ok(read) = std::fs::read_dir(&dir) else { continue };
