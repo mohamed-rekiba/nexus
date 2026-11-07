@@ -13,7 +13,7 @@ game needs: the library, downloads, installs, launching, controller input and up
 |---|---|---|
 | PS5 | PS5 games, with [KytyPS5](https://github.com/KytyPS5/KytyPS5) | Linux, macOS, Windows |
 | PS4 | PS4 games, with [shadPS4](https://github.com/shadps4-emu/shadPS4) | Linux, macOS, Windows |
-| Switch | Switch and Switch 2 games, with [Lichii](https://github.com/zortos293/Lichii). You provide your own keys and firmware. | Linux |
+| Switch | Switch and Switch 2 games, with [Lichii](https://github.com/zortos293/Lichii). Up to 4 controllers are set up for you; you provide your own keys and firmware. | Linux |
 | PC | PC games, natively or through Wine or Proton | Linux, macOS, Windows |
 | Steam | The games Steam installed, played through Steam | Linux |
 

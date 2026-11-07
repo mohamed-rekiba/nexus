@@ -23,6 +23,8 @@ network = ["api.github.com", "github.com", "*.githubusercontent.com"]
 # Your own build: in the folder you map as lichii-build, or on your PATH.
 process = [
     "builds/*/squashfs-root/AppRun",
+    # Games start in Lichii's command-line program, with Nexus's settings file (-c).
+    "builds/*/squashfs-root/usr/bin/eden-cli",
     "builds/*/*.AppImage",
     "folder:lichii-build",
     "system:lichii",
@@ -37,6 +39,14 @@ write = true
 # Switch game files to install, in its Switch folder, and downloads of Switch releases. Read only.
 [[permissions.filesystem]]
 folder = "packages"
+
+# Lichii's settings, as its window saves them (qt-config.ini): games start with them, and with
+# players 1 to 4 on the controllers you have. Read only.
+[[permissions.filesystem]]
+folder = "eden-config"
+default = "~/.config/eden"
+title = "Lichii settings"
+after = "own_build"
 
 # A Lichii you built or installed yourself. Read only.
 [[permissions.filesystem]]

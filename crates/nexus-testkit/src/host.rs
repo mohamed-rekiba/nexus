@@ -35,6 +35,7 @@ pub struct FakeHost {
     network: FakeNetwork,
     archives: FakeArchives,
     hardware: Option<nexus_core::Specs>,
+    controllers: Vec<nexus_api::Controller>,
     free_space: Option<u64>,
     /// Folders on a disk of their own, and its free bytes.
     disks: Vec<(PathBuf, u64)>,
@@ -83,6 +84,7 @@ impl FakeHost {
             network: FakeNetwork::default(),
             archives: FakeArchives::default(),
             hardware: None,
+            controllers: Vec::new(),
             free_space: None,
             disks: Vec::new(),
             first_run: false,
@@ -99,6 +101,12 @@ impl FakeHost {
     /// The computer the "This PC" check sees. Without it the check finds nothing.
     pub fn hardware(mut self, specs: nexus_core::Specs) -> Self {
         self.hardware = Some(specs);
+        self
+    }
+
+    /// The game controllers the computer has. Without it there are none.
+    pub fn controllers(mut self, controllers: Vec<nexus_api::Controller>) -> Self {
+        self.controllers = controllers;
         self
     }
 
@@ -246,8 +254,13 @@ impl FakeHost {
             .network(Arc::new(self.network.clone()))
             .archives(Arc::new(self.archives.clone()))
             .clock(Arc::new(self.clock.clone()));
-        if self.hardware.is_some() || self.free_space.is_some() || !self.disks.is_empty() {
-            let hardware = FixedHardware(self.hardware.unwrap_or_default(), self.free_space, self.disks);
+        if self.hardware.is_some()
+            || self.free_space.is_some()
+            || !self.disks.is_empty()
+            || !self.controllers.is_empty()
+        {
+            let hardware =
+                FixedHardware(self.hardware.unwrap_or_default(), self.free_space, self.disks, self.controllers);
             builder = builder.hardware(Arc::new(hardware));
         }
         for (plugin, third_party) in self.plugins {
@@ -374,7 +387,7 @@ impl TestHost {
 }
 
 /// A computer with these specs, this much free space on each disk, and the disks of their own.
-struct FixedHardware(nexus_core::Specs, Option<u64>, Vec<(PathBuf, u64)>);
+struct FixedHardware(nexus_core::Specs, Option<u64>, Vec<(PathBuf, u64)>, Vec<nexus_api::Controller>);
 
 impl nexus_core::Hardware for FixedHardware {
     fn specs(&self) -> nexus_core::Specs {
@@ -383,5 +396,9 @@ impl nexus_core::Hardware for FixedHardware {
 
     fn free_bytes(&self, path: &std::path::Path) -> Option<u64> {
         self.2.iter().find(|(disk, _)| path.starts_with(disk)).map(|(_, free)| *free).or(self.1)
+    }
+
+    fn controllers(&self) -> Vec<nexus_api::Controller> {
+        self.3.clone()
     }
 }

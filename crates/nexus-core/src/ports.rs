@@ -384,6 +384,11 @@ pub trait Hardware: Send + Sync {
     /// The free bytes on the disk that holds `path`, which must exist; `None` when the system
     /// doesn't say. Quick: one system call.
     fn free_bytes(&self, path: &std::path::Path) -> Option<u64>;
+    /// The game controllers connected now ([`nexus_api::Controllers`]). It may take a second:
+    /// call it off the async threads. None by default.
+    fn controllers(&self) -> Vec<nexus_api::Controller> {
+        Vec::new()
+    }
 }
 
 /// A computer the launcher can't look at. The default until the app plugs in a real one.

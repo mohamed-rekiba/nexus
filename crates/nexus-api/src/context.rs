@@ -333,6 +333,44 @@ impl VpnGate {
     }
 }
 
+/// A game controller the computer has now, as SDL3 sees it with the hints an SDL-based emulator
+/// sets. An emulator that maps controllers by SDL (Lichii) writes its settings from this.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Controller {
+    /// What SDL calls it ("Xbox Series X Controller").
+    pub name: String,
+    /// SDL's GUID for it, 32 lowercase hex digits, with the two bytes of its name's checksum
+    /// zeroed, as Eden and its forks write it.
+    pub guid: String,
+    /// Which controller of this GUID it is, from 0, in the order SDL lists them.
+    pub port: u32,
+    /// SDL's mapping of its inputs to a gamepad's, without the GUID and name in front:
+    /// `a:b0,b:b1,dpup:h0.1,leftx:a0,lefttrigger:a2,...`.
+    pub mapping: String,
+}
+
+/// Lists the controllers the computer has now. The host's runs a probe each time, so it may
+/// take a second.
+#[async_trait]
+pub trait ControllerList: Send + Sync {
+    async fn connected(&self) -> Vec<Controller>;
+}
+
+/// The host's [`ControllerList`], in the service registry.
+#[derive(Clone)]
+pub struct Controllers(Arc<dyn ControllerList>);
+
+impl Controllers {
+    pub fn new(list: Arc<dyn ControllerList>) -> Self {
+        Self(list)
+    }
+
+    /// The controllers connected now, in SDL's order.
+    pub async fn connected(&self) -> Vec<Controller> {
+        self.0.connected().await
+    }
+}
+
 /// Everything the host gives a plugin at `init`.
 #[derive(Clone)]
 pub struct PluginContext {

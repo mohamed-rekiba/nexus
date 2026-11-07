@@ -761,6 +761,7 @@ impl Kernel {
                 runs_32bit: host.runs_32bit,
             }))
             .insert(Arc::new(VpnGate::new(Arc::new(self.inner.ports.vpn.clone()))))
+            .insert(Arc::new(nexus_api::Controllers::new(Arc::new(HostControllers(self.inner.ports.hardware.clone())))))
             .build();
         PluginContext::new(ContextParts {
             plugin: id.clone(),
@@ -918,4 +919,15 @@ fn validate(host: &HostConfig, manifest: &PluginManifest, origin: Origin) -> Res
         return Err(LoadError::Invalid(format!("{a_kind} plugin needs code")));
     }
     Ok(())
+}
+
+/// The controllers from the hardware port, read off the async threads.
+struct HostControllers(Arc<dyn crate::Hardware>);
+
+#[async_trait::async_trait]
+impl nexus_api::ControllerList for HostControllers {
+    async fn connected(&self) -> Vec<nexus_api::Controller> {
+        let hardware = self.0.clone();
+        tokio::task::spawn_blocking(move || hardware.controllers()).await.unwrap_or_default()
+    }
 }
