@@ -40,6 +40,7 @@ impl Pc {
             env: Default::default(),
             cwd: Some(Location::Folder(folder)),
             game_process: None,
+            relaunch: None,
         };
         match start.kind {
             // A script without `#!` (some repacks' `start`) runs with sh.

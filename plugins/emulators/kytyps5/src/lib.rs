@@ -567,7 +567,14 @@ impl Launcher for Kyty {
         let addcont = LaunchArg::path(found.dir.join("addcont")?);
         let args =
             self.args_for(&run.program, run.tag.as_deref(), &settings, LaunchArg::path(found.dir), addcont).await;
-        Ok(LaunchSpec { program: run.program, args, env: Default::default(), cwd: run.cwd, game_process: None })
+        Ok(LaunchSpec {
+            program: run.program,
+            args,
+            env: Default::default(),
+            cwd: run.cwd,
+            game_process: None,
+            relaunch: None,
+        })
     }
 }
 

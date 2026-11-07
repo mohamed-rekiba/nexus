@@ -377,3 +377,55 @@ async fn a_solid_nsz_installs_as_the_nsp_lichii_can_play() {
     assert_eq!(&nsp[nsp.len() - nca.len() - 6..nsp.len() - 6], nca.as_slice(), "the NCA, then the ticket");
     assert_eq!(&nsp[nsp.len() - 6..], b"ticket");
 }
+
+#[tokio::test]
+async fn a_game_that_starts_another_of_its_programs_is_started_again_in_the_same_session() {
+    let (test, _games) = boot().await;
+    test.core.dispatch(Command::InstallEmulator { plugin: lichii(), version: None }).await.unwrap();
+    let cli = app_run(&test).parent().unwrap().join("usr/bin/eden-cli");
+    std::fs::create_dir_all(cli.parent().unwrap()).unwrap();
+    std::fs::write(&cli, b"\x7fELF eden-cli").unwrap();
+    test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
+    test.core
+        .dispatch(Command::Session(SessionCmd::Launch("emu-lichii:01002B30028F6000".parse().unwrap())))
+        .await
+        .unwrap();
+
+    // eden-cli exits with 75 when the game starts another of its programs (Sonic x Shadow
+    // Generations' two games): its launcher starts it again with EDEN_CLI_RESTART_HANDOFF set.
+    let first = test.spawner.wait_for(2).await;
+    assert_eq!(first.command.env.get("EDEN_CLI_RESTART_HANDOFF"), None);
+    first.exit(75);
+    let again = test.spawner.wait_for(3).await;
+    assert_eq!(again.command.program, first.command.program);
+    assert_eq!(again.command.args, first.command.args, "the same game");
+    assert_eq!(again.command.env.get("EDEN_CLI_RESTART_HANDOFF").map(String::as_str), Some("1"));
+    let running = test.core.view().running.expect("still running, in the same session");
+    assert_eq!(running.key, "emu-lichii:01002B30028F6000");
+    assert!(test.core.view().notices.iter().all(|n| !n.contains("code 75")), "no error for a restart");
+
+    again.exit(0);
+    test.until(nexus_core::Area::Sessions, |core| core.view().running.is_none()).await;
+    assert_eq!(test.spawner.spawned().len(), 3, "a normal exit ends the game");
+}
+
+#[tokio::test]
+async fn after_stop_a_game_asking_to_start_again_is_not_started() {
+    let (test, _games) = boot().await;
+    test.core.dispatch(Command::InstallEmulator { plugin: lichii(), version: None }).await.unwrap();
+    let cli = app_run(&test).parent().unwrap().join("usr/bin/eden-cli");
+    std::fs::create_dir_all(cli.parent().unwrap()).unwrap();
+    std::fs::write(&cli, b"\x7fELF eden-cli").unwrap();
+    test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
+    test.core
+        .dispatch(Command::Session(SessionCmd::Launch("emu-lichii:01002B30028F6000".parse().unwrap())))
+        .await
+        .unwrap();
+    let first = test.spawner.wait_for(2).await;
+    let session = nexus_api::SessionId(test.core.view().running.expect("running").session);
+
+    test.core.dispatch(Command::Session(SessionCmd::Stop(session))).await.unwrap();
+    first.exit(75);
+    test.until(nexus_core::Area::Sessions, |core| core.view().running.is_none()).await;
+    assert_eq!(test.spawner.spawned().len(), 2, "Stop ends the game, whatever its code");
+}
