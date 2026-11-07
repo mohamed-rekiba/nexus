@@ -7,7 +7,7 @@
 use std::sync::Mutex;
 
 use nexus_api::serde_json::{self, Value};
-use nexus_api::{Folders, HostPath, PluginError, PluginResult, RelPath};
+use nexus_api::{DirEntry, Folders, HostPath, PluginError, PluginResult, RelPath};
 
 use crate::sfo;
 
@@ -23,15 +23,21 @@ pub enum Console {
 /// their compressed forms (`.nsz`, `.xcz`), and a Switch 2 package (`.nup`).
 pub const SWITCH_FILES: [&str; 5] = ["nsp", "nsz", "xci", "xcz", "nup"];
 
+/// Whether `name` is a Switch game file of any kind: a game, an update or DLC.
+pub fn is_switch_file(name: &str) -> bool {
+    name.rsplit_once('.').is_some_and(|(_, e)| SWITCH_FILES.iter().any(|s| e.eq_ignore_ascii_case(s)))
+}
+
 /// The Switch game in the file `name`, from the name alone: its files are encrypted, and their
 /// keys are the player's. A name like `Title [0100ABCDEF012000][v131072].nsp` gives the title,
 /// the title id and the version. `None` for another kind of file, and for an update or DLC: a
-/// base game's title id ends in `000`.
+/// base game's title id ends in `000`, and a name without a title id says "update", "upd" or
+/// "dlc".
 pub fn switch_file(name: &str) -> Option<(String, String, String)> {
-    let (stem, extension) = name.rsplit_once('.')?;
-    if !SWITCH_FILES.iter().any(|e| extension.eq_ignore_ascii_case(e)) {
+    if !is_switch_file(name) {
         return None;
     }
+    let (stem, _) = name.rsplit_once('.')?;
     let groups: Vec<&str> = stem.split('[').skip(1).filter_map(|g| g.split_once(']').map(|(g, _)| g.trim())).collect();
     let title_id = groups
         .iter()
@@ -39,6 +45,11 @@ pub fn switch_file(name: &str) -> Option<(String, String, String)> {
         .map(|g| g.to_ascii_uppercase())
         .unwrap_or_default();
     if !title_id.is_empty() && !title_id.ends_with("000") {
+        return None;
+    }
+    let lower = stem.to_ascii_lowercase();
+    let mut words = lower.split(|c: char| !c.is_ascii_alphanumeric());
+    if title_id.is_empty() && words.any(|w| matches!(w, "update" | "upd" | "dlc")) {
         return None;
     }
     let version = groups
@@ -61,7 +72,12 @@ pub struct FoundGame {
     pub version: String,
     /// The age the game is rated for, from `ageLevel.default` (PS5 only).
     pub age: Option<u8>,
+    /// The game's folder: what its size counts and an uninstall deletes. For a Switch game, the
+    /// folder that holds it alone with its update and DLC (an install's `Switch/<title>`), else
+    /// its file.
     pub dir: HostPath,
+    /// The file a Switch game starts. `None` for a game that is a folder.
+    pub file: Option<HostPath>,
     pub icon: Option<HostPath>,
     pub background: Option<HostPath>,
 }
@@ -124,6 +140,7 @@ pub async fn read_game(folders: &dyn Folders, console: Console, dir: &HostPath) 
                 age: p["ageLevel"]["default"].as_u64().and_then(|a| u8::try_from(a).ok()).filter(|a| *a > 0),
                 title_id,
                 dir: dir.clone(),
+                file: None,
                 icon: file_in(folders, &sce, &["icon0.png"]).await,
                 background: file_in(folders, &sce, &["pic0.png"]).await,
             })
@@ -147,6 +164,7 @@ pub async fn read_game(folders: &dyn Folders, console: Console, dir: &HostPath) 
                 age: None,
                 title_id,
                 dir: dir.clone(),
+                file: None,
                 icon: file_in(folders, &sce, &["icon0.png"]).await,
                 background: file_in(folders, &sce, &["pic1.png", "pic0.png"]).await,
             })
@@ -158,8 +176,35 @@ pub async fn read_game(folders: &dyn Folders, console: Console, dir: &HostPath) 
 /// the player's, then the game.
 const SCAN_DEPTH: usize = 3;
 
+/// The Switch games among the files of `dir`, at `depth` below the root. When `dir` is at least
+/// two folders down (`Switch/<title>`) and holds one game, it is that game's folder; else each
+/// game is its own file.
+fn switch_games(dir: &HostPath, depth: usize, files: &[DirEntry]) -> PluginResult<Vec<FoundGame>> {
+    let games: Vec<(&DirEntry, (String, String, String))> =
+        files.iter().filter_map(|f| switch_file(&f.name).map(|g| (f, g))).collect();
+    let own_folder = depth >= 2 && games.len() == 1;
+    let mut out = Vec::new();
+    for (entry, (title, title_id, version)) in games {
+        let file = dir.join(&entry.name)?;
+        out.push(FoundGame {
+            id: String::new(),
+            title,
+            title_id,
+            content_id: String::new(),
+            version,
+            age: None,
+            dir: if own_folder { dir.clone() } else { file.clone() },
+            file: Some(file),
+            icon: None,
+            background: None,
+        });
+    }
+    Ok(out)
+}
+
 /// Every game for `console` in the folder named `folder`, sorted by title. A game folder may
-/// hold games of other consoles too: each console's games are told apart by their files.
+/// hold games of other consoles too: each console's games are told apart by their files. An
+/// install's work folder (`<name>.part`) is never read.
 pub async fn scan(folders: &dyn Folders, folder: &str, console: Console) -> PluginResult<Vec<FoundGame>> {
     let mut found: Vec<FoundGame> = Vec::new();
     for root in folders.roots(folder).await? {
@@ -171,32 +216,21 @@ pub async fn scan(folders: &dyn Folders, folder: &str, console: Console) -> Plug
                     found.push(game);
                     continue;
                 }
-                if depth == SCAN_DEPTH {
+                // A Switch game is a file, so the deepest folders are listed too.
+                if depth == SCAN_DEPTH && console != Console::Switch {
                     continue;
                 }
                 // A root that can't be listed (not there yet) holds no games.
-                for child in folders.list(&dir).await.unwrap_or_default() {
-                    if child.name.starts_with('.') {
-                        continue;
-                    }
-                    if child.is_dir {
+                let entries = folders.list(&dir).await.unwrap_or_default();
+                let entries: Vec<DirEntry> = entries.into_iter().filter(|e| !e.name.starts_with('.')).collect();
+                if depth < SCAN_DEPTH {
+                    for child in entries.iter().filter(|e| e.is_dir && !e.name.ends_with(".part")) {
                         next.push(dir.join(&child.name)?);
-                    } else if console == Console::Switch
-                        && let Some((title, title_id, version)) = switch_file(&child.name)
-                    {
-                        let file = dir.join(&child.name)?;
-                        found.push(FoundGame {
-                            id: String::new(),
-                            title,
-                            title_id,
-                            content_id: String::new(),
-                            version,
-                            age: None,
-                            dir: file,
-                            icon: None,
-                            background: None,
-                        });
                     }
+                }
+                if console == Console::Switch {
+                    let files: Vec<DirEntry> = entries.into_iter().filter(|e| !e.is_dir).collect();
+                    found.extend(switch_games(&dir, depth, &files)?);
                 }
             }
             level = next;
@@ -319,15 +353,11 @@ impl FoundGame {
         if !self.content_id.is_empty() {
             facts.push(GameFact::new("content-id", "Content ID", &self.content_id));
         }
-        let file = self
-            .dir
-            .path
-            .as_str()
-            .rsplit_once('.')
-            .is_some_and(|(_, e)| SWITCH_FILES.contains(&e.to_ascii_lowercase().as_str()));
-        match file {
-            true => facts.push(GameFact::new("file", "File", self.dir.path.as_str())),
-            false => facts.push(GameFact::new("folder", "Folder", self.dir.path.as_str())),
+        if let Some(file) = &self.file {
+            facts.push(GameFact::new("file", "File", file.path.as_str()));
+        }
+        if self.file.as_ref() != Some(&self.dir) {
+            facts.push(GameFact::new("folder", "Folder", self.dir.path.as_str()));
         }
         nexus_api::GameDetails {
             folder: Some(self.dir.clone()),

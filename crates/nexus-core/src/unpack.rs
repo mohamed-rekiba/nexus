@@ -202,7 +202,10 @@ async fn unpack_into(
             }
             let name = archive.file_name().ok_or_else(|| failed("the AppImage download has no file name"))?;
             let appimage = dir.join(name);
-            tokio::fs::copy(&archive, &appimage).await.map_err(failed)?;
+            // A link costs no copy of a 100 MB file; another disk needs the copy.
+            if tokio::fs::hard_link(&archive, &appimage).await.is_err() {
+                tokio::fs::copy(&archive, &appimage).await.map_err(failed)?;
+            }
             extract_appimage(ports, may_run, &appimage, &dir, into).await
         }
     }
