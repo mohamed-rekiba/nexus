@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Nexus
+GenericName=Game Launcher
+Comment=Games from every emulator, in one place
+Exec=nexus
+Icon=nexus
+Terminal=false
+Categories=Game;Emulator;
+Keywords=games;launcher;emulator;playstation;ps4;ps5;shadps4;kyty;
+StartupWMClass=nexus
