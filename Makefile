@@ -72,7 +72,7 @@ hooks-install: ## Install the git hooks from .pre-commit-config.yaml (needs pre-
 hooks-run: ## Run the git hooks from .pre-commit-config.yaml (needs pre-commit)
 	pre-commit run --all-files
 
-catalog: ## Read the forums again (Chrome opens) into assets/catalog/; CONSOLE=pc for one catalog, STEAM=1 adds Steam data
+catalog: ## Read the forums again (Chrome opens) into assets/catalog/; CONSOLE=pc for one catalog, STEAM=1 adds Steam data, CONCURRENCY=4 reads faster
 	scripts/catalog/update-catalogs.sh $(if $(CONSOLE),--console $(CONSOLE))
 
 catalog-refresh: ## Update assets/catalog/ from the forums' feed and API, without a browser; CONSOLE=pc for one catalog
