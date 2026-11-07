@@ -12,6 +12,7 @@ license.workspace = true
 [dev-dependencies]
 image.workspace = true
 emu-kyty.workspace = true
+emu-lichii.workspace = true
 emu-pc.workspace = true
 emu-steam.workspace = true
 playstation-store.workspace = true

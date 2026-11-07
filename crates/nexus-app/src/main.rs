@@ -37,6 +37,7 @@ use nexus_ui_host::{AppShell, ShellOptions};
 
 // Linked for their compile-time plugin factories.
 use emu_kyty as _;
+use emu_lichii as _;
 use emu_pc as _;
 use emu_shadps4 as _;
 use emu_steam as _;

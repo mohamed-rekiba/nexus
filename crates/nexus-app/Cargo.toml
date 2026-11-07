@@ -30,6 +30,7 @@ tracing-subscriber.workspace = true
 # Linked so their compile-time factories register. Don't remove as "unused".
 emu-kyty.workspace = true
 emu-shadps4.workspace = true
+emu-lichii.workspace = true
 emu-pc.workspace = true
 emu-steam.workspace = true
 playstation-store.workspace = true

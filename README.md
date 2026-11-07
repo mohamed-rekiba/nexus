@@ -13,6 +13,7 @@ game needs: the library, downloads, installs, launching, controller input and up
 |---|---|---|
 | PS5 | PS5 games, with [KytyPS5](https://github.com/KytyPS5/KytyPS5) | Linux, macOS, Windows |
 | PS4 | PS4 games, with [shadPS4](https://github.com/shadps4-emu/shadPS4) | Linux, macOS, Windows |
+| Switch | Switch and Switch 2 games, with [Lichii](https://github.com/zortos293/Lichii). You provide your own keys and firmware. | Linux |
 | PC | PC games, natively or through Wine or Proton | Linux, macOS, Windows |
 | Steam | The games Steam installed, played through Steam | Linux |
 
@@ -56,9 +57,10 @@ brings itself back when they close.
 - **Catalog and Downloads.** The games a catalog offers. Nexus downloads a release by BitTorrent
   into your packages folder, and can bind the download to your VPN and pause it when the VPN drops.
 - **Installs.** Each plugin installs the packages it understands, with progress in Downloads.
-  Today that is unsigned PS5 packages, exFAT disc images, PS4 fake packages and PC releases.
+  Today that is unsigned PS5 packages, exFAT disc images, PS4 fake packages, Switch game files and
+  PC releases.
 - **Emulator builds.** For an emulator plugin, Nexus downloads and updates the official builds, or
-  runs a build of your own. Today that is KytyPS5 and shadPS4.
+  runs a build of your own. Today that is KytyPS5, shadPS4 and Lichii.
 - **Themes.** Switching the theme keeps the screen you are on, your selection, the downloads and a
   running game.
 - **Controller.** Every screen works with a gamepad, a keyboard or a pointer.
