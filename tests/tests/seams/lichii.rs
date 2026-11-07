@@ -2,6 +2,7 @@
 //! files (but not their updates) from the player's folder, and the launch.
 
 use emu_lichii::{LichiiPlugin, RELEASES};
+use nexus_api::HOST_OPEN_EMULATOR;
 use nexus_api::*;
 use nexus_core::{Command, SessionCmd};
 use nexus_testkit::{FakeHost, FakeHttp, FakeSpawner, TestCore, contract};
@@ -189,4 +190,40 @@ async fn a_game_file_in_the_packages_folder_is_offered_and_installs_into_its_own
     assert_eq!(job.state, "done", "{}", job.error);
     let installed = games.path().join("Switch/Hades/Hades [0100535012974000][v0].nsz");
     assert_eq!(std::fs::read(installed).unwrap(), b"NCZ game");
+}
+
+/// The Emulators screen's button that opens Lichii's own window, if its page has one.
+fn open_button(test: &TestCore) -> Option<nexus_ui_api::SlotVm> {
+    let view = test.core.view();
+    let emu = view.emulators.emulators.iter().find(|e| e.plugin == lichii())?.clone();
+    emu.panels.into_iter().find(|p| p.action.as_deref() == Some(HOST_OPEN_EMULATOR))
+}
+
+#[tokio::test]
+async fn open_lichii_starts_its_own_window_without_a_game_and_no_game_starts_meanwhile() {
+    let (test, _games) = boot().await;
+    test.core.dispatch(Command::InstallEmulator { plugin: lichii(), version: None }).await.unwrap();
+    test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
+    test.core.dispatch(Command::Navigate(nexus_core::Route::Emulators)).await.unwrap();
+    let button = open_button(&test).expect("an Open Lichii button");
+    assert_eq!(button.text, "Open Lichii");
+
+    let open =
+        Command::RunAction { plugin: lichii(), action: HOST_OPEN_EMULATOR.into(), game: None, args: button.args };
+    test.core.dispatch(open).await.unwrap();
+
+    let process = test.spawner.wait_for(2).await;
+    let app_run = test.data_dir().join("plugins/emu-lichii/builds").join(TAG).join("squashfs-root/AppRun");
+    assert_eq!(process.command.program, app_run);
+    assert!(process.command.args.is_empty(), "no game: {:?}", process.command.args);
+    let running = test.core.view().running.expect("the running screen");
+    assert_eq!(running.title, "Lichii");
+
+    let play = Command::Session(SessionCmd::Launch("emu-lichii:01002B30028F6000".parse().unwrap()));
+    let refused = test.core.dispatch(play).await.unwrap_err().to_string();
+    assert!(refused.contains("Lichii is running"), "{refused}");
+
+    process.exit(0);
+    test.until(nexus_core::Area::Sessions, |core| core.view().running.is_none()).await;
+    assert!(test.core.view().home.games.iter().all(|g| g.last_played.is_empty()), "the window is not play time");
 }

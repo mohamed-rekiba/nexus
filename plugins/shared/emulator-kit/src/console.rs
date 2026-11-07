@@ -9,9 +9,9 @@ use std::sync::Arc;
 use nexus_api::serde_json::{self, Value};
 use nexus_api::{
     ArtworkKind, Catalog, CompatInfo, CompatLevel, Compatibility, ConfigScope, Configurator, GAMES_FOLDER, GameDetails,
-    GameSummary, HOST_INSTALL_GAME, HostPath, ImageSource, Installable, Order, PACKAGES_FOLDER, Page, PageRequest,
-    Platform, PluginResult, RelPath, SearchQuery, SectionRow, SlotContent, SlotId, SlotItem, SlotRequest, Slots,
-    async_trait,
+    GameSummary, HOST_INSTALL_GAME, HOST_OPEN_EMULATOR, HostPath, ImageSource, Installable, Order, PACKAGES_FOLDER,
+    Page, PageRequest, Platform, PluginResult, RelPath, SearchQuery, SectionRow, SlotContent, SlotId, SlotItem,
+    SlotRequest, Slots, async_trait,
 };
 
 use crate::builds::{BuildManager, Flavor, LISTS_TTL};
@@ -203,6 +203,19 @@ impl<F: Flavor> Slots for ConsoleEmulator<F> {
             }
             (SlotId::EmulatorPanel, None) => {
                 let mut items = self.builds.switch_items().await;
+                // Its own window, once there is a build to open.
+                if F::HAS_WINDOW && self.builds.run().await.is_ok() {
+                    items.push(item(
+                        "open-emulator",
+                        SlotContent::Action {
+                            label: format!("Open {}", F::NAME),
+                            action: HOST_OPEN_EMULATOR.into(),
+                            args: Value::Null,
+                            style: nexus_api::ActionStyle::Secondary,
+                            icon: None,
+                        },
+                    ));
+                }
                 for found in self.candidates().await.unwrap_or_default() {
                     items.push(item(
                         &format!("install-{}", found.label),

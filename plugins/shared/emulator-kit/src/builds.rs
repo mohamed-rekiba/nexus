@@ -88,6 +88,10 @@ pub trait Flavor: Send + Sync + 'static {
     /// for an emulator whose `--help` opens its window and never ends (Lichii): its build
     /// becomes current once its program is there.
     const TEST_RUN: bool = true;
+    /// The emulator has a window of its own, with settings Nexus doesn't show (its controls, a
+    /// console's keys): its page offers "Open <name>" ([`nexus_api::HOST_OPEN_EMULATOR`]), and
+    /// its launcher answers [`nexus_api::Launcher::open_emulator`].
+    const HAS_WINDOW: bool = false;
     /// The style of "Switch to official builds" on the page.
     const OFFICIAL_STYLE: ActionStyle = ActionStyle::Secondary;
 
