@@ -160,6 +160,7 @@ async fn a_program_in_a_granted_folder_runs_from_its_real_path() {
         env: Default::default(),
         cwd: None,
         game_process: None,
+        relaunch: None,
     };
     let t = launcher_host(spec, "[\"folder:pc-games\"]").await;
     map(&t, "pc-games", &[games.path()]);
@@ -182,6 +183,7 @@ async fn a_folder_program_without_its_folder_rule_is_not_spawned() {
         env: Default::default(),
         cwd: None,
         game_process: None,
+        relaunch: None,
     };
     let t = launcher_host(spec, "[\"system:wine\"]").await;
     map(&t, "pc-games", &[games.path()]);
@@ -202,6 +204,7 @@ async fn a_system_program_runs_by_name_only_with_its_rule_and_a_cwd() {
         env: Default::default(),
         cwd,
         game_process: None,
+        relaunch: None,
     };
     let in_game = Some(at("pc-games", 0, "Game").into());
 
@@ -309,6 +312,7 @@ async fn an_environment_value_can_be_a_path_the_host_resolves() {
         .into(),
         cwd: Some(at("pc-games", 0, "Game").into()),
         game_process: None,
+        relaunch: None,
     };
     let t = launcher_host(spec, "[\"system:wine\"]").await;
     map(&t, "pc-games", &[games.path()]);

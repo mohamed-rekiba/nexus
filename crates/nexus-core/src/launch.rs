@@ -126,6 +126,11 @@ pub(crate) async fn launch(core: &Core, game: GameKey) -> CoreResult<()> {
     }
     let command = spawn_command(kernel, &plugin, &manifest.permissions, &spec)?;
     let title = core.library().snapshot().title(&game);
+    let relaunch = spec.relaunch.clone().map(|rule| {
+        let mut again = command.clone();
+        again.env.extend(rule.env);
+        (rule.code, again)
+    });
     let new = NewSession {
         game: game.clone(),
         title,
@@ -140,12 +145,31 @@ pub(crate) async fn launch(core: &Core, game: GameKey) -> CoreResult<()> {
 
     let core = core.clone();
     tokio::spawn(async move {
-        let ended = started.ended.await;
+        let mut ended = started.ended.await;
+        // A program that restarts itself through its launcher: start it again, a few times.
+        let mut relaunches = 0;
+        while let (Some((code, again)), Some(exit)) = (&relaunch, &ended) {
+            if exit.code != Some(*code) || relaunches == MAX_RELAUNCHES {
+                break;
+            }
+            relaunches += 1;
+            match core.sessions().relaunch(session, again.clone()).await {
+                Ok(next) => ended = next.await,
+                Err(e) => {
+                    tracing::warn!(plugin_id = %game.plugin, %session, "not started again: {e}");
+                    break;
+                }
+            }
+        }
         let played = core.ports().clock.now().saturating_duration_since(started.at);
         finish(&core, session, &game, ended, played, &launcher).await;
     });
     Ok(())
 }
+
+/// The most times in a row a game is started again for [`nexus_api::Relaunch`]: a program that
+/// asks for it each time ends there.
+const MAX_RELAUNCHES: u32 = 8;
 
 /// The local id of the session an emulator's own window runs as ([`open_emulator`]). It is no
 /// game id: a game's has no `@`.

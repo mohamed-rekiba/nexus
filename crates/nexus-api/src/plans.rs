@@ -151,6 +151,18 @@ pub trait Installer: Send + Sync {
     }
 }
 
+/// A launch's rule for a program that restarts itself through its launcher: Lichii's
+/// `eden-cli` exits with 75 when a game starts another of its programs, and is to be started
+/// again with `EDEN_CLI_RESTART_HANDOFF` set. The host starts it again at most a few times in a
+/// row, and never after the player pressed Stop.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Relaunch {
+    /// The exit code that asks for it.
+    pub code: i32,
+    /// Added to the environment of the next runs.
+    pub env: BTreeMap<String, String>,
+}
+
 /// The process to start for a game. The host spawns it only if the manifest's
 /// `permissions.process` allows `program`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -171,6 +183,11 @@ pub struct LaunchSpec {
     /// game is the program started here.
     #[serde(default)]
     pub game_process: Option<String>,
+    /// When the program exits with this rule's code, the host starts it again, with the rule's
+    /// environment on top, in the same session: for a program that restarts itself through its
+    /// launcher. `None`: every exit ends the game.
+    #[serde(default)]
+    pub relaunch: Option<Relaunch>,
 }
 
 /// Where a program or folder is. As JSON, a bare string is a path in the data folder, and
@@ -329,6 +346,7 @@ mod location_tests {
             env: BTreeMap::new(),
             cwd: Some(Location::Folder(game.clone())),
             game_process: None,
+            relaunch: None,
         };
         let json = serde_json::to_value(&spec).unwrap();
         assert_eq!(json["program"], serde_json::json!({"system": "wine"}));

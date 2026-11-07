@@ -37,6 +37,8 @@ const CONSOLE: &str = "SWITCH";
 pub const FOLDER: &str = "Switch";
 /// Lichii's settings folder, where its window saves `qt-config.ini`.
 pub const CONFIG: &str = "eden-config";
+/// The exit code eden-cli asks to be started again with (`kRestartExitCode` in Lichii).
+const RESTART_CODE: i32 = 75;
 /// The settings file games start with, in the plugin's folder (see [`controls`]).
 const GAME_SETTINGS: &str = "eden-cli/config.ini";
 
@@ -275,6 +277,13 @@ impl Launcher for Lichii {
             None => None,
         };
         let mut args = Vec::new();
+        // eden-cli exits with 75 when a game starts another of its programs (a collection
+        // of games, a restart after a setting): it is started again with
+        // EDEN_CLI_RESTART_HANDOFF set, and reads where the game was from Lichii's folder.
+        let relaunch = cli.is_some().then(|| Relaunch {
+            code: RESTART_CODE,
+            env: [("EDEN_CLI_RESTART_HANDOFF".to_owned(), "1".to_owned())].into(),
+        });
         let program = match cli {
             Some(cli) => {
                 args.extend(["-c".into(), LaunchArg::path(Location::Data(self.game_settings().await?))]);
@@ -288,7 +297,7 @@ impl Launcher for Lichii {
         }
         args.extend(["-g".into(), LaunchArg::path(found.file.unwrap_or(found.dir))]);
         let env = [("EDEN_NX2_SPLIT".to_owned(), settings.gpu_split.value().into())].into();
-        Ok(LaunchSpec { program, args, env, cwd: run.cwd, game_process: None })
+        Ok(LaunchSpec { program, args, env, cwd: run.cwd, game_process: None, relaunch })
     }
 
     /// Lichii's window: its controls, keys, firmware and graphics settings. A game started from
@@ -298,7 +307,14 @@ impl Launcher for Lichii {
         let settings = builds.settings().for_launch(config).await;
         let run = builds.run().await?;
         let env = [("EDEN_NX2_SPLIT".to_owned(), settings.gpu_split.value().into())].into();
-        Ok(Some(LaunchSpec { program: run.program, args: Vec::new(), env, cwd: run.cwd, game_process: None }))
+        Ok(Some(LaunchSpec {
+            program: run.program,
+            args: Vec::new(),
+            env,
+            cwd: run.cwd,
+            game_process: None,
+            relaunch: None,
+        }))
     }
 }
 
