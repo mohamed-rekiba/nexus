@@ -58,6 +58,9 @@ pub enum ArchiveFormat {
     /// A zip that holds one AppImage. The host takes it out and runs its
     /// `--appimage-extract` (Linux only), so `into` gets its `squashfs-root` folder.
     AppImageInZip,
+    /// The download is an AppImage itself. The host copies it into `into` under the download's
+    /// file name and runs its `--appimage-extract` (Linux only), as for [`Self::AppImageInZip`].
+    AppImage,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

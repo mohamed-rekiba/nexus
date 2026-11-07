@@ -194,42 +194,64 @@ async fn unpack_into(
             let [appimage] = found.as_slice() else {
                 return Err(failed(format!("expected one AppImage in the zip, found {}", found.len())));
             };
-            // Checked where it will be once unpacked, as the manifest names it.
-            let name = appimage.file_name().unwrap_or_default();
-            if !may_run(&into.join(name)) {
-                return Err(failed(format!(
-                    "the plugin may not run {}: add it to permissions.process",
-                    name.to_string_lossy()
-                )));
+            extract_appimage(ports, may_run, appimage, &dir, into).await
+        }
+        ArchiveFormat::AppImage => {
+            if platform != Some(nexus_api::Platform::Linux) {
+                return Err(failed("AppImages run on Linux only"));
             }
-            set_executable(appimage)?;
-            // The file passed its checks; running it to unpack is no worse than running it to play.
-            let command = SpawnCommand {
-                program: appimage.clone(),
-                args: vec!["--appimage-extract".into()],
-                env: Default::default(),
-                cwd: dir.clone(),
-                log: None,
-                keep_running: false,
-            };
-            let mut process = ports.spawner.spawn(command).await.map_err(failed)?;
-            let exit = match ports.clock.timeout(EXTRACT_TIMEOUT, process.wait()).await {
-                Some(exit) => exit.map_err(failed)?,
-                None => {
-                    let _ = process.kill().await;
-                    return Err(failed("the AppImage's --appimage-extract took too long"));
-                }
-            };
-            if !exit.success {
-                return Err(failed(format!("the AppImage's --appimage-extract failed (code {:?})", exit.code)));
-            }
-            let _ = tokio::fs::remove_file(appimage).await;
-            if !dir.join("squashfs-root").is_dir() {
-                return Err(failed("the AppImage left no squashfs-root folder"));
-            }
-            Ok(())
+            let name = archive.file_name().ok_or_else(|| failed("the AppImage download has no file name"))?;
+            let appimage = dir.join(name);
+            tokio::fs::copy(&archive, &appimage).await.map_err(failed)?;
+            extract_appimage(ports, may_run, &appimage, &dir, into).await
         }
     }
+}
+
+/// Runs `appimage`, in `dir`, with `--appimage-extract`, so `dir` gets its `squashfs-root`
+/// folder, then deletes it. It runs only when the plugin may run it where it will be once
+/// unpacked, in `into`.
+async fn extract_appimage(
+    ports: &DownloadPorts,
+    may_run: &(dyn Fn(&Path) -> bool + Sync),
+    appimage: &Path,
+    dir: &Path,
+    into: &Path,
+) -> CoreResult<()> {
+    // Checked where it will be once unpacked, as the manifest names it.
+    let name = appimage.file_name().unwrap_or_default();
+    if !may_run(&into.join(name)) {
+        return Err(failed(format!(
+            "the plugin may not run {}: add it to permissions.process",
+            name.to_string_lossy()
+        )));
+    }
+    set_executable(appimage)?;
+    // The file passed its checks; running it to unpack is no worse than running it to play.
+    let command = SpawnCommand {
+        program: appimage.to_path_buf(),
+        args: vec!["--appimage-extract".into()],
+        env: Default::default(),
+        cwd: dir.to_path_buf(),
+        log: None,
+        keep_running: false,
+    };
+    let mut process = ports.spawner.spawn(command).await.map_err(failed)?;
+    let exit = match ports.clock.timeout(EXTRACT_TIMEOUT, process.wait()).await {
+        Some(exit) => exit.map_err(failed)?,
+        None => {
+            let _ = process.kill().await;
+            return Err(failed("the AppImage's --appimage-extract took too long"));
+        }
+    };
+    if !exit.success {
+        return Err(failed(format!("the AppImage's --appimage-extract failed (code {:?})", exit.code)));
+    }
+    let _ = tokio::fs::remove_file(appimage).await;
+    if !dir.join("squashfs-root").is_dir() {
+        return Err(failed("the AppImage left no squashfs-root folder"));
+    }
+    Ok(())
 }
 
 fn set_executable(path: &Path) -> CoreResult<()> {
