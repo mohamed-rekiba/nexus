@@ -92,6 +92,13 @@ export global Commands {
     public function connect-vpn(name: string) { Host.command("Vpn", "{\"Connect\":" + Json.text(name) + "}"); }
     public function disconnect-vpn(name: string) { Host.command("Vpn", "{\"Disconnect\":" + Json.text(name) + "}"); }
     public function import-vpn(path: string) { Host.command("Vpn", "{\"Import\":" + Json.text(path) + "}"); }
+    // Settings → Backup. `large`: with the items a plugin marks large, such as PC games' Wine
+    // prefixes. `file`: a backup's file name in the backup folder.
+    public function back-up(large: bool) { Host.command("Backup", "{\"BackUp\":{\"large\":" + Json.flag(large) + "}}"); }
+    public function restore-backup(file: string) { Host.command("Backup", "{\"Restore\":" + Json.text(file) + "}"); }
+    public function refresh-backups() { Host.command("Backup", "\"Refresh\""); }
+    // "" goes back to ~/Nexus Backups.
+    public function set-backup-folder(path: string) { Host.command("Pref", "[\"backup_folder\"," + Json.text-or-null(path) + "]"); }
 
     // Plugins, emulators and settings.
     // A plugin and a version, "" for the newest.

@@ -140,11 +140,11 @@ fn the_keys_move_through_settings_tabs_and_change_the_focused_row() {
     assert_eq!(host.first("sounds").accessible_value().as_deref(), Some("off"), "Enter turns the sounds off");
     host.navigate(Key::DownArrow);
     assert_eq!(host.first("start-at-login").accessible_value().as_deref(), Some("off"));
-    // Up to the tabs and Right to POWER: "Quit Nexus".
+    // Up to the tabs and Right past BACKUP to POWER: "Quit Nexus".
     for _ in 0..5 {
         host.navigate(Key::UpArrow);
     }
-    for _ in 0..5 {
+    for _ in 0..6 {
         host.navigate(Key::RightArrow);
     }
     host.navigate(Key::DownArrow);
@@ -411,4 +411,50 @@ fn a_packaged_install_updates_from_settings_then_offers_a_restart() {
     host.first("launcher-update").invoke_accessible_default_action();
     let asked = host.requests.borrow().iter().any(|r| matches!(r, nexus_ui_host::UiRequest::Restart));
     assert!(asked, "the installed update offers a restart");
+}
+
+/// Settings with the backup folder in `backups`.
+fn backup_tab(backups: &std::path::Path) -> Composed {
+    let mut host = composed(|h| h);
+    host.ui.start().unwrap();
+    let folder = serde_json::json!(backups.display().to_string());
+    host.dispatch(Command::Pref(nexus_core::Pref::BackupFolder, folder));
+    host.dispatch(Command::Navigate(nexus_core::Route::Settings));
+    host.settle();
+    host.settings_tab("Backup");
+    host.settle();
+    host
+}
+
+#[test]
+fn backup_backs_up_lists_the_file_and_restores_it_on_a_second_press() {
+    let backups = tempfile::tempdir().unwrap();
+    let mut host = backup_tab(backups.path());
+    assert_eq!(host.value("backup-folder"), backups.path().display().to_string());
+    assert_eq!(host.count("backup"), 0);
+
+    host.press_first("back-up");
+    host.settle();
+    assert_eq!(host.count("backup"), 1, "the new backup is listed");
+    assert!(host.description("back-up").starts_with("Backed up to nexus-backup-"), "{}", host.description("back-up"));
+
+    let file = host.value("backup");
+    host.press("backup", &file);
+    assert_eq!(host.description("backup"), "armed", "the first press only asks again");
+    assert_eq!(host.count("backup-restart"), 0);
+    host.press("backup", &file);
+    host.settle();
+    assert_eq!(host.count("backup"), 2, "with the backup of what was here before");
+    assert_eq!(host.count("backup-restart"), 1, "Restart Nexus finishes the restore");
+}
+
+#[test]
+fn the_backup_folder_row_takes_a_typed_folder() {
+    let (backups, other) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let mut host = backup_tab(backups.path());
+    std::fs::write(other.path().join("nexus-backup-not-really.tar.gz"), b"no").unwrap();
+    host.dispatch(Command::Pref(nexus_core::Pref::BackupFolder, serde_json::json!(other.path().display().to_string())));
+    host.settle();
+    assert_eq!(host.value("backup-folder"), other.path().display().to_string());
+    assert_eq!(host.count("backup"), 0, "a file that isn't a backup isn't listed");
 }

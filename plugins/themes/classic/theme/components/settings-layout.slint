@@ -29,6 +29,14 @@ export global SystemRows {
     out property <int> count: 3 + (root.os >= 0 ? 1 : 0) + (root.install >= 0 ? 1 : 0);
 }
 
+// BACKUP: "Back up now", the switch for large items, the backup folder, "Restart Nexus" after a
+// restore, then one row per backup.
+export global BackupRows {
+    out property <int> restart: Vm.backup.restart ? 3 : -1;
+    out property <int> first-backup: root.restart >= 0 ? 4 : 3;
+    out property <int> count: root.first-backup + Vm.backup.backups.length;
+}
+
 // POWER: "Quit Nexus" ("Restart Nexus" when Nexus is the whole screen: the session starts it
 // again), then Log out only on a desktop (on Nexus OS the session would just start again), then
 // Restart and Shut down.

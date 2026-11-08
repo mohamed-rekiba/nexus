@@ -365,6 +365,8 @@ impl Core {
         crate::hardware::check_hardware(&core);
         crate::catalog_reads::watch_catalogs(&core);
         crate::catalog_reads::watch_store_installs(&core);
+        let lister = core.clone();
+        tokio::spawn(async move { crate::backups::handle(&lister, crate::BackupCmd::Refresh).await.ok() });
         core
     }
 
@@ -587,6 +589,13 @@ impl Core {
                 plugin_settings::set_plugin_enabled(self, &plugin, enabled).await
             }
             Command::ThemeSwitched(theme) => self.theme_switched(theme),
+            Command::Pref(Pref::BackupFolder, value) => {
+                let set = self.preferences().set(Pref::BackupFolder, value).await;
+                if set.is_ok() {
+                    crate::backups::handle(self, crate::BackupCmd::Refresh).await.ok();
+                }
+                set
+            }
             Command::Pref(pref, value) => self.preferences().set(pref, value).await,
             Command::Torrent(command) => release_downloads::torrent(self, command).await,
             Command::GameInstall(command) => release_downloads::game_install(self, command).await,

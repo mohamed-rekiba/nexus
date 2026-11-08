@@ -5,7 +5,7 @@ import { Tokens } from "../tokens.slint";
 import { Look } from "../components/look.slint";
 import { BackButton } from "../components/widgets.slint";
 import { Prefs, Tab } from "../components/settings-rows.slint";
-import { GamesSection, UpdatesSection, LauncherSection, DownloadsSection, PcSection, SystemSection, PowerSection } from "../components/settings-sections.slint";
+import { GamesSection, UpdatesSection, LauncherSection, DownloadsSection, PcSection, SystemSection, BackupSection, PowerSection } from "../components/settings-sections.slint";
 
 export component SettingsScreen inherits SheetFrame {
     panel-width: 1000 * Look.tpx;
@@ -47,7 +47,8 @@ export component SettingsScreen inherits SheetFrame {
                 property <int> at: Look.rtl ? Prefs.tab-count - 1 - i : i;
                 section: self.at;
                 text: self.at == 0 ? "Launcher" : self.at == 1 ? "Games" : self.at == 2 ? "Updates"
-                    : self.at == 3 ? "Downloads" : self.at == 4 ? "This PC" : self.at == 5 && Vm.system.whole-screen ? "System" : "Power";
+                    : self.at == 3 ? "Downloads" : self.at == 4 ? "This PC" : self.at == 5 && Vm.system.whole-screen ? "System"
+                    : self.at == Prefs.backup-section ? "Backup" : "Power";
             }
         }
 
@@ -68,6 +69,7 @@ export component SettingsScreen inherits SheetFrame {
             if Prefs.section == 3 : DownloadsSection { reveal(y, h) => { root.reveal(y, h); } }
             if Prefs.section == 4 : PcSection { reveal(y, h) => { root.reveal(y, h); } }
             if Prefs.section == 5 && Vm.system.whole-screen : SystemSection { reveal(y, h) => { root.reveal(y, h); } }
+            if Prefs.section == Prefs.backup-section : BackupSection { reveal(y, h) => { root.reveal(y, h); } }
             if Prefs.section == Prefs.power-section : PowerSection { reveal(y, h) => { root.reveal(y, h); } }
             }
         }

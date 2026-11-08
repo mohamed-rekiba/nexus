@@ -5,7 +5,7 @@ import { Look } from "look.slint";
 import { Icon } from "icon.slint";
 import { Switch } from "widgets.slint";
 import { Osk, TextField } from "keyboard.slint";
-import { LauncherRows, DownloadsRows, SystemRows, PowerRows } from "settings-layout.slint";
+import { LauncherRows, DownloadsRows, SystemRows, BackupRows, PowerRows } from "settings-layout.slint";
 
 // The rows of a settings sheet (Settings, and a plugin's page), and where the keys are in it.
 // A sheet is a list of sections; each has rows. Settings shows one section at a time, under a
@@ -24,7 +24,9 @@ import { LauncherRows, DownloadsRows, SystemRows, PowerRows } from "settings-lay
 //       shows: it has no rows to focus
 //   5   SYSTEM, when Nexus is the whole screen: Internet, Sound, Bluetooth (each opens its
 //       panel), Nexus OS updates (on Nexus OS), "Install Nexus OS on this PC" (on its USB stick)
-//   5/6 POWER, the last tab (6 after SYSTEM): "Quit Nexus" ("Restart Nexus" when Nexus is the
+//   5/6 BACKUP (6 after SYSTEM): "Back up now", "Include large items", the backup folder,
+//       "Restart Nexus" after a restore, then one row per backup, which restores it
+//   6/7 POWER, the last tab (7 after SYSTEM): "Quit Nexus" ("Restart Nexus" when Nexus is the
 //       whole screen: the session starts it again), then Log out (the Nexus session on a
 //       desktop), Restart and Shut down, which ask again before they act
 // On a theme's page:
@@ -80,9 +82,10 @@ export global Prefs {
     out property <int> sections: root.game-page ? 1
         : root.theme-page ? (Vm.plugin-page.current ? 2 : 1)
         : root.page ? (root.on ? 3 + root.panels : 1)
-        : 6 + (Vm.system.whole-screen ? 1 : 0);
-    // Power is the last tab: after System when Nexus is the whole screen.
-    out property <int> power-section: Vm.system.whole-screen ? 6 : 5;
+        : 7 + (Vm.system.whole-screen ? 1 : 0);
+    // Backup, then Power, the last tab: after System when Nexus is the whole screen.
+    out property <int> backup-section: Vm.system.whole-screen ? 6 : 5;
+    out property <int> power-section: root.backup-section + 1;
     // The page's build rows: the build, then "Uninstall" when it is installed.
     out property <int> builds: !root.page || root.theme-page || !root.on || !Vm.plugin-page.has-emulator || !Vm.plugin-page.emulator.has-builds ? 0
         : Vm.plugin-page.emulator.installed.length > 0 ? 2 : 1;
@@ -104,6 +107,7 @@ export global Prefs {
             : section == 3 ? DownloadsRows.count
             : section == 4 ? 0
             : section == root.power-section ? PowerRows.count
+            : section == root.backup-section ? BackupRows.count
             : SystemRows.count
     }
     // Back to the first row, as a sheet opens.

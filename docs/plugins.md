@@ -518,6 +518,7 @@ A capability is one thing a plugin does for the host. The manifest names it in `
 | `game_installer` | `GameInstaller` | `game_installer` |
 | `metadata` | `Metadata` | `metadata` |
 | `releases` | `Releases` | `releases` |
+| `backup` | `Backup` | `backup` |
 | `theme` | none (themes only) | none |
 | `network`, `vpn`, `bluetooth`, `audio`, `power`, `os_updates`, `os_install` | `NetworkSettings`, `VpnSettings`, `BluetoothSettings`, `AudioSettings`, `PowerSettings`, `OsUpdates`, `OsInstall` | `network`, `vpn`, `bluetooth`, `audio`, `power`, `os_updates`, `os_install` |
 
@@ -618,6 +619,20 @@ installs a store is doing. It returns none by default.
 
 A `Fact` has a `FactKind` (`Publisher`, `ReleaseDate`, `Firmware`, `Compatibility`, and others), a
 label, a value and an optional page.
+
+### Backup
+
+`Backup::items()` names what Settings → Backup saves of the plugin, as `BackupItem`s (`backup.rs`):
+a `name` the same on every computer (lowercase letters, digits and `-`), a `title` for the player,
+a `place`, names to `skip` below it, and `large` for an item the player must ask for, such as Wine
+prefixes. The place is `BackupPlace::Data` (a path in the plugin's data folder) or
+`BackupPlace::Folder` (a `HostPath` in a folder the manifest asks for). The host reads and writes
+the files; the plugin only names them.
+
+A restore asks again and puts each item of the backup where the item of the same name is now, so
+the folders may differ between computers. It writes only into the data folder and into folders
+with `write = true`; an item with no place is left out. `emulator_kit::backup::Items` answers with a
+fixed list.
 
 ### Metadata
 
