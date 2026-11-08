@@ -286,7 +286,8 @@ Left and right follow the reading direction, so right to left they swap.
 A move in the row shows at once. The theme tells the core about the selection with `Select`
 after `Look.select-after` without another move. A key that is not a move sends the selection
 first, so the core acts on the game on screen. The mouse wheel moves along the row, one game a
-notch.
+notch. One click on a game's tile selects it and opens its Game Hub, and one click on the Library
+tile opens the Library: a click doesn't only select, as a key move does.
 
 ### Top bar
 

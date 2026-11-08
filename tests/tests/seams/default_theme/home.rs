@@ -320,3 +320,39 @@ fn selecting_a_game_keeps_the_tiles() {
     host.settle();
     assert!(tiles.iter().all(|t| t.is_valid()), "the tiles from before the selection are still shown");
 }
+
+/// A mouse click in the middle of `element`, as a pointer does.
+fn click_on(host: &mut Composed, element: &i_slint_backend_testing::ElementHandle) {
+    use slint::platform::{PointerEventButton, WindowEvent};
+    let (at, size) = (element.absolute_position(), element.size());
+    let position = slint::LogicalPosition::new(at.x + size.width / 2.0, at.y + size.height / 2.0);
+    let window = host.instance().window();
+    window.dispatch_event(WindowEvent::PointerMoved { position });
+    window.dispatch_event(WindowEvent::PointerPressed { position, button: PointerEventButton::Left });
+    window.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
+    host.pump();
+    host.settle();
+}
+
+#[test]
+fn one_click_on_a_game_of_home_s_row_opens_it() {
+    let mut host = default_theme();
+    let view = host.core().view();
+    let first = view.home.selected.expect("a game");
+    let next = view.home.games[first + 1].clone();
+    let tile = i_slint_backend_testing::ElementHandle::find_by_accessible_label(host.instance(), "default-tile")
+        .find(|t| t.accessible_value().is_some_and(|v| v == next.title.as_str()))
+        .expect("the next game's tile");
+    click_on(&mut host, &tile);
+    assert_eq!(host.core().view().screen, nexus_ui_api::ScreenId::GameDetail, "one click, not two");
+    assert_eq!(host.core().view().game.as_deref(), Some(next.key.as_str()));
+}
+
+#[test]
+fn one_click_on_the_library_tile_opens_the_library() {
+    let mut host = default_theme();
+    let tile = host.first("default-library-tile");
+    click_on(&mut host, &tile);
+    rest(&mut host);
+    assert!(host.values("default-tile").is_empty(), "the Library covers the row");
+}
