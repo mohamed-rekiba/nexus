@@ -155,11 +155,71 @@ mod system {
             return false;
         }
         let order = if appid == LAUNCHER_APPID { appid.to_string() } else { format!("{appid},{LAUNCHER_APPID}") };
+        tracing::info!(appid, ?ids, ?windows, order, "gamescope: showing the windows of these processes");
         run(
             "xprop",
             &["-root", "-f", "GAMESCOPECTRL_BASELAYER_APPID", "32c", "-set", "GAMESCOPECTRL_BASELAYER_APPID", &order],
         );
         true
+    }
+
+    /// The app id Gamescope shows first: the first of the root window's
+    /// `GAMESCOPECTRL_BASELAYER_APPID`, which reads `NAME(CARDINAL) = 1234, 7`.
+    fn shown_appid() -> Option<u32> {
+        let out = run("xprop", &["-root", "GAMESCOPECTRL_BASELAYER_APPID"])?;
+        out.split_once('=')?.1.split(',').next()?.trim().parse().ok()
+    }
+
+    /// The name of process `pid`, for the log.
+    fn process_name(pid: u32) -> String {
+        std::fs::read_to_string(format!("/proc/{pid}/comm")).map(|n| n.trim().to_owned()).unwrap_or_default()
+    }
+
+    /// What `keep_game` last wrote to the log, so a game that stays behind writes it once.
+    static KEPT_LOG: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+    /// Under Gamescope, while the game is the one shown: when Gamescope's focus isn't on a
+    /// window of the game's processes `ids`, tags their windows with the game's id, which
+    /// takes in the windows the game opened after it showed. Gamescope then shows them, in
+    /// place of the launcher behind them. The launcher shown (only its id in the list) is left
+    /// as it is.
+    pub fn keep_game(ids: &[u32]) {
+        if !gamescope() || super::kwin::Kwin::get().is_some() {
+            return;
+        }
+        let Some(appid) = shown_appid().filter(|id| *id != LAUNCHER_APPID) else { return };
+        let focused = front();
+        if focused.is_some_and(|pid| ids.contains(&pid)) {
+            return;
+        }
+        let windows = windows(ids);
+        for w in &windows {
+            run("xprop", &["-id", w, "-f", "STEAM_GAME", "32c", "-set", "STEAM_GAME", &appid.to_string()]);
+        }
+        let focused = focused.map(|pid| format!("{pid} ({})", process_name(pid))).unwrap_or_else(|| "none".into());
+        let names: Vec<String> = ids.iter().map(|id| format!("{id} ({})", process_name(*id))).collect();
+        let line = format!(
+            "gamescope: the focus is on process {focused}, not the game's; tagged the game's windows {windows:?} \
+             with app id {appid}. The game's processes: {names:?}"
+        );
+        let mut last = KEPT_LOG.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if *last != line {
+            // Once per change: every window on screen and its process, for a game window that
+            // belongs to a process outside the game's.
+            let all = xdotool(&["search", "--onlyvisible", "--name", ""]).unwrap_or_default();
+            let all: Vec<String> = all
+                .split_whitespace()
+                .map(|w| {
+                    let pid = xdotool(&["getwindowpid", w]).and_then(|p| p.parse::<u32>().ok());
+                    match pid {
+                        Some(pid) => format!("{w}: {pid} ({})", process_name(pid)),
+                        None => format!("{w}: no process"),
+                    }
+                })
+                .collect();
+            tracing::info!("{line}. Every window on screen: {all:?}");
+            *last = line;
+        }
     }
 
     /// Under Gamescope, tags the launcher's window so Gamescope shows it: in its Steam mode it
@@ -454,6 +514,13 @@ impl Windows for SystemWindows {
 
     fn show_game(&self, ids: &[u32]) -> bool {
         system::show(ids)
+    }
+
+    fn keep_game(&self, ids: &[u32]) {
+        #[cfg(target_os = "linux")]
+        system::keep_game(ids);
+        #[cfg(not(target_os = "linux"))]
+        let _ = ids;
     }
 
     fn show_launcher(&self) {

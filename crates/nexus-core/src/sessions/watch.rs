@@ -177,9 +177,15 @@ async fn follow(
             }
             continue;
         }
+        // A game in front stays there with the windows it opened since: Proton opens the
+        // game's own after a helper's, and Gamescope shows only the ones it was told about.
+        let in_front = sessions.game_in_front();
         let look = sessions
             .blocking(move |desktop, processes| {
                 let ids = members(processes, root, root_exited);
+                if in_front && !ids.is_empty() {
+                    desktop.keep_game(&ids);
+                }
                 let front = desktop.front();
                 let window = if ids.is_empty() { Some(false) } else { desktop.has_window(&ids) };
                 Look { ends_with_window: desktop.window_close_ends_game(), front, window, ids }
