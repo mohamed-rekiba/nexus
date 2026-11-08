@@ -14,8 +14,7 @@ use crate::compile::compile;
 use crate::images::{Crop, ImageCache, ImageKey, ImageSize, Window, decode};
 use crate::themes::{ResolvedTheme, ThemeSet};
 
-/// The id of the built-in theme every chain ends in.
-pub const BASE_THEME: &str = "default";
+pub use nexus_ui_api::BASE_THEME;
 
 /// What the theme asked for that the app has to carry out.
 #[derive(Clone, Debug, PartialEq)]

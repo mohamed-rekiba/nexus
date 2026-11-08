@@ -38,9 +38,10 @@ Two themes are built into the binary. Each crate's `build.rs` embeds its `theme/
   every screen, component and token, and every other theme extends it, directly or through a
   parent.
 - **Default** (`default`, in `plugins/themes/default/theme/`) is the theme the app starts with
-  and falls back to (`BASE_THEME` in `crates/nexus-ui-host/src/host.rs`). It extends `classic`
-  and ships `screens/home.slint`, its own copies of `components/nav.slint` and
-  `components/top-bar.slint`, and the "All games" pictures. Its Home is a list of the systems,
+  and falls back to (`BASE_THEME` in `crates/nexus-ui-api/src/theme.rs`), and the first in the
+  Themes list. It extends `classic` and ships `screens/home.slint`, its own copies of
+  `components/nav.slint`, `components/top-bar.slint` and `components/library-view.slint`,
+  `components/chip-row.slint`, and the "All games" pictures. Its Home is a list of the systems,
   "All games" first and then each entry of `Vm.emulators`, on the far side of the reading
   direction, with the focused system's `cover` behind it. Enter or a click opens the Library on
   the system's games (`LibrarySystem`); Back clears the filter and comes back to the list; Menu

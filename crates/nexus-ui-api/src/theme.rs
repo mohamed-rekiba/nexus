@@ -9,6 +9,10 @@ use serde::{Deserialize, Serialize};
 use crate::tokens::{TOKENS, TokenValue, token};
 use crate::{ComponentId, ScreenId};
 
+/// The id of the built-in theme the app starts with, falls back to and uses in safe mode. The
+/// Themes list shows it first.
+pub const BASE_THEME: &str = "default";
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum InputMode {
