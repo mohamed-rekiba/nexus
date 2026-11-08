@@ -3,6 +3,7 @@
 //! `spans.rs` stays its own binary: `tracing` caches per-callsite interest across threads.
 
 mod app;
+mod backup;
 mod boot;
 mod catalog_refresh;
 mod classic_theme;

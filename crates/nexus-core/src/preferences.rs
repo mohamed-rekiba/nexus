@@ -58,6 +58,8 @@ pub enum Pref {
     Theme,
     /// The PC the "games won't start here" notice was last for. The core sets it.
     PcNoticed,
+    /// The folder Settings → Backup writes to and lists, as a path; null for `~/Nexus Backups`.
+    BackupFolder,
 }
 
 /// What values a [`Pref`] takes.
@@ -82,7 +84,7 @@ pub struct PrefSpec {
 
 impl Pref {
     /// Every preference.
-    pub const ALL: [Pref; 10] = [
+    pub const ALL: [Pref; 11] = [
         Pref::Sounds,
         Pref::Fullscreen,
         Pref::ReturnOnExit,
@@ -93,6 +95,7 @@ impl Pref {
         Pref::Welcomed,
         Pref::Theme,
         Pref::PcNoticed,
+        Pref::BackupFolder,
     ];
 
     /// Its key under `app` in the config.
@@ -108,6 +111,7 @@ impl Pref {
             Pref::Welcomed => "welcomed",
             Pref::Theme => "theme",
             Pref::PcNoticed => "pc_noticed",
+            Pref::BackupFolder => "backup_folder",
         }
     }
 
@@ -118,7 +122,7 @@ impl Pref {
             }
             Pref::StartAtLogin | Pref::Welcomed => (PrefKind::Flag, Value::Bool(false), true),
             Pref::Scale => (PrefKind::Size { min: MIN_SCALE, max: MAX_SCALE }, Value::from(1.0), true),
-            Pref::Monitor => (PrefKind::Name, Value::Null, true),
+            Pref::Monitor | Pref::BackupFolder => (PrefKind::Name, Value::Null, true),
             Pref::Theme | Pref::PcNoticed => (PrefKind::Name, Value::Null, false),
         };
         PrefSpec { kind, default, by_player }
@@ -293,6 +297,7 @@ mod tests {
             (Pref::Welcomed, Value::Bool(false)),
             (Pref::Theme, Value::Null),
             (Pref::PcNoticed, Value::Null),
+            (Pref::BackupFolder, Value::Null),
         ];
         assert_eq!(defaults.len(), Pref::ALL.len(), "every pref has a row");
         for (pref, default) in defaults {

@@ -1082,6 +1082,34 @@ fn settings_vm(s: &Snapshot) -> SettingsVm {
         start_at_login: prefs.start_at_login,
         start_at_login_error: prefs.start_at_login_error.clone().unwrap_or_default(),
         vpn: vpn_vm(&s.vpn),
+        backup: backup_vm(s),
+    }
+}
+
+fn backup_vm(s: &Snapshot) -> nexus_ui_api::BackupVm {
+    let backup = &s.backup;
+    let home = s.plugins.host().home.as_deref().map(|h| h.display().to_string());
+    let folder = s.backup_folder.as_ref().map(|f| short_home(&f.display().to_string(), home.as_deref()));
+    let job = backup.job.as_ref();
+    nexus_ui_api::BackupVm {
+        folder: folder.unwrap_or_default(),
+        running: job.is_some(),
+        restoring: job.is_some_and(|j| j.restoring),
+        progress: job.filter(|j| j.total > 0).map(|j| (j.done as f64 / j.total as f64).min(1.0) as f32).unwrap_or(0.0),
+        status: if backup.error.is_empty() { backup.done.clone() } else { backup.error.clone() },
+        failed: !backup.error.is_empty(),
+        restart: backup.restart,
+        backups: backup
+            .backups
+            .iter()
+            .map(|b| nexus_ui_api::BackupFileVm {
+                file: b.file.clone(),
+                date: crate::display::date_time_text(b.made),
+                size: crate::display::size_text(b.bytes),
+                items: b.items.join(", "),
+                before_restore: b.before_restore,
+            })
+            .collect(),
     }
 }
 

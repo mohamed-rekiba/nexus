@@ -369,6 +369,17 @@ export struct VpnItem { name: string, kind: string, connected: bool, switchable:
 // why the last connect, disconnect or import failed.
 export struct VpnSettings { problem: string, only: bool, finds: bool, can-import: bool, chosen: string, route: string, vpns: [VpnItem], error: string }
 
+// One backup in the backup folder. file: what the command Backup Restore takes. date: when it
+// was made, "Nov 9, 2026, 14:30 UTC". items: what it holds, such as "Saves, Keys and firmware".
+// before-restore: the backup a restore made of what was there before.
+export struct BackupFile { file: string, date: string, size: string, items: string, before-restore: bool }
+
+// Settings → Backup. folder: the backup folder, with the home folder as `~`. running: a backup
+// or a restore runs (restoring: a restore), `progress` from 0 to 1. status: what the last one
+// did, or why it failed (failed). restart: a restore finished, and Nexus starts again to finish
+// it. backups: newest first.
+export struct Backup { folder: string, running: bool, restoring: bool, progress: float, status: string, failed: bool, restart: bool, backups: [BackupFile] }
+
 // The launcher's own update. state: off | idle | checking | current | available |
 // downloading | ready | failed. text: what to tell the player.
 export struct LauncherUpdate { state: string, current: string, version: string, text: string, method: string }
@@ -447,6 +458,8 @@ export global Vm {
     in-out property <int> torrents-sharing;
     // "Download only through a VPN", and the VPNs.
     in-out property <VpnSettings> vpn;
+    // Settings → Backup.
+    in-out property <Backup> backup;
     in-out property <[SettingsPanel]> settings;
     in-out property <[Field]> theme-options;
     in-out property <[ThemeChoice]> themes;

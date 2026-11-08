@@ -116,6 +116,8 @@ pub enum Capability {
     Metadata,
     /// Lists the games an emulator's catalog offers to download. See [`crate::Releases`].
     Releases,
+    /// Names what of the plugin's data a backup holds. See [`crate::Backup`].
+    Backup,
     /// A theme manifest declares only this. The theme's files come from [`crate::ThemePlugin`],
     /// not from `init`, so no emulator can provide it.
     Theme,
