@@ -1,1 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="All games"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0a6cff"/><stop offset="1" stop-color="#6d28d9"/></linearGradient></defs><rect width="128" height="128" rx="27" fill="url(#g)"/><rect x="28" y="28" width="32" height="32" rx="8" fill="white"/><rect x="68" y="28" width="32" height="32" rx="8" fill="white"/><rect x="28" y="68" width="32" height="32" rx="8" fill="white"/><rect x="68" y="68" width="32" height="32" rx="8" fill="white" opacity=".55"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="21.5 21.5 469 469" role="img" aria-label="All Games icon">
+<defs>
+ <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#008de9"/><stop offset=".48" stop-color="#1927ad"/><stop offset="1" stop-color="#8b00ce"/></linearGradient>
+ <linearGradient id="edge" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#43f5ff"/><stop offset=".5" stop-color="#5477ff"/><stop offset="1" stop-color="#ff46e6"/></linearGradient>
+ <linearGradient id="left" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#18e6ff"/><stop offset="1" stop-color="#1862dc"/></linearGradient>
+ <linearGradient id="mid" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#30edff"/><stop offset="1" stop-color="#7d65f8"/></linearGradient>
+ <linearGradient id="right" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#e47bff"/><stop offset="1" stop-color="#9e2ce4"/></linearGradient>
+ <linearGradient id="pad" x1="0" y1="0" x2=".8" y2="1"><stop stop-color="#fff"/><stop offset=".65" stop-color="#f2f4ff"/><stop offset="1" stop-color="#dcb8ff"/></linearGradient>
+ <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="12"/></filter>
+ <clipPath id="clip"><rect x="25" y="25" width="462" height="462" rx="95"/></clipPath>
+</defs>
+<rect x="25" y="25" width="462" height="462" rx="95" fill="url(#tile)" stroke="url(#edge)" stroke-width="7"/>
+<g clip-path="url(#clip)"><path d="M50 84Q155 25 258 60" fill="none" stroke="#7efaff" stroke-width="13" opacity=".12"/></g>
+<!-- fan of game library cards -->
+<g transform="rotate(-18 174 258)"><rect x="96" y="163" width="157" height="201" rx="25" fill="url(#left)" stroke="#7feeff" stroke-width="3"/><path d="M100 310l52-54 38 30 63-73v129H100Z" fill="#0956bb" opacity=".8"/><circle cx="165" cy="232" r="20" fill="#0748a4"/><path d="M132 281q32-49 66 0" fill="#0748a4"/><ellipse cx="130" cy="192" rx="13" ry="7" fill="#b4ffff" transform="rotate(-32 130 192)" opacity=".85"/></g>
+<rect x="196" y="133" width="143" height="207" rx="25" fill="url(#mid)" stroke="#9feaff" stroke-width="3"/><path d="M199 282l38-39 25 20 29-39 45 44v56H199Z" fill="#1450bd" opacity=".65"/><path d="M250 274v-52h12v-17l15 11 13-21 14 23 12-8v64Z" fill="#133caa"/><path d="M271 205v-25l15 7-15 7" fill="#133caa"/><ellipse cx="226" cy="165" rx="16" ry="8" fill="#d0ffff" transform="rotate(-35 226 165)"/>
+<g transform="rotate(18 347 256)"><rect x="285" y="167" width="142" height="196" rx="24" fill="url(#right)" stroke="#ff9dff" stroke-width="3"/><path d="M287 308l43-41 34 18 61-53v110H287Z" fill="#6d2ac1"/><path d="M337 244q-3-41 37-43 40 0 37 43-20 13-34-4v45h-17v-45q-12 17-23 4" fill="#7225b9"/><circle cx="355" cy="221" r="8" fill="#c87aff"/><circle cx="388" cy="221" r="7" fill="#c87aff"/></g>
+<!-- controller silhouette -->
+<path d="M163 281c-29-3-47 13-59 44l-27 76c-13 38 17 67 49 51 18-9 34-33 53-47 14-10 35-12 77-12s63 2 77 12c19 14 35 38 53 47 32 16 62-13 49-51l-27-76c-12-31-30-47-59-44-23 3-33 12-53 12h-80c-20 0-30-9-53-12Z" fill="url(#pad)" stroke="#e3eaff" stroke-width="3"/>
+<path d="M160 321v53m-27-26h54" stroke="#061957" stroke-width="19" stroke-linecap="round"/>
+<g fill="#061957"><circle cx="350" cy="321" r="14"/><circle cx="320" cy="348" r="14"/><circle cx="380" cy="348" r="14"/><circle cx="350" cy="376" r="14"/></g>
+</svg>

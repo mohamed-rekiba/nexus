@@ -119,8 +119,8 @@ Each built-in emulator carries its system's icon and cover in the binary
 third-party game art and console marks, such as the PlayStation, Nintendo Switch, Windows and
 Steam logos and characters from their games. The project owner supplied them. The repository
 holds no licence information for them. The marks belong to their owners. The icons
-(`assets/system-art/*.svg`) and the Systems theme's "All games" pictures are drawn for this
-project and use no game art.
+(`assets/system-art/*.svg`) and the Systems theme's "All games" pictures were made for this
+project; the project owner supplied the "All games" icon and picture and the Switch icon.
 
 ### libmpv
 
