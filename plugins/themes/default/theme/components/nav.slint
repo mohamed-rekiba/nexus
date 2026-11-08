@@ -85,8 +85,8 @@ export global Nav {
     in-out property <bool> to-releases;
 
     out property <int> tabs: 0;
-    // The screen buttons, then the network, sound and Bluetooth icons when Nexus is the whole
-    // screen (`Sys`).
+    // The screen buttons, the network, sound and Bluetooth icons when Nexus is the whole screen
+    // (`Sys`), and Settings last.
     out property <int> buttons: 5 + root.statuses;
     out property <int> statuses: Vm.system.whole-screen ? 3 : 0;
     out property <bool> library: root.view == "library";
@@ -190,9 +190,11 @@ export global Nav {
     }
     // The top bar's first item the keys can reach: Search, or Downloads with no Catalog.
     out property <int> first-tab: Vm.catalog-available ? 0 : 1;
+    // The screen buttons (Search, Downloads, Emulators, Themes), the machine's icons when Nexus
+    // is the whole screen, and Settings last.
     public function activate-tab(index: int) {
-        if (index >= root.tabs + 5) {
-            Sys.show(index - root.tabs - 5);
+        if (index >= root.tabs + 4 && index < root.tabs + 4 + root.statuses) {
+            Sys.show(index - root.tabs - 4);
         } else {
             Host.play-sound("select");
             Commands.navigate(index == 0 ? "catalog"

@@ -337,3 +337,26 @@ fn the_default_theme_is_first_in_the_themes_list_whichever_is_in_use() {
         assert!(y(&host, "default") < y(&host, "classic"), "with {theme} in use, Default is first");
     }
 }
+
+#[test]
+fn a_hint_for_two_pad_buttons_is_as_wide_as_its_text_not_a_circle() {
+    let width = |host: &Composed, key: &str| {
+        i_slint_backend_testing::ElementHandle::find_by_accessible_label(host.instance(), "hint-key")
+            .find(|e| e.accessible_value().as_deref() == Some(key))
+            .unwrap_or_else(|| panic!("no hint key {key}"))
+            .size()
+    };
+    let mut host = composed(|h| h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha"]).build()));
+    host.ui.start().unwrap();
+    for theme in ["classic", "default"] {
+        host.ui.switch(&id(theme)).unwrap();
+        host.dispatch(Command::Navigate(nexus_core::Route::Home));
+        // A controller button: the hints show the pad's buttons.
+        host.pad(nexus_ui_host::PadButton::Up);
+        host.pad(nexus_ui_host::PadButton::Down);
+        let one = width(&host, "✕");
+        let two = width(&host, "L1  R1");
+        assert_eq!(one.width, one.height, "{theme}: one button is a circle");
+        assert!(two.width > two.height * 1.5, "{theme}: L1 R1 is a pill as wide as its text: {two:?}");
+    }
+}
