@@ -159,3 +159,42 @@ async fn copy_tree(host: &Host, from: &HostPath, to: &RelPath) -> PluginResult<(
     }
     Ok(())
 }
+
+/// The data folders a build with `--data-folder` keeps in the shared data folder: the saves and
+/// the games' own downloaded data. Its caches stay in the build's folder.
+pub const SHARED_DIRS: [&str; 2] = ["_SaveData", "_DownloadData"];
+
+/// Copies each game's entry of the shared data folders ([`SHARED_DIRS`]) from `from`, a build's
+/// folder, into the shared data folder `to`, when `to` has none for that game yet. An entry `to`
+/// has stays as it is, so a save is never overwritten, and copying again copies nothing. The
+/// build keeps its own copy.
+pub async fn share_data(host: &Host, from: &RelPath, to: &HostPath) -> PluginResult<()> {
+    let (storage, folders) = (host.storage.as_ref(), host.folders.as_ref());
+    for dir in SHARED_DIRS {
+        for name in storage.list(&from.join(dir)?).await? {
+            let target = to.join(dir)?.join(&name)?;
+            if folders.exists(&target).await? {
+                continue;
+            }
+            let mut left = vec![(from.join(dir)?.join(&name)?, target)];
+            while let Some((source, target)) = left.pop() {
+                match storage.list(&source).await {
+                    Ok(names) if !names.is_empty() => {
+                        for name in names {
+                            left.push((source.join(&name)?, target.join(&name)?));
+                        }
+                    }
+                    // A file (a folder's list of one fails), or an empty folder, which has
+                    // nothing to read.
+                    _ => {
+                        if let Ok(bytes) = storage.read(&source).await {
+                            folders.write(&target, &bytes).await?;
+                        }
+                    }
+                }
+            }
+            host.log.info(&format!("copied {from}/{dir}/{name} to the shared data folder"));
+        }
+    }
+    Ok(())
+}

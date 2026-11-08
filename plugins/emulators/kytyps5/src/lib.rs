@@ -8,7 +8,10 @@
 //! - Games: PS5 game folders (`sce_sys/param.json`) in the player's game folders.
 //! - KytyPS5 writes saves and caches relative to its working folder, which is the build's
 //!   folder. When the current build changes, those folders move to the new build, so saves
-//!   and shader caches survive updates and rollbacks: see [`data`].
+//!   and shader caches survive updates and rollbacks: see [`data`]. A build that has
+//!   `--data-folder` keeps its saves and the games' downloaded data in the folder you map as
+//!   kyty-data (`~/.local/share/KytyPS5` until then), which every such build shares. Its first
+//!   game copies the build's saves there, game by game, and a save already there stays.
 //! - Compatibility: the community list KytyPS5's own launcher uses.
 //! - Installs: PS5 packages, exFAT images and unpacked game folders, in [`install`].
 
@@ -52,6 +55,11 @@ pub const PACKAGES: &str = nexus_api::PACKAGES_FOLDER;
 const MAC_BUNDLE: &str = "KytyPS5.app/Contents/MacOS";
 /// The folder you map to your own KytyPS5 build.
 pub const OWN_BUILD: &str = "kyty-build";
+/// The shared data folder: saves and the games' downloaded data, for every build that has
+/// [`DATA_OPTION`].
+pub const DATA_FOLDER: &str = "kyty-data";
+/// The option that tells KytyPS5 where its saves go, in place of the folder it runs in.
+const DATA_OPTION: &str = "--data-folder";
 /// Where a build's binary may be in your own build's folder: at its top, in KytyPS5's usual
 /// build folders, or in a macOS app bundle.
 const OWN_PATHS: [&str; 6] = ["", "_Build/release-linux", "_Build/linux/install", "_Build/linux", "build", MAC_BUNDLE];
@@ -241,6 +249,8 @@ impl emulator_kit::settings::Settings for Settings {
 }
 
 /// The command line KytyPS5 gets for a game. `addcont` is the game's DLC folder (`--addcont-dir`).
+/// `data` is the shared data folder (`--data-folder`), given only to a build that lists the
+/// option: without it, a build keeps its saves in its own folder.
 /// The window size only sizes the window;
 /// `--video-out-resolution` is what the game is told its screen is. Extra arguments come last.
 /// `supported`: the options the build knows (its `--help`); a setting it doesn't know is left
@@ -249,12 +259,19 @@ pub fn kyty_args(
     settings: &Settings,
     game: LaunchArg,
     addcont: LaunchArg,
+    data: Option<LaunchArg>,
     supported: Option<&BTreeSet<String>>,
 ) -> Vec<LaunchArg> {
     let mut out: Vec<LaunchArg> = vec!["--game".into(), game];
     if supported.is_none_or(|known| known.contains(ADDCONT_OPTION)) {
         out.push(ADDCONT_OPTION.into());
         out.push(addcont);
+    }
+    if let Some(data) = data
+        && supported.is_some_and(|known| known.contains(DATA_OPTION))
+    {
+        out.push(DATA_OPTION.into());
+        out.push(data);
     }
     for (option, value) in setting_options(settings) {
         if supported.is_some_and(|known| !known.contains(option)) {
@@ -544,6 +561,10 @@ impl Kyty {
         addcont: LaunchArg,
     ) -> Vec<LaunchArg> {
         let known = self.options(binary, tag).await;
+        let data = match &known {
+            Some(known) if known.contains(DATA_OPTION) => self.shared_data(tag).await,
+            _ => None,
+        };
         if let Some(known) = &known {
             if !known.contains(ADDCONT_OPTION) {
                 self.emu.host().log.info(&format!("KytyPS5 at {binary} has no {ADDCONT_OPTION}: it is left out"));
@@ -552,7 +573,26 @@ impl Kyty {
                 self.emu.host().log.info(&format!("KytyPS5 at {binary} has no {option}: that setting is left out"));
             }
         }
-        kyty_args(settings, game, addcont, known.as_ref())
+        kyty_args(settings, game, addcont, data, known.as_ref())
+    }
+
+    /// The shared data folder, for a build that has [`DATA_OPTION`], once the saves of the
+    /// build `tag` are copied into it ([`data::share_data`]). `None` when the copy failed: the
+    /// game then runs with the saves in the build's folder, as before.
+    async fn shared_data(&self, tag: Option<&str>) -> Option<LaunchArg> {
+        let host = self.emu.host();
+        let shared = HostPath::new(DATA_FOLDER, 0, RelPath::root());
+        if let Some(tag) = tag {
+            let copied = match data::home(host.storage.as_ref(), Some(tag), host.platform).await {
+                Ok(home) => data::share_data(host, &home, &shared).await,
+                Err(e) => Err(e),
+            };
+            if let Err(e) = copied {
+                host.log.warn(&format!("the saves didn't copy to the shared data folder: {e}; they stay in the build"));
+                return None;
+            }
+        }
+        Some(LaunchArg::path(shared))
     }
 }
 
@@ -610,7 +650,7 @@ mod tests {
         let settings = Settings { video_out: VideoOut::FullHd, ..Settings::default() };
         let known: BTreeSet<String> =
             ["--game", "--screen-width", "--screen-height", "--present-mode"].map(String::from).into();
-        let args = texts(kyty_args(&settings, "/g/PPSA1".into(), "/g/PPSA1/addcont".into(), Some(&known)));
+        let args = texts(kyty_args(&settings, "/g/PPSA1".into(), "/g/PPSA1/addcont".into(), None, Some(&known)));
         assert_eq!(
             args,
             ["--game", "/g/PPSA1", "--screen-width", "1920", "--screen-height", "1080", "--present-mode", "Mailbox"]
@@ -618,9 +658,27 @@ mod tests {
     }
 
     #[test]
+    fn the_shared_data_folder_goes_only_to_a_build_that_lists_its_option() {
+        let settings = Settings::default();
+        let data = || Some(LaunchArg::from("/home/p/.local/share/KytyPS5"));
+        let old: BTreeSet<String> = ["--game", "--addcont-dir"].map(String::from).into();
+        let args = texts(kyty_args(&settings, "/g/PPSA1".into(), "/g/a".into(), data(), Some(&old)));
+        assert!(!args.contains(&"--data-folder".to_owned()), "{args:?}");
+        let new: BTreeSet<String> = ["--game", "--addcont-dir", "--data-folder"].map(String::from).into();
+        let args = texts(kyty_args(&settings, "/g/PPSA1".into(), "/g/a".into(), data(), Some(&new)));
+        assert_eq!(
+            args[..6],
+            ["--game", "/g/PPSA1", "--addcont-dir", "/g/a", "--data-folder", "/home/p/.local/share/KytyPS5"]
+        );
+        // A build whose --help didn't answer may not know it, and would stop at it.
+        let args = texts(kyty_args(&settings, "/g/PPSA1".into(), "/g/a".into(), data(), None));
+        assert!(!args.contains(&"--data-folder".to_owned()), "{args:?}");
+    }
+
+    #[test]
     fn the_command_line_puts_extra_arguments_last() {
         let settings = Settings { amd_cpu: true, extra_args: "--x 'a b'".into(), ..Settings::default() };
-        let args: Vec<String> = kyty_args(&settings, "/g/PPSA1".into(), "/g/PPSA1/addcont".into(), None)
+        let args: Vec<String> = kyty_args(&settings, "/g/PPSA1".into(), "/g/PPSA1/addcont".into(), None, None)
             .into_iter()
             .map(|a| match a {
                 LaunchArg::Text(t) => t,
