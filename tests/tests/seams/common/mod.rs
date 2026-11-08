@@ -136,12 +136,20 @@ pub fn composed_first_run(build: impl FnOnce(FakeHost) -> FakeHost) -> Composed 
 /// The core and the shell, with the built-in themes; `classic` saves the Classic theme as the
 /// choice when the test saved none.
 fn boot_composed(build: impl FnOnce(FakeHost) -> FakeHost, classic: bool) -> Composed {
+    let themes = FakeHost::new()
+        .built_in(nexus_api::PluginBox::theme(theme_classic::ClassicTheme))
+        .built_in(nexus_api::PluginBox::theme(theme_default::DefaultTheme));
+    boot_with(build(themes), classic)
+}
+
+/// Like [`composed_first_run`], with the Default theme as the only theme: no Classic.
+pub fn composed_default_only(build: impl FnOnce(FakeHost) -> FakeHost) -> Composed {
+    testing_backend();
+    boot_with(build(FakeHost::new().built_in(nexus_api::PluginBox::theme(theme_default::DefaultTheme))), false)
+}
+
+fn boot_with(host: FakeHost, classic: bool) -> Composed {
     let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-    let host = build(
-        FakeHost::new()
-            .built_in(nexus_api::PluginBox::theme(theme_classic::ClassicTheme))
-            .built_in(nexus_api::PluginBox::theme(theme_default::DefaultTheme)),
-    );
     let test = rt.block_on(host.boot_core());
     if classic && test.core.selected_theme().is_none() {
         test.core.theme_switched(nexus_api::PluginId::new(theme_classic::ID).unwrap()).unwrap();

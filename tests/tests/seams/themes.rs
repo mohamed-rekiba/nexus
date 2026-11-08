@@ -11,7 +11,7 @@ fn a_first_run_shows_the_default_theme_and_saves_no_choice() {
     host.ui.start().unwrap();
     assert_eq!(host.ui.current(), Some(&id(theme_default::ID)));
     assert_eq!(host.core().kernel().config().get(&["app", "theme"]), serde_json::Value::Null);
-    assert_eq!(host.ui.resolved().unwrap().merged.chain, [id("default"), id("classic")], "it extends Classic");
+    assert_eq!(host.ui.resolved().unwrap().merged.chain, [id("default")], "it stands alone");
 }
 
 #[test]
@@ -410,4 +410,27 @@ fn exactly_one_theme_is_the_fallback() {
         matches!(&error, ThemeError::Fallback(m) if m.contains("default") && m.contains("second")),
         "the error names both: {error}"
     );
+}
+
+#[test]
+fn the_default_theme_works_with_the_classic_theme_removed() {
+    let mut host = composed_default_only(|h| {
+        h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha", "Beta"]).build())
+            .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
+    });
+    assert!(!host.ui.themes().contains(&id(theme_classic::ID)));
+    host.ui.start().expect("Default starts without Classic");
+    assert_eq!(host.ui.current(), Some(&id(theme_default::ID)));
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
+    for route in ["Catalog", "Downloads", "Settings", "Emulators", "Themes", "Home"] {
+        let args = [
+            slint_interpreter::Value::String("Navigate".into()),
+            slint_interpreter::Value::String(format!("{route:?}").into()),
+        ];
+        host.instance().invoke_global("Host", "command", &args).unwrap();
+        host.pump();
+        assert_eq!(format!("{:?}", host.core().view().screen), route, "the {route} screen");
+    }
+    host.dispatch(Command::OpenGame("emu-a:G0".parse().unwrap()));
+    assert_eq!(host.core().view().screen, ScreenId::GameDetail);
 }

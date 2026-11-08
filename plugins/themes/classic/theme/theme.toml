@@ -7,8 +7,7 @@ capabilities = ["theme"]
 activation = "eager"
 
 # The built-in Classic theme: the old launcher's own look (its ui/*.slint), ported to the theme
-# contract. Every value is laid out on a 1920×1080 canvas and scaled to the window. Every
-# other theme extends it, the Default theme included.
+# contract. Every value is laid out on a 1920×1080 canvas and scaled to the window.
 [theme]
 ui_api = "^0.2.0"
 screens = ["home", "game-detail", "catalog", "downloads", "settings", "emulators", "themes", "plugin", "running", "game-settings"]
