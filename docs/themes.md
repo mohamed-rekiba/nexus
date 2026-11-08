@@ -263,6 +263,7 @@ in it is an error (`deny_unknown_fields`).
 | `breakpoints` | Named window classes. See [Responsive layout](#responsive-layout). |
 | `assets` | `images`, `fonts` and `sounds`. See [Images, fonts and sounds](#images-fonts-and-sounds). |
 | `options` | Settings the player can change. See [Tokens and options](#tokens-and-options). |
+| `emulators` | A system's icon and cover in place of its emulator plugin's. See [Images, fonts and sounds](#images-fonts-and-sounds). |
 
 A theme can define these screens (`ScreenId` in `crates/nexus-ui-api/src/vm.rs`). Each screen
 file is `screens/<id>.slint` and exports the component in the second column
@@ -314,6 +315,7 @@ must supply every token and every file its shell imports.
 |---|---|
 | Tokens | Per name. The child's value replaces the parent's. |
 | Images and sounds | Per name. The child's file replaces the parent's. |
+| `emulators` | Per system and per picture. The child's icon replaces the parent's and leaves the parent's cover. |
 | Fonts | Added up. Every theme in the chain registers its fonts. |
 | Breakpoints | A child with any breakpoint replaces the parent's whole list. |
 | `input` | The first non-empty list in the chain, the theme first. |
@@ -755,6 +757,22 @@ Set `font-family` to the family name inside the files, as the fixture does with 
 font path must resolve inside the theme folder (`ResolvedTheme::font_paths`). A built-in
 theme has no folder, so its fonts are written once to a `launcher-fonts` folder in the system's
 temp folder.
+
+**A system's pictures.** Each entry of `Vm.emulators` has `system` (the system id, such as
+`PS5`), `icon` and `cover`. The emulator plugin ships the two pictures (see `[system]` in
+[plugins.md](plugins.md)). A theme can show its own for a system, by its id:
+
+```toml
+[theme.emulators.PS5]
+icon = "images/ps5-icon.png"
+cover = "images/ps5-cover.jpg"
+```
+
+The host decodes them when it loads the theme, the icon as a thumbnail and the cover at full
+size, and puts them in `Vm.emulators` in place of the plugin's. A picture the theme leaves out
+stays the plugin's, and an entry for a system that no emulator plays changes nothing. A missing
+or undecodable file fails the load with `ThemeError::Asset`, as an image does. The key is the
+system, not the plugin, so the picture stays when another emulator plays the system.
 
 **Sounds.** A sound name is what `Host.play-sound(name)` takes. The app plays WAV and Ogg Vorbis
 (`rodio` features in the workspace `Cargo.toml`). The host gives no sound when the player has

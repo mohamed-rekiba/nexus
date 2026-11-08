@@ -59,4 +59,7 @@ after = "own_build"
 [system]
 id = "SWITCH"
 name = "Nintendo Switch"
+# The system's pictures, in assets/ (made by scripts/make-system-art.sh).
+icon = "icon.png"
+cover = "cover.jpg"
 color = "#e60012"

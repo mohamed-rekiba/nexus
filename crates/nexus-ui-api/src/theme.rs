@@ -124,6 +124,21 @@ pub struct ThemeSection {
     pub assets: ThemeAssets,
     #[serde(default)]
     pub options: BTreeMap<String, ThemeOption>,
+    /// Pictures for a system, by its id (`[theme.emulators.PS5]`), in place of the ones its
+    /// emulator plugin ships.
+    #[serde(default)]
+    pub emulators: BTreeMap<String, SystemArt>,
+}
+
+/// A system's icon and cover a theme shows in place of its emulator plugin's: PNG or JPEG files
+/// in the theme folder. A picture the theme leaves out stays the plugin's.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SystemArt {
+    #[serde(default)]
+    pub icon: Option<RelPath>,
+    #[serde(default)]
+    pub cover: Option<RelPath>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -202,6 +217,13 @@ pub struct LayerPath {
     pub path: RelPath,
 }
 
+/// A system's pictures in a merged theme, each from the layer that sets it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MergedArt {
+    pub icon: Option<LayerPath>,
+    pub cover: Option<LayerPath>,
+}
+
 /// An option's value, as the theme's `Options` global holds it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OptionValue {
@@ -221,6 +243,8 @@ pub struct MergedTheme {
     pub images: BTreeMap<String, LayerPath>,
     pub fonts: Vec<LayerPath>,
     pub sounds: BTreeMap<String, LayerPath>,
+    /// Each system's pictures from the chain, per picture: the child's wins.
+    pub system_art: BTreeMap<String, MergedArt>,
     pub breakpoints: Vec<Breakpoint>,
     pub input: Vec<InputMode>,
     pub navigation: Navigation,
@@ -245,6 +269,7 @@ pub fn merge_chain(chain: &[&ThemeManifest], option_values: &serde_json::Value) 
     let mut tokens = BTreeMap::new();
     let mut images = BTreeMap::new();
     let mut sounds = BTreeMap::new();
+    let mut system_art: BTreeMap<String, MergedArt> = BTreeMap::new();
     let mut fonts = Vec::new();
     let mut breakpoints = Vec::new();
     // Root theme first, so children overwrite.
@@ -259,6 +284,16 @@ pub fn merge_chain(chain: &[&ThemeManifest], option_values: &serde_json::Value) 
         }
         for (name, path) in &section.assets.sounds {
             sounds.insert(name.clone(), LayerPath { layer, path: path.clone() });
+        }
+        for (system, art) in &section.emulators {
+            let merged = system_art.entry(system.clone()).or_default();
+            let at = |path: &RelPath| LayerPath { layer, path: path.clone() };
+            if let Some(icon) = &art.icon {
+                merged.icon = Some(at(icon));
+            }
+            if let Some(cover) = &art.cover {
+                merged.cover = Some(at(cover));
+            }
         }
         fonts.extend(section.assets.fonts.iter().map(|path| LayerPath { layer, path: path.clone() }));
         if !section.breakpoints.is_empty() {
@@ -315,6 +350,7 @@ pub fn merge_chain(chain: &[&ThemeManifest], option_values: &serde_json::Value) 
         images,
         fonts,
         sounds,
+        system_art,
         breakpoints,
         input: chain
             .iter()

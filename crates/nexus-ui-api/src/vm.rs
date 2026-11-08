@@ -787,6 +787,14 @@ pub struct EmulatorVm {
     pub plugin: PluginId,
     /// The program's name, the manifest's `emulator_name()`: `KytyPS5`.
     pub name: String,
+    /// The id of the system it plays, from its manifest's `[system]` (`PS5`): what the commands
+    /// LibrarySystem and CatalogSystem take. Empty when the manifest has none.
+    pub system: String,
+    /// The system's icon and cover from the plugin's assets, or the theme's own for the system.
+    #[serde(serialize_with = "mark::thumb")]
+    pub icon: Option<ImageRef>,
+    #[serde(serialize_with = "mark::picture")]
+    pub cover: Option<ImageRef>,
     /// `loaded`, `active` or `failed`.
     pub status: String,
     /// It installs builds of its own. An emulator that only starts games (PC) has none.

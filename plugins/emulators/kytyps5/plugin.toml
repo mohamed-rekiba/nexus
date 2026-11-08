@@ -113,3 +113,6 @@ default = [
 id = "PS5"
 name = "PlayStation 5"
 # No color: PS5 is drawn in the theme's neutral look, black with a white edge.
+# The system's pictures, in assets/ (made by scripts/make-system-art.sh).
+icon = "icon.png"
+cover = "cover.jpg"

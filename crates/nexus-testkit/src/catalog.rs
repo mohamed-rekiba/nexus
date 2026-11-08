@@ -48,6 +48,9 @@ pub struct FakeCatalog {
     waiting_installer: bool,
     keymap: Vec<(String, String)>,
     requires: Option<String>,
+    /// Its system's art, in its assets: `system/icon.png` and `system/cover.png`.
+    icon: Option<Vec<u8>>,
+    cover: Option<Vec<u8>>,
 }
 
 impl FakeCatalog {
@@ -71,7 +74,21 @@ impl FakeCatalog {
             waiting_installer: false,
             keymap: Vec::new(),
             requires: None,
+            icon: None,
+            cover: None,
         }
+    }
+
+    /// Its system's icon, `png` in its assets, named in its manifest's `[system]`.
+    pub fn icon(mut self, png: Vec<u8>) -> Self {
+        self.icon = Some(png);
+        self
+    }
+
+    /// Its system's cover, `png` in its assets, named in its manifest's `[system]`.
+    pub fn cover(mut self, png: Vec<u8>) -> Self {
+        self.cover = Some(png);
+        self
     }
 
     /// KytyPS5 for the PS5 catalog, `emu-kyty`, named PS5: no games of its own and no slots. It
@@ -221,6 +238,12 @@ impl FakeCatalog {
                 "PS4" => "[system]\nid = \"PS4\"\nname = \"PlayStation 4\"\ncolor = \"#8fc2ff\"\n",
                 _ => "",
             };
+            if self.icon.is_some() {
+                toml += "icon = \"system/icon.png\"\n";
+            }
+            if self.cover.is_some() {
+                toml += "cover = \"system/cover.png\"\n";
+            }
         }
         toml += "[permissions]\n";
         if self.launcher {
@@ -277,6 +300,13 @@ impl FakeCatalog {
             }
             if self.waiting_installer {
                 provided.game_installer = Some(Arc::new(WaitingInstaller));
+            }
+            let art: Vec<(&str, Vec<u8>)> = [("system/icon.png", &self.icon), ("system/cover.png", &self.cover)]
+                .into_iter()
+                .filter_map(|(path, png)| Some((path, png.clone()?)))
+                .collect();
+            if !art.is_empty() {
+                provided.assets = Some(Arc::new(MemFiles::new(art)));
             }
             Ok(provided)
         })
@@ -612,5 +642,27 @@ impl Slots for FakeService {
     }
     async fn run_action(&self, _: &str, _: Option<&str>, _: &serde_json::Value) -> PluginResult<()> {
         Ok(())
+    }
+}
+
+/// Files held in memory: a plugin's assets in a test.
+pub struct MemFiles(Vec<(RelPath, Vec<u8>)>);
+
+impl MemFiles {
+    /// Every path must be a valid [`RelPath`].
+    pub fn new<'a>(files: impl IntoIterator<Item = (&'a str, Vec<u8>)>) -> Self {
+        Self(files.into_iter().map(|(path, bytes)| (RelPath::new(path).expect("a valid path"), bytes)).collect())
+    }
+}
+
+impl Files for MemFiles {
+    fn read(&self, path: &RelPath) -> Option<Vec<u8>> {
+        self.0.iter().find(|(p, _)| p == path).map(|(_, bytes)| bytes.clone())
+    }
+
+    fn list(&self) -> Vec<RelPath> {
+        let mut paths: Vec<RelPath> = self.0.iter().map(|(p, _)| p.clone()).collect();
+        paths.sort();
+        paths
     }
 }

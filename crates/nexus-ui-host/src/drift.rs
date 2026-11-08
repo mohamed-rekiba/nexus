@@ -208,6 +208,9 @@ fn emulator() -> EmulatorVm {
     EmulatorVm {
         plugin: id(),
         name: s(),
+        system: s(),
+        icon: Some(image()),
+        cover: Some(image()),
         status: s(),
         has_builds: true,
         installed: vec![s()],

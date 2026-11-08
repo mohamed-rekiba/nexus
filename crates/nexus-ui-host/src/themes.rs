@@ -10,6 +10,13 @@ use nexus_core::Core;
 use nexus_ui_api::contract::{self, RESERVED_FILES, SHELL_FILE};
 use nexus_ui_api::{ComponentId, MergedTheme, ScreenId, ThemeError, ThemeManifest, merge_chain};
 
+/// A system's icon and cover from a theme, as file bytes; `None` leaves the plugin's.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SystemArtBytes {
+    pub icon: Option<Vec<u8>>,
+    pub cover: Option<Vec<u8>>,
+}
+
 /// One theme in a chain: its manifest and its files.
 #[derive(Clone)]
 pub struct ThemeLayer {
@@ -203,6 +210,27 @@ impl ResolvedTheme {
                     message: "is missing".into(),
                 })?;
                 Ok((name.clone(), bytes))
+            })
+            .collect()
+    }
+
+    /// Bytes of each system's icon and cover the theme sets, by system id.
+    pub fn system_art(&self) -> Result<BTreeMap<String, SystemArtBytes>, ThemeError> {
+        let read = |at: &nexus_ui_api::LayerPath| {
+            let layer = &self.layers[at.layer];
+            layer.files.read(&at.path).ok_or_else(|| ThemeError::Asset {
+                theme: layer.manifest.id().clone(),
+                asset: at.path.to_string(),
+                message: "is missing".into(),
+            })
+        };
+        self.merged
+            .system_art
+            .iter()
+            .map(|(system, art)| {
+                let icon = art.icon.as_ref().map(read).transpose()?;
+                let cover = art.cover.as_ref().map(read).transpose()?;
+                Ok((system.clone(), SystemArtBytes { icon, cover }))
             })
             .collect()
     }
