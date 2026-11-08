@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/mohamed-rekiba/nexus/compare/nexus-os-v0.7.0...nexus-os-v0.8.0) (2026-11-08)
+
+
+### Features
+
+* **os:** bundle Nexus v0.12.0 ([7261164](https://github.com/mohamed-rekiba/nexus/commit/72611645af85921fbccd7ce4ae4a3c03d21b1cf9))
+
 ## [0.7.0](https://github.com/mohamed-rekiba/nexus/compare/nexus-os-v0.6.0...nexus-os-v0.7.0) (2026-11-08)
 
 
