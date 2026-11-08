@@ -1,16 +1,16 @@
 # Catalog collector
 
 These scripts make the catalog files that Nexus's Game Catalog plugin
-(`plugins/services/release-catalog`) reads, one for each console: `ps5.json`, `ps4.json` and
-`pc.json`. Each file lists the release topics of one or more RuTracker forums, in English, with
+(`plugins/services/release-catalog`) reads, one for each console: `ps5.json`, `ps4.json`,
+`pc.json` and `switch.json`. Each file lists the release topics of one or more RuTracker forums, in English, with
 their magnet links and game facts.
 
 ## How the catalogs reach Nexus
 
 - `assets/catalog-sources.json` names the forums each catalog comes from. The collector reads it,
   and the plugin's `build.rs` compiles the same file into Nexus.
-- `assets/catalog/ps5.json`, `ps4.json` and `pc.json` are the bundled catalogs. The plugin's
-  `build.rs` compiles these three into Nexus (the list is in `bundled-names.rs`); a build fails
+- `assets/catalog/ps5.json`, `ps4.json`, `pc.json` and `switch.json` are the bundled catalogs.
+  The plugin's `build.rs` compiles these four into Nexus (the list is in `bundled-names.rs`); a build fails
   when one is missing. Git holds a full set; `make catalog` and `make catalog-refresh` replace
   them, and the next build bundles the new ones.
 - In Nexus, the plugin uses the bundled catalog while its **Catalog address** setting is empty.
@@ -44,6 +44,14 @@ forum has:
 | `ps4` | f=973, PS4 games | `ps4.json` |
 | `linux` | f=1992, native Linux games | `pc.json` |
 | `wine` | f=2059, Linux games with Wine | `pc.json` |
+| `switch` | f=1605, Switch and Switch 2 games | `switch.json` |
+
+The Switch forum's titles start with `[Nintendo Switch]` or `[NSW2]`. Its `tag` is the first;
+every release has a torrent, so the second needs no tag. Its `[NRO]` topics are homebrew
+programs (PC ports, emulators), not games: the collector and the plugin leave them out.
+
+The bundled `switch.json` starts empty. Run `make catalog CONSOLE=switch` once to fill it; after
+that, `make catalog-refresh` updates it too.
 
 The plugin also reads the bundled file to learn what a listing's topics are for. It finds the
 forum by the `f=` number in the listing's `source`, else by the listing's `platform` key, and
@@ -104,6 +112,10 @@ The script guards the current files:
   there. `make clean` removes `dist/`, and the backups with it.
 - It stops at the first forum whose listing is partial (`list.mjs` exit 2), before it copies
   anything into `assets/catalog/`.
+- A run that stopped after it read every listing page (Chrome closed while it read topic pages,
+  for example) leaves `dist/catalog/<key>-topics.json.partial.json`. A full run in the next day
+  goes on from that file with `list.mjs --enrich-existing`: it reads only the topic pages left,
+  then deletes the file. Delete it yourself to read the forum again from its first page.
 - It checks every new file before the first copy, and copies only complete, English files that
   this run wrote.
 
@@ -186,7 +198,9 @@ Other options: `--output <file>`, `--max-pages <1-200>` (default 200),
 `--verification-timeout <seconds>` (default 180), `--concurrency <1-4>`, `--headless`. Use
 `--headless` only to look for faults: the check page stops a run without a window. Exit code 0
 means every page was read; 2 means the listing is partial and went to
-`<key>-topics.json.partial.json`.
+`<key>-topics.json.partial.json`. With `--enrich-existing <file>`, the listing comes from that file
+and only its topic pages are read; the result is complete when that file has no listing pages
+left and this run read every topic.
 
 ## Translation
 

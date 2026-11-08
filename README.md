@@ -13,6 +13,7 @@ game needs: the library, downloads, installs, launching, controller input and up
 |---|---|---|
 | PS5 | PS5 games, with [KytyPS5](https://github.com/KytyPS5/KytyPS5) | Linux, macOS, Windows |
 | PS4 | PS4 games, with [shadPS4](https://github.com/shadps4-emu/shadPS4) | Linux, macOS, Windows |
+| Switch | Switch and Switch 2 games, with [Lichii](https://github.com/zortos293/Lichii). Up to 4 controllers are set up for you; you provide your own keys and firmware. | Linux |
 | PC | PC games, natively or through Wine or Proton | Linux, macOS, Windows |
 | Steam | The games Steam installed, played through Steam | Linux |
 
@@ -56,9 +57,10 @@ brings itself back when they close.
 - **Catalog and Downloads.** The games a catalog offers. Nexus downloads a release by BitTorrent
   into your packages folder, and can bind the download to your VPN and pause it when the VPN drops.
 - **Installs.** Each plugin installs the packages it understands, with progress in Downloads.
-  Today that is unsigned PS5 packages, exFAT disc images, PS4 fake packages and PC releases.
+  Today that is unsigned PS5 packages, exFAT disc images, PS4 fake packages, Switch game files and
+  PC releases.
 - **Emulator builds.** For an emulator plugin, Nexus downloads and updates the official builds, or
-  runs a build of your own. Today that is KytyPS5 and shadPS4.
+  runs a build of your own. Today that is KytyPS5, shadPS4 and Lichii.
 - **Themes.** Switching the theme keeps the screen you are on, your selection, the downloads and a
   running game.
 - **Controller.** Every screen works with a gamepad, a keyboard or a pointer.
@@ -150,42 +152,42 @@ menu. On a PC with an NVIDIA card it gets NVIDIA's driver by itself. It needs a 
 starts with UEFI.
 
 <!-- x-release-please-start-version -->
-The current version is Nexus OS 0.5.0:
-[its release](https://github.com/mohamed-rekiba/nexus/releases/tag/nexus-os-v0.5.0).
+The current version is Nexus OS 0.6.0:
+[its release](https://github.com/mohamed-rekiba/nexus/releases/tag/nexus-os-v0.6.0).
 All Nexus OS releases are tagged `nexus-os-v…` on the
 [releases page](https://github.com/mohamed-rekiba/nexus/releases?q=nexus-os).
 
-The release has one ISO, named with its version (`nexus-os-x86_64-0.5.0.iso`), to write to a USB
+The release has one ISO, named with its version (`nexus-os-x86_64-0.6.0.iso`), to write to a USB
 stick of 8 GB or more. When the ISO is over 2 GiB it comes in parts
-(`nexus-os-x86_64-0.5.0.iso.part-aa`, `-ab`, …): download them all and join them into the ISO.
+(`nexus-os-x86_64-0.6.0.iso.part-aa`, `-ab`, …): download them all and join them into the ISO.
 
 - Linux and macOS:
 
   ```sh
-  v=0.5.0
+  v=0.6.0
   cat nexus-os-x86_64-$v.iso.part-* > nexus-os-x86_64-$v.iso
   ```
 
 - Windows (Command Prompt), naming every part in order:
 
   ```bat
-  set v=0.5.0
+  set v=0.6.0
   copy /b nexus-os-x86_64-%v%.iso.part-aa + nexus-os-x86_64-%v%.iso.part-ab nexus-os-x86_64-%v%.iso
   ```
 
-Then check the ISO against `nexus-os-x86_64-0.5.0.iso.sha256` (each part also has its own
+Then check the ISO against `nexus-os-x86_64-0.6.0.iso.sha256` (each part also has its own
 `.sha256`):
 
-- Linux: `sha256sum -c nexus-os-x86_64-0.5.0.iso.sha256`
-- macOS: `shasum -a 256 -c nexus-os-x86_64-0.5.0.iso.sha256`
-- Windows (PowerShell): `Get-FileHash nexus-os-x86_64-0.5.0.iso`, and compare it with the file's
+- Linux: `sha256sum -c nexus-os-x86_64-0.6.0.iso.sha256`
+- macOS: `shasum -a 256 -c nexus-os-x86_64-0.6.0.iso.sha256`
+- Windows (PowerShell): `Get-FileHash nexus-os-x86_64-0.6.0.iso`, and compare it with the file's
   first word.
 
 To try the ISO in a virtual machine first, on Fedora, from a clone of this repository:
 
 ```sh
 sudo dnf install qemu-kvm qemu-img edk2-ovmf
-os/run-vm.sh path/to/nexus-os-x86_64-0.5.0.iso
+os/run-vm.sh path/to/nexus-os-x86_64-0.6.0.iso
 ```
 
 <!-- x-release-please-end -->

@@ -13,7 +13,7 @@ const report = (key, ids, at = '2026-10-19T00:00:00Z') => ({
 test('catalog-sources.json: every forum has a key, an address, and a tag or a system', async () => {
   const sources = JSON.parse(await readFile(new URL('../../assets/catalog-sources.json', import.meta.url), 'utf8'));
   const names = Object.keys(sources);
-  assert.deepEqual(names, ['ps5', 'ps4', 'pc'], 'the root is the catalogs, by name');
+  assert.deepEqual(names, ['ps5', 'ps4', 'pc', 'switch'], 'the root is the catalogs, by name');
   const keys = new Set();
   for (const name of names) {
     const catalog = sources[name];

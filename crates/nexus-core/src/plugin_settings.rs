@@ -75,6 +75,9 @@ pub(crate) async fn run_action(
     if action == nexus_api::HOST_OPEN_SETTINGS {
         return crate::navigation::navigate(core, Route::Settings).await;
     }
+    if action == nexus_api::HOST_OPEN_EMULATOR {
+        return crate::launch::open_emulator(core, plugin).await;
+    }
     if action == HOST_INSTALL_GAME {
         let source = serde_json::from_value(args)
             .map_err(|e| CoreError::Invalid(format!("{HOST_INSTALL_GAME} needs a folder path: {e}")))?;

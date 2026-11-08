@@ -58,6 +58,9 @@ pub enum ArchiveFormat {
     /// A zip that holds one AppImage. The host takes it out and runs its
     /// `--appimage-extract` (Linux only), so `into` gets its `squashfs-root` folder.
     AppImageInZip,
+    /// The download is an AppImage itself. The host copies it into `into` under the download's
+    /// file name and runs its `--appimage-extract` (Linux only), as for [`Self::AppImageInZip`].
+    AppImage,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -148,6 +151,18 @@ pub trait Installer: Send + Sync {
     }
 }
 
+/// A launch's rule for a program that restarts itself through its launcher: Lichii's
+/// `eden-cli` exits with 75 when a game starts another of its programs, and is to be started
+/// again with `EDEN_CLI_RESTART_HANDOFF` set. The host starts it again at most a few times in a
+/// row, and never after the player pressed Stop.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Relaunch {
+    /// The exit code that asks for it.
+    pub code: i32,
+    /// Added to the environment of the next runs.
+    pub env: BTreeMap<String, String>,
+}
+
 /// The process to start for a game. The host spawns it only if the manifest's
 /// `permissions.process` allows `program`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -168,6 +183,11 @@ pub struct LaunchSpec {
     /// game is the program started here.
     #[serde(default)]
     pub game_process: Option<String>,
+    /// When the program exits with this rule's code, the host starts it again, with the rule's
+    /// environment on top, in the same session: for a program that restarts itself through its
+    /// launcher. `None`: every exit ends the game.
+    #[serde(default)]
+    pub relaunch: Option<Relaunch>,
 }
 
 /// Where a program or folder is. As JSON, a bare string is a path in the data folder, and
@@ -286,6 +306,13 @@ pub trait Launcher: Send + Sync {
     /// `config` is the game's merged settings (emulator settings, then game settings).
     async fn prepare(&self, game: &str, config: &serde_json::Value) -> PluginResult<LaunchSpec>;
 
+    /// The emulator's own window, without a game: for the settings only it has, such as its
+    /// controls or a console's keys. `config` is the emulator's settings. `None`, the default,
+    /// for an emulator with no window of its own.
+    async fn open_emulator(&self, _config: &serde_json::Value) -> PluginResult<Option<LaunchSpec>> {
+        Ok(None)
+    }
+
     async fn on_exit(&self, game: &str, exit: &ExitInfo) -> PluginResult<()> {
         let _ = (game, exit);
         Ok(())
@@ -319,6 +346,7 @@ mod location_tests {
             env: BTreeMap::new(),
             cwd: Some(Location::Folder(game.clone())),
             game_process: None,
+            relaunch: None,
         };
         let json = serde_json::to_value(&spec).unwrap();
         assert_eq!(json["program"], serde_json::json!({"system": "wine"}));

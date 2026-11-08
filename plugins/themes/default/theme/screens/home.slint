@@ -376,9 +376,13 @@ component HomeView inherits Rectangle {
             }
             TouchArea {
                 mouse-cursor: pointer;
+                // One click opens the game, selected or not: the keys select first, then Enter
+                // opens, but a pointer points at the game it means.
                 clicked => {
-                    if (i == Nav.selected && !Nav.extra) { Origin.from = "row"; Commands.open-game(game.key); } else { Nav.extra = false; Nav.select-now(game.key); }
+                    if (i != Nav.selected || Nav.extra) { Nav.extra = false; Nav.select-now(game.key); }
                     Nav.zone = "row";
+                    Origin.from = "row";
+                    Commands.open-game(game.key);
                 }
             }
         }
@@ -405,7 +409,7 @@ component HomeView inherits Rectangle {
             }
             TouchArea {
                 mouse-cursor: pointer;
-                clicked => { if (Nav.extra) { Nav.open-library(); } else { Nav.extra = true; } Nav.zone = "row"; }
+                clicked => { Nav.extra = true; Nav.zone = "row"; Nav.open-library(); }
             }
         }
         // The name beside the selected tile. Its two layers take turns as the hero's do.

@@ -89,8 +89,9 @@ pub trait Folders: Send + Sync {
     async fn roots(&self, folder: &str) -> PluginResult<Vec<FolderRoot>>;
     /// Entries of a folder, sorted by name. Empty when it doesn't exist.
     async fn list(&self, dir: &HostPath) -> PluginResult<Vec<DirEntry>>;
-    /// The bytes of every file under `dir`, counting at most [`MAX_SIZE_FILES`] entries.
-    /// Linked folders are not entered. 0 when it doesn't exist.
+    /// The bytes of every file under `dir`, counting at most [`MAX_SIZE_FILES`] entries, or
+    /// the bytes of `dir` when it is a file. Linked folders are not entered. 0 when it doesn't
+    /// exist.
     async fn size(&self, dir: &HostPath) -> PluginResult<u64>;
     async fn exists(&self, path: &HostPath) -> PluginResult<bool>;
     /// Up to `len` bytes from `offset`, at most [`MAX_FOLDER_READ`]. Fewer at the end of the
@@ -329,6 +330,44 @@ impl VpnGate {
 
     pub async fn check(&self) -> Result<VpnPass, VpnBlock> {
         self.0.check().await
+    }
+}
+
+/// A game controller the computer has now, as SDL3 sees it with the hints an SDL-based emulator
+/// sets. An emulator that maps controllers by SDL (Lichii) writes its settings from this.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Controller {
+    /// What SDL calls it ("Xbox Series X Controller").
+    pub name: String,
+    /// SDL's GUID for it, 32 lowercase hex digits, with the two bytes of its name's checksum
+    /// zeroed, as Eden and its forks write it.
+    pub guid: String,
+    /// Which controller of this GUID it is, from 0, in the order SDL lists them.
+    pub port: u32,
+    /// SDL's mapping of its inputs to a gamepad's, without the GUID and name in front:
+    /// `a:b0,b:b1,dpup:h0.1,leftx:a0,lefttrigger:a2,...`.
+    pub mapping: String,
+}
+
+/// Lists the controllers the computer has now. The host's runs a probe each time, so it may
+/// take a second.
+#[async_trait]
+pub trait ControllerList: Send + Sync {
+    async fn connected(&self) -> Vec<Controller>;
+}
+
+/// The host's [`ControllerList`], in the service registry.
+#[derive(Clone)]
+pub struct Controllers(Arc<dyn ControllerList>);
+
+impl Controllers {
+    pub fn new(list: Arc<dyn ControllerList>) -> Self {
+        Self(list)
+    }
+
+    /// The controllers connected now, in SDL's order.
+    pub async fn connected(&self) -> Vec<Controller> {
+        self.0.connected().await
     }
 }
 

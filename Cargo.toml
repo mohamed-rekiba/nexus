@@ -11,6 +11,7 @@ members = [
     "plugins/shared/emulator-kit",
     "plugins/emulators/kytyps5",
     "plugins/emulators/shadps4",
+    "plugins/emulators/lichii",
     "plugins/emulators/pc",
     "plugins/emulators/steam",
     "plugins/services/playstation-store",
@@ -22,7 +23,7 @@ members = [
 exclude = ["third_party/oozextract"]
 
 [workspace.package]
-version = "0.9.0"
+version = "0.10.0"
 edition = "2024"
 rust-version = "1.99"
 publish = false
@@ -40,6 +41,7 @@ theme-default = { path = "plugins/themes/default" }
 emulator-kit = { path = "plugins/shared/emulator-kit" }
 emu-kyty = { path = "plugins/emulators/kytyps5" }
 emu-shadps4 = { path = "plugins/emulators/shadps4" }
+emu-lichii = { path = "plugins/emulators/lichii" }
 emu-pc = { path = "plugins/emulators/pc" }
 emu-steam = { path = "plugins/emulators/steam" }
 playstation-store = { path = "plugins/services/playstation-store" }
@@ -47,6 +49,8 @@ release-catalog = { path = "plugins/services/release-catalog" }
 system-host = { path = "plugins/system/host" }
 
 aes = "0.9"
+# Solid NSZ files (Switch packages compressed whole), decompressed into NSPs by the Lichii plugin.
+zstd = { version = "0.14", default-features = false }
 async-trait = "0.1"
 cbc = "0.2"
 ed25519-dalek = "3"

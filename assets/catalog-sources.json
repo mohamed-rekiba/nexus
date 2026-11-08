@@ -3,5 +3,6 @@
   "ps4": { "platform": "PS4", "forums": [{ "key": "ps4", "url": "https://rutracker.net/forum/viewforum.php?f=973", "tag": "PS4" }] },
   "pc":  { "platform": "PC",  "forums": [
     { "key": "linux", "url": "https://rutracker.net/forum/viewforum.php?f=1992", "system": "linux" },
-    { "key": "wine",  "url": "https://rutracker.net/forum/viewforum.php?f=2059", "system": "linux", "wine": true } ] }
+    { "key": "wine",  "url": "https://rutracker.net/forum/viewforum.php?f=2059", "system": "linux", "wine": true } ] },
+  "switch": { "platform": "Switch", "forums": [{ "key": "switch", "url": "https://rutracker.net/forum/viewforum.php?f=1605", "tag": "Nintendo Switch" }] }
 }

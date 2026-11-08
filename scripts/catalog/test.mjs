@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { chromium } from 'playwright-core';
 import { readListing, mergeTopics } from './listing.mjs';
-import { collectMagnetBatch, applyMagnets, normalizeGameInfo } from './magnets.mjs';
+import { collectMagnetBatch, applyMagnets, normalizeGameInfo, resumedReport } from './magnets.mjs';
 import { PLATFORMS } from './platforms.mjs';
 
 // The configured forums' origin (catalog-sources.json). The tests serve its pages themselves.
@@ -380,9 +380,27 @@ test('a release without details borrows the game facts of another release of the
 test('releases the launcher cannot play are left out by their tag', async () => {
   const { UNPLAYABLE } = await import('./platforms.mjs');
   for (const title of ['[PS VR Only] GORN [USA]', '[PS4 VR] Dreams', '[PS VR+PS Move] Job Simulator', '[PS4 Exclusive VR Only] Blood & Truth',
-    '[PS4 PS2 Classics] God of War [NTSC-U]', '[PS4 PS2 Classis] Star Wars', '[PSP-PS4] LocoRoco', '[PS4 PSX Classics] Ape Escape', '[PS4 homebrew] Store'])
+    '[PS4 PS2 Classics] God of War [NTSC-U]', '[PS4 PS2 Classis] Star Wars', '[PSP-PS4] LocoRoco', '[PS4 PSX Classics] Ape Escape', '[PS4 homebrew] Store',
+    '[Nintendo Switch] Prototype 2 (порт) [NRO][RUS/ENG] [7.38 GB]', '[Nintendo Switch] Mega Man X Regenesis (хоумбрю) [NRO][ENG]'])
     assert.ok(UNPLAYABLE.test(title), title);
   for (const title of ['[PS4] Firewatch [EUR]', '[PS4 Exclusive] God of War III (3) Remastered [EUR]', '[PS4 Exclusive PlayLink] That\'s You!',
-    'My Friend Peppa Pig [EUR/RUS]', '[PS5] Ghost of Tsushima', '[PS4] Vampyr [EUR]', '[PS4] Moving Out [EUR]'])
+    'My Friend Peppa Pig [EUR/RUS]', '[PS5] Ghost of Tsushima', '[PS4] Vampyr [EUR]', '[PS4] Moving Out [EUR]',
+    '[Nintendo Switch] Detention [NSZ][ENG] [1.07 GB]', '[NSW2] Kirby Air Riders [NUP][ENG] [19.84 GB]', '[Nintendo Switch] Minecraft [NSP][RUS/Multi11]'])
     assert.ok(!UNPLAYABLE.test(title), title);
+});
+
+test('a resumed listing is complete when its listing was and this run read the rest', () => {
+  const partial = { source: 'https://xyz.net/forum/viewforum.php?f=1605', complete: false, pages_remaining: [],
+    failures: [{ status: 'browser_error', message: 'Target page, context or browser has been closed' }], topics: [] };
+  const done = resumedReport(partial, { complete: true, failures: [] });
+  assert.equal(done.complete, true, 'the earlier run\'s failure was in the part read again');
+  assert.deepEqual(done.failures, []);
+  assert.equal(done.source, partial.source, 'the rest of the listing stays');
+
+  const failedAgain = resumedReport(partial, { complete: false, failures: [{ status: 'cancelled' }] });
+  assert.equal(failedAgain.complete, false);
+  assert.deepEqual(failedAgain.failures, [{ status: 'cancelled' }], 'this run\'s failures');
+
+  const short = { ...partial, pages_remaining: ['https://xyz.net/forum/viewforum.php?f=1605&start=50'] };
+  assert.equal(resumedReport(short, { complete: true, failures: [] }).complete, false, 'listing pages were never read');
 });

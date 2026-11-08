@@ -202,7 +202,7 @@ impl CodePlugin for ShadPlugin {
         let spec = ConsoleSpec {
             console: Console::Ps4,
             packages: &[Format::Ps4Package],
-            compat: CompatList { url: COMPATIBILITY, page: LIST_PAGE, parse: compat::shad },
+            compat: Some(CompatList { url: COMPATIBILITY, page: LIST_PAGE, parse: compat::shad }),
             keys: KEYS,
             section: "shadps4",
             version_row: true,
@@ -240,7 +240,14 @@ impl Launcher for Shad {
         let run = builds.run().await?;
         // shadPS4 takes the game folder with -g; -f true|false sets full screen.
         let args = vec!["-g".into(), LaunchArg::path(found.dir), "-f".into(), settings.fullscreen.to_string().into()];
-        Ok(LaunchSpec { program: run.program, args, env: Default::default(), cwd: run.cwd, game_process: None })
+        Ok(LaunchSpec {
+            program: run.program,
+            args,
+            env: Default::default(),
+            cwd: run.cwd,
+            game_process: None,
+            relaunch: None,
+        })
     }
 }
 

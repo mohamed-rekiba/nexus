@@ -1,7 +1,7 @@
 # Sample catalogs
 
 Catalog files in the catalog collector's format (see `src/format.rs`; `src/topic.rs` is its
-typed model), one per console (`ps5.json`, `ps4.json`, `pc.json`), for testing the Catalog
+typed model), one per console (`ps5.json`, `ps4.json`, `pc.json`, `switch.json`), for testing the Catalog
 screen, the Game Hub of a release, and downloads. Each release's torrent is a free
 Blender film under Creative Commons (Big Buck Bunny, Sintel, Tears of Steel, Cosmos
 Laundromat), not a game: it downloads, and its install then fails with "not a package".
@@ -17,7 +17,9 @@ They test:
 - a release with no title id and no size, which groups by its name;
 - a PS5 PKG release (`fpkg`), which the Game Hub warns about;
 - Steam data (the `steam` object) on a console release with no title id, which gives its art;
-- a PC release packed with Wine (`pc.json`), with Steam data and a ProtonDB tier.
+- a PC release packed with Wine (`pc.json`), with Steam data and a ProtonDB tier;
+- Switch and Switch 2 releases (`switch.json`) with no title id, and an `[NRO]` homebrew port
+  that the plugin leaves out.
 
 The plugin's own tests read every sample (`every_sample_catalog_reads` in `src/lib.rs`), and
 check that each reads into the typed model (`CatalogFile` in `src/topic.rs`) and writes back

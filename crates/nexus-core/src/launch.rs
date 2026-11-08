@@ -126,6 +126,11 @@ pub(crate) async fn launch(core: &Core, game: GameKey) -> CoreResult<()> {
     }
     let command = spawn_command(kernel, &plugin, &manifest.permissions, &spec)?;
     let title = core.library().snapshot().title(&game);
+    let relaunch = spec.relaunch.clone().map(|rule| {
+        let mut again = command.clone();
+        again.env.extend(rule.env);
+        (rule.code, again)
+    });
     let new = NewSession {
         game: game.clone(),
         title,
@@ -140,9 +145,75 @@ pub(crate) async fn launch(core: &Core, game: GameKey) -> CoreResult<()> {
 
     let core = core.clone();
     tokio::spawn(async move {
-        let ended = started.ended.await;
+        let mut ended = started.ended.await;
+        // A program that restarts itself through its launcher: start it again, a few times.
+        let mut relaunches = 0;
+        while let (Some((code, again)), Some(exit)) = (&relaunch, &ended) {
+            if exit.code != Some(*code) || relaunches == MAX_RELAUNCHES {
+                break;
+            }
+            relaunches += 1;
+            match core.sessions().relaunch(session, again.clone()).await {
+                Ok(next) => ended = next.await,
+                Err(e) => {
+                    tracing::warn!(plugin_id = %game.plugin, %session, "not started again: {e}");
+                    break;
+                }
+            }
+        }
         let played = core.ports().clock.now().saturating_duration_since(started.at);
         finish(&core, session, &game, ended, played, &launcher).await;
+    });
+    Ok(())
+}
+
+/// The most times in a row a game is started again for [`nexus_api::Relaunch`]: a program that
+/// asks for it each time ends there.
+const MAX_RELAUNCHES: u32 = 8;
+
+/// The local id of the session an emulator's own window runs as ([`open_emulator`]). It is no
+/// game id: a game's has no `@`.
+pub(crate) const EMULATOR_WINDOW: &str = "@emulator";
+
+/// Starts the emulator's own window, without a game ([`nexus_api::HOST_OPEN_EMULATOR`]). It runs
+/// as a session, so no game starts until it closes, and Nexus comes back when it does. Its time
+/// is not play time, and it asks nothing at the end.
+pub(crate) async fn open_emulator(core: &Core, plugin: &PluginId) -> CoreResult<()> {
+    let kernel = core.kernel();
+    let claim = core.sessions().claim()?;
+    let manifest = kernel.manifest(plugin)?;
+    if crate::emulator_builds::busy(core, plugin) {
+        return Err(CoreError::Invalid(format!("{} is updating: open it when it is done", manifest.name)));
+    }
+    let provided = kernel.provided(plugin).await?;
+    let launcher = require(plugin, Capability::Launcher, provided.launcher.clone())?;
+    let config = core.config_value(plugin, &ConfigScope::Emulator).await?;
+    let spec = kernel.guard(plugin, "launcher.open_emulator", launcher.open_emulator(&config)).await?;
+    let name = manifest.emulator_name().to_owned();
+    let spec = spec.ok_or_else(|| CoreError::Invalid(format!("{name} has no window of its own")))?;
+    if !manifest.permissions.allows_program(&spec.program) {
+        return Err(CoreError::PermissionDenied { plugin: plugin.clone(), action: format!("run {}", spec.program) });
+    }
+    let command = spawn_command(kernel, plugin, &manifest.permissions, &spec)?;
+    let window = GameKey::new(plugin.clone(), EMULATOR_WINDOW);
+    let new = NewSession {
+        game: window.clone(),
+        title: name,
+        build: crate::emulator_builds::build_of(core, plugin),
+        command,
+        log: log_path(&kernel.host().data_dir, &window),
+        game_process: None,
+    };
+    let started = core.sessions().start(claim, new).await?;
+    let session = started.session;
+    crate::navigation::push(core, Route::Running(session));
+    let core = core.clone();
+    tokio::spawn(async move {
+        let ended = started.ended.await;
+        tracing::info!(plugin_id = %window.plugin, %session, ?ended, "emulator window closed");
+        core.state().nav.retain(|r| r != &Route::Running(session));
+        core.sessions().end(session, None);
+        core.changed(Area::Sessions);
     });
     Ok(())
 }

@@ -390,6 +390,7 @@ impl Launcher for Play {
             env: Default::default(),
             cwd: None,
             game_process: None,
+            relaunch: None,
         })
     }
 }

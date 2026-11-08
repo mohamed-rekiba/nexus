@@ -6,7 +6,7 @@ import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { evaluateThroughNavigation, findChrome } from './chrome.mjs';
 import { readListing, mergeTopics } from './listing.mjs';
-import { collectMagnetBatch, applyMagnets } from './magnets.mjs';
+import { collectMagnetBatch, applyMagnets, resumedReport } from './magnets.mjs';
 import { distFile, platformFrom } from './platforms.mjs';
 
 const args = process.argv.slice(2);
@@ -17,7 +17,7 @@ function option(name, fallback) {
   return args[index + 1];
 }
 if (args.includes('--help')) {
-  console.log('Usage: node list.mjs [--platform ps5|ps4|linux|wine] [--output path] [--max-pages 200] [--verification-timeout 180] [--headless] [--include-magnets] [--enrich-existing path] [--concurrency 1-4]\n'
+  console.log('Usage: node list.mjs [--platform ps5|ps4|linux|wine|switch] [--output path] [--max-pages 200] [--verification-timeout 180] [--headless] [--include-magnets] [--enrich-existing path] [--concurrency 1-4]\n'
     + 'Reads listing/topic HTML only. Complete verification/login manually. Never opens magnet links or downloads torrents.');
   process.exit(0);
 }
@@ -147,7 +147,7 @@ try {
 
 const topics = mergeTopics(pages);
 const complete = !interrupted && failures.length === 0 && pending.size === 0;
-let report = existing ? { ...existing } : {
+let report = existing ? resumedReport(existing, { complete, failures }) : {
   source: platform.source,
   platform: platform.key,
   collected_at: new Date().toISOString(),
@@ -167,7 +167,7 @@ if (includeMagnets) {
 await mkdir(dirname(output), { recursive: true });
 const temporary = `${output}.${process.pid}.tmp`;
 await writeFile(temporary, JSON.stringify(report, null, 2) + '\n');
-const successful = complete && (!includeMagnets || (report.magnet_collection.complete && report.game_info_collection.complete));
+const successful = report.complete && (!includeMagnets || (report.magnet_collection.complete && report.game_info_collection.complete));
 if (successful) {
   await rename(temporary, output);
 } else {

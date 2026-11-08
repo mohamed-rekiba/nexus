@@ -9,9 +9,9 @@ use std::sync::Arc;
 use nexus_api::serde_json::{self, Value};
 use nexus_api::{
     ArtworkKind, Catalog, CompatInfo, CompatLevel, Compatibility, ConfigScope, Configurator, GAMES_FOLDER, GameDetails,
-    GameSummary, HOST_INSTALL_GAME, HostPath, ImageSource, Installable, Order, PACKAGES_FOLDER, Page, PageRequest,
-    Platform, PluginResult, RelPath, SearchQuery, SectionRow, SlotContent, SlotId, SlotItem, SlotRequest, Slots,
-    async_trait,
+    GameSummary, HOST_INSTALL_GAME, HOST_OPEN_EMULATOR, HostPath, ImageSource, Installable, Order, PACKAGES_FOLDER,
+    Page, PageRequest, Platform, PluginResult, RelPath, SearchQuery, SectionRow, SlotContent, SlotId, SlotItem,
+    SlotRequest, Slots, async_trait,
 };
 
 use crate::builds::{BuildManager, Flavor, LISTS_TTL};
@@ -35,7 +35,8 @@ pub struct ConsoleSpec {
     pub console: Console,
     /// The package formats it installs games from.
     pub packages: &'static [Format],
-    pub compat: CompatList,
+    /// `None` for an emulator without one: its games have no compatibility badge.
+    pub compat: Option<CompatList>,
     /// Its default keyboard keys, as (button, keys).
     pub keys: &'static [(&'static str, &'static str)],
     /// The id of its section on a game's page.
@@ -79,18 +80,25 @@ impl<F: Flavor> ConsoleEmulator<F> {
     }
 
     /// The packages to install in this console's folder of each packages folder, as installs go
-    /// to its folder of the games folder.
+    /// to its folder of the games folder. For the Switch, its game files (not updates or DLC).
     pub async fn candidates(&self) -> PluginResult<Vec<Installable>> {
         let folders = &self.host.folders;
         let mut out = Vec::new();
         for root in folders.roots(PACKAGES_FOLDER).await? {
-            let dir = HostPath::new(PACKAGES_FOLDER, root.root, RelPath::new(F::CONSOLE)?);
+            let dir = HostPath::new(PACKAGES_FOLDER, root.root, RelPath::new(F::FOLDER)?);
             let Ok(entries) = folders.list(&dir).await else { continue };
             for entry in entries {
                 if entry.is_dir {
                     continue;
                 }
                 let file = dir.join(&entry.name)?;
+                // A Switch game file is known by its name; its contents are encrypted.
+                if self.spec.console == Console::Switch {
+                    if games::switch_file(&entry.name).is_some() {
+                        out.push(Installable { source: file, label: entry.name });
+                    }
+                    continue;
+                }
                 let head = folders.read_range(&file, 0, 512).await.unwrap_or_default();
                 if installs::format(&head).is_some_and(|f| self.spec.packages.contains(&f)) {
                     out.push(Installable { source: file, label: entry.name });
@@ -103,7 +111,7 @@ impl<F: Flavor> ConsoleEmulator<F> {
     async fn compat_list(&self) -> HashMap<String, CompatInfo> {
         let Ok(cache) = RelPath::new("cache/compatibility.json") else { return Default::default() };
         let host = &self.host;
-        let list = &self.spec.compat;
+        let Some(list) = &self.spec.compat else { return Default::default() };
         match cache::cached_json(host.storage.as_ref(), host.http.as_ref(), &host.log, list.url, &cache, LISTS_TTL)
             .await
         {
@@ -149,7 +157,7 @@ impl<F: Flavor> Catalog for ConsoleEmulator<F> {
 impl<F: Flavor> Compatibility for ConsoleEmulator<F> {
     async fn status(&self, game: &str) -> PluginResult<CompatInfo> {
         let found = self.games.find(self.host.folders.as_ref(), game).await?;
-        let page = Some(self.spec.compat.page.to_owned());
+        let page = self.spec.compat.as_ref().map(|c| c.page.to_owned());
         Ok(match self.compat_list().await.remove(&found.title_id.to_uppercase()) {
             Some(info) => CompatInfo { page, ..info },
             None => CompatInfo { level: CompatLevel::Unknown, notes: None, source: None, page, tested: None },
@@ -177,7 +185,7 @@ impl<F: Flavor> Slots for ConsoleEmulator<F> {
     async fn items(&self, request: &SlotRequest) -> PluginResult<Vec<SlotItem>> {
         let item = |id: &str, content| SlotItem { id: id.into(), order: Order::default(), content };
         Ok(match (request.slot, request.game.as_deref()) {
-            (SlotId::GameBadge, Some(game)) => {
+            (SlotId::GameBadge, Some(game)) if self.spec.compat.is_some() => {
                 vec![item("compat", games::compat_badge(&self.status(game).await?, self.host.platform))]
             }
             (SlotId::GameDetailSection, Some(game)) => {
@@ -195,6 +203,19 @@ impl<F: Flavor> Slots for ConsoleEmulator<F> {
             }
             (SlotId::EmulatorPanel, None) => {
                 let mut items = self.builds.switch_items().await;
+                // Its own window, once there is a build to open.
+                if F::HAS_WINDOW && self.builds.run().await.is_ok() {
+                    items.push(item(
+                        "open-emulator",
+                        SlotContent::Action {
+                            label: format!("Open {}", F::NAME),
+                            action: HOST_OPEN_EMULATOR.into(),
+                            args: Value::Null,
+                            style: nexus_api::ActionStyle::Secondary,
+                            icon: None,
+                        },
+                    ));
+                }
                 for found in self.candidates().await.unwrap_or_default() {
                     items.push(item(
                         &format!("install-{}", found.label),

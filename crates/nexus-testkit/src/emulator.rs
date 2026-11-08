@@ -232,6 +232,7 @@ impl Launcher for FakeEmulator {
             env,
             cwd: None,
             game_process: self.game_process.clone(),
+            relaunch: None,
         })
     }
     async fn on_exit(&self, game: &str, exit: &ExitInfo) -> PluginResult<()> {

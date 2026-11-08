@@ -478,6 +478,10 @@ asks again.
 
 - `HostInfo`: `api_version`, `platform`, `safe_mode`, `runs_32bit`.
 - `VpnGate`: `check()` tells whether the plugin may fetch now under "Download only through a VPN".
+- `Controllers`: `connected()` lists the game controllers the computer has now, as SDL3 reads them
+  with the hints Eden and its forks set: each one's name, SDL GUID, port and SDL mapping. The host
+  runs a probe (`nexus --probe-controllers`) each time, so it takes up to a second; without
+  SDL3 the list is empty. Lichii writes its players 1 to 4 from it.
   A plugin asks it before bulk fetches. It reports on the VPN only: the plugin's own HTTP does not
   go through the VPN's interface.
 
@@ -772,8 +776,8 @@ it, so a plugin does not name the host's screens. `PluginError` converts from `I
 
 ## Shared code: emulator-kit
 
-`emulator-kit` (`plugins/shared/emulator-kit`) is a crate, not a plugin. Two emulators use it
-as a whole (KytyPS5 and shadPS4), and the PC plugin uses parts of it. It depends on `nexus-api` like
+`emulator-kit` (`plugins/shared/emulator-kit`) is a crate, not a plugin. Three emulators use it
+as a whole (KytyPS5, shadPS4 and Lichii), and the PC plugin uses parts of it. It depends on `nexus-api` like
 a plugin, plus `tokio` and the Kraken decoder for PS5 packages.
 
 A console emulator describes itself, and the kit runs the rest:

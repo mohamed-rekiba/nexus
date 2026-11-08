@@ -34,6 +34,11 @@ pub enum SlotId {
 /// that says to turn a setting on.
 pub const HOST_OPEN_SETTINGS: &str = "host:open-settings";
 
+/// A slot action the host runs itself: starts the emulator's own window without a game, from
+/// [`crate::Launcher::open_emulator`]. It runs as a session: no game starts until it closes,
+/// and its time is not play time.
+pub const HOST_OPEN_EMULATOR: &str = "host:open-emulator";
+
 impl SlotId {
     pub const ALL: [SlotId; 6] = [
         Self::GameBadge,

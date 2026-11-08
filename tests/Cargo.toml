@@ -12,6 +12,7 @@ license.workspace = true
 [dev-dependencies]
 image.workspace = true
 emu-kyty.workspace = true
+emu-lichii.workspace = true
 emu-pc.workspace = true
 emu-steam.workspace = true
 playstation-store.workspace = true
@@ -23,6 +24,7 @@ nexus-ui-host.workspace = true
 slint = { workspace = true, features = ["renderer-software"] }
 slint-interpreter.workspace = true
 tempfile.workspace = true
+zstd.workspace = true
 theme-default.workspace = true
 futures.workspace = true
 nexus-api.workspace = true

@@ -479,7 +479,7 @@ impl CodePlugin for KytyPlugin {
         let spec = ConsoleSpec {
             console: Console::Ps5,
             packages: &[Format::Ps5Package, Format::Exfat],
-            compat: CompatList { url: COMPATIBILITY, page: LIST_PAGE, parse: compat::kyty },
+            compat: Some(CompatList { url: COMPATIBILITY, page: LIST_PAGE, parse: compat::kyty }),
             keys: KEYS,
             section: "kyty",
             version_row: false,
@@ -567,7 +567,14 @@ impl Launcher for Kyty {
         let addcont = LaunchArg::path(found.dir.join("addcont")?);
         let args =
             self.args_for(&run.program, run.tag.as_deref(), &settings, LaunchArg::path(found.dir), addcont).await;
-        Ok(LaunchSpec { program: run.program, args, env: Default::default(), cwd: run.cwd, game_process: None })
+        Ok(LaunchSpec {
+            program: run.program,
+            args,
+            env: Default::default(),
+            cwd: run.cwd,
+            game_process: None,
+            relaunch: None,
+        })
     }
 }
 

@@ -31,7 +31,19 @@ impl Hardware for SystemHardware {
     fn free_bytes(&self, path: &std::path::Path) -> Option<u64> {
         crate::disk::free_bytes(path)
     }
+
+    fn controllers(&self) -> Vec<nexus_api::Controller> {
+        let mut probe = std::process::Command::new(match std::env::current_exe() {
+            Ok(exe) => exe,
+            Err(_) => return Vec::new(),
+        });
+        probe.arg("--probe-controllers");
+        run_probe(probe, CONTROLLER_PROBE_TIME).map(|text| crate::controller_probe::parse(&text)).unwrap_or_default()
+    }
 }
+
+/// How long the controller probe may take: SDL waits half a second for controllers to show up.
+const CONTROLLER_PROBE_TIME: Duration = Duration::from_secs(5);
 
 /// The processor has AVX2, from the processor itself; unknown on other processors.
 fn avx2() -> Option<bool> {
@@ -48,17 +60,16 @@ fn output(program: &str, args: &[&str]) -> Option<String> {
 
 /// Runs `nexus --probe-gpu`, at most `PROBE_TIME`. `None` when no Vulkan loader answered.
 fn probe_gpus(data_dir: &std::path::Path) -> Option<Vec<Gpu>> {
-    let exe = std::env::current_exe().ok()?;
-    let mut child = std::process::Command::new(exe)
-        .arg("--probe-gpu")
-        // MoltenVK writes its log to standard output.
-        .env("MVK_CONFIG_LOG_LEVEL", "0")
-        .arg("--data-dir")
-        .arg(data_dir)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .ok()?;
+    let mut probe = std::process::Command::new(std::env::current_exe().ok()?);
+    // MoltenVK writes its log to standard output.
+    probe.arg("--probe-gpu").env("MVK_CONFIG_LOG_LEVEL", "0").arg("--data-dir").arg(data_dir);
+    run_probe(probe, PROBE_TIME).map(|text| crate::gpu_probe::parse(&text))
+}
+
+/// Runs a probe child process for at most `time`, and gives what it printed. `None` when it
+/// failed or took too long.
+fn run_probe(mut probe: std::process::Command, time: Duration) -> Option<String> {
+    let mut child = probe.stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).spawn().ok()?;
     let started = std::time::Instant::now();
     loop {
         match child.try_wait() {
@@ -68,9 +79,9 @@ fn probe_gpus(data_dir: &std::path::Path) -> Option<Vec<Gpu>> {
                 }
                 let mut text = String::new();
                 std::io::Read::read_to_string(&mut child.stdout.take()?, &mut text).ok()?;
-                return Some(crate::gpu_probe::parse(&text));
+                return Some(text);
             }
-            Ok(None) if started.elapsed() < PROBE_TIME => std::thread::sleep(Duration::from_millis(50)),
+            Ok(None) if started.elapsed() < time => std::thread::sleep(Duration::from_millis(50)),
             _ => {
                 let _ = child.kill();
                 return None;

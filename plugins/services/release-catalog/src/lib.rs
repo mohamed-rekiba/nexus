@@ -406,7 +406,7 @@ const BUNDLED_SOURCES: &[u8] = include!(concat!(env!("OUT_DIR"), "/sources.rs"))
 
 /// The catalog files the build bundles, from the project's `assets/catalog/`: one for each
 /// console an emulator plugin plays. `build.rs` reads the same list.
-pub const BUNDLED_NAMES: [&str; 3] = include!("../bundled-names.rs");
+pub const BUNDLED_NAMES: [&str; 4] = include!("../bundled-names.rs");
 
 /// The name the catalog sources are kept under, in [`Catalogs::kept_sources`].
 const SOURCES: &str = "catalog-sources";
@@ -1327,7 +1327,7 @@ mod tests {
         let (_, unusable) = sources.clone().usable();
         assert!(unusable.is_empty(), "forums with no f= number: {unusable:?}");
         let names: Vec<&str> = sources.catalogs.keys().map(String::as_str).collect();
-        assert_eq!(names, ["pc", "ps4", "ps5"]);
+        assert_eq!(names, ["pc", "ps4", "ps5", "switch"]);
     }
 
     #[test]
@@ -1360,6 +1360,7 @@ mod tests {
             ("ps5", include_bytes!("../samples/ps5.json").as_slice()),
             ("ps4", include_bytes!("../samples/ps4.json").as_slice()),
             ("pc", include_bytes!("../samples/pc.json").as_slice()),
+            ("switch", include_bytes!("../samples/switch.json").as_slice()),
         ];
         for (console, bytes) in samples {
             let list = read(bytes, &forums()).unwrap_or_else(|e| panic!("{console}: {e}"));

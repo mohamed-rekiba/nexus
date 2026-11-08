@@ -387,6 +387,7 @@ impl Launcher for Steam {
             cwd: Some(Location::Folder(game.dir)),
             // Steam's reaper runs the game, and ends with it.
             game_process: Some(format!("SteamLaunch AppId={} ", game.id)),
+            relaunch: None,
         })
     }
 }

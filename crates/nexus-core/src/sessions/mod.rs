@@ -334,6 +334,41 @@ impl SessionsSubsystem {
         Ok(Started { session, at: started, ended })
     }
 
+    /// Starts `command` again in `session`, whose game ended asking for it
+    /// ([`nexus_api::Relaunch`]): the session keeps its start and its screen, with the new
+    /// process. Resolves when that process ends, as [`Started::ended`] does. Fails when the
+    /// session is gone or the player pressed Stop.
+    pub async fn relaunch(
+        &self,
+        session: SessionId,
+        mut command: SpawnCommand,
+    ) -> CoreResult<BoxFuture<'static, Option<ProcessExit>>> {
+        let (plugin, log) = {
+            let state = self.state();
+            let s = state.sessions.get(&session).ok_or(CoreError::UnknownSession(session))?;
+            if s.stopping {
+                return Err(CoreError::Invalid(format!("{} was stopped", s.title)));
+            }
+            (s.game.plugin.clone(), s.log.clone())
+        };
+        keep_previous_log(&log);
+        command.log = Some(log);
+        tracing::info!(plugin_id = %plugin, %session, "running again: {}", command.shell_line());
+        let process =
+            self.inner.ports.spawner.spawn(command).await.map_err(|error| CoreError::Plugin { plugin, error })?;
+        let (stop_tx, stop_rx) = oneshot::channel();
+        {
+            let mut state = self.state();
+            if let Some(s) = state.sessions.get_mut(&session) {
+                s.pid = process.id();
+            }
+            state.stops.insert(session, stop_tx);
+        }
+        self.changed();
+        let this = self.clone();
+        Ok(Box::pin(async move { watch::run(this, session, process, stop_rx, None).await }))
+    }
+
     /// Ends the session once its game ended: it leaves the running games, and the game's
     /// play time grows by `played` (`None` when nothing was played). The session as it ended;
     /// `None` when there was no such session.

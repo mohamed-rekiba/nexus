@@ -79,8 +79,19 @@ pub trait Flavor: Send + Sync + 'static {
     /// The console's name ("PS5"). It names the console's page on the Emulators screen, its
     /// games' platform, and its folder inside the games and packages folders.
     const CONSOLE: &'static str;
+    /// The console's folder inside the games and packages folders, when it isn't [`Flavor::CONSOLE`]
+    /// (Lichii's games are SWITCH, in `Switch/`).
+    const FOLDER: &'static str = Self::CONSOLE;
     /// Your own build's page shows its version, from its `--help` ([`Flavor::version`]).
     const OWN_VERSION: bool = false;
+    /// A new build runs once with `--help` before it becomes current ([`Flavor::runs`]). Off
+    /// for an emulator whose `--help` opens its window and never ends (Lichii): its build
+    /// becomes current once its program is there.
+    const TEST_RUN: bool = true;
+    /// The emulator has a window of its own, with settings Nexus doesn't show (its controls, a
+    /// console's keys): its page offers "Open <name>" ([`nexus_api::HOST_OPEN_EMULATOR`]), and
+    /// its launcher answers [`nexus_api::Launcher::open_emulator`].
+    const HAS_WINDOW: bool = false;
     /// The style of "Switch to official builds" on the page.
     const OFFICIAL_STYLE: ActionStyle = ActionStyle::Secondary;
 
@@ -408,8 +419,11 @@ impl<F: Flavor> Installer for BuildManager<F> {
         // Downloads can lose the flag.
         storage.set_executable(&program).await?;
         // Before anything moves, so a build that doesn't run never takes the data.
-        let ran = self.help(&Location::Data(program), MAX_PROGRAM_TIME).await;
-        if !ran.is_some_and(|help| self.flavor.runs(&help)) {
+        let ran = match F::TEST_RUN {
+            true => self.help(&Location::Data(program), MAX_PROGRAM_TIME).await.is_some_and(|h| self.flavor.runs(&h)),
+            false => true,
+        };
+        if !ran {
             self.versions.discard(version).await?;
             return Err(PluginError::Precondition(format!(
                 "{} {} does not run on this system",

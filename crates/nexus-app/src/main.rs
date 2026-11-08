@@ -9,6 +9,7 @@ mod archives;
 mod args;
 mod audio;
 mod clock;
+mod controller_probe;
 mod desktop;
 mod disk;
 mod gamepad;
@@ -37,6 +38,7 @@ use nexus_ui_host::{AppShell, ShellOptions};
 
 // Linked for their compile-time plugin factories.
 use emu_kyty as _;
+use emu_lichii as _;
 use emu_pc as _;
 use emu_shadps4 as _;
 use emu_steam as _;
@@ -53,6 +55,9 @@ fn main() {
     let raw: Vec<String> = std::env::args().collect();
     if let Some(at) = raw.iter().position(|a| a == "--supports") {
         std::process::exit(if raw.get(at + 1).is_some_and(|f| args::supports(f)) { 0 } else { 1 });
+    }
+    if raw.iter().any(|a| a == "--probe-controllers") {
+        std::process::exit(if controller_probe::print() { 0 } else { 1 });
     }
     if raw.iter().any(|a| a == "--probe-gpu") {
         let data_dir = raw.iter().position(|a| a == "--data-dir").and_then(|i| raw.get(i + 1)).map(PathBuf::from);

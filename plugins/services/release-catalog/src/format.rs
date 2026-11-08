@@ -287,7 +287,8 @@ fn is_package(info: &GameInfo, title: &str) -> bool {
     words.chain(tags(title)).any(|word| word == "pkg" || word == "fpkg")
 }
 
-/// Apps (YouTube, Media Player), system software and forum threads (rules, chat) aren't games.
+/// Apps (YouTube, Media Player), system software, forum threads (rules, chat) and Switch
+/// homebrew programs aren't games.
 fn is_game(title: &str, genre: &str, title_id: &str, magnet: &str) -> bool {
     const APPS: [&str; 10] = [
         "app",
@@ -311,14 +312,20 @@ fn is_game(title: &str, genre: &str, title_id: &str, magnet: &str) -> bool {
         let parts: Vec<&str> = n.split(' ').collect();
         words.windows(parts.len()).any(|w| w == parts.as_slice())
     });
-    !app && !thread && !named
+    // A Switch homebrew program (`[NRO]`): the forum's PC ports and emulators for the console,
+    // not a game package an emulator installs.
+    let homebrew = tags(title).iter().any(|t| t == "nro");
+    !app && !thread && !named && !homebrew
 }
 
-/// The console a topic is for: its game info's, else the `[PS5]` tag in its title, else its
-/// title id's.
+/// The consoles a topic may name itself, upper case.
+const CONSOLES: [&str; 4] = ["PS5", "PS4", "PC", "SWITCH"];
+
+/// The console a topic is for: its game info's, else the `[PS5]` tag in its title (`[Nintendo
+/// Switch]` or `[NSW2]` for a Switch game), else its title id's.
 fn platform(info: &GameInfo, title: &str, title_id: &str) -> String {
     let named = text(&info.platform).to_ascii_uppercase();
-    if named == "PS5" || named == "PS4" || named == "PC" {
+    if CONSOLES.contains(&named.as_str()) {
         return named;
     }
     let upper = title.to_ascii_uppercase();
@@ -326,6 +333,8 @@ fn platform(info: &GameInfo, title: &str, title_id: &str) -> String {
         "PS5".into()
     } else if upper.contains("[PS4]") {
         "PS4".into()
+    } else if upper.contains("[NINTENDO SWITCH]") || upper.contains("[NSW2]") {
+        "SWITCH".into()
     } else if title_id.starts_with("PPSA") {
         "PS5".into()
     } else if title_id.starts_with("CUSA") {
@@ -338,12 +347,12 @@ fn platform(info: &GameInfo, title: &str, title_id: &str) -> String {
 }
 
 /// What a topic says it is for in its own fields, as the collector's published files write
-/// them: its console (`platform`: `PS5`, `PS4` or `PC`) and the system a PC release is for
+/// them: its console (`platform`: `PS5`, `PS4`, `PC` or `SWITCH`) and the system a PC release is for
 /// (`system`). `None` for a field it doesn't have. Its `wine_packed` is read by
 /// [`packed_with_wine`].
 fn declared(topic: &Topic) -> (Option<String>, Option<String>) {
     let platform = text(&topic.platform).to_ascii_uppercase();
-    let platform = ["PS5", "PS4", "PC"].contains(&platform.as_str()).then_some(platform);
+    let platform = CONSOLES.contains(&platform.as_str()).then_some(platform);
     let system = Some(text(&topic.system).to_ascii_lowercase()).filter(|s| !s.is_empty());
     (platform, system)
 }
@@ -693,6 +702,20 @@ mod tests {
 
         let ps4 = read(&forum("https://xyz.net/forum/viewforum.php?f=973", "ps4", topic("added_at"))).unwrap();
         assert_eq!(ps4.releases[0].platform, "PS4");
+    }
+
+    #[test]
+    fn a_switch_forum_s_games_are_switch_releases_and_its_nro_ports_are_left_out() {
+        let magnet = |c: char| format!("magnet:?xt=urn:btih:{}&tr=x", c.to_string().repeat(40));
+        let topics = serde_json::json!([
+            { "id": "1", "title": "[Nintendo Switch] Detention [NSZ][ENG] [1.07 GB]", "magnet": magnet('A') },
+            { "id": "2", "title": "[NSW2] Kirby Air Riders [NUP][ENG] [19.84 GB]", "magnet": magnet('B') },
+            { "id": "3", "title": "[Nintendo Switch] Prototype 2 (port) [NRO][RUS/ENG] [7.38 GB]", "magnet": magnet('C') },
+            { "id": "4", "title": "[Nintendo Switch] Wild Blue Skies [NSP][ENG] [2.09 GB]", "magnet": magnet('D') },
+        ]);
+        let list = read(&forum("https://xyz.net/forum/viewforum.php?f=1605", "switch", topics)).unwrap();
+        let got: Vec<(&str, &str)> = list.releases.iter().map(|r| (r.title.as_str(), r.platform.as_str())).collect();
+        assert_eq!(got, [("Detention", "SWITCH"), ("Kirby Air Riders", "SWITCH"), ("Wild Blue Skies", "SWITCH")]);
     }
 
     #[test]

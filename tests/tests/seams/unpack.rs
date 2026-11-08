@@ -11,12 +11,15 @@ use nexus_core::{Command, CoreError};
 use nexus_testkit::{FakeHost, StubPlugin, TestCore};
 
 const URL: &str = "https://builds.example/emu.archive";
+const DEST: &str = "downloads/emu.archive";
 
 /// Plans one archive, and records what the host hands the installer.
 #[derive(Clone)]
 struct ArchiveEmu {
     sha256: String,
     format: ArchiveFormat,
+    /// Where the download goes; a bare AppImage keeps this file's name.
+    dest: &'static str,
     got: Arc<Mutex<Vec<DownloadedArtifact>>>,
 }
 
@@ -30,7 +33,7 @@ impl Downloader for ArchiveEmu {
                 size: None,
                 sha256: self.sha256.clone(),
                 signature: None,
-                dest: RelPath::new("downloads/emu.archive")?,
+                dest: RelPath::new(self.dest)?,
                 unpack: Some(Unpack { format: self.format, into: RelPath::new("builds/1.0")? }),
             }],
         })
@@ -59,7 +62,7 @@ async fn boot(host: FakeHost, archive: Vec<u8>, format: ArchiveFormat) -> (TestC
 }
 
 async fn boot_with(host: FakeHost, archive: Vec<u8>, format: ArchiveFormat, process: &str) -> (TestCore, ArchiveEmu) {
-    let emu = ArchiveEmu { sha256: host.http().serve(URL, archive), format, got: Arc::default() };
+    let emu = ArchiveEmu { sha256: host.http().serve(URL, archive), format, dest: DEST, got: Arc::default() };
     let e = emu.clone();
     let plugin = StubPlugin::from_toml(&format!(
         "id = \"emu\"\nkind = \"emulator\"\nname = \"Emu\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
@@ -196,6 +199,44 @@ async fn an_appimage_in_a_zip_is_extracted_by_running_it_on_linux() {
 }
 
 #[tokio::test]
+async fn a_bare_appimage_is_extracted_by_running_it_on_linux_under_its_own_name() {
+    let host = FakeHost::new().platform(Some(Platform::Linux));
+    let emu = ArchiveEmu {
+        sha256: host.http().serve(URL, b"\x7fELF appimage".to_vec()),
+        format: ArchiveFormat::AppImage,
+        dest: "downloads/lichii-linux-x86_64.AppImage",
+        got: Arc::default(),
+    };
+    let e = emu.clone();
+    let plugin = StubPlugin::from_toml(
+        "id = \"emu\"\nkind = \"emulator\"\nname = \"Emu\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
+         capabilities = [\"downloader\", \"installer\"]\n[permissions]\nnetwork = [\"builds.example\"]\n\
+         process = [\"builds/*/*.AppImage\"]",
+    )
+    .provides(move |_| {
+        let e = Arc::new(e.clone());
+        Ok(Provided { downloader: Some(e.clone()), installer: Some(e), ..Provided::default() })
+    });
+    let t = host.plugin(plugin).boot_core().await;
+    let core = t.core.clone();
+    let install = tokio::spawn(async move {
+        core.dispatch(Command::InstallEmulator { plugin: PluginId::new("emu").unwrap(), version: None }).await
+    });
+
+    let process = tokio::time::timeout(Duration::from_secs(5), t.spawner.wait_for(1)).await.unwrap();
+    assert_eq!(process.command.args, ["--appimage-extract"]);
+    assert_eq!(process.command.program, process.command.cwd.join("lichii-linux-x86_64.AppImage"));
+    std::fs::create_dir_all(process.command.cwd.join("squashfs-root")).unwrap();
+    std::fs::write(process.command.cwd.join("squashfs-root/AppRun"), b"#!/bin/sh\n").unwrap();
+    process.exit(0);
+    install.await.unwrap().unwrap();
+
+    let build = plugin_dir(&t).join("builds/1.0");
+    assert!(build.join("squashfs-root/AppRun").is_file());
+    assert!(!build.join("lichii-linux-x86_64.AppImage").exists(), "the AppImage is gone once extracted");
+}
+
+#[tokio::test]
 async fn an_appimage_whose_extract_never_ends_is_killed_after_ten_minutes() {
     let archive = zip(&[("Emu.AppImage", b"\x7fELF appimage")]);
     let host = FakeHost::new().platform(Some(Platform::Linux));
@@ -222,7 +263,8 @@ async fn an_appimage_whose_extract_never_ends_is_killed_after_ten_minutes() {
 async fn a_tampered_appimage_is_deleted_before_anything_runs_and_other_systems_refuse_it() {
     let archive = zip(&[("Emu.AppImage", b"\x7fELF")]);
     let host = FakeHost::new().platform(Some(Platform::Linux));
-    let tampered = ArchiveEmu { sha256: "00".repeat(32), format: ArchiveFormat::AppImageInZip, got: Arc::default() };
+    let tampered =
+        ArchiveEmu { sha256: "00".repeat(32), format: ArchiveFormat::AppImageInZip, dest: DEST, got: Arc::default() };
     host.http().serve(URL, archive.clone());
     let e = tampered.clone();
     let plugin = StubPlugin::from_toml(
