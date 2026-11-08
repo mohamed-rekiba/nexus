@@ -310,8 +310,8 @@ about monitors and focus. The app plugs in `platform::SystemPlatform`. Tests plu
 their changes into `Core::changes()`, and reads them all into one `Snapshot`. The subsystems are
 the torrents (`torrents/`), the game installs (`game_installs/`), the library (`library/`), the
 running games (`sessions/`), the preferences (`preferences.rs`), the notices (`notices.rs`), the
-VPN setting (`vpn.rs`) and the launcher's update (`launcher_update.rs`). A subsystem follows
-these rules:
+VPN setting (`vpn.rs`), the launcher's update (`launcher_update.rs`) and the backups
+(`backup/`). A subsystem follows these rules:
 
 - It owns its state behind its own lock, and its saved records. Nothing else takes that lock or
   writes those keys.
@@ -338,7 +338,11 @@ removes builds. `plugin_settings.rs` sets plugin settings and turns plugins on o
 `release_downloads.rs` resolves the Catalog's downloads and installs. `launch.rs` starts games and
 handles their end. `library_reads.rs` and `catalog_reads.rs` read the plugins for the library and
 the catalogs. `uninstall.rs` removes an installed game. `system.rs` runs the machine's
-settings. The commands keep flat names (`Command::Back`, `Command::LibrarySort`), which the themes
+settings. `backups.rs` asks the plugins with the `Backup` capability for their items, finds where
+each is on this computer through the plugin's grants, and hands the paths to the backup subsystem,
+which writes and reads the `.tar.gz` (`backup/archive.rs`): `backup.json` first, then the settings
+without this computer's folders, then `items/<plugin>/<item>/…`. A restore checks every entry
+before it writes one, refuses links, and writes nothing through a link it finds. The commands keep flat names (`Command::Back`, `Command::LibrarySort`), which the themes
 send. [ADR 0002](adr/0002-game-page-reads-stay-as-flows.md) records why the reads for a game's page
 stay separate flows.
 
@@ -349,7 +353,7 @@ what values it takes, its default, and whether the player sets it. `Command::Pre
 checks the value against the spec: a size goes to the nearest end of its range, and a value of
 the wrong type is refused. "Start at login" asks the `LoginSession` port first. The config is the
 subsystem's store, so a setting cannot drift from what is saved. The keys are `sounds`,
-`fullscreen`, `return_on_exit`, `scale`, `start_at_login`, `auto_update`, `monitor`, `welcomed`,
+`fullscreen`, `return_on_exit`, `scale`, `start_at_login`, `auto_update`, `monitor`, `backup_folder`, `welcomed`,
 `theme` and `pc_noticed`.
 
 ### Host folders

@@ -4,7 +4,7 @@ import { Assets } from "../assets.slint";
 import { Tokens } from "../tokens.slint";
 import { Look } from "look.slint";
 import { Prefs, Row, Value, Editor, FolderRow } from "settings-rows.slint";
-import { LauncherRows, DownloadsRows, SystemRows, PowerRows } from "settings-layout.slint";
+import { LauncherRows, DownloadsRows, SystemRows, BackupRows, PowerRows } from "settings-layout.slint";
 import { Sys } from "system-panel.slint";
 import { Setup } from "install-os.slint";
 
@@ -523,6 +523,124 @@ export component SystemSection inherits VerticalLayout {
 }
 
 // Leaving Nexus, and the machine's power. Log out, Restart and Shut down ask again: the first press arms them, the second acts.
+// Settings → Backup: one file with the settings, keys, firmware and saves, in the backup folder,
+// and each backup there, which a press restores.
+export component BackupSection inherits VerticalLayout {
+    callback reveal(length, length);
+    // "Include large items" holds for the next backup only: it is no setting.
+    property <bool> large;
+    // The list may have changed outside Nexus.
+    init => { Commands.refresh-backups(); }
+
+        Row {
+            label: "Back up now";
+            hint: Vm.backup.status != "" ? Vm.backup.status
+                : "Settings, keys, firmware and saves, in one file · keep it private: it holds your console keys";
+            hint-kind: Vm.backup.failed ? 2 : Vm.backup.status != "" ? 1 : 0;
+            focused: Prefs.is(Prefs.backup-section, 0);
+            first: true;
+            accessible-role: button;
+            accessible-label: "back-up";
+            accessible-value: Vm.backup.running ? "running" : "";
+            accessible-description: self.hint;
+            accessible-action-default => { self.act(); }
+            reveal(y, h) => { root.reveal(y, h); }
+            clicked => { Prefs.section = Prefs.backup-section; Prefs.row = 0; self.act(); }
+            property <int> seen: Prefs.serial;
+            changed seen => { if (self.focused && Prefs.pending == 0) { self.act(); } }
+            function act() { if (!Vm.backup.running) { Commands.back-up(root.large); } }
+            Value {
+                kind: Vm.backup.running ? "text" : "action";
+                text: Vm.backup.running ? (Vm.backup.restoring ? "Restoring… " : "Backing up… ") + Math.round(Vm.backup.progress * 100) + "%"
+                    : "Back up";
+                tone: Vm.backup.running ? 0 : 3;
+            }
+        }
+        Row {
+            label: "Include large items";
+            hint: "PC games' Wine prefixes, with their saves · can take many GB";
+            focused: Prefs.is(Prefs.backup-section, 1);
+            accessible-role: button;
+            accessible-label: "backup-large";
+            accessible-value: root.large ? "on" : "off";
+            accessible-action-default => { root.large = !root.large; }
+            reveal(y, h) => { root.reveal(y, h); }
+            clicked => { Prefs.section = Prefs.backup-section; Prefs.row = 1; root.large = !root.large; }
+            property <int> seen: Prefs.serial;
+            changed seen => {
+                if (self.focused && (Prefs.pending == 0 || (Prefs.pending > 0) != root.large)) { root.large = !root.large; }
+            }
+            Value { kind: "toggle"; on: root.large; }
+        }
+        folder := Row {
+            property <bool> typing: Prefs.editing && self.focused;
+            label: "Backup folder";
+            detail: Vm.backup.folder;
+            hint: "Type a folder · empty goes back to ~/Nexus Backups";
+            focused: Prefs.is(Prefs.backup-section, 2);
+            last: BackupRows.count == 3;
+            accessible-role: button;
+            accessible-label: "backup-folder";
+            accessible-value: Vm.backup.folder;
+            accessible-action-default => { Prefs.tabs = false; Prefs.section = Prefs.backup-section; Prefs.row = 2; self.open(); }
+            reveal(y, h) => { root.reveal(y, h); }
+            clicked => { Prefs.section = Prefs.backup-section; Prefs.row = 2; self.open(); }
+            property <int> seen: Prefs.serial;
+            changed seen => { if (self.focused && Prefs.pending == 0 && !Prefs.editing) { self.open(); } }
+            function open() {
+                Prefs.edit-text = Vm.backup.folder;
+                Prefs.editing = true;
+            }
+            if !folder.typing : Value { kind: "action"; text: "Change"; tone: 3; }
+            if folder.typing : Editor { horizontal-stretch: 2; done(text) => { Commands.set-backup-folder(text); } }
+        }
+        if BackupRows.restart >= 0 : Row {
+            label: "Restart Nexus";
+            hint: "Finishes the restore: emulators read their settings when Nexus starts";
+            hint-kind: 1;
+            focused: Prefs.is(Prefs.backup-section, BackupRows.restart);
+            last: BackupRows.count == BackupRows.first-backup;
+            accessible-role: button;
+            accessible-label: "backup-restart";
+            accessible-action-default => { Host.restart(); }
+            reveal(y, h) => { root.reveal(y, h); }
+            clicked => { Host.restart(); }
+            property <int> seen: Prefs.serial;
+            changed seen => { if (self.focused && Prefs.pending == 0) { Host.restart(); } }
+            Value { kind: "action"; text: "Restart"; tone: 3; }
+        }
+        // A restore asks again: the first press arms it, the second restores.
+        for backup[i] in Vm.backup.backups : Row {
+            property <bool> armed;
+            label: backup.date;
+            hint: (backup.before-restore ? "Made before a restore · " : "") + backup.items + " · " + backup.size;
+            focused: Prefs.is(Prefs.backup-section, BackupRows.first-backup + i);
+            last: i == Vm.backup.backups.length - 1;
+            danger: self.armed;
+            accessible-role: button;
+            accessible-label: "backup";
+            accessible-value: backup.file;
+            accessible-description: self.armed ? "armed" : "";
+            accessible-action-default => { self.act(); }
+            changed focused => { if (!self.focused) { self.armed = false; } }
+            reveal(y, h) => { root.reveal(y, h + (self.last ? 180 * Look.px : 0)); }
+            clicked => { Prefs.section = Prefs.backup-section; Prefs.row = BackupRows.first-backup + i; self.act(); }
+            property <int> seen: Prefs.serial;
+            changed seen => { if (self.focused && Prefs.pending == 0) { self.act(); } }
+            function act() {
+                if (Vm.backup.running) { return; }
+                if (!self.armed) { self.armed = true; return; }
+                self.armed = false;
+                Commands.restore-backup(backup.file);
+            }
+            Value {
+                kind: parent.armed ? "text" : "action";
+                text: parent.armed ? "Press again to restore: it replaces these files here" : "Restore";
+                tone: parent.armed ? 2 : 3;
+            }
+        }
+}
+
 export component PowerSection inherits VerticalLayout {
     callback reveal(length, length);
 

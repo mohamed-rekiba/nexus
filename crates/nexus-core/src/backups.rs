@@ -31,8 +31,11 @@ pub enum BackupCmd {
 
 pub(crate) async fn handle(core: &Core, command: BackupCmd) -> CoreResult<()> {
     match command {
+        // With no folder (no home folder, and none chosen), the list is empty.
         BackupCmd::Refresh => {
-            core.backup().list(folder(core)?).await;
+            if let Ok(folder) = folder(core) {
+                core.backup().list(folder).await;
+            }
             Ok(())
         }
         BackupCmd::BackUp { large } => {

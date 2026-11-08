@@ -285,7 +285,7 @@ come to the front on each system is in [reference/desktop.md](reference/desktop.
 ## Settings
 
 Changes save as you make them. Settings has one tab for each section: Launcher, Games, Updates,
-Downloads and This PC, then System when Nexus is the whole screen, and Power. With a controller or keyboard,
+Downloads and This PC, then System when Nexus is the whole screen, Backup, and Power. With a controller or keyboard,
 press Up from the first row to reach the tabs, Left and Right to choose one, and Down to go into its
 rows. With a mouse, click a tab.
 
@@ -303,9 +303,34 @@ rows. With a mouse, click a tab.
 | DOWNLOADS | Your VPN, Add a VPN | On Linux, WireGuard and OpenVPN interfaces are found by themselves. With NetworkManager you connect, disconnect and add one from a `.conf` or `.ovpn` file. On macOS, pick the network your VPN app made |
 | DOWNLOADS | Keep sharing finished downloads | Other players download from you, at most 128 KB/s |
 | THIS PC | | Your processor, memory and graphics, and whether each emulator's games should run well |
+| BACKUP | Back up now | Writes one file with Nexus's settings and each emulator's settings, keys, firmware and saves. See [Backup and restore](#backup-and-restore) |
+| BACKUP | Include large items | For the next backup only: PC games' Wine prefixes, with their saves. Off by default |
+| BACKUP | Backup folder | Where backups go, `~/Nexus Backups` until you type another |
+| BACKUP | A backup | Press twice to restore it |
 | POWER | Quit Nexus | Closes Nexus. As the whole screen it says Restart Nexus, and the session starts it again. Log out, Restart and Shut down show there too, where the system allows them, and ask you to press twice |
 
 The command-line options are listed by `nexus --help` and in [development.md](development.md).
+
+### Backup and restore
+
+**Back up now** writes `nexus-backup-<date>-<time>.tar.gz` (UTC) to the backup folder. It holds:
+
+- Nexus's settings: play time, hidden games, your results, game art, the theme, which plugins are
+  on, and every emulator's settings. Not your folders, downloads or installs: they belong to this
+  computer.
+- Lichii: the keys, the NAND (firmware and saves), the SD card, amiibo, mods and its window's
+  settings, from "Lichii data" and "Lichii settings" on its page.
+- shadPS4: its data folder, without its caches, logs and downloads.
+- KytyPS5: the "KytyPS5 saves" folder. Saves of a build without `--data-folder` stay in the build.
+- PC, with **Include large items** only: each game's Wine prefix.
+
+The file holds your console keys: keep it private.
+
+To restore, press a backup twice. Nexus first backs up what is here now (the backup that says "Made
+before a restore"), then puts each item into the folder it has on this computer, so a backup from
+another computer works. A file the backup has replaces the one here; other files stay. Your
+folder settings stay as they are. Then restart Nexus: emulators read their settings when it
+starts. Neither a backup nor a restore starts while a game runs or installs.
 
 ## Emulators
 
