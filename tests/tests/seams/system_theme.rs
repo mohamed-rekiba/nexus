@@ -360,7 +360,8 @@ fn the_keys_reach_the_icons_at_the_end_of_the_top_bar_and_move_between_panels() 
     let mut host = shown(&system, WHOLE_SCREEN);
     use slint::platform::Key;
     host.navigate(Key::UpArrow);
-    // Left of the first item is the last, Bluetooth: the bar goes round.
+    // Left of the first item is the last, Settings: the bar goes round. Left again is Bluetooth.
+    host.navigate(Key::LeftArrow);
     host.navigate(Key::LeftArrow);
     host.navigate(Key::Return);
     assert_eq!(host.value("system-panel"), "bluetooth");
@@ -375,15 +376,15 @@ fn l1_and_r1_reach_every_item_of_the_top_bar_again_and_again_round_the_ends() {
     let system = machine();
     let mut host = shown(&system, WHOLE_SCREEN);
     use slint::platform::Key;
-    // Without a catalog the bar has nine stops: Home, Library, four screen buttons and the
-    // three icons. R1 eight times from Home is Bluetooth, the last.
-    for _ in 0..8 {
+    // Without a catalog the bar has nine stops: Home, Library, three screen buttons, the three
+    // icons and Settings. R1 seven times from Home is Bluetooth, the one before Settings.
+    for _ in 0..7 {
         host.navigate(Key::Tab);
     }
     host.navigate(Key::Return);
     assert_eq!(host.value("system-panel"), "bluetooth");
     host.navigate(Key::Escape);
-    // One more is Home again, and L1 goes back to the last. Twice round, still there.
+    // One more is Settings, the last, and L1 goes back to Bluetooth. Once round, still there.
     host.navigate(Key::Tab);
     host.navigate(Key::Backtab);
     for _ in 0..9 {
@@ -391,4 +392,33 @@ fn l1_and_r1_reach_every_item_of_the_top_bar_again_and_again_round_the_ends() {
     }
     host.navigate(Key::Return);
     assert_eq!(host.value("system-panel"), "bluetooth", "L1 wraps and every stop answers again");
+}
+
+#[test]
+fn as_the_whole_screen_settings_is_the_last_icon_in_the_top_bar_and_the_keys_reach_it_last() {
+    use nexus_ui_api::ScreenId;
+    use slint::platform::Key;
+    let x = |host: &Composed, label: &str| host.first(label).absolute_position().x;
+    let mut host = shown(&machine(), WHOLE_SCREEN);
+    for theme in ["classic", "default"] {
+        host.ui.switch(&id(theme)).unwrap();
+        host.dispatch(Command::Navigate(nexus_core::Route::Home));
+        host.settle();
+        for icon in ["Themes", "status:network", "status:sound", "status:bluetooth", "battery"] {
+            assert!(x(&host, "Settings") > x(&host, icon), "{theme}: Settings is after {icon}");
+        }
+        // L1 from Home goes round to the top bar's last item: Settings.
+        host.navigate(Key::Backtab);
+        host.navigate(Key::Return);
+        assert_eq!(host.core().view().screen, ScreenId::Settings, "{theme}: the last item opens Settings");
+        // From Home again, two steps back: the Bluetooth icon, the one before it.
+        host.dispatch(Command::Navigate(nexus_core::Route::Home));
+        host.settle();
+        host.navigate(Key::Backtab);
+        host.navigate(Key::Backtab);
+        host.navigate(Key::Return);
+        host.settle();
+        assert_eq!(host.value("system-panel"), "bluetooth", "{theme}: the one before is Bluetooth");
+        host.navigate(Key::Escape);
+    }
 }
