@@ -55,13 +55,14 @@ export global Look {
             : state == "unpacking" ? "Unpacking" : state == "paused" ? "Paused" : state == "installing" ? "Installing"
             : state == "done" ? "Done" : state == "failed" ? "Failed" : state == "cancelled" ? "Cancelled" : state
     }
-    // ProtonDB's tier as words and as a color: green runs well, red doesn't run.
-    public pure function protondb-label(tier: string) -> string {
+    // A compatibility layer's rating as words and as a color: green runs well, red doesn't run.
+    // It knows ProtonDB's tiers; another word shows as it is, in grey.
+    public pure function rating-label(tier: string) -> string {
         tier == "platinum" ? "Platinum" : tier == "gold" ? "Gold" : tier == "silver" ? "Silver"
             : tier == "bronze" ? "Bronze" : tier == "borked" ? "Borked" : tier == "native" ? "Native"
             : tier == "pending" ? "Pending" : tier
     }
-    public pure function protondb-color(tier: string) -> color {
+    public pure function rating-color(tier: string) -> color {
         tier == "platinum" || tier == "gold" || tier == "native" ? Tokens.color-success
             : tier == "borked" ? Tokens.color-danger
             : tier == "silver" || tier == "bronze" ? Tokens.color-warning

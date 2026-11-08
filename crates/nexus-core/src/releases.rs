@@ -393,11 +393,19 @@ pub(crate) fn metadata_of(offer: &Offer) -> Option<&GameMetadata> {
 
 /// The compatibility tier of the offer's newest release that has one, and its page: empty for
 /// none.
-pub(crate) fn compatibility(offer: &Offer) -> (String, String) {
+pub(crate) fn compatibility(offer: &Offer) -> Compatibility {
     match offer.releases.iter().find_map(|r| r.fact(FactKind::Compatibility)) {
-        Some(tier) => (tier.value.clone(), tier.url.clone()),
-        None => (String::new(), String::new()),
+        Some(fact) => Compatibility { source: fact.label.clone(), rating: fact.value.clone(), url: fact.url.clone() },
+        None => Compatibility::default(),
     }
+}
+
+/// How a game runs through a compatibility layer: who rates it, the rating's word, the page.
+#[derive(Default)]
+pub(crate) struct Compatibility {
+    pub source: String,
+    pub rating: String,
+    pub url: String,
 }
 
 /// A PC release's system as people read it: `Linux`, `Windows`, `macOS`; empty for none.

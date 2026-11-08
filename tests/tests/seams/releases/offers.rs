@@ -143,8 +143,9 @@ async fn a_pc_offer_shows_steam_s_words_and_art_and_its_protondb_tier() {
     assert_eq!(detail.logo, steam_image("logo.png"));
     assert_eq!(detail.screenshots, [steam_image("ss_1.jpg").unwrap()]);
     assert_eq!(detail.store_url, "https://store.steampowered.com/app/504230/");
-    assert_eq!(detail.protondb, "gold", "a game packed with Wine has ProtonDB's tier");
-    assert_eq!(detail.protondb_url, "https://www.protondb.com/app/504230");
+    assert_eq!(detail.layer_source, "ProtonDB", "a game packed with Wine has ProtonDB's tier");
+    assert_eq!(detail.layer_rating, "gold");
+    assert_eq!(detail.layer_url, "https://www.protondb.com/app/504230");
 }
 
 #[tokio::test]
@@ -194,7 +195,7 @@ async fn a_native_pc_offer_has_no_protondb_tier() {
     .await;
     let detail = open_first(&t).await;
     assert_eq!(detail.store_url, "https://store.steampowered.com/app/504230/");
-    assert_eq!((detail.protondb.as_str(), detail.protondb_url.as_str()), ("", ""));
+    assert_eq!((detail.layer_source.as_str(), detail.layer_rating.as_str(), detail.layer_url.as_str()), ("", "", ""));
 }
 
 #[tokio::test]
@@ -212,7 +213,7 @@ async fn a_ps_offer_the_store_has_no_art_for_gets_steam_s_art() {
     assert_eq!(card.cover, steam_image("portrait.jpg"));
     let detail = open_first(&t).await;
     assert_eq!(detail.background, steam_image("hero.jpg"));
-    assert_eq!(detail.protondb, "", "a console game has no ProtonDB tier");
+    assert_eq!(detail.layer_rating, "", "a console game has no ProtonDB tier");
 }
 
 #[tokio::test]

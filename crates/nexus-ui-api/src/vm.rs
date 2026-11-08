@@ -343,11 +343,12 @@ pub struct GameDetailVm {
     pub screenshots: Vec<ImageRef>,
     /// The game's page in a store, or empty.
     pub store_url: String,
-    /// For a Windows game packed with Wine that the catalog found on Steam: ProtonDB's tier,
-    /// such as `gold` (a release's [`nexus_api::FactKind::Compatibility`] fact). Empty for none.
-    pub protondb: String,
-    /// The game's ProtonDB page, for the same games; empty for none.
-    pub protondb_url: String,
+    /// How the game runs through a compatibility layer, from a release's
+    /// [`nexus_api::FactKind::Compatibility`] fact: who rates it (`ProtonDB`), the rating's word
+    /// (`gold`), and the game's page there. Empty for none.
+    pub layer_source: String,
+    pub layer_rating: String,
+    pub layer_url: String,
     /// How the game runs on this PC, from its emulator's needs: `None` before the check, or
     /// when the system can't say. For a game a catalog offers that doesn't fit in the
     /// download folder, `no` with "Not enough space" and the free space ("10.0 GB free").
