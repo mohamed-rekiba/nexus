@@ -59,7 +59,7 @@ fn a_game_packed_with_wine_shows_its_protondb_tier_and_its_page() {
         serde_json::json!([{ "id": "1", "title": "Celeste [Wine]", "magnet": format!("magnet:?xt=urn:btih:{ASTRO_HASH}"),
             "game_info": {}, "steam": { "appid": 504230, "short": "Help Madeline survive.", "protondb": "gold" } }]),
     );
-    assert_eq!(host.values("protondb"), ["Gold"], "the ProtonDB card");
+    assert_eq!(host.values("layer-rating"), ["Gold"], "the ProtonDB card");
     assert_eq!(host.values("hub-store"), ["Store"], "Steam's page is the store page");
 
     host.press("game-options", "Options");
@@ -90,7 +90,7 @@ fn the_game_hub_s_facts_wrap_in_rows_of_three() {
     };
     let facts = if host.count("on-this-pc") > 0 { 5 } else { 4 };
     let (played_x, played_y) = place(&host, "played");
-    let (proton_x, proton_y) = place(&host, "protondb");
+    let (proton_x, proton_y) = place(&host, "layer-rating");
     assert!(proton_y > played_y, "{facts} facts: the last one starts a second row");
     assert!(proton_x < played_x, "the second row starts on the left");
 
@@ -98,7 +98,7 @@ fn the_game_hub_s_facts_wrap_in_rows_of_three() {
     host.dispatch(Command::SetThemeOption { key: "direction".into(), value: "rtl".into() });
     host.settle();
     let (played_x, played_y) = place(&host, "played");
-    let (proton_x, proton_y) = place(&host, "protondb");
+    let (proton_x, proton_y) = place(&host, "layer-rating");
     assert!(proton_y > played_y);
     assert!(proton_x > played_x, "the second row starts on the right");
 }
@@ -114,7 +114,7 @@ fn as_the_whole_screen_the_game_menu_opens_nothing_outside_nexus() {
         serde_json::json!([{ "id": "1", "title": "Celeste [Wine]", "magnet": format!("magnet:?xt=urn:btih:{ASTRO_HASH}"),
             "game_info": {}, "steam": { "appid": 504230, "short": "Help Madeline survive.", "protondb": "gold" } }]),
     );
-    assert_eq!(host.values("protondb"), ["Gold"], "the tier still shows");
+    assert_eq!(host.values("layer-rating"), ["Gold"], "the tier still shows");
     host.press("game-options", "Options");
     let items = host.values("game-menu");
     for outside in ["Open game folder", "View emulator log", "Compatibility list", "ProtonDB page"] {
@@ -126,7 +126,7 @@ fn as_the_whole_screen_the_game_menu_opens_nothing_outside_nexus() {
 fn a_game_without_a_protondb_tier_has_no_card_or_menu_item() {
     let home = tempfile::tempdir().unwrap();
     let mut host = astro_on_its_game_hub(home.path());
-    assert!(host.values("protondb").is_empty());
+    assert!(host.values("layer-rating").is_empty());
     host.press("game-options", "Options");
     assert!(!host.values("game-menu").contains(&"ProtonDB page".to_owned()));
 }

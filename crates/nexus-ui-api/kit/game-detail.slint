@@ -891,12 +891,12 @@ export component GameDetailPage inherits Rectangle {
             }
             Rectangle { height: 22 * Look.px; }
             // The old launcher's fact cards: how it runs, how it runs on this PC, how long you
-            // played, how big it is, for a Windows game packed with Wine, ProtonDB's tier, and
+            // played, how big it is, how it runs through a compatibility layer (ProtonDB's tier), and
             // for a game a catalog offers, how easy its best release is to download. Three to a
             // row; right to left mirrors each row.
             facts := Rectangle {
                 property <int> pc: Vm.detail.has-this-pc ? 1 : 0;
-                property <int> proton: Vm.detail.protondb != "" ? 1 : 0;
+                property <int> proton: Vm.detail.layer-rating != "" ? 1 : 0;
                 property <int> count: 3 + self.pc + self.proton + (Vm.detail.availability != "" ? 1 : 0);
                 property <length> gap: 14 * Look.px;
                 property <length> cell: (self.width - 2 * self.gap) / 3;
@@ -937,18 +937,18 @@ export component GameDetailPage inherits Rectangle {
                     key: "SIZE";
                     value: Vm.detail.size != "" ? Vm.detail.size : "Unknown";
                 }
-                if Vm.detail.protondb != "" : Rectangle {
+                if Vm.detail.layer-rating != "" : Rectangle {
                     x: facts.at(3 + facts.pc);
                     y: facts.line(3 + facts.pc);
                     width: facts.cell;
                     height: 92 * Look.px;
                     accessible-role: text;
-                    accessible-label: "protondb";
-                    accessible-value: Look.protondb-label(Vm.detail.protondb);
+                    accessible-label: "layer-rating";
+                    accessible-value: Look.rating-label(Vm.detail.layer-rating);
                     Fact {
-                        key: "PROTONDB";
-                        value: Look.protondb-label(Vm.detail.protondb);
-                        tint: Look.protondb-color(Vm.detail.protondb);
+                        key: Vm.detail.layer-source.to-uppercase();
+                        value: Look.rating-label(Vm.detail.layer-rating);
+                        tint: Look.rating-color(Vm.detail.layer-rating);
                     }
                 }
                 // The seeder counts are in the technical details.

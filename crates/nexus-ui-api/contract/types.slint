@@ -234,11 +234,12 @@ export struct GameDetail {
     age-rating: string,
     screenshots: [image],
     store-url: string,
-    // For a Windows game packed with Wine that the catalog found on Steam: ProtonDB's tier
-    // (platinum, gold, silver, bronze, borked, native or pending) and its ProtonDB page.
-    // Empty for none.
-    protondb: string,
-    protondb-url: string,
+    // How the game runs through a compatibility layer: who rates it (ProtonDB), the rating's
+    // word (for ProtonDB: platinum, gold, silver, bronze, borked, native or pending), and the
+    // game's page there. Empty for none.
+    layer-source: string,
+    layer-rating: string,
+    layer-url: string,
     // How the game runs on this PC, from its emulator's needs. `has-this-pc` is false before
     // the check, and when the system can't say. A game a catalog offers that doesn't fit in
     // the download folder has level "no", headline "Not enough space" and why "10.0 GB free".

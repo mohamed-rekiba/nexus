@@ -7,7 +7,7 @@ import { Trailers } from "trailer-player.slint";
 
 // A game's options, as the old launcher's menu: the Game Hub (from Home), the emulator's own
 // actions, then open the game's folder, view the emulator's log, rate how it runs, the
-// community list, the ProtonDB page, Settings, and Uninstall for an installed game. Items the game doesn't
+// community list, the compatibility layer's page (ProtonDB's), Settings, and Uninstall for an installed game. Items the game doesn't
 // have are left out. Options on a pad, the Menu key, or the "⋯" button open it; up and down move, Enter
 // picks, Escape closes. Uninstall asks first in the same card, with the keys on Not now.
 export global GameMenu {
@@ -34,7 +34,7 @@ export global GameMenu {
         { id: "trailer", label: "Watch trailer", icon: "film", on: Vm.detail.trailer-url != "" },
         { id: "rate", label: "Rate how it runs", icon: "star", on: true },
         { id: "compat", label: "Compatibility list", icon: "web", on: Vm.detail.compat-page != "" && root.outside },
-        { id: "protondb", label: "ProtonDB page", icon: "web", on: Vm.detail.protondb-url != "" && root.outside },
+        { id: "layer", label: Vm.detail.layer-source + " page", icon: "web", on: Vm.detail.layer-url != "" && root.outside },
         { id: "settings", label: "Settings", icon: "gear", on: true },
         { id: "hide", label: Vm.detail.hidden ? "Show in the Catalog" : "Hide from the Catalog",
             icon: Vm.detail.hidden ? "eye" : "eye-off", on: Vm.detail.releases.length > 0 },
@@ -120,7 +120,7 @@ export global GameMenu {
             if (id == "trailer") { Trailers.watch(); }
             if (id == "rate") { Commands.ask-result(root.game); }
             if (id == "compat") { Host.open-url(Vm.detail.compat-page); }
-            if (id == "protondb") { Host.open-url(Vm.detail.protondb-url); }
+            if (id == "layer") { Host.open-url(Vm.detail.layer-url); }
             if (id == "settings") { Commands.navigate("settings"); }
             if (id == "hide") { Commands.hide-game(root.game, !Vm.detail.hidden); }
         }
