@@ -413,6 +413,25 @@ async fn a_game_in_front_keeps_the_windows_it_opens_after_it_showed() {
 }
 
 #[tokio::test]
+async fn a_game_is_kept_on_screen_when_the_desktop_shows_the_launcher_in_place_of_its_new_window() {
+    let (t, _) = core_with(FakeEmulator::new(vec!["A"])).await;
+    let (_, process) = play(&t).await;
+    until(&t, "the game is in front", || t.core.game_in_front()).await;
+    // The helper's window closed, and Gamescope shows the launcher in place of the game's
+    // window it wasn't told about yet.
+    t.windows.set_front(Front::Launcher);
+    t.clock.advance(WATCH_EVERY + Duration::from_millis(3)).await;
+    until(&t, "the desktop says the launcher is in front", || !t.core.game_in_front()).await;
+
+    // The game's window opens a round later.
+    let game = process.id + 1000;
+    t.processes.add(process.id, game);
+    t.clock.advance(WATCH_EVERY + Duration::from_millis(3)).await;
+    until(&t, "the game's window is kept on screen", || t.windows.kept().last().is_some_and(|ids| ids.contains(&game)))
+        .await;
+}
+
+#[tokio::test]
 async fn a_game_behind_the_launcher_is_not_kept_on_screen() {
     let (t, _) = core_with(FakeEmulator::new(vec!["A"])).await;
     play(&t).await;
