@@ -1,0 +1,73 @@
+name: Warm cache
+
+# Keeps Package's build caches ready on main, so a release restores the dependencies already
+# built and compiles only Nexus itself. A cache saved on a tag serves nobody else, and GitHub
+# drops a cache nobody reads for 7 days, so Package can't keep its own caches warm.
+#
+# Each job builds what Package's build job builds, with the same toolchain, environment and
+# shared cache name (package-<system>), and saves the cache. It packs nothing. It runs when
+# Cargo.lock or the toolchain changes on main, twice a week, and by hand.
+on:
+  push:
+    branches: [main]
+    paths:
+      - Cargo.lock
+      - rust-toolchain.toml
+      - .github/workflows/warm-cache.yml
+      - .github/actions/setup/action.yml
+  schedule:
+    - cron: "23 4 * * 1,4"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer Cargo.lock waits for the run before it, which still saves.
+concurrency:
+  group: warm-cache
+  cancel-in-progress: false
+
+# The same as package.yml's: the cache key holds every CARGO_* and RUST* variable, so a
+# difference here would make a cache Package never restores.
+env:
+  CARGO_TERM_COLOR: always
+  HOMEBREW_NO_AUTO_UPDATE: "1"
+  HOMEBREW_NO_INSTALL_CLEANUP: "1"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: Warm (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux, runner: ubuntu-22.04 }
+          - { name: macos-arm64, runner: macos-15 }
+          - { name: macos-x86_64, runner: macos-15-intel }
+          - { name: windows, runner: windows-2022 }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          shared-key: package-${{ matrix.name }}
+          save-cache: true
+      # The tools go into ~/.cargo/bin, which the cache keeps.
+      - if: matrix.name != 'macos-x86_64'
+        uses: ./.github/actions/cargo-tool
+        with:
+          tool: cargo-about
+          version: 0.9.2
+      - name: cargo-about (Intel Mac)
+        if: matrix.name == 'macos-x86_64'
+        run: |
+          cargo about --version 2> /dev/null | grep -qw 0.9.2 \
+            || cargo install cargo-about@0.9.2 --locked --features cli
+      - run: cargo build --release --locked -p nexus-app

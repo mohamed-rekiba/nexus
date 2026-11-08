@@ -14,8 +14,8 @@ nfpm=${CARGO_TARGET_DIR:-$root/target}/nfpm/$version/nfpm
 if [ ! -x "$nfpm" ]; then
     mkdir -p "$(dirname "$nfpm")"
     archive="$(dirname "$nfpm")/nfpm.tar.gz"
-    curl -fsSL --retry 3 -o "$archive" \
-        "https://github.com/goreleaser/nfpm/releases/download/v${version}/nfpm_${version}_Linux_x86_64.tar.gz"
+    "$root/scripts/download.sh" \
+        "https://github.com/goreleaser/nfpm/releases/download/v${version}/nfpm_${version}_Linux_x86_64.tar.gz" "$archive"
     echo "$sha  $archive" | sha256sum -c - > /dev/null
     tar -xzf "$archive" -C "$(dirname "$nfpm")" nfpm
     rm "$archive"

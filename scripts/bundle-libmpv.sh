@@ -7,7 +7,8 @@
 # Needs, per system (the libmpv action in .github installs them):
 #   macOS    Homebrew's mpv and dylibbundler
 #   Linux    libmpv-dev, mpv and patchelf (Debian, Ubuntu); mpv-libs and patchelf (Fedora)
-#   Windows  LIBMPV_DIR: an unpacked shinchiro mpv-dev build (libmpv-2.dll)
+#   Windows  LIBMPV_DIR: an unpacked shinchiro mpv-dev build (libmpv-2.dll), and
+#            LIBMPV_FFMPEG: the FFmpeg commit it was built from (master if unset)
 set -euo pipefail
 os="$1"
 lib_dir="$2"
@@ -20,7 +21,7 @@ fetch_licences() {
     local ref="$1"
     if [[ "$ref" =~ ^[0-9]+\.[0-9] ]]; then ref="v$ref"; fi
     for file in Copyright LICENSE.GPL LICENSE.LGPL; do
-        curl -fsSL --retry 3 -o "$licences/$file" "https://raw.githubusercontent.com/mpv-player/mpv/$ref/$file"
+        "$(dirname "$0")/download.sh" "https://raw.githubusercontent.com/mpv-player/mpv/$ref/$file" "$licences/$file"
     done
     echo "mpv https://github.com/mpv-player/mpv/archive/$ref.tar.gz" >> "$licences/SOURCES"
 }
@@ -30,7 +31,7 @@ fetch_ffmpeg() {
     local ref="$1"
     mkdir -p "$licences/ffmpeg"
     for file in LICENSE.md COPYING.GPLv2 COPYING.GPLv3 COPYING.LGPLv2.1 COPYING.LGPLv3; do
-        curl -fsSL --retry 3 -o "$licences/ffmpeg/$file" "https://raw.githubusercontent.com/FFmpeg/FFmpeg/$ref/$file"
+        "$(dirname "$0")/download.sh" "https://raw.githubusercontent.com/FFmpeg/FFmpeg/$ref/$file" "$licences/ffmpeg/$file"
     done
     echo "ffmpeg https://github.com/FFmpeg/FFmpeg/archive/$ref.tar.gz" >> "$licences/SOURCES"
 }
@@ -108,9 +109,9 @@ case "$os" in
         # The build's name ends in mpv's commit: -git-<hash>.
         ref="$(basename "${LIBMPV_SOURCE:-}" .7z | sed -n 's/.*-git-\([0-9a-f]*\)$/\1/p')"
         fetch_licences "${ref:-master}"
-        # shinchiro builds FFmpeg from its master branch: the build's own FFmpeg commit isn't
-        # in the file name, so the texts come from master.
-        fetch_ffmpeg master
+        # shinchiro builds FFmpeg from its master branch. The commit isn't in the file name;
+        # the libmpv action names it (LIBMPV_FFMPEG), read from the DLL.
+        fetch_ffmpeg "${LIBMPV_FFMPEG:-master}"
         source="shinchiro's mpv-winbuild-cmake build (${LIBMPV_SOURCE:-https://github.com/shinchiro/mpv-winbuild-cmake})"
         ;;
     *)

@@ -249,7 +249,8 @@ from `about.toml` and `about.hbs`; without cargo-about a local package warns and
 `CI` set it fails), and the `libmpv/` and `libarchive/` licence folders from the bundle scripts.
 `scripts/bundle-libmpv.sh` and `scripts/bundle-libarchive.sh` copy or build those libraries;
 `NEXUS_NO_LIBMPV=1` and `NEXUS_NO_LIBARCHIVE=1` leave them out. `scripts/fetch-sources.sh` downloads
-the source archives that the `SOURCES` files name.
+the source archives that the `SOURCES` files name, and keeps them in `NEXUS_SOURCES_CACHE` when it is
+set.
 
 `install.sh`, in the tarball, installs the package for the user without sudo. Check it with
 `shellcheck scripts/install.sh`.
@@ -275,6 +276,7 @@ The workflows are in `.github/workflows/`:
 | `weekly.yml` | Mondays, by hand | The tests on Windows; on Linux: the real emulator releases install, the desktop adapter under Xvfb and openbox, the trailer player on a real video, and `cargo deny` with the newest advisories |
 | `release.yml` | Pushes to `main`, by hand | Release Please keeps a release pull request open for Nexus and one for Nexus OS, makes the draft release and tag when one merges, then starts `package.yml` or `os.yml` on the tag |
 | `package.yml` | A Nexus tag (started by `release.yml`), by hand | The packages on Linux, both Mac processors and Windows. On a tag it publishes the release, records it in `os/nexus.txt`, and starts `os.yml` |
+| `warm-cache.yml` | `Cargo.lock` or the toolchain changes on `main`, Mondays and Thursdays, by hand | Builds what `package.yml` builds on each system and saves the cache on `main`, so a release starts from built dependencies |
 | `os.yml` | Daily, on a Nexus OS tag, after a Nexus release, by hand | The Nexus OS images and USB stick ([../os/README.md](../os/README.md)) |
 | `mirror-deps.yml` | By hand | Copies the pinned Windows libmpv build into this repository's `deps` release |
 
@@ -286,8 +288,13 @@ the run's artifacts.
 For branch protection, require Format, Clippy, Test and cargo-deny.
 
 The shared steps are in `.github/actions/`: `setup` (the toolchain, the Linux build packages and
-the dependency cache), `libmpv`, `libarchive` and `linux-packages` (a pinned nfpm, checked against
-its SHA-256).
+the dependency cache), `cargo-tool` (cargo-nextest or cargo-about, from the cache when it has the
+pinned version), `libmpv`, `libarchive`, `sources-list` (a package's `SOURCES` lists, for
+the sources job) and `linux-packages` (a pinned nfpm, checked against its SHA-256).
+
+`package.yml`'s jobs: `build` (Linux, Windows) and `build-mac` (Apple Silicon on `macos-15`,
+Intel on `macos-15-intel`) run side by side. `macos` joins the two Mac apps as soon as both are built, while
+`sources` fetches the third-party sources the builds list. `publish` waits for all of them.
 
 The workflows follow these rules:
 
@@ -295,8 +302,13 @@ The workflows follow these rules:
 - Permissions are `contents: read` or none at the top. A job that writes asks for what it needs.
 - Every job has a `timeout-minutes`.
 - Cargo runs with `--locked`, so CI fails when `Cargo.lock` is out of date.
-- A new push to a pull request cancels its older CI run.
-- Only `main` saves the dependency cache. A pull request restores `main`'s cache.
+- A new push to a pull request cancels its older CI run. Every run on `main` finishes, so it saves
+  its cache.
+- CI saves its cache on `main` and on each pull request; a pull request restores its own cache,
+  or else `main`'s. `package.yml` only restores: `warm-cache.yml` saves its caches on `main`, as a
+  cache saved on a tag serves no other run.
+- Downloads go through `scripts/download.sh`, which sends the workflow's token for GitHub files
+  and tries 5 times. Each download step has its own `timeout-minutes`.
 
 ## Releases
 

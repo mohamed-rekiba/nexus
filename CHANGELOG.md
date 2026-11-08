@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/mohamed-rekiba/nexus/compare/v0.11.0...v0.11.1) (2026-11-08)
+
+
+### Bug Fixes
+
+* **package:** the Windows package names the FFmpeg commit its libmpv was built from ([e6aa138](https://github.com/mohamed-rekiba/nexus/commit/e6aa13854df8a8a435e2544fe84b05cb3e9525e7))
+
 ## [0.11.0](https://github.com/mohamed-rekiba/nexus/compare/v0.10.0...v0.11.0) (2026-11-08)
 
 
