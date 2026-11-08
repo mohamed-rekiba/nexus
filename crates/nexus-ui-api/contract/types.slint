@@ -304,12 +304,14 @@ export struct ThemeChoice { id: string, name: string, current: bool }
 export struct Folder { name: string, title: string, help: string, text: string, shown: string, default: string, requested-by: string, write: bool }
 
 // system: the id of the system it plays ("PS5"), what LibrarySystem takes; "" for none.
+// system-name: its full name ("PlayStation 5"); "" for none.
 // icon, cover: the system's square icon and its wide picture, from the emulator plugin or the
 // theme's `[theme.emulators.<system>]`; empty when neither has one.
 export struct Emulator {
     plugin: string,
     name: string,
     system: string,
+    system-name: string,
     icon: image,
     cover: image,
     status: string,

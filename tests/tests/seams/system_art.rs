@@ -61,6 +61,7 @@ fn the_emulator_s_icon_and_cover_reach_the_theme_with_its_system() {
     let ps4 = of(&shown, "PS4");
     assert_eq!(size(ps4, "icon"), (8, 8));
     assert_eq!(size(ps4, "cover"), (32, 18));
+    assert_eq!(text(ps4, "system-name"), "PlayStation 4");
 }
 
 #[test]

@@ -1108,3 +1108,37 @@ fn a_child_theme_renders_the_same_library() {
     shoot(&window, &out.join("fixture-grid-home.png"));
     not_blank(&out, &["fixture-grid-home"]);
 }
+
+/// The Systems theme's Home, left to right and right to left, on the five built-in emulators
+/// with their own icons and covers, as `systems-home.png` and `systems-rtl-home.png`.
+#[test]
+fn the_systems_theme_renders_its_list_both_ways() {
+    use nexus_api::PluginBox;
+    let (window, out) = offscreen();
+    let home = tempfile::tempdir().unwrap();
+    let mut host = composed_on_current_platform(|h| {
+        h.home(home.path())
+            .built_in(PluginBox::theme(theme_systems::SystemsTheme))
+            .built_in(PluginBox::code(emu_kyty::KytyPlugin))
+            .built_in(PluginBox::code(emu_shadps4::ShadPlugin))
+            .built_in(PluginBox::code(emu_lichii::LichiiPlugin))
+            .built_in(PluginBox::code(emu_pc::PcPlugin))
+            .built_in(PluginBox::code(emu_steam::SteamPlugin))
+    });
+    host.ui.start().unwrap();
+    host.ui.switch(&id(theme_systems::ID)).unwrap();
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
+    // The fake network has no emulator builds: their notices would cover the list.
+    host.dispatch(Command::Notice(nexus_core::NoticeCmd::DismissAll));
+    host.load_images();
+    // The focus on the third entry, so the list shows a big tile between small ones.
+    for _ in 0..2 {
+        key(&mut host, slint::platform::Key::DownArrow);
+    }
+    shoot(&window, &out.join("systems-home.png"));
+    host.dispatch(Command::SetThemeOption { key: "direction".into(), value: "rtl".into() });
+    host.load_images();
+    shoot(&window, &out.join("systems-rtl-home.png"));
+    println!("screenshots in {}", out.display());
+    not_blank(&out, &["systems-home", "systems-rtl-home"]);
+}

@@ -26,6 +26,7 @@ slint-interpreter.workspace = true
 tempfile.workspace = true
 zstd.workspace = true
 theme-default.workspace = true
+theme-systems.workspace = true
 futures.workspace = true
 nexus-api.workspace = true
 nexus-core.workspace = true

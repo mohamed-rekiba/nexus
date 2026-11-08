@@ -1,0 +1,23 @@
+id = "systems"
+kind = "theme"
+name = "Systems"
+version = "0.1.0"
+host_api = "^0.2"
+capabilities = ["theme"]
+activation = "eager"
+
+# Home is a list of the systems the emulators play, on the far side, with the focused system's
+# cover behind it; each opens the Library on its games. Every other screen, the tokens, the
+# fonts and the sounds are the default theme's. The systems' icons and covers come from their
+# emulator plugins: `[theme.emulators.<SYSTEM>]` would put this theme's own in their place.
+[theme]
+ui_api = "^0.2.0"
+extends = "default"
+screens = ["home"]
+input = ["gamepad", "pointer"]
+navigation = "focus"
+
+# The "All games" entry at the top of the list (scripts/make-system-art.sh).
+[theme.assets.images]
+all-games-icon = "images/all-games-icon.png"
+all-games-cover = "images/all-games-cover.jpg"
