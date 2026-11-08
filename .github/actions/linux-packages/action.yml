@@ -22,9 +22,12 @@ runs:
         # Pinned with its SHA-256 as GitHub lists it. Dependabot doesn't follow this: change both.
         NFPM_VERSION: 2.47.0
         NFPM_SHA256: 0660ca602b2d2d2ae4781a06c692b3eeb9d437ffea05b831d76e41f4a3188783
+        # scripts/download.sh logs in to GitHub with it.
+        GH_TOKEN: ${{ github.token }}
       run: |
-        curl -fsSL --retry 3 -o "$RUNNER_TEMP/nfpm.tar.gz" \
-          "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz"
+        scripts/download.sh \
+          "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz" \
+          "$RUNNER_TEMP/nfpm.tar.gz"
         echo "$NFPM_SHA256  $RUNNER_TEMP/nfpm.tar.gz" | sha256sum -c -
         tar -xzf "$RUNNER_TEMP/nfpm.tar.gz" -C "$RUNNER_TEMP" nfpm
     - name: Build the packages

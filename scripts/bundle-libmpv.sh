@@ -20,7 +20,7 @@ fetch_licences() {
     local ref="$1"
     if [[ "$ref" =~ ^[0-9]+\.[0-9] ]]; then ref="v$ref"; fi
     for file in Copyright LICENSE.GPL LICENSE.LGPL; do
-        curl -fsSL --retry 3 -o "$licences/$file" "https://raw.githubusercontent.com/mpv-player/mpv/$ref/$file"
+        "$(dirname "$0")/download.sh" "https://raw.githubusercontent.com/mpv-player/mpv/$ref/$file" "$licences/$file"
     done
     echo "mpv https://github.com/mpv-player/mpv/archive/$ref.tar.gz" >> "$licences/SOURCES"
 }
@@ -30,7 +30,7 @@ fetch_ffmpeg() {
     local ref="$1"
     mkdir -p "$licences/ffmpeg"
     for file in LICENSE.md COPYING.GPLv2 COPYING.GPLv3 COPYING.LGPLv2.1 COPYING.LGPLv3; do
-        curl -fsSL --retry 3 -o "$licences/ffmpeg/$file" "https://raw.githubusercontent.com/FFmpeg/FFmpeg/$ref/$file"
+        "$(dirname "$0")/download.sh" "https://raw.githubusercontent.com/FFmpeg/FFmpeg/$ref/$file" "$licences/ffmpeg/$file"
     done
     echo "ffmpeg https://github.com/FFmpeg/FFmpeg/archive/$ref.tar.gz" >> "$licences/SOURCES"
 }

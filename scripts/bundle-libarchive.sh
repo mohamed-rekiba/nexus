@@ -29,8 +29,8 @@ build() {
     local work
     work="$(mktemp -d)"
     local archive="$work/libarchive-$VERSION.tar.xz"
-    curl -fsSL --retry 3 -o "$archive" \
-        "https://github.com/libarchive/libarchive/releases/download/v$VERSION/libarchive-$VERSION.tar.xz"
+    "$(dirname "$0")/download.sh" \
+        "https://github.com/libarchive/libarchive/releases/download/v$VERSION/libarchive-$VERSION.tar.xz" "$archive"
     # sha256sum on Linux, shasum on macOS.
     if command -v sha256sum > /dev/null; then
         echo "$SHA256  $archive" | sha256sum -c - > /dev/null
