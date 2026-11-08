@@ -3,6 +3,7 @@
 //! tests.
 
 mod home;
+mod library;
 mod theme_files;
 
 use crate::common::*;

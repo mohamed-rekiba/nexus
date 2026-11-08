@@ -895,7 +895,8 @@ tests that matter for a theme:
   that every font the theme names ships with it and that every animation time goes through
   `Look.timed`.
 - `default_theme/`: the Default theme's Home, its list and the way to each system's games and
-  back, and its files.
+  back; its Library (one card size, the system's cover behind it, the systems in the top bar
+  and the genres' list); and its files.
 - `composed` starts on the Classic theme; `composed_first_run` saves no theme, as a first run.
 - `system_art.rs`: a system's icon and cover from its emulator plugin, and a theme's
   `[theme.systems.<SYSTEM>]` in their place.

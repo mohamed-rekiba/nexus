@@ -1,0 +1,124 @@
+import { Tokens } from "../tokens.slint";
+import { Look } from "look.slint";
+import { Nav } from "nav.slint";
+
+// A Library filter: a system with its count. It is lit, a soft see-through white, when it is
+// on, and ringed under the keys. Right to left, the count is on the left of the name.
+export component FilterChip inherits Rectangle {
+    in property <string> text;
+    in property <int> count: -1;
+    in property <bool> active;
+    in property <bool> focused;
+    callback clicked();
+    height: 40 * Look.px;
+    width: row.preferred-width;
+    border-radius: 20 * Look.px;
+    background: root.active ? #ffffff38 : ta.has-hover ? #ffffff26 : #ffffff14;
+    border-width: 1px;
+    border-color: root.active ? #ffffff59 : #ffffff14;
+    transform-scale: ta.pressed ? 0.95 : 1.0;
+    animate background, border-color { duration: Look.timed(Tokens.motion-fast); }
+    animate transform-scale { duration: Look.timed(Tokens.motion-fast); easing: ease-out-back; }
+    accessible-role: button;
+    accessible-label: "filter:" + root.text;
+    accessible-value: root.active ? "on" : "off";
+    accessible-item-selected: root.focused;
+    accessible-action-default => { root.clicked(); }
+    row := HorizontalLayout {
+        padding-left: 16 * Look.px;
+        padding-right: 16 * Look.px;
+        spacing: 7 * Look.px;
+        if Look.rtl && root.count >= 0 : Text { text: root.count; font-size: 15 * Look.px; color: root.active ? #ffffffb3 : Look.text3; vertical-alignment: center; }
+        Text { text: root.text; font-size: 18 * Look.px; font-weight: root.active ? 600 : 500; color: Tokens.color-text; vertical-alignment: center; }
+        if !Look.rtl && root.count >= 0 : Text { text: root.count; font-size: 15 * Look.px; color: root.active ? #ffffffb3 : Look.text3; vertical-alignment: center; }
+    }
+    ta := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+    // Under the keys: a ring with no glow. A glow is a shadow under the whole ring, and it would
+    // show through the see-through chip as a solid colour.
+    Rectangle {
+        x: -4 * Look.px;
+        y: -4 * Look.px;
+        width: root.width + 8 * Look.px;
+        height: root.height + 8 * Look.px;
+        border-radius: root.border-radius + 4 * Look.px;
+        border-width: 3 * Look.px;
+        border-color: Look.ring;
+        opacity: root.focused ? 1 : 0;
+        animate opacity { duration: Look.timed(Tokens.motion-fast); }
+    }
+}
+
+// The Library's systems as a row of chips, in the top bar between the way back and the
+// buttons. The row scrolls to keep the focused chip in view, and fades at an edge where more
+// chips are hidden. Right to left, the row is mirrored: the first chip is on the right.
+export component SystemChips inherits Rectangle {
+    // The keys are on the Library: its focused chip shows.
+    in property <bool> keys;
+    clip: true;
+    accessible-role: list;
+    accessible-label: "systems";
+    property <length> fade: 40 * Look.px;
+    property <length> scroll;
+    // Room at each end for the focus ring, which is wider than its chip.
+    property <length> pad: 6 * Look.px;
+    property <length> length: chips.preferred-width + 2 * root.pad;
+    pure function within(x: length, w: length, span: length) -> length {
+        Look.rtl ? span - x - w : x
+    }
+    // Moves the chips so the one `x` from the start side, `w` wide, is in view, clear of the
+    // fades.
+    function reveal(x: length, w: length) {
+        let most = Math.max(0, root.length - root.width);
+        if (x - root.scroll < root.fade) {
+            root.scroll = Math.max(0, x - root.fade);
+        } else if (x + w - root.scroll > root.width - root.fade) {
+            root.scroll = Math.min(most, x + w - root.width + root.fade);
+        }
+    }
+    // The mouse wheel moves the row, for the chips past the fade. Under the chips, so their
+    // clicks stay theirs.
+    TouchArea {
+        scroll-event(event) => {
+            let delta = (event.delta-y + event.delta-x) / 1px;
+            if (Math.abs(delta) < 1) { return reject; }
+            root.scroll = Math.clamp(root.scroll - delta * 1px * (Look.rtl ? -1 : 1), 0, Math.max(0, root.length - root.width));
+            accept
+        }
+    }
+    chips := HorizontalLayout {
+        x: Look.rtl ? root.width - root.length + root.pad + root.scroll : root.pad - root.scroll;
+        y: (root.height - 40 * Look.px) / 2;
+        width: self.preferred-width;
+        height: 40 * Look.px;
+        spacing: 10 * Look.px;
+        alignment: start;
+        animate x { duration: Look.timed(Tokens.motion-normal); easing: ease-out-expo; }
+        for j in Nav.lib.systems.length : chip := FilterChip {
+            property <int> i: Look.rtl ? Nav.lib.systems.length - 1 - j : j;
+            text: Nav.lib.systems[self.i].label;
+            count: Nav.lib.systems[self.i].count;
+            active: Nav.lib.systems[self.i].on;
+            focused: root.keys && Nav.zone == "filters" && Nav.filter == self.i;
+            changed focused => {
+                if (self.focused) { root.reveal(root.within(self.x + root.pad, self.width, root.length), self.width); }
+            }
+            clicked => { Nav.zone = "filters"; Nav.filter = chip.i; Nav.system(Nav.lib.systems[chip.i].id); }
+        }
+    }
+    if root.scroll > 0 : Rectangle {
+        x: root.within(0, self.width, root.width);
+        width: root.fade;
+        background: Look.rtl ? @linear-gradient(90deg, Look.band-clear 0%, Look.band 100%)
+            : @linear-gradient(90deg, Look.band 0%, Look.band-clear 100%);
+        accessible-role: text;
+        accessible-label: "systems-more-start";
+    }
+    if root.length - root.scroll > root.width + 1px : Rectangle {
+        x: root.within(root.width - self.width, self.width, root.width);
+        width: root.fade;
+        background: Look.rtl ? @linear-gradient(90deg, Look.band 0%, Look.band-clear 100%)
+            : @linear-gradient(90deg, Look.band-clear 0%, Look.band 100%);
+        accessible-role: text;
+        accessible-label: "systems-more-end";
+    }
+}
