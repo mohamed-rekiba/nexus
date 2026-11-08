@@ -324,3 +324,16 @@ fn the_default_settings_screen_edits_a_folder_with_the_keys() {
         .any(|r| matches!(r, nexus_ui_host::UiRequest::Core(Command::Library(nexus_core::LibraryCmd::Refresh))));
     assert!(asked, "Enter on Rescan, after the text box closed, asks the core to scan");
 }
+
+#[test]
+fn the_default_theme_is_first_in_the_themes_list_whichever_is_in_use() {
+    let y = |host: &Composed, theme: &str| host.first(&format!("plugin:{theme}")).absolute_position().y;
+    let mut host = composed(|h| h);
+    host.ui.start().unwrap();
+    for theme in ["classic", "default"] {
+        host.ui.switch(&id(theme)).unwrap();
+        host.dispatch(Command::Navigate(nexus_core::Route::Themes));
+        host.settle();
+        assert!(y(&host, "default") < y(&host, "classic"), "with {theme} in use, Default is first");
+    }
+}
