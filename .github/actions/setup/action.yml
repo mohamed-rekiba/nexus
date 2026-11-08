@@ -9,10 +9,16 @@ inputs:
   cache-key:
     description: Keeps the caches of jobs that build different things apart
     default: ""
+  shared-key:
+    description: >-
+      A cache name shared by jobs in different workflows, in place of the job's own: Package's
+      builds and warm-cache.yml's use the same one, so a release restores what warm-cache saved
+    default: ""
   save-cache:
     description: >-
-      'true' saves the cache at the end of the job. Callers pass true on main only: pull
-      requests then restore main's cache and never write their own.
+      'true' saves the cache at the end of the job. A cache saved on main serves every branch
+      and tag; one saved on a pull request serves only that pull request's next push. CI saves
+      on both; Package saves on main only (warm-cache.yml), as its caches are large.
     default: "false"
 runs:
   using: composite
@@ -36,4 +42,5 @@ runs:
     - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       with:
         key: ${{ inputs.cache-key }}
+        shared-key: ${{ inputs.shared-key }}
         save-if: ${{ inputs.save-cache == 'true' }}
