@@ -7,7 +7,8 @@
 # Needs, per system (the libmpv action in .github installs them):
 #   macOS    Homebrew's mpv and dylibbundler
 #   Linux    libmpv-dev, mpv and patchelf (Debian, Ubuntu); mpv-libs and patchelf (Fedora)
-#   Windows  LIBMPV_DIR: an unpacked shinchiro mpv-dev build (libmpv-2.dll)
+#   Windows  LIBMPV_DIR: an unpacked shinchiro mpv-dev build (libmpv-2.dll), and
+#            LIBMPV_FFMPEG: the FFmpeg commit it was built from (master if unset)
 set -euo pipefail
 os="$1"
 lib_dir="$2"
@@ -108,9 +109,9 @@ case "$os" in
         # The build's name ends in mpv's commit: -git-<hash>.
         ref="$(basename "${LIBMPV_SOURCE:-}" .7z | sed -n 's/.*-git-\([0-9a-f]*\)$/\1/p')"
         fetch_licences "${ref:-master}"
-        # shinchiro builds FFmpeg from its master branch: the build's own FFmpeg commit isn't
-        # in the file name, so the texts come from master.
-        fetch_ffmpeg master
+        # shinchiro builds FFmpeg from its master branch. The commit isn't in the file name;
+        # the libmpv action names it (LIBMPV_FFMPEG), read from the DLL.
+        fetch_ffmpeg "${LIBMPV_FFMPEG:-master}"
         source="shinchiro's mpv-winbuild-cmake build (${LIBMPV_SOURCE:-https://github.com/shinchiro/mpv-winbuild-cmake})"
         ;;
     *)
