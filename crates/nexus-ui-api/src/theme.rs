@@ -9,10 +9,6 @@ use serde::{Deserialize, Serialize};
 use crate::tokens::{TOKENS, TokenValue, token};
 use crate::{ComponentId, ScreenId};
 
-/// The id of the built-in theme the app starts with, falls back to and uses in safe mode. The
-/// Themes list shows it first.
-pub const BASE_THEME: &str = "default";
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum InputMode {
@@ -105,6 +101,10 @@ pub enum OptionKind {
 pub struct ThemeSection {
     /// The `nexus-ui-api` versions this theme works with.
     pub ui_api: VersionReq,
+    /// The theme the app starts with, falls back to when another fails, and uses in safe mode.
+    /// The Themes list shows it first. Exactly one installed theme sets it.
+    #[serde(default)]
+    pub fallback: bool,
     /// The parent theme. Missing screens, components, tokens and assets come from it.
     #[serde(default)]
     pub extends: Option<PluginId>,
@@ -185,6 +185,8 @@ pub enum ThemeError {
     MissingParent { theme: PluginId, parent: PluginId },
     #[error("theme {theme} extends itself through {chain:?}")]
     Cycle { theme: PluginId, chain: Vec<PluginId> },
+    #[error("{0}")]
+    Fallback(String),
     #[error("theme {theme}: token {token}: {message}")]
     Token { theme: PluginId, token: String, message: String },
     #[error("theme {theme}: {file}: {message}")]
@@ -279,13 +281,15 @@ impl MergedTheme {
 }
 
 /// Merges `chain` (the theme first, then its parents) and applies the player's option values.
-/// Every token must end up with a value.
+/// A token no theme in the chain sets keeps its default.
 pub fn merge_chain(chain: &[&ThemeManifest], option_values: &serde_json::Value) -> Result<MergedTheme, ThemeError> {
     let theme = chain.first().expect("a chain has at least the theme itself").id().clone();
     let token_error =
         |token: &str, message: String| ThemeError::Token { theme: theme.clone(), token: token.to_owned(), message };
 
-    let mut tokens = BTreeMap::new();
+    // Every token starts at its default; the chain sets the ones it changes.
+    let mut tokens: BTreeMap<String, TokenValue> =
+        TOKENS.iter().map(|t| (t.name.to_owned(), t.default_value())).collect();
     let mut images = BTreeMap::new();
     let mut sounds = BTreeMap::new();
     let mut system_art: BTreeMap<String, Art<LayerPath>> = BTreeMap::new();
@@ -355,10 +359,6 @@ pub fn merge_chain(chain: &[&ThemeManifest], option_values: &serde_json::Value) 
                 }
             }
         }
-    }
-
-    if let Some(missing) = TOKENS.iter().find(|t| !tokens.contains_key(t.name)) {
-        return Err(token_error(missing.name, "no theme in the chain sets it".into()));
     }
 
     let first = |f: fn(&ThemeSection) -> Option<Navigation>| chain.iter().find_map(|m| f(&m.theme));
@@ -468,10 +468,19 @@ mod tests {
     }
 
     #[test]
-    fn a_chain_missing_a_token_is_an_error_naming_it() {
+    fn a_token_the_theme_leaves_out_keeps_its_default() {
         let lonely = manifest("lonely", "[theme.tokens]\ncolor-bg = \"#000000\"");
-        let err = merge_chain(&[&lonely], &serde_json::Value::Null).unwrap_err();
-        assert!(matches!(err, ThemeError::Token { ref token, .. } if token == "color-surface"), "{err}");
+        let merged = merge_chain(&[&lonely], &serde_json::Value::Null).unwrap();
+        assert_eq!(merged.tokens["color-bg"], TokenValue::Color(0x000000ff));
+        assert_eq!(merged.tokens["color-surface"], TokenValue::Color(0x121a31ff), "Classic's surface");
+        assert_eq!(merged.tokens.len(), TOKENS.len());
+    }
+
+    #[test]
+    fn a_wrong_token_value_is_an_error_naming_it() {
+        let wrong = manifest("wrong", "[theme.tokens]\ncolor-bg = \"blue\"");
+        let err = merge_chain(&[&wrong], &serde_json::Value::Null).unwrap_err();
+        assert!(matches!(err, ThemeError::Token { ref token, .. } if token == "color-bg"), "{err}");
     }
 
     #[test]

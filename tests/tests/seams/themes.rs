@@ -360,3 +360,48 @@ fn a_hint_for_two_pad_buttons_is_as_wide_as_its_text_not_a_circle() {
         assert!(two.width > two.height * 1.5, "{theme}: L1 R1 is a pill as wide as its text: {two:?}");
     }
 }
+
+#[test]
+fn a_theme_gets_the_kit_beneath_its_files_and_its_own_kit_file_wins() {
+    let kit = |name: &str| nexus_ui_api::contract::KIT.iter().find(|(n, _)| *n == name).map(|(_, text)| *text).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let own = format!("// This theme's own commands.\n{}", kit("commands.slint"));
+    write_theme(dir.path(), "own-kit", "extends = \"default\"", &[("kit/commands.slint", own.as_str())]);
+    write_theme(
+        dir.path(),
+        "broken-kit",
+        "extends = \"default\"",
+        &[("kit/commands.slint", "export global Commands {}\n")],
+    );
+    let mut host = composed(|h| h.discover(dir.path()));
+    host.ui.start().unwrap();
+    let served = |host: &Composed| host.ui.resolved().unwrap().slint_sources().unwrap()["kit/commands.slint"].clone();
+    assert_eq!(served(&host), kit("commands.slint"), "Classic ships none: the kit's");
+
+    host.ui.switch(&id("own-kit")).expect("a theme with its own kit file loads");
+    assert_eq!(served(&host), own, "the theme's copy replaces the kit's");
+
+    // Proof that the theme's copy is the one compiled: an empty Commands breaks every caller.
+    let error = host.ui.switch(&id("broken-kit")).unwrap_err();
+    assert!(matches!(error, ThemeError::Compile { .. }), "{error}");
+    assert_eq!(host.ui.current(), Some(&id("own-kit")), "the theme on screen stays");
+}
+
+#[test]
+fn exactly_one_theme_is_the_fallback() {
+    assert!(matches!(nexus_ui_host::ThemeSet::default().fallback(), Err(ThemeError::Fallback(_))), "none");
+
+    let mut host = composed_first_run(|h| h);
+    assert_eq!(host.ui.themes().fallback().unwrap(), id(theme_default::ID));
+    host.ui.start().unwrap();
+    assert_eq!(host.ui.current(), Some(&id(theme_default::ID)), "a first run shows the fallback theme");
+
+    let dir = tempfile::tempdir().unwrap();
+    write_theme(dir.path(), "second", "fallback = true\nextends = \"default\"", &[]);
+    let mut host = composed_first_run(|h| h.discover(dir.path()));
+    let error = host.ui.start().unwrap_err();
+    assert!(
+        matches!(&error, ThemeError::Fallback(m) if m.contains("default") && m.contains("second")),
+        "the error names both: {error}"
+    );
+}

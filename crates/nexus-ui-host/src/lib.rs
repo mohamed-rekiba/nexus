@@ -21,7 +21,7 @@ mod values;
 
 pub use bind::Viewport;
 pub use compile::{VFS_ROOT, sources};
-pub use host::{BASE_THEME, Requests, ThemeHost, TrailerRequest, TrailerStatus, UiRequest, vm_text};
+pub use host::{Requests, ThemeHost, TrailerRequest, TrailerStatus, UiRequest, vm_text};
 pub use images::{Crop, ImageKey, ImageSize, MAX_HEIGHT, MAX_WIDTH, Prepared, StillWanted, prepare};
 pub use input::{PadAction, PadButton};
 pub use loader::sweep_thumbs;

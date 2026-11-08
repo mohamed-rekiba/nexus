@@ -317,7 +317,7 @@ pub(crate) fn build(s: &Snapshot) -> AppView {
         system: system_vm(s),
         result_prompt: state.result_prompt.as_ref().map(|(key, _)| s.library.title(key)),
     };
-    plugin_lists(&mut view);
+    plugin_lists(&mut view, &s.plugins);
     crate::display::write(&mut view);
     view
 }
@@ -1324,13 +1324,13 @@ fn emulators_vm(s: &Snapshot) -> EmulatorsVm {
 
 /// The Emulators and the Themes lists, from every plugin, and the Plugin page's actions and
 /// whether its theme is the one shown.
-fn plugin_lists(view: &mut AppView) {
+fn plugin_lists(view: &mut AppView, registry: &Plugins) {
     let shown = view.settings.themes.iter().find(|t| t.current).map(|t| t.id.clone());
     let plugins = &view.emulators.plugins;
     // Emulators, then the services that describe their games.
     let kind = |kind: &'static str| plugins.iter().filter(move |p| p.kind == kind).cloned();
     view.emulators.emulator_plugins = kind("emulator").chain(kind("service")).collect();
-    // A theme's status says whether it is the one shown. The Default theme comes first; the
+    // A theme's status says whether it is the one shown. The fallback theme comes first; the
     // others keep their order.
     view.emulators.theme_plugins = kind("theme")
         .map(|p| PluginRowVm {
@@ -1338,7 +1338,10 @@ fn plugin_lists(view: &mut AppView) {
             ..p
         })
         .collect();
-    view.emulators.theme_plugins.sort_by_key(|p| p.id.as_str() != nexus_ui_api::BASE_THEME);
+    let fallback = |id: &PluginId| {
+        registry.manifest(id).and_then(|m| ThemeManifest::from_plugin(m).ok()).is_some_and(|m| m.theme.fallback)
+    };
+    view.emulators.theme_plugins.sort_by_key(|p| !fallback(&p.id));
     if let Some(page) = &mut view.plugin_page {
         page.actions = page.sections.iter().filter(|s| s.kind == SlotKind::Action).cloned().collect();
         page.current = shown.as_ref() == Some(&page.plugin.id);
