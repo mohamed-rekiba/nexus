@@ -139,6 +139,8 @@ pub enum Command {
     CheckUpdates,
     /// The launcher's own update: look for one, or download it.
     LauncherUpdate(crate::LauncherUpdateCmd),
+    /// Settings → Backup: back up, restore, or read the backup folder again.
+    Backup(crate::BackupCmd),
     /// "Rate how it runs": asks "How far did it get?" for this game.
     AskResult(GameKey),
     /// The player's answer to "How far did it get?" after playing: one of
@@ -218,6 +220,7 @@ pub(crate) struct Inner {
     pub notices: crate::notices::NoticesSubsystem,
     pub launcher_update: crate::launcher_update::LauncherUpdateSubsystem,
     pub vpn: crate::vpn::VpnSubsystem,
+    pub backup: crate::backup::BackupSubsystem,
     /// Held while the catalogs are read: see [`crate::catalog_reads::refresh_releases`].
     pub reading_catalogs: tokio::sync::Mutex<()>,
 }
@@ -329,7 +332,12 @@ impl Core {
                     Box::pin(async move { torrents.vpn_changed().await })
                 }),
             );
+            let backup = crate::backup::BackupSubsystem::new(
+                kernel.config().clone(),
+                Notifier::new(changes.clone(), kernel.events().clone()),
+            );
             Inner {
+                backup,
                 preferences,
                 kernel,
                 ports,
@@ -415,6 +423,10 @@ impl Core {
     }
 
     /// The launcher's own update.
+    pub(crate) fn backup(&self) -> &crate::backup::BackupSubsystem {
+        &self.inner.backup
+    }
+
     pub(crate) fn launcher_update(&self) -> &crate::launcher_update::LauncherUpdateSubsystem {
         &self.inner.launcher_update
     }
@@ -464,6 +476,8 @@ impl Core {
             prefs: self.prefs(),
             notices: self.notices().snapshot(),
             launcher_update: self.launcher_update().snapshot(),
+            backup: self.backup().snapshot(),
+            backup_folder: crate::backups::folder(self).ok(),
             vpn: self.vpn().snapshot(),
             downloads: self.inner.downloads.jobs(),
             theme_options: state.theme.as_ref().map(|theme| self.theme_options(theme)).unwrap_or(Value::Null),
@@ -584,6 +598,7 @@ impl Core {
                 crate::system::check_launcher_update(self).await
             }
             Command::LauncherUpdate(command) => self.launcher_update().handle(command).await,
+            Command::Backup(command) => crate::backups::handle(self, command).await,
         };
         if let Err(error) = &result {
             tracing::warn!(%error, "command failed");

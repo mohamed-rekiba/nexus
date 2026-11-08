@@ -732,6 +732,43 @@ pub struct SettingsVm {
     pub start_at_login_error: String,
     /// "Download only through a VPN", and the VPNs.
     pub vpn: VpnSettingsVm,
+    /// Settings → Backup.
+    pub backup: BackupVm,
+}
+
+/// Settings → Backup: the backup folder, the job in progress, and the backups there.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct BackupVm {
+    /// The backup folder, with the home folder as `~`.
+    pub folder: String,
+    /// A backup or a restore runs.
+    pub running: bool,
+    /// The job running is a restore.
+    pub restoring: bool,
+    /// How far the job is, from 0 to 1.
+    pub progress: f32,
+    /// What the last job did, or why it failed. Empty before one.
+    pub status: String,
+    /// `status` says why it failed.
+    pub failed: bool,
+    /// A restore finished: Nexus starts again to finish it.
+    pub restart: bool,
+    /// Newest first.
+    pub backups: Vec<BackupFileVm>,
+}
+
+/// One backup in the backup folder.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct BackupFileVm {
+    /// Its file name: what Backup Restore takes.
+    pub file: String,
+    /// When it was made: `Nov 9, 2026, 14:30 UTC`.
+    pub date: String,
+    pub size: String,
+    /// What it holds: its items' titles, joined with ", ".
+    pub items: String,
+    /// The backup a restore made of what was there before.
+    pub before_restore: bool,
 }
 
 /// "Download only through a VPN", and the VPNs this computer has.

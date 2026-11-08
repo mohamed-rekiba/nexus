@@ -377,6 +377,7 @@ fn full_view() -> AppView {
             theme_options: vec![field()],
             folders: vec![folder()],
             vpn: VpnSettingsVm { vpns: vec![VpnVm::default()], ..VpnSettingsVm::default() },
+            backup: BackupVm { backups: vec![BackupFileVm::default()], ..BackupVm::default() },
             ..SettingsVm::default()
         },
         emulators: EmulatorsVm {

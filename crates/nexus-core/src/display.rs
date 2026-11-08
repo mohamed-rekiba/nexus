@@ -63,6 +63,14 @@ fn game_text(size_bytes: Option<u64>, last_played_days: Option<u64>, availabilit
     (maybe_size_text(size_bytes), days_text(last_played_days), availability_text(availability))
 }
 
+/// A time in seconds since 1970 as `Nov 9, 2026, 14:30 UTC`: the core knows no time zone.
+pub(crate) fn date_time_text(secs: u64) -> String {
+    let (y, m, d) = crate::backup::archive::civil(secs / 86_400);
+    let t = secs % 86_400;
+    let date = date_text(&format!("{y:04}-{m:02}-{d:02}"));
+    format!("{date}, {:02}:{:02} UTC", t / 3600, t % 3600 / 60)
+}
+
 /// `7.6 GB`, `820 MB`: decimal units, as the PS5 shows them.
 pub(crate) fn size_text(bytes: u64) -> String {
     let gb = bytes as f64 / 1e9;

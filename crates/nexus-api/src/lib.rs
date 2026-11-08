@@ -6,6 +6,7 @@
 //! Versioning: this crate follows semver. A plugin's manifest names the versions it works with
 //! in `host_api`, and the host refuses plugins whose range doesn't include [`API_VERSION`].
 
+mod backup;
 mod catalog;
 mod config;
 mod context;
@@ -34,6 +35,7 @@ pub use semver;
 pub use serde;
 pub use serde_json;
 
+pub use backup::*;
 pub use catalog::*;
 pub use config::*;
 pub use context::*;
