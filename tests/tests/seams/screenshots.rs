@@ -1110,7 +1110,8 @@ fn a_child_theme_renders_the_same_library() {
 }
 
 /// The Systems theme's Home, left to right and right to left, on the five built-in emulators
-/// with their own icons and covers, as `systems-home.png` and `systems-rtl-home.png`.
+/// with their own icons and covers, as `systems-all-games.png` (All games focused),
+/// `systems-home.png` and `systems-rtl-home.png`.
 #[test]
 fn the_systems_theme_renders_its_list_both_ways() {
     use nexus_api::PluginBox;
@@ -1131,6 +1132,7 @@ fn the_systems_theme_renders_its_list_both_ways() {
     // The fake network has no emulator builds: their notices would cover the list.
     host.dispatch(Command::Notice(nexus_core::NoticeCmd::DismissAll));
     host.load_images();
+    shoot(&window, &out.join("systems-all-games.png"));
     // The focus on the third entry, so the list shows a big tile between small ones.
     for _ in 0..2 {
         key(&mut host, slint::platform::Key::DownArrow);
@@ -1140,5 +1142,5 @@ fn the_systems_theme_renders_its_list_both_ways() {
     host.load_images();
     shoot(&window, &out.join("systems-rtl-home.png"));
     println!("screenshots in {}", out.display());
-    not_blank(&out, &["systems-home", "systems-rtl-home"]);
+    not_blank(&out, &["systems-all-games", "systems-home", "systems-rtl-home"]);
 }

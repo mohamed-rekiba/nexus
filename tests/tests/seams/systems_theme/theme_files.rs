@@ -26,5 +26,6 @@ fn the_all_games_pictures_ship_at_a_size_the_host_shows_whole() {
     assert_eq!(size("images/all-games-icon.png"), (256, 256));
     let (width, height) = size("images/all-games-cover.jpg");
     assert!(width <= nexus_ui_host::MAX_WIDTH && height <= nexus_ui_host::MAX_HEIGHT, "{width}×{height}");
-    assert_eq!((width, height), (1672, 941), "the systems' covers' size, so they line up");
+    // 16:9, as the screen it fills: no side of it is cut away.
+    assert_eq!(width * 9 / 16, height, "{width}×{height}");
 }
