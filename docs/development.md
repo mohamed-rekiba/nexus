@@ -176,7 +176,8 @@ cd scripts/catalog && npm test               # the catalog collector's tests (No
 
 The tests need no window, GPU, controller or sound device: they use Slint's testing backend and
 fakes. `cargo test -p nexus-tests --test seams screenshots::` renders each Classic theme screen,
-and the Default theme's Home in both directions, to PNG files in `target/tmp/screenshots/`.
+the Default theme's Home in both directions, and its Library (with its sorts, right to left) and
+Catalog, to PNG files in `target/tmp/screenshots/`.
 
 Some tests touch the real system, the network or files you supply. Each one skips, or returns at
 once, unless its variable is set:
