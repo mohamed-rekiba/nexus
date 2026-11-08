@@ -15,8 +15,8 @@ use crate::{HostPath, PluginResult, RelPath};
 pub enum BackupPlace {
     /// In the plugin's data folder.
     Data(RelPath),
-    /// In a host folder the manifest asks for. A restore writes there only when the grant
-    /// has `write = true`.
+    /// In a host folder the manifest asks for. A restore writes there even when the grant is
+    /// read only: the host writes, and the plugin named the place.
     Folder(HostPath),
 }
 

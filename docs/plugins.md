@@ -630,8 +630,8 @@ prefixes. The place is `BackupPlace::Data` (a path in the plugin's data folder) 
 the files; the plugin only names them.
 
 A restore asks again and puts each item of the backup where the item of the same name is now, so
-the folders may differ between computers. It writes only into the data folder and into folders
-with `write = true`; an item with no place is left out. `emulator_kit::backup::Items` answers with a
+the folders may differ between computers. The host writes, so a folder the plugin may only read
+(keys, firmware) needs no `write = true`; an item with no place is left out. `emulator_kit::backup::Items` answers with a
 fixed list.
 
 ### Metadata

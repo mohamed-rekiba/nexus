@@ -118,7 +118,7 @@ fn in_folder(file: &str) -> CoreResult<String> {
 async fn restore(core: &Core, path: PathBuf) -> CoreResult<()> {
     ready(core)?;
     let found = items(core, true).await;
-    let targets = found.iter().filter(|i| i.writable).map(|i| (i.source.key.clone(), i.source.path.clone())).collect();
+    let targets = found.iter().map(|i| (i.source.key.clone(), i.source.path.clone())).collect();
     let hardware = core.ports().hardware.clone();
     let plan = RestorePlan {
         targets,
@@ -215,8 +215,6 @@ fn ready(core: &Core) -> CoreResult<()> {
 struct Found {
     source: Source,
     large: bool,
-    /// A restore may write there: the plugin's data folder, or a grant with `write = true`.
-    writable: bool,
 }
 
 /// Every active plugin's items on this computer, the large ones only with `large`. An item the
@@ -242,14 +240,13 @@ async fn items(core: &Core, large: bool) -> Vec<Found> {
         };
         for item in items.into_iter().filter(|i| large || !i.large) {
             match place(core, &plugin, &item) {
-                Ok((path, writable)) => out.push(Found {
+                Ok(path) => out.push(Found {
                     source: Source {
                         key: ItemKey { plugin: plugin.as_str().to_owned(), name: item.name },
                         title: item.title,
                         path,
                         skip: item.skip,
                     },
-                    writable,
                     large: item.large,
                 }),
                 Err(e) => tracing::warn!(%plugin, item = item.name, error = %e, "the item stays out of the backup"),
@@ -259,8 +256,10 @@ async fn items(core: &Core, large: bool) -> Vec<Found> {
     out
 }
 
-/// Where `item` is on this computer, and whether a restore may write there.
-fn place(core: &Core, plugin: &PluginId, item: &BackupItem) -> CoreResult<(PathBuf, bool)> {
+/// Where `item` is on this computer. A restore writes there whether or not the plugin may: the
+/// host does the writing, and the plugin named the place as its own data. So a plugin needs no
+/// write access to a folder it only reads, such as one with keys and firmware.
+fn place(core: &Core, plugin: &PluginId, item: &BackupItem) -> CoreResult<PathBuf> {
     if !BackupItem::valid_name(&item.name) {
         return Err(CoreError::Invalid(format!("{:?} can't be an item's name", item.name)));
     }
@@ -269,14 +268,11 @@ fn place(core: &Core, plugin: &PluginId, item: &BackupItem) -> CoreResult<(PathB
     match &item.place {
         BackupPlace::Data(path) => {
             let root = kernel.host().plugin_dir(plugin);
-            Ok((DirStorage::new(root).resolve(path).map_err(refused)?, true))
+            DirStorage::new(root).resolve(path).map_err(refused)
         }
         BackupPlace::Folder(path) => {
             let folders = kernel.host_folders(plugin).ok_or_else(|| CoreError::UnknownPlugin(plugin.clone()))?;
-            let real = folders.resolve(path).map_err(refused)?;
-            let manifest = kernel.manifest(plugin)?;
-            let writable = manifest.permissions.folder(&path.folder).is_some_and(|g| g.write);
-            Ok((real, writable))
+            folders.resolve(path).map_err(refused)
         }
     }
 }
