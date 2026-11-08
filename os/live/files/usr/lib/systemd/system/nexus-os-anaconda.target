@@ -1,0 +1,11 @@
+# On the USB stick: Fedora's installer (Anaconda) instead of Nexus. Started by the boot entry
+# "Install Nexus OS (choose partitions)" (systemd.unit=nexus-os-anaconda.target), or from the
+# running stick by `nexus-os-install --choose-partitions` (systemctl isolate). Everything else
+# graphical.target starts, Nexus's session included, stops.
+[Unit]
+Description=Nexus OS USB stick: install with your own partitions (Anaconda)
+Requires=basic.target
+After=basic.target
+Conflicts=rescue.service rescue.target greetd.service
+Wants=nexus-os-anaconda.service NetworkManager.service systemd-logind.service systemd-user-sessions.service
+AllowIsolate=yes

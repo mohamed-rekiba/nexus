@@ -1,0 +1,23 @@
+// What "player", the console's user, may do while sitting at the PC (a local, active session).
+// There's no administrator password to type in, so what Nexus's Settings → System needs is
+// allowed here, and nothing more.
+
+// The network: joining a new Wi-Fi network saves it for the whole system, which polkit otherwise
+// reserves for an administrator (Settings → Internet runs nmcli).
+polkit.addRule(function (action, subject) {
+    if (action.id.indexOf("org.freedesktop.NetworkManager.") === 0 &&
+        subject.user === "player" && subject.local && subject.active) {
+        return polkit.Result.YES;
+    }
+});
+
+// "Check now" for system updates: start the update service instead of waiting for its daily run
+// (`systemctl start nexus-os-update.service`). Only starting, and only that unit.
+polkit.addRule(function (action, subject) {
+    if (action.id === "org.freedesktop.systemd1.manage-units" &&
+        action.lookup("unit") === "nexus-os-update.service" &&
+        action.lookup("verb") === "start" &&
+        subject.user === "player" && subject.local && subject.active) {
+        return polkit.Result.YES;
+    }
+});
