@@ -288,7 +288,7 @@ The capability table and the plugin lifecycle are in
 ### CI/CD
 
 - **Pull requests and `main`:** `ci.yml` runs Format, Clippy, Test and cargo-deny on Linux. A new
-  push cancels the older run of the same branch. It skips Markdown, `docs/`, `os/` and the other
+  push to a pull request cancels its older run. It skips Markdown, `docs/`, `os/` and the other
   workflows.
 - **Weekly:** `weekly.yml` runs the slow checks listed above.
 - **Releases:** [Release Please](https://github.com/googleapis/release-please) keeps a release pull
