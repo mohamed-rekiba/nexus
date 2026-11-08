@@ -71,8 +71,8 @@ export global Nav {
     in-out property <bool> to-releases;
 
     out property <int> tabs: 2;
-    // The screen buttons, then the network, sound and Bluetooth icons when Nexus is the whole
-    // screen (`Sys`).
+    // The screen buttons, the network, sound and Bluetooth icons when Nexus is the whole screen
+    // (`Sys`), and Settings last.
     out property <int> buttons: 5 + root.statuses;
     out property <int> statuses: Vm.system.whole-screen ? 3 : 0;
     out property <bool> library: root.view == "library";
@@ -147,19 +147,22 @@ export global Nav {
         root.zone = "row";
         root.tab = 0;
     }
+    // The tabs, then the screen buttons (Search, Downloads, Emulators, Themes), the machine's
+    // icons when Nexus is the whole screen, and Settings last.
     public function activate-tab(index: int) {
-        if (index >= root.tabs + 5) {
-            Sys.show(index - root.tabs - 5);
-        } else if (index == 0) {
+        let button = index - root.tabs;
+        if (index == 0) {
             root.go-home();
         } else if (index == 1) {
             root.open-library();
+        } else if (button >= 4 && button < 4 + root.statuses) {
+            Sys.show(button - 4);
         } else {
             Host.play-sound("select");
-            Commands.navigate(index == 2 ? "catalog"
-                : index == 3 ? "downloads"
-                : index == 4 ? "emulators"
-                : index == 5 ? "themes"
+            Commands.navigate(button == 0 ? "catalog"
+                : button == 1 ? "downloads"
+                : button == 2 ? "emulators"
+                : button == 3 ? "themes"
                 : "settings");
         }
     }

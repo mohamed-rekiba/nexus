@@ -31,9 +31,9 @@ export global Origin {
 
 // The Default theme's copy of the Classic theme's Nav. Home is a list of systems: "All games"
 // (entry 0), then each emulator in `Vm.emulators` (entry 1 on). The keys act on one zone at a
-// time: the top bar (`tabs`), the list (`row`), and in the Library its bar (`bar`: search,
-// sort, Comfortable, Compact, and in the Catalog the catalog plugin's button), its systems
-// (`filters`), its genres (`genres`) and its grid (`grid`).
+// time: the top bar (`tabs`), the list (`row`), and in the Library its systems in the top bar
+// (`filters`), its bar (`bar`: search, sort, the genres' list, and in the Catalog the catalog
+// plugin's button) and its grid (`grid`). The Library has one card size.
 //
 // The top bar has no tabs: the five screen buttons (0 to 4), then, when Nexus is the whole
 // screen, the network, sound and Bluetooth icons (5 to 7). A system opens the Library on its
@@ -54,23 +54,29 @@ export global Nav {
     in-out property <int> entry;
     out property <int> entries: Vm.emulators.length + 1;
     // The system the focused entry opens: "" for All games, as LibrarySystem takes it.
-    out property <string> entry-system: root.entry > 0 && root.entry <= Vm.emulators.length
-        ? Vm.emulators[root.entry - 1].system : "";
+    out property <string> entry-system: root.system-of(root.entry);
+    // Entry `i`'s system: "" for All games.
+    public pure function system-of(i: int) -> string {
+        i > 0 && i <= Vm.emulators.length ? Vm.emulators[i - 1].system : ""
+    }
     // The Library grid's columns, set by the grid.
     in-out property <int> columns: 1;
-    // The focused item of the Library's bar, systems and genres.
+    // The focused item of the Library's bar and systems.
     in-out property <int> bar;
     in-out property <int> filter;
-    in-out property <int> genre;
-    // The Library's smaller cards.
-    in-out property <bool> compact;
+    // The system whose games the Library shows: "" for every system. Its cover is behind it.
+    // Only `filter-library` sets it, with the core's filter: the core changes that filter only
+    // when told to.
+    out property <string> lib-system;
     // The search box has the keys, for typing; the shell takes them back when it's false.
     in-out property <bool> typing;
     // A letter typed in the Library grid, for the search box to start with.
     in-out property <string> first-letter;
-    // The list of sorts is open, with the keys on `sort-focus`.
+    // A list under the bar is open, with the keys on `sort-focus`: the sorts, or the genres
+    // when `picking-genre` is true.
     in-out property <bool> sort-open;
     in-out property <int> sort-focus;
+    in-out property <bool> picking-genre;
     // How far each grid is scrolled. A screen's grid goes when a game's details open; the next
     // one starts where it was.
     in-out property <length> catalog-scroll;
@@ -79,8 +85,8 @@ export global Nav {
     in-out property <bool> to-releases;
 
     out property <int> tabs: 0;
-    // The screen buttons, then the network, sound and Bluetooth icons when Nexus is the whole
-    // screen (`Sys`).
+    // The screen buttons, the network, sound and Bluetooth icons when Nexus is the whole screen
+    // (`Sys`), and Settings last.
     out property <int> buttons: 5 + root.statuses;
     out property <int> statuses: Vm.system.whole-screen ? 3 : 0;
     out property <bool> library: root.view == "library";
@@ -147,7 +153,7 @@ export global Nav {
     }
     // Opens the Library on the focused entry's games.
     public function open-entry() {
-        Commands.library-system(root.entry-system);
+        root.filter-library(root.entry-system);
         root.sort-open = false;
         root.view = "library";
         root.zone = "grid";
@@ -157,7 +163,7 @@ export global Nav {
     // The list comes back: from the Library, from the shell when a game starts, or before a
     // search. The Library's filter goes, so every other view of it starts from all the games.
     public function go-home() {
-        if (root.view == "library") { Commands.library-system(""); }
+        if (root.view == "library") { root.filter-library(""); }
         root.sort-open = false;
         root.view = "home";
         root.zone = "row";
@@ -184,9 +190,11 @@ export global Nav {
     }
     // The top bar's first item the keys can reach: Search, or Downloads with no Catalog.
     out property <int> first-tab: Vm.catalog-available ? 0 : 1;
+    // The screen buttons (Search, Downloads, Emulators, Themes), the machine's icons when Nexus
+    // is the whole screen, and Settings last.
     public function activate-tab(index: int) {
-        if (index >= root.tabs + 5) {
-            Sys.show(index - root.tabs - 5);
+        if (index >= root.tabs + 4 && index < root.tabs + 4 + root.statuses) {
+            Sys.show(index - root.tabs - 4);
         } else {
             Host.play-sound("select");
             Commands.navigate(index == 0 ? "catalog"
@@ -202,7 +210,12 @@ export global Nav {
         if (root.catalog) { Commands.catalog-search(text); } else { Commands.library-search(text); }
     }
     public function system(id: string) {
-        if (root.catalog) { Commands.catalog-system(id); } else { Commands.library-system(id); }
+        if (root.catalog) { Commands.catalog-system(id); } else { root.filter-library(id); }
+    }
+    // The Library shows the games of system `id` ("" for all), and its cover.
+    function filter-library(id: string) {
+        Commands.library-system(id);
+        root.lib-system = id;
     }
     public function genre-filter(id: string) {
         if (root.catalog) { Commands.catalog-genre(id); } else { Commands.library-genre(id); }
@@ -211,23 +224,28 @@ export global Nav {
         if (root.catalog) { Commands.catalog-more(); } else { Commands.library-more(); }
     }
     // The Catalog's bar has the catalog plugin's first button (`Vm.catalog-actions`), such as
-    // Refresh, after the card sizes.
+    // Refresh, at its far end.
     out property <bool> bar-button: root.catalog && Vm.catalog-actions.length > 0;
-    // The Library's bar: search, sort, Comfortable, Compact, then the Catalog's button.
+    // The genres' button shows when there is a genre to pick.
+    out property <bool> has-genres: root.lib.genres.length > 1;
+    // The bar's items: search (0), sort (1), the genres (2), the Catalog's button (3).
+    out property <int> bar-last: root.bar-button ? 3 : root.has-genres ? 2 : 1;
     public function activate-bar(index: int) {
         if (index == 0) {
             root.typing = true;
         } else if (index == 1) {
             // The list of sorts, with the keys on the one in use.
+            root.picking-genre = false;
             root.sort-open = true;
             root.sort-focus = root.sort-index(root.lib.sort);
-        } else if (index == 4) {
-            if (root.bar-button) {
-                let button = Vm.catalog-actions[0];
-                Commands.run-action(button.plugin, button.action, "", button.args);
-            }
-        } else {
-            root.compact = index == 3;
+        } else if (index == 2 && root.has-genres) {
+            // The list of genres: the one in use takes the keys as the list opens.
+            root.picking-genre = true;
+            root.sort-open = true;
+            root.sort-focus = 0;
+        } else if (index == 3 && root.bar-button) {
+            let button = Vm.catalog-actions[0];
+            Commands.run-action(button.plugin, button.action, "", button.args);
         }
         Host.play-sound("select");
     }
@@ -243,15 +261,29 @@ export global Nav {
         if (root.catalog) { Commands.catalog-sort(root.sorts[index]); } else { Commands.library-sort(root.sorts[index]); }
         Host.play-sound("select");
     }
-    // The keys while the list of sorts is open: Up and Down move round it, Enter picks, Back
-    // closes it. It takes every key.
+    // How many choices the open list has.
+    out property <int> list-length: root.picking-genre ? root.lib.genres.length : root.sorts.length;
+    // The genre at `index` of the genres: the core filters by it, and the list closes.
+    public function pick-genre(index: int) {
+        root.sort-open = false;
+        root.genre-filter(root.lib.genres[index].id);
+        Host.play-sound("select");
+    }
+    // The keys while a list under the bar is open: Up and Down move round it, Enter picks,
+    // Back closes it. It takes every key.
     public function sort-key(text: string) {
-        if (text == Key.UpArrow || text == Key.DownArrow) {
-            let count = root.sorts.length;
+        if ((text == Key.UpArrow || text == Key.DownArrow) && root.list-length > 0) {
+            let count = root.list-length;
             root.sort-focus = Math.mod(root.sort-focus + (text == Key.DownArrow ? 1 : -1) + count, count);
             Host.play-sound("move");
         } else if (text == Key.Return) {
-            root.pick-sort(root.sort-focus);
+            if (root.sort-focus >= root.list-length) {
+                root.sort-open = false;
+            } else if (root.picking-genre) {
+                root.pick-genre(root.sort-focus);
+            } else {
+                root.pick-sort(root.sort-focus);
+            }
         } else if (text == Key.Escape || text == Key.Backspace) {
             root.sort-open = false;
             Host.play-sound("back");
@@ -362,7 +394,7 @@ export global Nav {
             return root.horizontal(-1);
         }
         if (root.zone == "tabs") {
-            if (text == Key.DownArrow) { root.go(root.library ? "bar" : "row"); return true; }
+            if (text == Key.DownArrow) { root.go(root.library ? "filters" : "row"); return true; }
             if (text == Key.Return) { root.activate-tab(root.tab); return true; }
             if (text == Key.Escape || text == Key.Backspace) { root.go(root.view == "library" ? "grid" : "row"); return true; }
         } else if (root.zone == "row") {
@@ -379,24 +411,20 @@ export global Nav {
             Host.play-sound("back");
             Commands.back();
             return true;
-        } else if (root.zone == "bar") {
-            if (text == Key.UpArrow) { if (!root.catalog) { root.go("tabs"); root.tab = root.first-tab; } return true; }
-            if (text == Key.DownArrow) { root.go("filters"); return true; }
-            if (text == Key.Return) { root.activate-bar(root.bar); return true; }
-            if (text == Key.Escape || text == Key.Backspace) { root.leave(); return true; }
         } else if (root.zone == "filters") {
-            if (text == Key.UpArrow) { root.go("bar"); return true; }
-            if (text == Key.DownArrow) { root.go(root.lib.genres.length > 1 ? "genres" : "grid"); return true; }
+            // The systems are in the top bar: up from them is the top bar's buttons.
+            if (text == Key.UpArrow) { if (!root.catalog) { root.go("tabs"); root.tab = root.first-tab; } return true; }
+            if (text == Key.DownArrow) { root.go("bar"); return true; }
             if (text == Key.Return) { root.system(root.lib.systems[root.filter].id); Host.play-sound("select"); return true; }
             if (text == Key.Escape || text == Key.Backspace) { root.leave(); return true; }
-        } else if (root.zone == "genres") {
+        } else if (root.zone == "bar") {
             if (text == Key.UpArrow) { root.go("filters"); return true; }
             if (text == Key.DownArrow) { root.go("grid"); return true; }
-            if (text == Key.Return) { root.genre-filter(root.lib.genres[root.genre].id); Host.play-sound("select"); return true; }
+            if (text == Key.Return) { root.activate-bar(root.bar); return true; }
             if (text == Key.Escape || text == Key.Backspace) { root.leave(); return true; }
         } else if (root.zone == "grid") {
             if (text == Key.UpArrow) {
-                if (root.selected < root.columns) { root.go(root.lib.genres.length > 1 ? "genres" : "filters"); } else { root.select(root.selected - root.columns); }
+                if (root.selected < root.columns) { root.go("bar"); } else { root.select(root.selected - root.columns); }
                 return true;
             }
             if (text == Key.DownArrow) {
@@ -444,9 +472,13 @@ export global Nav {
         if (root.zone == "tabs") { root.step-tab(delta); }
         if (root.zone == "row") { root.step-row(delta); }
         if (root.zone == "actions") { root.action = Math.clamp(root.action + delta, 0, root.actions - 1); Host.play-sound("move"); }
-        if (root.zone == "bar") { root.bar = Math.clamp(root.bar + delta, 0, root.bar-button ? 4 : 3); Host.play-sound("move"); }
+        if (root.zone == "bar") {
+            // With no genres, the genres' place is skipped.
+            let next = root.bar + delta;
+            root.bar = Math.clamp(next == 2 && !root.has-genres ? next + delta : next, 0, root.bar-last);
+            Host.play-sound("move");
+        }
         if (root.zone == "filters") { root.filter = Math.clamp(root.filter + delta, 0, root.lib.systems.length - 1); Host.play-sound("move"); }
-        if (root.zone == "genres") { root.genre = Math.clamp(root.genre + delta, 0, root.lib.genres.length - 1); Host.play-sound("move"); }
         if (root.zone == "grid") { root.select(root.selected < 0 ? 0 : root.selected + delta); }
         true
     }

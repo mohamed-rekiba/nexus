@@ -337,7 +337,9 @@ Both built-in themes have the option "Animations" (off makes the transitions cut
 
 Nexus starts with the Default theme. Its Home is a list of your systems, "All games" first, with
 the focused system's picture behind it: Enter or a click shows that system's games, Back comes
-back to the list, and Options (Menu) opens the emulator's page. Classic is the old launcher's
+back to the list, and Options (Menu) opens the emulator's page. The system's picture stays behind
+its games. The systems are in the top bar, and search, sort and the list of genres are in the row
+under it. Classic is the old launcher's
 look: a row of your games on Home, and a Library tab.
 Third-party plugins are themes only: they are data and run no code. To write a theme, see
 [themes.md](themes.md).

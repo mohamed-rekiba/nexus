@@ -324,3 +324,39 @@ fn the_default_settings_screen_edits_a_folder_with_the_keys() {
         .any(|r| matches!(r, nexus_ui_host::UiRequest::Core(Command::Library(nexus_core::LibraryCmd::Refresh))));
     assert!(asked, "Enter on Rescan, after the text box closed, asks the core to scan");
 }
+
+#[test]
+fn the_default_theme_is_first_in_the_themes_list_whichever_is_in_use() {
+    let y = |host: &Composed, theme: &str| host.first(&format!("plugin:{theme}")).absolute_position().y;
+    let mut host = composed(|h| h);
+    host.ui.start().unwrap();
+    for theme in ["classic", "default"] {
+        host.ui.switch(&id(theme)).unwrap();
+        host.dispatch(Command::Navigate(nexus_core::Route::Themes));
+        host.settle();
+        assert!(y(&host, "default") < y(&host, "classic"), "with {theme} in use, Default is first");
+    }
+}
+
+#[test]
+fn a_hint_for_two_pad_buttons_is_as_wide_as_its_text_not_a_circle() {
+    let width = |host: &Composed, key: &str| {
+        i_slint_backend_testing::ElementHandle::find_by_accessible_label(host.instance(), "hint-key")
+            .find(|e| e.accessible_value().as_deref() == Some(key))
+            .unwrap_or_else(|| panic!("no hint key {key}"))
+            .size()
+    };
+    let mut host = composed(|h| h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha"]).build()));
+    host.ui.start().unwrap();
+    for theme in ["classic", "default"] {
+        host.ui.switch(&id(theme)).unwrap();
+        host.dispatch(Command::Navigate(nexus_core::Route::Home));
+        // A controller button: the hints show the pad's buttons.
+        host.pad(nexus_ui_host::PadButton::Up);
+        host.pad(nexus_ui_host::PadButton::Down);
+        let one = width(&host, "✕");
+        let two = width(&host, "L1  R1");
+        assert_eq!(one.width, one.height, "{theme}: one button is a circle");
+        assert!(two.width > two.height * 1.5, "{theme}: L1 R1 is a pill as wide as its text: {two:?}");
+    }
+}

@@ -1143,3 +1143,43 @@ fn the_default_theme_renders_its_list_both_ways() {
     println!("screenshots in {}", out.display());
     not_blank(&out, &["default-all-games", "default-home", "default-rtl-home"]);
 }
+
+/// The Default theme's Library on All games and on PS5, with its list of sorts, the Catalog,
+/// and the Library right to left, as `default-library[-ps5|-sort|-rtl].png` and
+/// `default-catalog.png`.
+#[test]
+fn the_default_theme_renders_its_library() {
+    use slint::platform::Key;
+    let (window, out) = offscreen();
+    let home = tempfile::tempdir().unwrap();
+    let mut host = library(home.path());
+    host.ui.switch(&id(theme_default::ID)).unwrap();
+    host.dispatch(Command::Notice(nexus_core::NoticeCmd::DismissAll));
+    host.dispatch(Command::Navigate(Route::Home));
+    host.load_images();
+    // All games, at the top of the list.
+    key(&mut host, Key::Return);
+    follow(&mut host);
+    shoot(&window, &out.join("default-library.png"));
+    host.first("filter:PS5").invoke_accessible_default_action();
+    host.pump();
+    follow(&mut host);
+    shoot(&window, &out.join("default-library-ps5.png"));
+    host.first("library-sort").invoke_accessible_default_action();
+    follow(&mut host);
+    shoot(&window, &out.join("default-library-sort.png"));
+    key(&mut host, Key::Escape);
+    host.dispatch(Command::Navigate(Route::Catalog));
+    host.load_images();
+    follow(&mut host);
+    shoot(&window, &out.join("default-catalog.png"));
+    host.dispatch(Command::Navigate(Route::Home));
+    host.dispatch(Command::SetThemeOption { key: "direction".into(), value: "rtl".into() });
+    follow(&mut host);
+    shoot(&window, &out.join("default-library-rtl.png"));
+    println!("screenshots in {}", out.display());
+    not_blank(
+        &out,
+        &["default-library", "default-library-ps5", "default-library-sort", "default-catalog", "default-library-rtl"],
+    );
+}
