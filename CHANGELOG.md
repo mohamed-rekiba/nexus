@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.12.0](https://github.com/mohamed-rekiba/nexus/compare/v0.11.1...v0.12.0) (2026-11-08)
+
+
+### Features
+
+* **default theme:** a shorter Library header, one card size, and the system's cover behind its games ([35b1363](https://github.com/mohamed-rekiba/nexus/commit/35b1363e8c5beada00a69fd8aa29087d1472ab4c))
+* **themes:** Settings is the last icon in the top bar, and a hint for two pad buttons fits them ([1e38752](https://github.com/mohamed-rekiba/nexus/commit/1e38752fa0b38d8823d2c32a244f4b22a9a5d757))
+* **themes:** the Default theme is first in the Themes list ([2bfbd1e](https://github.com/mohamed-rekiba/nexus/commit/2bfbd1ee9022225f29a7417aede41546ad56442c))
+
+
+### Bug Fixes
+
+* **build:** run-session gives the X11 settings to Nexus only, and opens gamescope full screen ([39e805d](https://github.com/mohamed-rekiba/nexus/commit/39e805db6c8afbd50abea7e7304773d832fa66d2))
+
 ## [0.11.1](https://github.com/mohamed-rekiba/nexus/compare/v0.11.0...v0.11.1) (2026-11-08)
 
 
