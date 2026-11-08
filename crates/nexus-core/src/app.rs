@@ -370,9 +370,8 @@ impl Core {
         crate::catalog_reads::watch_store_installs(&core);
         let lister = core.clone();
         tokio::spawn(async move {
-            if let Err(e) = crate::backups::handle(&lister, crate::BackupCmd::Refresh).await {
-                tracing::warn!(error = %e, "the backup folder wasn't read");
-            }
+            // Only the list: the plugins start when they are first needed, not for this.
+            crate::backups::list(&lister).await;
         });
         core
     }

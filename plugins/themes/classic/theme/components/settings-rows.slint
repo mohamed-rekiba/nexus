@@ -197,6 +197,11 @@ export global Prefs {
             if (text == Key.Escape) { root.editing = false; return true; }
             return false;
         }
+        // Back closes the backup browser before it leaves Settings.
+        if (text == Key.Escape && Vm.screen == "settings" && Vm.backup.browser.open) {
+            Commands.close-backup-browser();
+            return true;
+        }
         if (root.tabs) {
             if (text == Key.LeftArrow) { if (root.tab-step(Look.rtl ? 1 : -1)) { Host.play-sound("move"); } return true; }
             if (text == Key.RightArrow) { if (root.tab-step(Look.rtl ? -1 : 1)) { Host.play-sound("move"); } return true; }

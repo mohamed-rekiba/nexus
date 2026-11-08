@@ -27,6 +27,8 @@ use crate::{CoreError, CoreResult};
 
 /// In the data folder: the settings of the last restore, until the next start puts them back.
 pub(crate) const PENDING: &str = "restored-settings.json";
+/// What every backup holds besides the plugins' items, as the player reads it.
+pub(crate) const SETTINGS: &str = "Nexus settings";
 /// Why a second job can't start.
 pub(crate) const BUSY: &str = "A backup or a restore is already running";
 
@@ -46,10 +48,34 @@ pub struct BackupFile {
     /// When it was made, in seconds since 1970.
     pub made: u64,
     pub bytes: u64,
-    /// What it holds: its items' titles, each once.
+    /// What it holds: [`SETTINGS`], then its items' titles, each once.
     pub items: Vec<String>,
     /// The backup a restore made of what was there before.
     pub before_restore: bool,
+}
+
+/// One place the browser starts from: Home, the backup folder, a drive.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BrowsePlace {
+    pub name: String,
+    pub path: PathBuf,
+}
+
+/// A folder or a backup in the browser's folder.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BrowseEntry {
+    pub path: PathBuf,
+    /// A backup's details; `None` for a folder.
+    pub backup: Option<BackupFile>,
+}
+
+/// "Restore from another folder": the folder the browser shows, and where it can go.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Browser {
+    pub at: PathBuf,
+    pub places: Vec<BrowsePlace>,
+    /// Its folders, then its backups newest first. Hidden folders are left out.
+    pub entries: Vec<BrowseEntry>,
 }
 
 /// The subsystem's state, as the view reads it.
@@ -58,6 +84,12 @@ pub struct BackupSnapshot {
     pub job: Option<BackupJob>,
     /// Newest first.
     pub backups: Arc<Vec<BackupFile>>,
+    /// What a backup holds on this computer now: the titles of the plugins' items, and of the
+    /// large ones, which a backup takes only when asked.
+    pub holds: Arc<Vec<String>>,
+    pub large: Arc<Vec<String>>,
+    /// The browser, while it is open.
+    pub browser: Option<Arc<Browser>>,
     /// Why the last job failed. Empty when it didn't.
     pub error: String,
     /// What the last job did, such as "Backed up to nexus-backup-….tar.gz". Empty before one.
@@ -128,6 +160,48 @@ impl BackupSubsystem {
         self.changed();
     }
 
+    /// What a backup holds here now: the titles of the plugins' items, and of the large ones.
+    pub(crate) fn set_items(&self, holds: Vec<String>, large: Vec<String>) {
+        let mut state = self.state();
+        state.holds = Arc::new(holds);
+        state.large = Arc::new(large);
+        drop(state);
+        self.changed();
+    }
+
+    /// Opens the browser at `at`, or moves it there, with `places` to go to.
+    pub(crate) async fn browse(&self, at: PathBuf, places: Vec<BrowsePlace>) -> CoreResult<()> {
+        let dir = at.clone();
+        let entries = blocking(move || browse(&dir)).await?;
+        self.state().browser = Some(Arc::new(Browser { at, places, entries }));
+        self.changed();
+        Ok(())
+    }
+
+    pub(crate) fn close_browser(&self) {
+        self.state().browser = None;
+        self.changed();
+    }
+
+    /// Removes the backup `file` of `folder`, then reads the list again.
+    pub(crate) async fn delete(&self, folder: &Path, file: &str) -> CoreResult<()> {
+        if self.busy() {
+            return Err(CoreError::Invalid(BUSY.into()));
+        }
+        let path = folder.join(file);
+        let removed = blocking(move || std::fs::remove_file(&path)).await;
+        {
+            let mut state = self.state();
+            state.error.clear();
+            match &removed {
+                Ok(()) => state.done = format!("Deleted {file}"),
+                Err(e) => state.error = format!("{file} wasn't deleted: {e}"),
+            }
+        }
+        self.list(folder.to_path_buf()).await;
+        removed
+    }
+
     /// Starts a job, or refuses when one runs.
     fn begin(&self, restoring: bool) -> CoreResult<()> {
         let mut state = self.state();
@@ -193,12 +267,13 @@ impl BackupSubsystem {
         Ok(dest)
     }
 
-    /// Puts the backup `file` of `folder` back. First it backs up what is here of the items
-    /// the backup has; nothing is restored when that fails. The settings wait in [`PENDING`]
-    /// for the next start.
-    pub(crate) async fn restore(&self, folder: &Path, file: &str, plan: RestorePlan) -> CoreResult<()> {
+    /// Puts the backup at `path` back. First it backs up what is here of the items the backup
+    /// has, into `folder`; nothing is restored when that fails. The settings wait in
+    /// [`PENDING`] for the next start.
+    pub(crate) async fn restore(&self, path: &Path, folder: &Path, plan: RestorePlan) -> CoreResult<()> {
         self.begin(true)?;
-        let outcome = self.restore_in_job(folder, file, plan).await;
+        self.state().browser = None;
+        let outcome = self.restore_in_job(path, folder, plan).await;
         self.end(&outcome);
         if outcome.is_ok() {
             self.state().restart = true;
@@ -208,8 +283,9 @@ impl BackupSubsystem {
         outcome.map(|_| ()).map_err(CoreError::Invalid)
     }
 
-    async fn restore_in_job(&self, folder: &Path, file: &str, plan: RestorePlan) -> Result<String, String> {
-        let path = folder.join(file);
+    async fn restore_in_job(&self, path: &Path, folder: &Path, plan: RestorePlan) -> Result<String, String> {
+        let file = file_name(path);
+        let path = path.to_path_buf();
         let read = path.clone();
         let manifest = blocking(move || archive::read_manifest(&read)).await.map_err(|e| format!("{file}: {e}"))?;
         let has: Vec<ItemKey> = manifest.items.iter().map(archive::ItemRecord::key).collect();
@@ -285,32 +361,59 @@ fn file_name(path: &Path) -> String {
     path.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_owned()
 }
 
+/// The backup at `path`; `None` for a file that isn't one this Nexus reads.
+fn backup_file(path: &Path) -> Option<BackupFile> {
+    let file = path.file_name()?.to_str()?.to_owned();
+    let kind = archive::kind_of(&file)?;
+    let manifest = archive::read_manifest(path).ok()?;
+    let mut items: Vec<String> = vec![SETTINGS.to_owned()];
+    for item in &manifest.items {
+        if !items.contains(&item.title) {
+            items.push(item.title.clone());
+        }
+    }
+    Some(BackupFile {
+        before_restore: kind == Kind::BeforeRestore,
+        bytes: std::fs::metadata(path).map(|m| m.len()).unwrap_or(0),
+        file,
+        made: manifest.made,
+        items,
+    })
+}
+
+fn newest_first(backups: &mut [BackupFile]) {
+    backups.sort_by(|a, b| b.made.cmp(&a.made).then_with(|| b.file.cmp(&a.file)));
+}
+
 /// The backups in `folder`, newest first.
 fn list(folder: &Path) -> Vec<BackupFile> {
     let Ok(dir) = std::fs::read_dir(folder) else { return Vec::new() };
-    let mut out: Vec<BackupFile> = dir
-        .filter_map(Result::ok)
-        .filter_map(|entry| {
-            let file = entry.file_name().to_str()?.to_owned();
-            let kind = archive::kind_of(&file)?;
-            let manifest = archive::read_manifest(&entry.path()).ok()?;
-            let mut items: Vec<String> = Vec::new();
-            for item in &manifest.items {
-                if !items.contains(&item.title) {
-                    items.push(item.title.clone());
-                }
-            }
-            Some(BackupFile {
-                before_restore: kind == Kind::BeforeRestore,
-                bytes: entry.metadata().map(|m| m.len()).unwrap_or(0),
-                file,
-                made: manifest.made,
-                items,
-            })
-        })
-        .collect();
-    out.sort_by(|a, b| b.made.cmp(&a.made).then_with(|| b.file.cmp(&a.file)));
+    let mut out: Vec<BackupFile> = dir.filter_map(Result::ok).filter_map(|e| backup_file(&e.path())).collect();
+    newest_first(&mut out);
     out
+}
+
+/// The folders of `dir` by name, then its backups newest first. Hidden folders, other files
+/// and links are left out.
+fn browse(dir: &Path) -> std::io::Result<Vec<BrowseEntry>> {
+    let mut folders = Vec::new();
+    let mut backups = Vec::new();
+    for entry in std::fs::read_dir(dir)?.filter_map(Result::ok) {
+        let Ok(kind) = entry.file_type() else { continue };
+        let name = entry.file_name();
+        if kind.is_dir() && !name.to_string_lossy().starts_with('.') {
+            folders.push(entry.path());
+        } else if kind.is_file()
+            && let Some(backup) = backup_file(&entry.path())
+        {
+            backups.push((entry.path(), backup));
+        }
+    }
+    folders.sort_by_key(|p| p.file_name().map(|n| n.to_string_lossy().to_lowercase()));
+    backups.sort_by_key(|b| std::cmp::Reverse(b.1.made));
+    let mut out: Vec<BrowseEntry> = folders.into_iter().map(|path| BrowseEntry { path, backup: None }).collect();
+    out.extend(backups.into_iter().map(|(path, backup)| BrowseEntry { path, backup: Some(backup) }));
+    Ok(out)
 }
 
 #[cfg(test)]

@@ -422,12 +422,14 @@ fn backup_tab(backups: &std::path::Path) -> Composed {
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
     host.settle();
     host.settings_tab("Backup");
+    // The tab asks for the list and what a backup holds as it opens.
+    host.pump();
     host.settle();
     host
 }
 
 #[test]
-fn backup_backs_up_lists_the_file_and_restores_it_on_a_second_press() {
+fn backup_backs_up_lists_the_file_and_restores_it_from_its_menu() {
     let backups = tempfile::tempdir().unwrap();
     let mut host = backup_tab(backups.path());
     assert_eq!(host.value("backup-folder"), backups.path().display().to_string());
@@ -440,7 +442,9 @@ fn backup_backs_up_lists_the_file_and_restores_it_on_a_second_press() {
 
     let file = host.value("backup");
     host.press("backup", &file);
-    assert_eq!(host.description("backup"), "armed", "the first press only asks again");
+    assert_eq!(host.description("backup"), "menu:Restore", "the first press opens its menu");
+    host.press("backup", &file);
+    assert_eq!(host.description("backup"), "armed:Restore", "Restore asks again");
     assert_eq!(host.count("backup-restart"), 0);
     host.press("backup", &file);
     host.settle();
@@ -457,4 +461,54 @@ fn the_backup_folder_row_takes_a_typed_folder() {
     host.settle();
     assert_eq!(host.value("backup-folder"), other.path().display().to_string());
     assert_eq!(host.count("backup"), 0, "a file that isn't a backup isn't listed");
+}
+
+#[test]
+fn a_backup_s_menu_deletes_it_with_the_keys_after_asking_again() {
+    use slint::platform::Key;
+    let backups = tempfile::tempdir().unwrap();
+    let mut host = backup_tab(backups.path());
+    host.press_first("back-up");
+    host.settle();
+    // Down from the tabs past Back up now, the backup folder and "Restore from another folder".
+    for _ in 0..4 {
+        host.navigate(Key::DownArrow);
+    }
+    host.navigate(Key::Return);
+    host.navigate(Key::RightArrow);
+    assert_eq!(host.description("backup"), "menu:Delete");
+    host.navigate(Key::Return);
+    assert_eq!(host.description("backup"), "armed:Delete");
+    host.navigate(Key::Return);
+    host.settle();
+    assert_eq!(host.count("backup"), 0);
+    assert!(std::fs::read_dir(backups.path()).unwrap().next().is_none(), "the file is gone");
+}
+
+#[test]
+fn restore_from_another_folder_browses_folders_and_back_closes_it() {
+    use slint::platform::Key;
+    let (backups, elsewhere) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    std::fs::create_dir_all(elsewhere.path().join("old-pc")).unwrap();
+    let mut host = backup_tab(backups.path());
+    host.dispatch(Command::Backup(nexus_core::BackupCmd::Browse(Some(elsewhere.path().into()))));
+    host.settle();
+    assert_eq!(host.count("back-up"), 0, "the browser takes the tab");
+    assert_eq!(host.values("browser-folder"), ["old-pc"]);
+    host.press_first("browser-folder");
+    host.settle();
+    assert_eq!(host.value("browser-close"), elsewhere.path().join("old-pc").display().to_string());
+    assert_eq!(host.count("browser-up"), 1);
+    host.navigate(Key::Escape);
+    host.settle();
+    assert_eq!(host.count("browser-close"), 0, "Back closes the browser");
+    assert_eq!(host.count("back-up"), 1, "and stays in Settings");
+}
+
+#[test]
+fn with_no_large_items_there_is_no_switch_for_them() {
+    let backups = tempfile::tempdir().unwrap();
+    let host = backup_tab(backups.path());
+    assert_eq!(host.count("backup-large"), 0, "no plugin here has large items");
+    assert!(host.description("back-up").starts_with("Nexus settings"), "{}", host.description("back-up"));
 }

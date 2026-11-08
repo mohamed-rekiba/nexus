@@ -1110,6 +1110,49 @@ fn backup_vm(s: &Snapshot) -> nexus_ui_api::BackupVm {
                 before_restore: b.before_restore,
             })
             .collect(),
+        holds: backup.holds.join(", "),
+        large: backup.large.join(", "),
+        default_folder: s
+            .plugins
+            .host()
+            .home
+            .as_ref()
+            .map(|h| short_home(&h.join(crate::backups::DEFAULT_FOLDER).display().to_string(), home.as_deref()))
+            .unwrap_or_default(),
+        browser: backup.browser.as_deref().map(|b| browser_vm(b, home.as_deref())).unwrap_or_default(),
+    }
+}
+
+fn browser_vm(browser: &crate::backup::Browser, home: Option<&str>) -> nexus_ui_api::BackupBrowserVm {
+    let full = |p: &std::path::Path| p.display().to_string();
+    nexus_ui_api::BackupBrowserVm {
+        open: true,
+        shown: short_home(&full(&browser.at), home),
+        parent: browser.at.parent().map(full).unwrap_or_default(),
+        places: browser
+            .places
+            .iter()
+            .map(|p| nexus_ui_api::BrowsePlaceVm { name: p.name.clone(), path: full(&p.path) })
+            .collect(),
+        entries: browser
+            .entries
+            .iter()
+            .map(|e| {
+                let name = e.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                let mut vm = nexus_ui_api::BrowseEntryVm {
+                    name,
+                    path: full(&e.path),
+                    folder: e.backup.is_none(),
+                    ..Default::default()
+                };
+                if let Some(b) = &e.backup {
+                    vm.date = crate::display::date_time_text(b.made);
+                    vm.size = crate::display::size_text(b.bytes);
+                    vm.items = b.items.join(", ");
+                }
+                vm
+            })
+            .collect(),
     }
 }
 
