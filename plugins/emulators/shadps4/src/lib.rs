@@ -219,6 +219,15 @@ impl CodePlugin for ShadPlugin {
             compatibility: Some(emu.clone()),
             game_installer: Some(shad),
             slots: Some(emu),
+            backup: Some(emulator_kit::backup::Items::provided(vec![
+                // Its settings, keys, saves and trophies; not its caches, logs and downloads.
+                BackupItem::new(
+                    "data",
+                    "PS4 settings and saves",
+                    BackupPlace::Folder(HostPath::new("shadps4-data", 0, RelPath::root())),
+                )
+                .skip(&["cache", "log", "shader", "temp", "download"]),
+            ])),
             assets: Some(nexus_api::system_art!()),
             ..Provided::default()
         })

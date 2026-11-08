@@ -121,3 +121,57 @@ async fn a_restore_takes_only_a_backup_file_of_the_backup_folder() {
     assert!(a.run(BackupCmd::Restore("nexus-backup-missing.tar.gz".into())).await.is_err());
     assert!(files(backups.path()).iter().all(|f| f.contains("-before-restore")), "nothing else written");
 }
+
+/// A computer with the real Lichii, shadPS4, KytyPS5 and PC plugins, each of their folders in
+/// a temporary folder of its own.
+async fn emulators(backups: &Path) -> (TestCore, Vec<(&'static str, tempfile::TempDir)>) {
+    let test = FakeHost::new()
+        .platform(Some(Platform::Linux))
+        .built_in(PluginBox::code(emu_lichii::LichiiPlugin))
+        .built_in(PluginBox::code(emu_shadps4::ShadPlugin))
+        .built_in(PluginBox::code(emu_kyty::KytyPlugin))
+        .built_in(PluginBox::code(emu_pc::PcPlugin))
+        .boot_core()
+        .await;
+    let mut folders = Vec::new();
+    for name in ["eden-data", "eden-config", "shadps4-data", "kyty-data"] {
+        let dir = tempfile::tempdir().unwrap();
+        test.core.dispatch(Command::SetFolders { name: name.into(), paths: vec![dir.path().into()] }).await.unwrap();
+        folders.push((name, dir));
+    }
+    let folder = serde_json::json!(backups.display().to_string());
+    test.core.dispatch(Command::Pref(Pref::BackupFolder, folder)).await.unwrap();
+    (test, folders)
+}
+
+fn at<'a>(folders: &'a [(&str, tempfile::TempDir)], name: &str) -> &'a Path {
+    folders.iter().find(|(n, _)| *n == name).unwrap().1.path()
+}
+
+#[tokio::test]
+async fn the_emulators_keys_firmware_settings_and_saves_go_to_another_computer() {
+    let backups = tempfile::tempdir().unwrap();
+    let (a, a_folders) = emulators(backups.path()).await;
+    write(&at(&a_folders, "eden-data").join("keys/prod.keys"), b"keys");
+    write(&at(&a_folders, "eden-data").join("nand/system/Contents/registered/fw.nca"), b"firmware");
+    write(&at(&a_folders, "eden-data").join("log/eden_log.txt"), b"not an item");
+    write(&at(&a_folders, "eden-config").join("qt-config.ini"), b"[UI]");
+    write(&at(&a_folders, "shadps4-data").join("config.json"), b"{}");
+    write(&at(&a_folders, "shadps4-data").join("savedata/1/CUSA1/SAVE.DAT"), b"ps4 save");
+    write(&at(&a_folders, "shadps4-data").join("shader/big.bin"), b"cache");
+    write(&at(&a_folders, "kyty-data").join("_SaveData/PPSA1/slot/save.dat"), b"ps5 save");
+    a.core.dispatch(Command::Backup(BackupCmd::BackUp { large: false })).await.unwrap();
+    let file = files(backups.path()).remove(0);
+
+    let (b, b_folders) = emulators(backups.path()).await;
+    b.core.dispatch(Command::Backup(BackupCmd::Restore(file))).await.unwrap();
+    let read = |folder: &str, path: &str| std::fs::read(at(&b_folders, folder).join(path)).ok();
+    assert_eq!(read("eden-data", "keys/prod.keys").as_deref(), Some(&b"keys"[..]));
+    assert_eq!(read("eden-data", "nand/system/Contents/registered/fw.nca").as_deref(), Some(&b"firmware"[..]));
+    assert_eq!(read("eden-data", "log/eden_log.txt"), None, "Eden's log isn't an item");
+    assert_eq!(read("eden-config", "qt-config.ini").as_deref(), Some(&b"[UI]"[..]));
+    assert_eq!(read("shadps4-data", "savedata/1/CUSA1/SAVE.DAT").as_deref(), Some(&b"ps4 save"[..]));
+    assert_eq!(read("shadps4-data", "config.json").as_deref(), Some(&b"{}"[..]));
+    assert_eq!(read("shadps4-data", "shader/big.bin"), None, "shadPS4's caches stay out");
+    assert_eq!(read("kyty-data", "_SaveData/PPSA1/slot/save.dat").as_deref(), Some(&b"ps5 save"[..]));
+}

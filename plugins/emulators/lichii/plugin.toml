@@ -11,7 +11,7 @@ host_api = "^0.2"
 platforms = ["linux"]
 # The console it plays: it gets that console's catalog (switch.json).
 console = "Switch"
-capabilities = ["catalog", "downloader", "installer", "configurator", "launcher", "slots", "game_installer"]
+capabilities = ["catalog", "downloader", "installer", "configurator", "launcher", "slots", "game_installer", "backup"]
 # What the install sheet says this emulator installs from.
 install_note = "Installs a Switch game from its game files (.nsp, .nsz, .xci, .xcz, .nup), with its update and DLC files, into the Switch folder of your game folders. A solid .nsz, which Lichii can't play, becomes the .nsp it was made from. Lichii needs your own keys and firmware in ~/.local/share/eden; Nexus doesn't provide them."
 
@@ -41,11 +41,22 @@ write = true
 folder = "packages"
 
 # Lichii's settings, as its window saves them (qt-config.ini): games start with them, and with
-# players 1 to 4 on the controllers you have. Read only.
+# players 1 to 4 on the controllers you have. Written only by a restore from Settings → Backup.
 [[permissions.filesystem]]
 folder = "eden-config"
 default = "~/.config/eden"
 title = "Lichii settings"
+write = true
+after = "own_build"
+
+# Eden's data folder: keys, firmware, saves and mods, which every Lichii build shares. Settings →
+# Backup saves it; written only by a restore.
+[[permissions.filesystem]]
+folder = "eden-data"
+default = "~/.local/share/eden"
+default_on = { macos = "~/Library/Application Support/eden", windows = "~/AppData/Roaming/eden" }
+title = "Lichii data"
+write = true
 after = "own_build"
 
 # A Lichii you built or installed yourself. Read only.

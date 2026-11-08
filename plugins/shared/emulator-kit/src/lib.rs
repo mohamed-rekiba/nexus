@@ -14,6 +14,7 @@
 
 pub mod archive_sets;
 pub mod args;
+pub mod backup;
 pub mod builds;
 pub mod cache;
 pub mod compat;

@@ -58,6 +58,11 @@ impl CodePlugin for PcPlugin {
             configurator: Some(pc.clone()),
             game_installer: Some(pc.clone()),
             slots: Some(pc),
+            // Each game's Wine prefix, where its saves are: large, so only when asked for.
+            backup: Some(emulator_kit::backup::Items::provided(vec![
+                BackupItem::new("prefixes", "PC games' Wine prefixes", BackupPlace::Data(RelPath::new("prefixes")?))
+                    .large(),
+            ])),
             assets: Some(nexus_api::system_art!()),
             ..Provided::default()
         })
