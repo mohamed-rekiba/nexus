@@ -216,6 +216,11 @@ pub trait Windows: Send + Sync {
     fn show_game(&self, ids: &[u32]) -> bool;
     /// Brings the launcher's window to the front.
     fn show_launcher(&self);
+    /// Keeps the game of the processes `ids` on screen while it is in front, with the windows
+    /// it opened after it showed. The core calls it on each look at a game in front. A desktop
+    /// that shows only the windows it was told about (Gamescope) is told about the new ones;
+    /// elsewhere this does nothing, so the player's own window switches stay theirs.
+    fn keep_game(&self, _ids: &[u32]) {}
     /// Whether one of the processes `ids` has a window. `None` when the system doesn't say.
     fn has_window(&self, _ids: &[u32]) -> Option<bool> {
         None
