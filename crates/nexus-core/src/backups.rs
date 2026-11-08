@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use nexus_api::{BackupItem, BackupPlace, Capability, PluginId};
 use serde::{Deserialize, Serialize};
 
-use crate::backup::{ItemKey, RestorePlan, Source};
+use crate::backup::{BrowsePlace, ItemKey, RestorePlan, Source};
 use crate::{Core, CoreError, CoreResult, DirStorage, Pref};
 
 /// The backup folder when the player chose none, in the home folder.
@@ -23,18 +23,38 @@ pub enum BackupCmd {
     /// Reads the backup folder's list again.
     Refresh,
     /// Backs up now; `large` takes in the items a plugin marks large.
-    BackUp { large: bool },
+    BackUp {
+        large: bool,
+    },
     /// Puts the backup with this file name, in the backup folder, back.
     Restore(String),
+    /// Puts the backup at this path back: one the browser found in another folder.
+    RestoreFile(PathBuf),
+    /// Deletes the backup with this file name from the backup folder.
+    Delete(String),
+    /// Opens the browser at this folder, or at the backup folder; or moves it there.
+    Browse(Option<PathBuf>),
+    CloseBrowser,
 }
 
 pub(crate) async fn handle(core: &Core, command: BackupCmd) -> CoreResult<()> {
     match command {
-        // With no folder (no home folder, and none chosen), the list is empty.
+        // What a backup holds here, and the list. With no folder (no home folder, and none
+        // chosen), the list is empty.
         BackupCmd::Refresh => {
-            if let Ok(folder) = folder(core) {
-                core.backup().list(folder).await;
-            }
+            let found = items(core, true).await;
+            let titles = |large: bool| {
+                let mut titles: Vec<String> = Vec::new();
+                for item in found.iter().filter(|i| i.large == large) {
+                    if !titles.contains(&item.source.title) {
+                        titles.push(item.source.title.clone());
+                    }
+                }
+                titles
+            };
+            let holds = [vec![crate::backup::SETTINGS.to_owned()], titles(false)].concat();
+            core.backup().set_items(holds, titles(true));
+            list(core).await;
             Ok(())
         }
         BackupCmd::BackUp { large } => {
@@ -44,30 +64,120 @@ pub(crate) async fn handle(core: &Core, command: BackupCmd) -> CoreResult<()> {
         }
         BackupCmd::Restore(file) => {
             ready(core)?;
-            if file.contains(['/', '\\']) || crate::backup::archive::kind_of(&file).is_none() {
-                return Err(CoreError::Invalid(format!("{file} isn't a backup in the backup folder")));
+            restore(core, folder(core)?.join(in_folder(&file)?)).await
+        }
+        BackupCmd::RestoreFile(path) => {
+            let named = path.file_name().and_then(|n| n.to_str()).and_then(crate::backup::archive::kind_of);
+            if !path.is_absolute() || named.is_none() || !path.is_file() {
+                return Err(CoreError::Invalid(format!("{} isn't a backup", path.display())));
             }
-            let found = items(core, true).await;
-            let targets =
-                found.iter().filter(|i| i.writable).map(|i| (i.source.key.clone(), i.source.path.clone())).collect();
-            let hardware = core.ports().hardware.clone();
-            let plan = RestorePlan {
-                targets,
-                current: found.into_iter().map(|i| i.source).collect(),
-                now: crate::sessions::now_secs(),
-                free: std::sync::Arc::new(move |path: &std::path::Path| {
-                    crate::release_downloads::free_at(hardware.as_ref(), path)
-                }),
+            restore(core, path).await
+        }
+        BackupCmd::Delete(file) => {
+            let file = in_folder(&file)?;
+            core.backup().delete(&folder(core)?, &file).await
+        }
+        BackupCmd::Browse(at) => {
+            let places = places(core);
+            let at = match at {
+                Some(at) => at,
+                None => folder(core)
+                    .ok()
+                    .filter(|f| f.is_dir())
+                    .or_else(|| places.first().map(|p| p.path.clone()))
+                    .ok_or_else(|| CoreError::Invalid("no folder to start from".into()))?,
             };
-            core.backup().restore(&folder(core)?, &file, plan).await
+            if !at.is_absolute() || !at.is_dir() {
+                return Err(CoreError::Invalid(format!("{} isn't a folder", at.display())));
+            }
+            core.backup().browse(at, places).await
+        }
+        BackupCmd::CloseBrowser => {
+            core.backup().close_browser();
+            Ok(())
         }
     }
+}
+
+/// The backups in the backup folder, read again.
+pub(crate) async fn list(core: &Core) {
+    if let Ok(folder) = folder(core) {
+        core.backup().list(folder).await;
+    }
+}
+
+/// `file`, when it names a backup in the backup folder: no folder in it.
+fn in_folder(file: &str) -> CoreResult<String> {
+    if file.contains(['/', '\\']) || crate::backup::archive::kind_of(file).is_none() {
+        return Err(CoreError::Invalid(format!("{file} isn't a backup in the backup folder")));
+    }
+    Ok(file.to_owned())
+}
+
+/// Puts the backup at `path` back into this computer's places.
+async fn restore(core: &Core, path: PathBuf) -> CoreResult<()> {
+    ready(core)?;
+    let found = items(core, true).await;
+    let targets = found.iter().filter(|i| i.writable).map(|i| (i.source.key.clone(), i.source.path.clone())).collect();
+    let hardware = core.ports().hardware.clone();
+    let plan = RestorePlan {
+        targets,
+        current: found.into_iter().map(|i| i.source).collect(),
+        now: crate::sessions::now_secs(),
+        free: std::sync::Arc::new(move |at: &std::path::Path| crate::release_downloads::free_at(hardware.as_ref(), at)),
+    };
+    core.backup().restore(&path, &folder(core)?, plan).await
+}
+
+/// Where the browser can go: Home, the backup folder, then each drive that is there.
+fn places(core: &Core) -> Vec<BrowsePlace> {
+    let mut out = Vec::new();
+    let home = core.kernel().host().home.clone();
+    if let Some(home) = &home {
+        out.push(BrowsePlace { name: "Home".into(), path: home.clone() });
+    }
+    if let Ok(folder) = folder(core)
+        && folder.is_dir()
+    {
+        out.push(BrowsePlace { name: "Backup folder".into(), path: folder });
+    }
+    for drive in drives(home.as_deref()) {
+        let name =
+            drive.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| drive.display().to_string());
+        out.push(BrowsePlace { name, path: drive });
+    }
+    out
+}
+
+/// The drives that are there: USB sticks and other disks the system mounted.
+fn drives(home: Option<&std::path::Path>) -> Vec<PathBuf> {
+    let children = |dir: PathBuf| -> Vec<PathBuf> {
+        let Ok(read) = std::fs::read_dir(&dir) else { return Vec::new() };
+        let mut found: Vec<PathBuf> = read.filter_map(Result::ok).map(|e| e.path()).filter(|p| p.is_dir()).collect();
+        found.sort();
+        found
+    };
+    if cfg!(target_os = "windows") {
+        return ('C'..='Z').map(|d| PathBuf::from(format!("{d}:\\"))).filter(|p| p.is_dir()).collect();
+    }
+    if cfg!(target_os = "macos") {
+        return children(PathBuf::from("/Volumes"));
+    }
+    let user = home.and_then(|h| h.file_name()).map(|n| n.to_owned());
+    let mut out = Vec::new();
+    if let Some(user) = user {
+        out.extend(children(PathBuf::from("/run/media").join(&user)));
+        out.extend(children(PathBuf::from("/media").join(&user)));
+    }
+    out.extend(children(PathBuf::from("/mnt")));
+    out
 }
 
 /// Sets the backup folder, then reads the list there.
 pub(crate) async fn set_folder(core: &Core, value: serde_json::Value) -> CoreResult<()> {
     core.preferences().set(Pref::BackupFolder, value).await?;
-    handle(core, BackupCmd::Refresh).await
+    list(core).await;
+    Ok(())
 }
 
 /// The backup folder: the player's (`~/` for the home folder), or `~/Nexus Backups`.
@@ -104,6 +214,7 @@ fn ready(core: &Core) -> CoreResult<()> {
 /// An item where it is on this computer.
 struct Found {
     source: Source,
+    large: bool,
     /// A restore may write there: the plugin's data folder, or a grant with `write = true`.
     writable: bool,
 }
@@ -139,6 +250,7 @@ async fn items(core: &Core, large: bool) -> Vec<Found> {
                         skip: item.skip,
                     },
                     writable,
+                    large: item.large,
                 }),
                 Err(e) => tracing::warn!(%plugin, item = item.name, error = %e, "the item stays out of the backup"),
             }

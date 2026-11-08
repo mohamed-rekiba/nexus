@@ -755,6 +755,50 @@ pub struct BackupVm {
     pub restart: bool,
     /// Newest first.
     pub backups: Vec<BackupFileVm>,
+    /// What a backup holds on this computer now, joined with ", ": "Nexus settings, Switch
+    /// keys, PS5 saves".
+    pub holds: String,
+    /// The large items, which a backup takes only when asked, joined with ", ". Empty when no
+    /// plugin has one.
+    pub large: String,
+    /// The backup folder when the player chose none, with the home folder as `~`.
+    pub default_folder: String,
+    /// "Restore from another folder".
+    pub browser: BackupBrowserVm,
+}
+
+/// "Restore from another folder": a folder's folders and backups, and the places to go to.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct BackupBrowserVm {
+    pub open: bool,
+    /// The folder shown, with the home folder as `~`.
+    pub shown: String,
+    /// Its parent, a full path for Backup Browse. Empty at the top.
+    pub parent: String,
+    pub places: Vec<BrowsePlaceVm>,
+    pub entries: Vec<BrowseEntryVm>,
+}
+
+/// A place the browser goes to: Home, the backup folder, a drive.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct BrowsePlaceVm {
+    pub name: String,
+    /// A full path, for Backup Browse.
+    pub path: String,
+}
+
+/// A folder, or a backup, in the browser's folder.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct BrowseEntryVm {
+    /// The folder's or the file's name.
+    pub name: String,
+    /// A full path: for Backup Browse (a folder) or Backup RestoreFile (a backup).
+    pub path: String,
+    pub folder: bool,
+    /// A backup's: as in [`BackupFileVm`]. Empty for a folder.
+    pub date: String,
+    pub size: String,
+    pub items: String,
 }
 
 /// One backup in the backup folder.

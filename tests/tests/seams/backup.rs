@@ -209,3 +209,72 @@ async fn a_second_job_waits_for_the_first() {
     let (one, two) = tokio::join!(a.run(BackupCmd::BackUp { large: false }), a.run(BackupCmd::BackUp { large: false }));
     assert!(one.is_ok() != two.is_ok(), "one runs and one is refused: {one:?} {two:?}");
 }
+
+fn view(pc: &Pc) -> nexus_ui_api::BackupVm {
+    pc.test.core.view().settings.backup
+}
+
+#[tokio::test]
+async fn a_backup_in_the_list_can_be_deleted() {
+    let backups = tempfile::tempdir().unwrap();
+    let a = Pc::new(backups.path()).await;
+    a.run(BackupCmd::BackUp { large: false }).await.unwrap();
+    let file = view(&a).backups[0].file.clone();
+    a.run(BackupCmd::Delete(file.clone())).await.unwrap();
+    assert!(files(backups.path()).is_empty());
+    assert!(view(&a).backups.is_empty());
+    assert!(a.run(BackupCmd::Delete("../settings.ini".into())).await.is_err(), "only a backup of the backup folder");
+}
+
+#[tokio::test]
+async fn the_browser_shows_folders_and_backups_and_restores_one_from_another_folder() {
+    let (backups, elsewhere) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let a = Pc::new(elsewhere.path()).await;
+    write(&a.saves.path().join("GAME/slot.dat"), b"from the stick");
+    a.run(BackupCmd::BackUp { large: false }).await.unwrap();
+    std::fs::create_dir_all(elsewhere.path().join("old-pc")).unwrap();
+    std::fs::create_dir_all(elsewhere.path().join(".hidden")).unwrap();
+    std::fs::write(elsewhere.path().join("notes.txt"), b"not a backup").unwrap();
+
+    let b = Pc::new(backups.path()).await;
+    b.run(BackupCmd::Browse(Some(elsewhere.path().into()))).await.unwrap();
+    let browser = view(&b).browser;
+    assert!(browser.open);
+    let names: Vec<(&str, bool)> = browser.entries.iter().map(|e| (e.name.as_str(), e.folder)).collect();
+    assert_eq!(names.len(), 2, "{names:?}");
+    assert_eq!(names[0], ("old-pc", true), "folders first, no hidden ones");
+    assert!(!names[1].1 && names[1].0.starts_with("nexus-backup-"), "then backups, no other files: {names:?}");
+    assert_eq!(browser.parent, elsewhere.path().parent().unwrap().display().to_string());
+    assert!(browser.places.iter().any(|p| p.name == "Backup folder"), "{:?}", browser.places);
+
+    let path = std::path::PathBuf::from(&browser.entries[1].path);
+    b.run(BackupCmd::RestoreFile(path)).await.unwrap();
+    assert_eq!(std::fs::read(b.saves.path().join("GAME/slot.dat")).unwrap(), b"from the stick");
+    assert!(!view(&b).browser.open, "a restore closes the browser");
+    assert!(
+        files(backups.path()).iter().any(|f| f.contains("-before-restore")),
+        "the backup of what was here is in b's backup folder"
+    );
+    assert!(b.run(BackupCmd::RestoreFile(elsewhere.path().join("notes.txt"))).await.is_err());
+}
+
+#[tokio::test]
+async fn the_tab_says_what_a_backup_holds_here_and_which_items_are_large() {
+    let backups = tempfile::tempdir().unwrap();
+    let a = Pc::new(backups.path()).await;
+    a.run(BackupCmd::Refresh).await.unwrap();
+    let tab = view(&a);
+    assert_eq!(tab.holds, "Nexus settings, Settings, Saves, Keys");
+    assert_eq!(tab.large, "Wine prefixes");
+
+    // Turned off, the plugin's items aren't in a backup, nor in the words.
+    a.test
+        .core
+        .dispatch(Command::SetPluginEnabled { plugin: PluginId::new(PLUGIN).unwrap(), enabled: false })
+        .await
+        .unwrap();
+    a.run(BackupCmd::Refresh).await.unwrap();
+    let tab = view(&a);
+    assert_eq!(tab.holds, "Nexus settings");
+    assert_eq!(tab.large, "", "no large items: no switch");
+}

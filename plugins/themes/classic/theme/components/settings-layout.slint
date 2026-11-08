@@ -29,12 +29,21 @@ export global SystemRows {
     out property <int> count: 3 + (root.os >= 0 ? 1 : 0) + (root.install >= 0 ? 1 : 0);
 }
 
-// BACKUP: "Back up now", the switch for large items, the backup folder, "Restart Nexus" after a
-// restore, then one row per backup.
+// BACKUP: "Back up now", the switch for large items (when a plugin has some), the backup
+// folder, "Restore from another folder", "Restart Nexus" after a restore, then one row per
+// backup. While the browser is open, its rows instead: the folder (Back closes it), the places,
+// "Up a folder" (not at the top), then the folder's folders and backups.
 export global BackupRows {
-    out property <int> restart: Vm.backup.restart ? 3 : -1;
-    out property <int> first-backup: root.restart >= 0 ? 4 : 3;
-    out property <int> count: root.first-backup + Vm.backup.backups.length;
+    out property <bool> browsing: Vm.backup.browser.open;
+    out property <int> large: Vm.backup.large != "" ? 1 : -1;
+    out property <int> folder: root.large >= 0 ? 2 : 1;
+    out property <int> other: root.folder + 1;
+    out property <int> restart: Vm.backup.restart ? root.other + 1 : -1;
+    out property <int> first-backup: root.other + 1 + (root.restart >= 0 ? 1 : 0);
+    out property <int> up: Vm.backup.browser.parent != "" ? 2 : -1;
+    out property <int> first-entry: root.up >= 0 ? 3 : 2;
+    out property <int> count: root.browsing ? root.first-entry + Vm.backup.browser.entries.length
+        : root.first-backup + Vm.backup.backups.length;
 }
 
 // POWER: "Quit Nexus" ("Restart Nexus" when Nexus is the whole screen: the session starts it

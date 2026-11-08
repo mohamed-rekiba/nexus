@@ -378,7 +378,17 @@ export struct BackupFile { file: string, date: string, size: string, items: stri
 // or a restore runs (restoring: a restore), `progress` from 0 to 1. status: what the last one
 // did, or why it failed (failed). restart: a restore finished, and Nexus starts again to finish
 // it. backups: newest first.
-export struct Backup { folder: string, running: bool, restoring: bool, progress: float, status: string, failed: bool, restart: bool, backups: [BackupFile] }
+// "Restore from another folder". shown: the folder, with the home folder as `~`. parent: its
+// parent's full path, empty at the top. places: Home, the backup folder and each drive, each
+// with a full path for the command Backup Browse. entries: the folder's folders (folder), then
+// its backups, each with a full path for Backup Browse or Backup RestoreFile.
+export struct BrowsePlace { name: string, path: string }
+export struct BrowseEntry { name: string, path: string, folder: bool, date: string, size: string, items: string }
+export struct BackupBrowser { open: bool, shown: string, parent: string, places: [BrowsePlace], entries: [BrowseEntry] }
+
+// holds: what a backup holds on this computer now. large: the large items a backup takes only
+// when asked, empty when no plugin has one. default-folder: the folder when none is chosen.
+export struct Backup { folder: string, running: bool, restoring: bool, progress: float, status: string, failed: bool, restart: bool, backups: [BackupFile], holds: string, large: string, default-folder: string, browser: BackupBrowser }
 
 // The launcher's own update. state: off | idle | checking | current | available |
 // downloading | ready | failed. text: what to tell the player.

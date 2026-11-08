@@ -989,7 +989,37 @@ macro_rules! shots {
     )*};
 }
 
+/// Settings → Backup with a backup and its menu open, and the browser of "Restore from another
+/// folder", as `classic-backup-menu.png` and `classic-backup-browser.png`, over the library the
+/// other screens show: the real KytyPS5 plugin names its saves; the home folder is a temporary
+/// one.
+fn shoot_backup(window: &MinimalSoftwareWindow, out: &Path) {
+    use slint::platform::Key;
+    window.set_size(slint::PhysicalSize::new(WIDTH, HEIGHT));
+    let home = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(home.path().join("Downloads/old-pc")).unwrap();
+    let mut host = library(home.path());
+    host.load_images();
+    host.dispatch(Command::Backup(nexus_core::BackupCmd::BackUp { large: false }));
+    host.dispatch(Command::Navigate(Route::Settings));
+    // Up to the tabs, and along them to Backup, which asks for the list as it opens.
+    key(&mut host, Key::UpArrow);
+    for _ in 0..5 {
+        key(&mut host, Key::RightArrow);
+    }
+    host.pump();
+    // Down to the backup, and Return opens its menu.
+    for _ in 0..4 {
+        key(&mut host, Key::DownArrow);
+    }
+    key(&mut host, Key::Return);
+    shoot(window, &out.join("classic-backup-menu.png"));
+    host.dispatch(Command::Backup(nexus_core::BackupCmd::Browse(Some(home.path().join("Downloads")))));
+    shoot(window, &out.join("classic-backup-browser.png"));
+}
+
 shots! {
+    the_backup_tab => shoot_backup,
     this_pc_screens => shoot_this_pc,
     the_releases => shoot_releases,
     a_ps4_cover => shoot_ps4_cover,
