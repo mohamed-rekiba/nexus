@@ -93,7 +93,11 @@ async fn a_backup_from_one_computer_restores_into_another_s_folders_and_keeps_it
     assert!(!b.saves.path().join("cache").exists(), "the cache stayed out");
     assert_eq!(std::fs::read(b.saves.path().join("OTHER/slot.dat")).unwrap(), b"b's own", "b's other saves stay");
     assert_eq!(std::fs::read(b.data().join("settings.ini")).unwrap(), b"fullscreen=1");
-    assert!(!b.keys.path().join("prod.keys").exists(), "a folder the plugin may only read isn't written");
+    assert_eq!(
+        std::fs::read(b.keys.path().join("prod.keys")).unwrap(),
+        b"keys",
+        "the host restores into a folder the plugin may only read"
+    );
     assert!(!b.data().join("prefixes").exists(), "large items are in a backup only when asked for");
     assert_eq!(b.config(&["app", "folders"]), b_folders, "b keeps its own folders");
     assert_eq!(b.config(&["app", "playtime"]), serde_json::Value::Null, "the settings wait for the next start");
