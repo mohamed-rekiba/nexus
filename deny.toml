@@ -10,6 +10,7 @@ ignore = [
     { id = "RUSTSEC-2026-0370", reason = "zvariant unmaintained: comes in through Slint's winit backend (zbus, accessibility on Linux)" },
     { id = "RUSTSEC-2026-0371", reason = "zbus_names unmaintained: comes in through Slint's winit backend (zbus)" },
     { id = "RUSTSEC-2026-0372", reason = "zvariant_derive unmaintained: comes in through Slint's winit backend (zbus)" },
+    { id = "RUSTSEC-2026-0441", reason = "pin-utils unmaintained: comes in through spin_on, which slint-macros needs; no maintained version to move to" },
     { id = "RUSTSEC-2026-0293", reason = "ringbuf 0.4 double drop when an element's Drop panics: comes in through librqbit-utp 0.7, whose ring buffer holds u8, which has no Drop; the fix is ringbuf 0.5, which librqbit 9.0.1 can't take" },
 ]
 
