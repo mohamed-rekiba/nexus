@@ -31,12 +31,15 @@ runs:
       if: runner.os == 'Windows'
       shell: bash
       env:
-        # Change all three together (and run the mirror-deps workflow again): the build's
-        # file, where shinchiro published it, and its SHA-256 as GitHub lists it. shinchiro
-        # keeps about six weeks of builds, so this repo's `deps` release holds a copy.
+        # Change all four together (and run the mirror-deps workflow again): the build's
+        # file, where shinchiro published it, its SHA-256 as GitHub lists it, and the FFmpeg
+        # commit it was built from. shinchiro keeps about six weeks of builds, so this repo's
+        # `deps` release holds a copy. The FFmpeg commit is in libmpv-2.dll:
+        # `strings libmpv-2.dll | grep -o 'N-[0-9]*-g[0-9a-f]*'` prints N-<count>-g<commit>.
         FILE: mpv-dev-x86_64-20261018-git-01e2533f31.7z
         UPSTREAM: https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20261018
         SHA256: d7f5621f42b6e161fe032df914a10bdece28a89df3e57c6c3e16a5a250929b5e
+        FFMPEG_COMMIT: 94cba3150c6b83057ed48b833689adc806715cc0
         GH_TOKEN: ${{ github.token }}
       run: |
         archive="$RUNNER_TEMP/$FILE"
@@ -48,3 +51,4 @@ runs:
         7z x -y -o"$RUNNER_TEMP/libmpv" "$archive" > /dev/null
         echo "LIBMPV_DIR=$RUNNER_TEMP/libmpv" >> "$GITHUB_ENV"
         echo "LIBMPV_SOURCE=$UPSTREAM/$FILE" >> "$GITHUB_ENV"
+        echo "LIBMPV_FFMPEG=$FFMPEG_COMMIT" >> "$GITHUB_ENV"
