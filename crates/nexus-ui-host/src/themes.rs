@@ -59,6 +59,21 @@ impl ThemeSet {
         self.themes.contains_key(id)
     }
 
+    /// The one theme that says `fallback = true`: the app starts with it, falls back to it, and
+    /// uses it in safe mode. None or more than one is an error that names them.
+    pub fn fallback(&self) -> Result<PluginId, ThemeError> {
+        let marked: Vec<&PluginId> =
+            self.themes.iter().filter(|(_, l)| l.manifest.theme.fallback).map(|(id, _)| id).collect();
+        match marked.as_slice() {
+            [one] => Ok((*one).clone()),
+            [] => Err(ThemeError::Fallback("no installed theme says `fallback = true`".into())),
+            many => Err(ThemeError::Fallback(format!(
+                "only one theme may say `fallback = true`; these do: {}",
+                many.iter().map(|id| id.as_str()).collect::<Vec<_>>().join(", ")
+            ))),
+        }
+    }
+
     /// The theme and its parents, the theme first.
     pub fn chain(&self, id: &PluginId) -> Result<Vec<ThemeLayer>, ThemeError> {
         let mut chain: Vec<ThemeLayer> = Vec::new();
@@ -116,10 +131,15 @@ impl ResolvedTheme {
         ThemeError::File { theme: self.layers[layer].manifest.id().clone(), file: file.to_owned(), message }
     }
 
-    /// Every `.slint` file the theme serves, with inheritance applied, and the theme's own
-    /// rule checks done.
+    /// Every `.slint` file the theme serves: the kit, then the theme's own files over it, with
+    /// inheritance applied and the theme's own rule checks done.
     pub fn slint_sources(&self) -> Result<BTreeMap<String, String>, ThemeError> {
         let mut sources = BTreeMap::new();
+        // The kit first, so a theme's own `kit/<name>.slint` replaces it.
+        let kit: BTreeMap<String, String> = contract::KIT
+            .iter()
+            .map(|(name, text)| (format!("{}/{name}", contract::KIT_DIR), (*text).to_owned()))
+            .collect();
         for (layer, theme) in self.layers.iter().enumerate().rev() {
             for path in theme.files.list() {
                 if path.extension() != Some("slint") {
@@ -135,7 +155,9 @@ impl ResolvedTheme {
         for (path, (layer, text)) in &sources {
             contract::lint(text, expected.get(path.as_str()).copied()).map_err(|m| self.file_error(*layer, path, m))?;
         }
-        Ok(sources.into_iter().map(|(path, (_, text))| (path, text)).collect())
+        let mut files = kit;
+        files.extend(sources.into_iter().map(|(path, (_, text))| (path, text)));
+        Ok(files)
     }
 
     /// Checks that hold before compiling: reserved names, declared screens and components,

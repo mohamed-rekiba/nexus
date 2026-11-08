@@ -8,8 +8,8 @@
 //! - `tokens.slint`: the `Tokens` global, one property per design token.
 //! - `assets.slint`: the `Assets` global, one `image` per name in `[theme.assets.images]`.
 //!
-//! Every `.slint` import resolves in the theme first, then in each parent up to the root
-//! theme. That gives screen and component overrides with fallback.
+//! The host also serves the kit ([`KIT`]) under `kit/`, beneath the theme's own files: a theme
+//! that ships `kit/<name>.slint` replaces that kit file.
 //!
 //! Rules the host checks before compiling:
 //! - No `@image-url`: images come from `Assets`, view models, or slot icons.
@@ -37,6 +37,14 @@ pub const OPTIONS_FILE: &str = "options.slint";
 
 /// Files the host serves. A theme that ships one of these is refused.
 pub const RESERVED_FILES: [&str; 4] = [TYPES_FILE, TOKENS_FILE, ASSETS_FILE, OPTIONS_FILE];
+
+/// The folder the kit is served under, beneath every theme's own files.
+pub const KIT_DIR: &str = "kit";
+
+/// The kit: behaviour and widgets drawn only from tokens, which every theme may import from
+/// `kit/<name>.slint`. A theme that ships a file at the same path replaces the kit's. Kit files
+/// import the host's files as `../types.slint` and each other by bare name.
+pub const KIT: &[(&str, &str)] = &[("commands.slint", include_str!("../kit/commands.slint"))];
 
 /// The fixed contract file. See `contract/types.slint`.
 pub const TYPES_SLINT: &str = include_str!("../contract/types.slint");
@@ -265,6 +273,14 @@ mod tests {
         assert!(lint("import { Card } from \"../components/card.slint\";", None).is_ok());
         assert!(lint("export component HomeScreen inherits Rectangle {}", Some("HomeScreen")).is_ok());
         assert!(lint("export component Home inherits Rectangle {}", Some("HomeScreen")).is_err());
+    }
+
+    #[test]
+    fn kit_files_pass_the_theme_rules() {
+        for (name, source) in KIT {
+            assert!(name.ends_with(".slint"), "{name}");
+            lint(source, None).unwrap_or_else(|m| panic!("kit/{name}: {m}"));
+        }
     }
 
     #[test]
