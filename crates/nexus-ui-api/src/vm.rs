@@ -790,6 +790,8 @@ pub struct EmulatorVm {
     /// The id of the system it plays, from its manifest's `[system]` (`PS5`): what the commands
     /// LibrarySystem and CatalogSystem take. Empty when the manifest has none.
     pub system: String,
+    /// The system's full name from the same `[system]` ("PlayStation 5"); empty with no system.
+    pub system_name: String,
     /// The system's icon and cover from the plugin's assets, or the theme's own for the system.
     #[serde(serialize_with = "mark::thumb")]
     pub icon: Option<ImageRef>,

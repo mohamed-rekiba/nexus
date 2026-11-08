@@ -4161,6 +4161,7 @@ dependencies = [
  "system-host",
  "tar",
  "theme-default",
+ "theme-systems",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -4244,6 +4245,7 @@ dependencies = [
  "tar",
  "tempfile",
  "theme-default",
+ "theme-systems",
  "tokio",
  "zip",
  "zstd",
@@ -6825,6 +6827,13 @@ checksum = "f18aa187839b2bdb1ad2fa35ead8c4c2976b64e4363c386d45ac0f7ee85c9233"
 
 [[package]]
 name = "theme-default"
+version = "0.10.0"
+dependencies = [
+ "nexus-api",
+]
+
+[[package]]
+name = "theme-systems"
 version = "0.10.0"
 dependencies = [
  "nexus-api",

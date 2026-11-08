@@ -13,7 +13,7 @@ mod notices;
 mod play;
 mod releases;
 mod settings;
-mod theme_files;
+pub(crate) mod theme_files;
 mod trailer;
 
 use crate::common::*;

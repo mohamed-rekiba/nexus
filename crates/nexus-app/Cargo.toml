@@ -37,6 +37,7 @@ playstation-store.workspace = true
 release-catalog.workspace = true
 system-host.workspace = true
 theme-default.workspace = true
+theme-systems.workspace = true
 # Vulkan, for "This PC": the graphics cards, read in a child process (src/gpu_probe.rs).
 ash = "0.38"
 # libmpv at run time, for trailers in the window (src/trailer.rs). Already in the lock file

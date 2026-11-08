@@ -209,6 +209,7 @@ fn emulator() -> EmulatorVm {
         plugin: id(),
         name: s(),
         system: s(),
+        system_name: s(),
         icon: Some(image()),
         cover: Some(image()),
         status: s(),

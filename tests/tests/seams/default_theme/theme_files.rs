@@ -1,7 +1,7 @@
 //! The theme's files: the fonts it ships and the animation times it uses.
 
 /// `text` without its `Look.timed(...)` calls.
-fn without_timed(text: &str) -> String {
+pub(crate) fn without_timed(text: &str) -> String {
     let mut rest = text;
     let mut out = String::new();
     while let Some(at) = rest.find("Look.timed(") {
@@ -26,7 +26,7 @@ fn without_timed(text: &str) -> String {
 }
 
 /// The times in `text` that are not 0, such as "40ms" or "6s".
-fn fixed_times(text: &str) -> Vec<String> {
+pub(crate) fn fixed_times(text: &str) -> Vec<String> {
     let chars: Vec<char> = text.chars().collect();
     let mut found = Vec::new();
     let mut i = 0;

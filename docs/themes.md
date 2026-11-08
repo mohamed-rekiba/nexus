@@ -34,7 +34,18 @@ How plugins load is in [plugins.md](plugins.md). How to build and test the repos
 
 The default theme is built into the binary. Its files are in `plugins/themes/default/theme/`,
 and `plugins/themes/default/build.rs` embeds them. Its id is `default` (`BASE_THEME` in
-`crates/nexus-ui-host/src/host.rs`). Every other theme is a folder on disk.
+`crates/nexus-ui-host/src/host.rs`).
+
+The Systems theme (`systems`, in `plugins/themes/systems/theme/`) is built in the same way. It
+extends `default` and ships `screens/home.slint`, its own copies of `components/nav.slint` and
+`components/top-bar.slint`, and the "All games" pictures. Its Home is a list of the systems,
+"All games" first and then each entry of `Vm.emulators`, on the far side of the reading
+direction, with the focused system's `cover` behind it. Enter or a click opens the Library on
+the system's games (`LibrarySystem`); Back clears the filter and comes back to the list; Menu
+opens the emulator's page. The top bar has no Home or Library tab, and shows a button back to
+the list while a system's games show. Every other screen is the default theme's.
+
+Every other theme is a folder on disk.
 
 The launcher looks in two places for theme folders. Both are set in
 `crates/nexus-app/src/args.rs` and used in `crates/nexus-app/src/main.rs`.
@@ -879,6 +890,10 @@ tests that matter for a theme:
 - `default_theme/`: the default theme, one module for each screen. `theme_files.rs` checks
   that every font the theme names ships with it and that every animation time goes through
   `Look.timed`.
+- `systems_theme/`: the Systems theme's Home, its list and the way to each system's games and
+  back, and its files.
+- `system_art.rs`: a system's icon and cover from its emulator plugin, and a theme's
+  `[theme.emulators.<SYSTEM>]` in their place.
 
 Run the theme tests:
 

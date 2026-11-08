@@ -1193,6 +1193,7 @@ fn emulators_vm(s: &Snapshot) -> EmulatorsVm {
             EmulatorVm {
                 name: plugins.manifest(&id).map(|m| m.emulator_name().to_owned()).unwrap_or_default(),
                 system: look.map(|l| l.id.clone()).unwrap_or_default(),
+                system_name: look.map(|l| l.name.clone()).unwrap_or_default(),
                 icon: art(look.and_then(|l| l.icon.as_ref())),
                 cover: art(look.and_then(|l| l.cover.as_ref())),
                 status: status_text(plugins.status(&id)),

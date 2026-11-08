@@ -35,6 +35,7 @@ mod switching;
 mod system;
 mod system_art;
 mod system_theme;
+mod systems_theme;
 mod themes;
 mod timing;
 mod torrents;
