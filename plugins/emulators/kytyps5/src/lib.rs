@@ -480,6 +480,15 @@ impl Flavor for KytyFlavor {
     }
 }
 
+/// What a backup holds of KytyPS5: the shared saves folder. Saves of a build without
+/// `--data-folder` stay in its own folder, and out of the backup. The settings are Nexus's own.
+fn backup_items() -> Arc<dyn Backup> {
+    let shared = HostPath::new(DATA_FOLDER, 0, RelPath::root());
+    emulator_kit::backup::Items::provided(vec![
+        BackupItem::new("saves", "PS5 saves", BackupPlace::Folder(shared)).skip(&["_TempData"]),
+    ])
+}
+
 pub struct KytyPlugin;
 
 #[async_trait]
@@ -513,6 +522,7 @@ impl CodePlugin for KytyPlugin {
             compatibility: Some(emu.clone()),
             game_installer: Some(kyty),
             slots: Some(emu),
+            backup: Some(backup_items()),
             assets: Some(nexus_api::system_art!()),
             ..Provided::default()
         })
