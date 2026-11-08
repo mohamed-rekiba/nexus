@@ -78,6 +78,18 @@ pub enum ImageRef {
     PluginAsset { plugin: PluginId, path: RelPath },
     /// A file in a host folder, read with the plugin's folder grants.
     Folder { plugin: PluginId, path: nexus_api::HostPath },
+    /// The shown theme's own picture for a system (`[theme.systems.<SYSTEM>]`). The UI host
+    /// decodes it with the theme and puts it in place of the emulator plugin's; the core has
+    /// no bytes for it.
+    Theme { system: String, picture: SystemPicture },
+}
+
+/// One of a system's two pictures.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SystemPicture {
+    Icon,
+    Cover,
 }
 
 /// One slot item, ready to show. `label` is `<plugin-id>:<item-id>`: themes set it as the
@@ -879,6 +891,8 @@ pub struct RunningVm {
     pub session: u64,
     pub key: String,
     pub title: String,
+    /// The emulator plugin that runs it, as `Emulator.plugin`.
+    pub plugin: PluginId,
     /// The name of the emulator that runs it, for example `KytyPS5`.
     pub emulator: String,
     /// The name of the page with the emulator's keys: its plugin's name, `PS5`.

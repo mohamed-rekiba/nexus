@@ -306,7 +306,7 @@ export struct Folder { name: string, title: string, help: string, text: string, 
 // system: the id of the system it plays ("PS5"), what LibrarySystem takes; "" for none.
 // system-name: its full name ("PlayStation 5"); "" for none.
 // icon, cover: the system's square icon and its wide picture, from the emulator plugin or the
-// theme's `[theme.emulators.<system>]`; empty when neither has one.
+// theme's `[theme.systems.<system>]`; empty when neither has one.
 export struct Emulator {
     plugin: string,
     name: string,
@@ -345,8 +345,9 @@ export struct KeyBinding { button: string, keys: string }
 // `state` is starting (until the game's window shows), running or stopping. `elapsed` is the
 // time played, for example "12 min". `in-front` is true while the game's window has the screen.
 // keymap: the emulator's keyboard keys; empty when the emulator lists none. emulator: the
-// program's name ("KytyPS5"); page: the name of its plugin's page, which has the keys ("PS5").
-export struct Running { session: int, key: string, title: string, emulator: string, page: string, state: string, elapsed: string, in-front: bool, keymap: [KeyBinding] }
+// program's name ("KytyPS5"); plugin: its plugin's id, as `Emulator.plugin`; page: the name of
+// its plugin's page, which has the keys ("PS5").
+export struct Running { session: int, key: string, title: string, plugin: string, emulator: string, page: string, state: string, elapsed: string, in-front: bool, keymap: [KeyBinding] }
 
 // A first play waits for the player to agree to install the emulator. `size` is in bytes,
 // 0 when the download's size isn't known.

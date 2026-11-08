@@ -684,6 +684,9 @@ impl Core {
                 };
                 from_plugin.or_else(from_dir).ok_or_else(|| CoreError::Io(format!("{plugin} has no asset {path}")))
             }
+            nexus_ui_api::ImageRef::Theme { system, .. } => {
+                Err(CoreError::Io(format!("the theme's picture for {system} is the UI host's, not the core's")))
+            }
             nexus_ui_api::ImageRef::Folder { plugin, path } => {
                 let folders = kernel.host_folders(plugin).ok_or_else(|| CoreError::UnknownPlugin(plugin.clone()))?;
                 nexus_api::Folders::read_range(&folders, path, 0, nexus_api::MAX_FOLDER_READ)

@@ -1,6 +1,6 @@
 //! Seam 3, composed host: a system's icon and cover. The emulator plugin that plays the system
 //! ships them in its assets, and a theme can put its own in their place with
-//! `[theme.emulators.<SYSTEM>]`.
+//! `[theme.systems.<SYSTEM>]`.
 
 use crate::common::*;
 use nexus_core::Command;
@@ -51,6 +51,8 @@ fn of<'a>(emulators: &'a [slint_interpreter::Struct], system: &str) -> &'a slint
     emulators.iter().find(|e| text(e, "system") == system).unwrap_or_else(|| panic!("no emulator for {system}"))
 }
 
+// The default theme draws no system art, so this also shows that every system's pictures load
+// as soon as the view binds them, not when a theme first shows one.
 #[test]
 fn the_emulator_s_icon_and_cover_reach_the_theme_with_its_system() {
     let mut host = composed(|h| {
@@ -93,7 +95,7 @@ fn each_real_emulator_shows_its_system_s_icon_and_cover() {
     }
 }
 
-/// A theme `id` in `dir` that extends `parent`, with `art` as `[theme.emulators.*]` lines and a
+/// A theme `id` in `dir` that extends `parent`, with `art` as `[theme.systems.*]` lines and a
 /// picture at each path it names: `(path, width, height)`.
 fn art_theme(dir: &std::path::Path, id: &str, parent: &str, art: &str, pictures: &[(&str, u32, u32)]) {
     write_theme(dir, id, &format!("extends = \"{parent}\"\n{art}"), &[]);
@@ -115,7 +117,7 @@ fn a_theme_s_cover_for_a_system_takes_the_place_of_the_plugin_s_and_keeps_its_ic
         dir.path(),
         "arty",
         "default",
-        "[theme.emulators.PS4]\ncover = \"art/ps4.png\"",
+        "[theme.systems.PS4]\ncover = \"art/ps4.png\"",
         &[("art/ps4.png", 64, 36)],
     );
     let mut host = composed(|h| ps4_with_art(h.discover(dir.path())));
@@ -134,14 +136,14 @@ fn a_child_theme_s_system_art_wins_over_its_parent_s_per_picture() {
         dir.path(),
         "parent-art",
         "default",
-        "[theme.emulators.PS4]\nicon = \"art/icon.png\"\ncover = \"art/cover.png\"",
+        "[theme.systems.PS4]\nicon = \"art/icon.png\"\ncover = \"art/cover.png\"",
         &[("art/icon.png", 10, 10), ("art/cover.png", 40, 20)],
     );
     art_theme(
         dir.path(),
         "child-art",
         "parent-art",
-        "[theme.emulators.PS4]\nicon = \"mine.png\"",
+        "[theme.systems.PS4]\nicon = \"mine.png\"",
         &[("mine.png", 12, 12)],
     );
     let mut host = composed(|h| ps4_with_art(h.discover(dir.path())));
@@ -160,7 +162,7 @@ fn a_theme_s_art_for_a_system_no_emulator_plays_changes_nothing() {
         dir.path(),
         "arty",
         "default",
-        "[theme.emulators.SWITCH]\ncover = \"art/switch.png\"",
+        "[theme.systems.SWITCH]\ncover = \"art/switch.png\"",
         &[("art/switch.png", 64, 36)],
     );
     let mut host = composed(|h| ps4_with_art(h.discover(dir.path())));
@@ -173,10 +175,26 @@ fn a_theme_s_art_for_a_system_no_emulator_plays_changes_nothing() {
 #[test]
 fn a_theme_whose_system_picture_is_missing_does_not_load_and_the_old_theme_stays() {
     let dir = tempfile::tempdir().unwrap();
-    art_theme(dir.path(), "arty", "default", "[theme.emulators.PS4]\ncover = \"art/gone.png\"", &[]);
+    art_theme(dir.path(), "arty", "default", "[theme.systems.PS4]\ncover = \"art/gone.png\"", &[]);
     let mut host = composed(|h| ps4_with_art(h.discover(dir.path())));
     host.ui.start().unwrap();
     let error = host.ui.switch(&nexus_api::PluginId::new("arty").unwrap()).unwrap_err();
     assert!(error.to_string().contains("art/gone.png"), "{error}");
+    assert_eq!(host.ui.current().map(|id| id.as_str()), Some("default"));
+}
+
+#[test]
+fn a_theme_whose_system_picture_does_not_decode_does_not_load_and_the_old_theme_stays() {
+    let dir = tempfile::tempdir().unwrap();
+    write_theme(
+        dir.path(),
+        "arty",
+        "extends = \"default\"\n[theme.systems.PS4]\ncover = \"art/bad.png\"",
+        &[("art/bad.png", "not a picture")],
+    );
+    let mut host = composed(|h| ps4_with_art(h.discover(dir.path())));
+    host.ui.start().unwrap();
+    let error = host.ui.switch(&nexus_api::PluginId::new("arty").unwrap()).unwrap_err();
+    assert!(error.to_string().contains("systems.PS4.cover"), "{error}");
     assert_eq!(host.ui.current().map(|id| id.as_str()), Some("default"));
 }

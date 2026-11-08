@@ -16,13 +16,17 @@ fn systems_theme() -> Composed {
 
 /// [`systems_theme`], with more plugins.
 fn systems_theme_with(more: impl FnOnce(nexus_testkit::FakeHost) -> nexus_testkit::FakeHost) -> Composed {
-    let mut host = composed(|h| {
+    systems_theme_of(|h| {
         more(
-            h.built_in(nexus_api::PluginBox::theme(theme_systems::SystemsTheme))
-                .plugin(FakeCatalog::new("emu-a").playable().system("PS4").games(["Alpha", "Beta"]).build())
+            h.plugin(FakeCatalog::new("emu-a").playable().system("PS4").games(["Alpha", "Beta"]).build())
                 .plugin(FakeCatalog::new("emu-b").playable().system("PS5").games(["Gamma"]).build()),
         )
-    });
+    })
+}
+
+/// The Systems theme on the plugins `build` adds, its library loaded.
+fn systems_theme_of(build: impl FnOnce(nexus_testkit::FakeHost) -> nexus_testkit::FakeHost) -> Composed {
+    let mut host = composed(|h| build(h.built_in(nexus_api::PluginBox::theme(theme_systems::SystemsTheme))));
     host.ui.start().unwrap();
     host.ui.switch(&nexus_api::PluginId::new(theme_systems::ID).unwrap()).unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));

@@ -399,6 +399,7 @@ fn full_view() -> AppView {
             session: 1,
             key: s(),
             title: s(),
+            plugin: id(),
             emulator: s(),
             page: s(),
             state: s(),

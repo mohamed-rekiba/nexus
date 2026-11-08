@@ -523,7 +523,8 @@ A capability is one thing a plugin does for the host. The manifest names it in `
 
 `Provided` also has an `assets` field: a `Files` object that serves the images slot data and
 catalog entries name as `ImageSource::Asset`, and the `[system]` icon and cover. The built-in
-emulators embed their `assets/` folder as an `EmbeddedFiles`. The manifest's `assets` folder is the alternative.
+emulators serve their `assets/icon.png` and `assets/cover.jpg` with the `nexus_api::system_art!`
+macro. The manifest's `assets` folder is the alternative.
 
 The traits are in `crates/nexus-api/src/`. All except `VpnSettings` are `async_trait` traits.
 

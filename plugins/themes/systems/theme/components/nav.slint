@@ -37,9 +37,10 @@ export global Origin {
 //
 // The top bar has no tabs: the five screen buttons (0 to 4), then, when Nexus is the whole
 // screen, the network, sound and Bluetooth icons (5 to 7). A system opens the Library on its
-// games (LibrarySystem); Back from the Library clears the filter and comes back to the list.
-// `extra` is true while the list shows, so the shell's game keys (Menu, T) stay off it.
-// Every other member is the default's, for the default theme's files that read them.
+// games (LibrarySystem); whatever brings the list back clears the filter. `extra` is true while
+// the list shows, so the shell's game keys (Menu, T) stay off it. The list has no buttons under
+// a game: the `actions` zone the shell gives a game that starts is the list's. Every other
+// member is the default's, for the default theme's files that read them.
 export global Nav {
     // home | library
     in-out property <string> view: "home";
@@ -52,7 +53,7 @@ export global Nav {
     // the Library opens, so Back comes back to it.
     in-out property <int> entry;
     out property <int> entries: Vm.emulators.length + 1;
-    // The system the focused entry opens: "" for All games.
+    // The system the focused entry opens: "" for All games, as LibrarySystem takes it.
     out property <string> entry-system: root.entry > 0 && root.entry <= Vm.emulators.length
         ? Vm.emulators[root.entry - 1].system : "";
     // The Library grid's columns, set by the grid.
@@ -153,7 +154,10 @@ export global Nav {
         root.extra = false;
         Host.play-sound("select");
     }
+    // The list comes back: from the Library, from the shell when a game starts, or before a
+    // search. The Library's filter goes, so every other view of it starts from all the games.
     public function go-home() {
+        if (root.view == "library") { Commands.library-system(""); }
         root.sort-open = false;
         root.view = "home";
         root.zone = "row";
@@ -343,6 +347,8 @@ export global Nav {
 
     // Handles a key on the home screen. Returns whether it did anything.
     public function key(text: string) -> bool {
+        // A game that starts puts the keys on `actions`, which the list doesn't have.
+        if (root.zone == "actions") { root.zone = "row"; }
         // A key that isn't a move acts on the game on screen: the core hears of it first.
         if (!(text == Key.LeftArrow || text == Key.RightArrow || text == Key.UpArrow || text == Key.DownArrow
             || text == Key.PageUp || text == Key.PageDown)) {
@@ -423,10 +429,8 @@ export global Nav {
         }
         false
     }
-    // Back from the Library to the list, on the entry it opened from, with the back sound. The
-    // filter goes, so every other view of the Library starts from all the games.
+    // Back from the Library to the list, on the entry it opened from, with the back sound.
     public function leave() {
-        Commands.library-system("");
         root.go-home();
         Host.play-sound("back");
     }

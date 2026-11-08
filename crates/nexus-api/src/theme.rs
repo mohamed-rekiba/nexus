@@ -29,6 +29,21 @@ impl EmbeddedFiles {
     }
 }
 
+/// A built-in emulator's system pictures as its `Provided.assets`: `assets/icon.png` and
+/// `assets/cover.jpg` in the crate that calls it, served as `icon.png` and `cover.jpg`, the names
+/// its manifest's `[system]` gives (`scripts/make-system-art.sh` makes them).
+#[macro_export]
+macro_rules! system_art {
+    () => {{
+        const FILES: &[(&str, &[u8])] = &[
+            ("icon.png", include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/icon.png"))),
+            ("cover.jpg", include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/cover.jpg"))),
+        ];
+        let files: std::sync::Arc<dyn $crate::Files> = std::sync::Arc::new($crate::EmbeddedFiles::new(FILES));
+        files
+    }};
+}
+
 impl Files for EmbeddedFiles {
     fn read(&self, path: &RelPath) -> Option<Vec<u8>> {
         self.files.iter().find(|(p, _)| *p == path.as_str()).map(|(_, data)| data.to_vec())

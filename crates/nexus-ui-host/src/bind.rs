@@ -21,37 +21,49 @@ pub trait ImageSource {
     fn near(&self, grid: &str, index: usize) -> bool;
 }
 
-/// A system's icon and cover from the theme, decoded. They take the place of its emulator
-/// plugin's; `None` leaves the plugin's.
-#[derive(Clone, Default)]
-pub struct ThemeArt {
-    pub icon: Option<Image>,
-    pub cover: Option<Image>,
+/// The theme's decoded pictures for each system (`[theme.systems.<SYSTEM>]`).
+pub type ThemeArt = BTreeMap<String, Art<Image>>;
+
+/// `view` with the theme's pictures in place of each system's emulator plugin's: an
+/// [`ImageRef::Theme`], which [`ThemedImages`] serves.
+pub(crate) fn with_theme_art(view: &AppView, art: &ThemeArt) -> AppView {
+    let mut view = view.clone();
+    for emulator in &mut view.emulators.emulators {
+        let Some(theme) = art.get(&emulator.system) else { continue };
+        let at = |picture| ImageRef::Theme { system: emulator.system.clone(), picture };
+        if theme.icon.is_some() {
+            emulator.icon = Some(at(SystemPicture::Icon));
+        }
+        if theme.cover.is_some() {
+            emulator.cover = Some(at(SystemPicture::Cover));
+        }
+    }
+    view
 }
 
-/// `emulators`, the value of `Vm.emulators`, with the theme's pictures for each system in
-/// place of the plugin's.
-pub(crate) fn with_theme_art(emulators: Value, art: &BTreeMap<String, ThemeArt>) -> Value {
-    let Value::Model(model) = emulators else { return emulators };
-    let rows: Vec<Value> = model
-        .iter()
-        .map(|row| {
-            let Value::Struct(mut fields) = row else { return row };
-            let system = match fields.get_field("system") {
-                Some(Value::String(system)) => system.to_string(),
-                _ => String::new(),
-            };
-            if let Some(theme) = art.get(&system) {
-                for (field, image) in [("icon", &theme.icon), ("cover", &theme.cover)] {
-                    if let Some(image) = image {
-                        fields.set_field(field.into(), Value::Image(image.clone()));
-                    }
-                }
+/// The images the view refers to: the theme's own pictures from `art`, the rest from `images`.
+pub(crate) struct ThemedImages<'a> {
+    pub images: &'a dyn ImageSource,
+    pub art: &'a ThemeArt,
+}
+
+impl ImageSource for ThemedImages<'_> {
+    fn image(&self, image: &ImageRef, size: crate::ImageSize, crop: crate::Crop, want: bool) -> Image {
+        match image {
+            ImageRef::Theme { system, picture } => {
+                self.art.get(system).and_then(|art| art.get(*picture)).cloned().unwrap_or_default()
             }
-            Value::Struct(fields)
-        })
-        .collect();
-    Value::Model(ModelRc::new(VecModel::from(rows)))
+            other => self.images.image(other, size, crop, want),
+        }
+    }
+
+    fn failed(&self, image: &ImageRef, size: crate::ImageSize, crop: crate::Crop) -> bool {
+        !matches!(image, ImageRef::Theme { .. }) && self.images.failed(image, size, crop)
+    }
+
+    fn near(&self, grid: &str, index: usize) -> bool {
+        self.images.near(grid, index)
+    }
 }
 
 fn text(s: impl AsRef<str>) -> Value {

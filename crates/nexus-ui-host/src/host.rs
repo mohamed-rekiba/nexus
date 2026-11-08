@@ -6,7 +6,7 @@ use std::time::SystemTime;
 
 use nexus_api::{GameKey, PluginId};
 use nexus_core::{Command, Core, Route, SessionCmd};
-use nexus_ui_api::ThemeError;
+use nexus_ui_api::{SystemPicture, ThemeError};
 use slint_interpreter::{ComponentDefinition, ComponentHandle, ComponentInstance, Image, SharedString, Value};
 
 use crate::bind::{self, Viewport};
@@ -77,7 +77,7 @@ struct Live {
     stamp: Option<SystemTime>,
     sounds: BTreeMap<String, std::sync::Arc<[u8]>>,
     /// The theme's pictures for each system, decoded once.
-    art: BTreeMap<String, bind::ThemeArt>,
+    art: bind::ThemeArt,
 }
 
 pub struct ThemeHost {
@@ -228,16 +228,20 @@ impl ThemeHost {
             .system_art()?
             .into_iter()
             .map(|(system, bytes)| {
-                let decoded = |picture: &str, bytes: Option<Vec<u8>>, size: ImageSize| {
-                    bytes.map(|bytes| decode(&bytes, size, Crop::None)).transpose().map_err(|message| {
-                        ThemeError::Asset { theme: id.clone(), asset: format!("emulators.{system}.{picture}"), message }
+                let decoded = bytes.try_map(|picture, bytes| {
+                    let (name, size) = match picture {
+                        SystemPicture::Icon => ("icon", ImageSize::Thumb),
+                        SystemPicture::Cover => ("cover", ImageSize::Full),
+                    };
+                    decode(&bytes, size, Crop::None).map_err(|message| ThemeError::Asset {
+                        theme: id.clone(),
+                        asset: format!("systems.{system}.{name}"),
+                        message,
                     })
-                };
-                let icon = decoded("icon", bytes.icon, ImageSize::Thumb)?;
-                let cover = decoded("cover", bytes.cover, ImageSize::Full)?;
-                Ok((system, bind::ThemeArt { icon, cover }))
+                })?;
+                Ok((system, decoded))
             })
-            .collect::<Result<BTreeMap<_, _>, ThemeError>>()?;
+            .collect::<Result<bind::ThemeArt, ThemeError>>()?;
         let definition = compile(&resolved)?;
         let platform = |e: slint_interpreter::PlatformError| ThemeError::Platform(e.to_string());
         let instance = match &self.live {
@@ -272,7 +276,7 @@ impl ThemeHost {
         &self,
         instance: &ComponentInstance,
         resolved: &ResolvedTheme,
-        art: &BTreeMap<String, bind::ThemeArt>,
+        art: &bind::ThemeArt,
         view: &nexus_ui_api::AppView,
     ) -> Result<(), String> {
         let (width, height, scale) = window_size(instance);
@@ -298,9 +302,17 @@ impl ThemeHost {
                 duration: trailer.duration,
             },
         };
-        let values = bind::vm_values(view, &self.images, &self.cards)?;
-        for (name, value) in values.into_iter().chain(bind::host_values(&host, &self.images)?) {
-            let value = if name == "emulators" && !art.is_empty() { bind::with_theme_art(value, art) } else { value };
+        // A theme with pictures of its own for some systems: they take the plugins' places.
+        let themed;
+        let view = if art.is_empty() {
+            view
+        } else {
+            themed = bind::with_theme_art(view, art);
+            &themed
+        };
+        let images = bind::ThemedImages { images: &self.images, art };
+        let values = bind::vm_values(view, &images, &self.cards)?;
+        for (name, value) in values.into_iter().chain(bind::host_values(&host, &images)?) {
             bind::set(instance, "Vm", &name, value)?;
         }
         Ok(())

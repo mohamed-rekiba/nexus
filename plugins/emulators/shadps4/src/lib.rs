@@ -32,12 +32,6 @@ use nexus_api::serde_json::Value;
 use nexus_api::*;
 
 const MANIFEST: &str = include_str!("../plugin.toml");
-
-/// The system's icon and cover, as the manifest's `[system]` names them.
-static ASSETS: EmbeddedFiles = EmbeddedFiles::new(&[
-    ("icon.png", include_bytes!("../assets/icon.png")),
-    ("cover.jpg", include_bytes!("../assets/cover.jpg")),
-]);
 // Nightly pre-releases come out daily; 30 still reaches the last official release.
 pub const RELEASES: &str = "https://api.github.com/repos/shadps4-emu/shadPS4/releases?per_page=30";
 /// The community list's page, for the player.
@@ -225,7 +219,7 @@ impl CodePlugin for ShadPlugin {
             compatibility: Some(emu.clone()),
             game_installer: Some(shad),
             slots: Some(emu),
-            assets: Some(std::sync::Arc::new(ASSETS)),
+            assets: Some(nexus_api::system_art!()),
             ..Provided::default()
         })
     }

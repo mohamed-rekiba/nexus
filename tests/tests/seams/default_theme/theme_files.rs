@@ -1,7 +1,7 @@
 //! The theme's files: the fonts it ships and the animation times it uses.
 
 /// `text` without its `Look.timed(...)` calls.
-pub(crate) fn without_timed(text: &str) -> String {
+fn without_timed(text: &str) -> String {
     let mut rest = text;
     let mut out = String::new();
     while let Some(at) = rest.find("Look.timed(") {
@@ -26,7 +26,7 @@ pub(crate) fn without_timed(text: &str) -> String {
 }
 
 /// The times in `text` that are not 0, such as "40ms" or "6s".
-pub(crate) fn fixed_times(text: &str) -> Vec<String> {
+fn fixed_times(text: &str) -> Vec<String> {
     let chars: Vec<char> = text.chars().collect();
     let mut found = Vec::new();
     let mut i = 0;
@@ -98,13 +98,13 @@ fn every_font_the_theme_names_ships_with_it() {
     assert!(wrong.is_empty(), "fonts the theme doesn't ship fall back to whatever the system has: {wrong:?}");
 }
 
-#[test]
-fn every_animation_time_goes_through_look_timed_so_animations_off_cuts_it() {
-    let (theme, files) = theme_sources();
-    // With Animations off the motion tokens are 0, so "Tokens.motion-normal - 20ms" is -20 ms
-    // and a bare "300ms" stays 300 ms. `Look.timed` makes both 0.
+/// Each `duration:` or `delay:` in `files` (under `theme`) with a time outside `Look.timed`, as
+/// `file:line: value`. With Animations off the motion tokens are 0, so
+/// "Tokens.motion-normal - 20ms" is -20 ms and a bare "300ms" stays 300 ms; `Look.timed` makes
+/// both 0.
+pub(crate) fn times_outside_look_timed(theme: &std::path::Path, files: &[std::path::PathBuf]) -> Vec<String> {
     let mut wrong = Vec::new();
-    for file in &files {
+    for file in files {
         let source = std::fs::read_to_string(file).unwrap();
         for (number, line) in source.lines().enumerate() {
             for field in ["duration:", "delay:"] {
@@ -112,11 +112,18 @@ fn every_animation_time_goes_through_look_timed_so_animations_off_cuts_it() {
                 let value = &line[at + field.len()..];
                 let value = &value[..value.find([';', '}']).unwrap_or(value.len())];
                 if !fixed_times(&without_timed(value)).is_empty() {
-                    let name = file.strip_prefix(&theme).unwrap().display();
+                    let name = file.strip_prefix(theme).unwrap().display();
                     wrong.push(format!("{name}:{}: {}", number + 1, value.trim()));
                 }
             }
         }
     }
+    wrong
+}
+
+#[test]
+fn every_animation_time_goes_through_look_timed_so_animations_off_cuts_it() {
+    let (theme, files) = theme_sources();
+    let wrong = times_outside_look_timed(&theme, &files);
     assert!(wrong.is_empty(), "times outside Look.timed:\n{}", wrong.join("\n"));
 }
