@@ -459,6 +459,7 @@ pub struct FakeWindows {
     front: Arc<Mutex<Front>>,
     windows: Arc<std::sync::atomic::AtomicBool>,
     shown: Arc<Mutex<Vec<Shown>>>,
+    kept: Arc<Mutex<Vec<Vec<u32>>>>,
     problem: Arc<Mutex<Option<String>>>,
     /// A game whose windows all closed is over, as on macOS.
     window_ends_game: Arc<std::sync::atomic::AtomicBool>,
@@ -470,6 +471,7 @@ impl Default for FakeWindows {
             front: Arc::new(Mutex::new(Front::Launcher)),
             windows: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             shown: Arc::default(),
+            kept: Arc::default(),
             problem: Arc::default(),
             window_ends_game: Arc::default(),
         }
@@ -505,6 +507,11 @@ impl FakeWindows {
     pub fn shown(&self) -> Vec<Shown> {
         self.shown.lock().unwrap().clone()
     }
+
+    /// The game processes the host asked to keep on screen, one list per ask, in order.
+    pub fn kept(&self) -> Vec<Vec<u32>> {
+        self.kept.lock().unwrap().clone()
+    }
 }
 
 impl Windows for FakeWindows {
@@ -528,6 +535,10 @@ impl Windows for FakeWindows {
 
     fn problem(&self) -> Option<String> {
         self.problem.lock().unwrap().clone()
+    }
+
+    fn keep_game(&self, ids: &[u32]) {
+        self.kept.lock().unwrap().push(ids.to_vec());
     }
 
     fn has_window(&self, _ids: &[u32]) -> Option<bool> {

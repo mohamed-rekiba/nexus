@@ -479,6 +479,11 @@ impl SessionsSubsystem {
             changed
         };
         if changed {
+            tracing::info!(
+                in_front,
+                "the desktop says the game's window is {}",
+                if in_front { "in front" } else { "not in front" }
+            );
             self.changed();
         }
     }
