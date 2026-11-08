@@ -27,8 +27,10 @@ or from `release.yml` on a release tag. It does not run the tests.
 | Job | Does |
 | --- | --- |
 | `version` | Reads the version from `Cargo.toml`. On a tag, fails when the tag is not `v<version>`. |
-| `build` | One job each for Linux, macOS arm64, macOS x86-64 and Windows. Builds, packs, signs the Windows files, and uploads artifacts. |
+| `build` | One job each for Linux and Windows. Builds, packs, signs the Windows files, and uploads artifacts. |
+| `build-mac` | One job each for macOS arm64 and macOS x86-64, each on a runner with its own processor. Builds and packs each app. |
 | `macos` | Joins the two Mac apps into one universal app, signs and notarizes it, and makes the disk image. |
+| `sources` | Fetches the third-party sources the builds list, one tar per package. |
 | `publish` | On a tag only. Writes checksums and `latest.json`, attests, attaches the files to the draft release, and publishes it as the latest. |
 | `os` | On a tag only. Names this release in `os/nexus.txt` and starts `os.yml`. See [os/README.md](../os/README.md). |
 
