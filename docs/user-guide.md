@@ -330,8 +330,14 @@ has tabs, as Settings does: General and Settings. A plugin with no settings has 
 
 ## Themes
 
-Themes lists the built-in theme, `default`, and the themes in `<data-dir>/extensions` (one folder
-each) and in `extensions/` next to the program. Open one and choose "Use this theme". Switching the
-theme keeps the screen you are on, your selection, the downloads and a running game. The default
-theme's option is "Animations" (off makes the transitions cuts). Third-party plugins are themes only: they are data and run no code. To write a theme, see
+Themes lists the built-in themes, Default and Classic, and the themes in `<data-dir>/extensions`
+(one folder each) and in `extensions/` next to the program. Open one and choose "Use this theme".
+Switching the theme keeps the screen you are on, your selection, the downloads and a running game.
+Both built-in themes have the option "Animations" (off makes the transitions cuts).
+
+Nexus starts with the Default theme. Its Home is a list of your systems, "All games" first, with
+the focused system's picture behind it: Enter or a click shows that system's games, Back comes
+back to the list, and Options (Menu) opens the emulator's page. Classic is the old launcher's
+look: a row of your games on Home, and a Library tab.
+Third-party plugins are themes only: they are data and run no code. To write a theme, see
 [themes.md](themes.md).

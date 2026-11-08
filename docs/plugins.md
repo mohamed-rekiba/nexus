@@ -189,6 +189,10 @@ discrete_gpu = true
 [system]
 id = "PS5"
 name = "PlayStation 5"
+# No color: PS5 is drawn in the theme's neutral look, black with a white edge.
+# The system's pictures, in assets/ (made by scripts/make-system-art.sh).
+icon = "icon.png"
+cover = "cover.jpg"
 ```
 
 Source: `plugins/emulators/kytyps5/plugin.toml`.
@@ -215,7 +219,7 @@ Fields of `PluginManifest`:
 | `requires` | What the plugin's games need from the computer: `vulkan`, `avx2`, and `[requires.recommended]`. |
 | `keymap` | An emulator's keyboard keys for the console's buttons, in the order the launch splash lists them. |
 | `install_note` | One or two sentences the install sheet shows. |
-| `system` | `[system]`: the id, name and `#rrggbb` color that the Library's chips and a card's badge use for the plugin's games. |
+| `system` | `[system]`: the id, name and `#rrggbb` color that the Library's chips and a card's badge use for the plugin's games. `icon` and `cover` name a square icon and a wide picture of the system in the plugin's assets (PNG or JPEG). A theme shows them from `Vm.emulators`, and can put its own in their place. |
 
 `API_VERSION` is a constant in `crates/nexus-api/src/lib.rs`. A change to the plugin API raises it
 by hand, together with every built-in plugin's `host_api`.
@@ -518,7 +522,9 @@ A capability is one thing a plugin does for the host. The manifest names it in `
 | `network`, `vpn`, `bluetooth`, `audio`, `power`, `os_updates`, `os_install` | `NetworkSettings`, `VpnSettings`, `BluetoothSettings`, `AudioSettings`, `PowerSettings`, `OsUpdates`, `OsInstall` | `network`, `vpn`, `bluetooth`, `audio`, `power`, `os_updates`, `os_install` |
 
 `Provided` also has an `assets` field: a `Files` object that serves the images slot data and
-catalog entries name as `ImageSource::Asset`. The manifest's `assets` folder is the alternative.
+catalog entries name as `ImageSource::Asset`, and the `[system]` icon and cover. The built-in
+emulators serve their `assets/icon.png` and `assets/cover.jpg` with the `nexus_api::system_art!`
+macro. The manifest's `assets` folder is the alternative.
 
 The traits are in `crates/nexus-api/src/`. All except `VpnSettings` are `async_trait` traits.
 

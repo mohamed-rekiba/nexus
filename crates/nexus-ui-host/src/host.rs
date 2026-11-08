@@ -6,7 +6,7 @@ use std::time::SystemTime;
 
 use nexus_api::{GameKey, PluginId};
 use nexus_core::{Command, Core, Route, SessionCmd};
-use nexus_ui_api::ThemeError;
+use nexus_ui_api::{SystemPicture, ThemeError};
 use slint_interpreter::{ComponentDefinition, ComponentHandle, ComponentInstance, Image, SharedString, Value};
 
 use crate::bind::{self, Viewport};
@@ -76,6 +76,8 @@ struct Live {
     options: serde_json::Value,
     stamp: Option<SystemTime>,
     sounds: BTreeMap<String, std::sync::Arc<[u8]>>,
+    /// The theme's pictures for each system, decoded once.
+    art: bind::ThemeArt,
 }
 
 pub struct ThemeHost {
@@ -222,6 +224,24 @@ impl ThemeHost {
             })
             .collect::<Result<BTreeMap<String, Image>, _>>()?;
         let sounds = resolved.sounds()?.into_iter().map(|(name, bytes)| (name, bytes.into())).collect();
+        let art = resolved
+            .system_art()?
+            .into_iter()
+            .map(|(system, bytes)| {
+                let decoded = bytes.try_map(|picture, bytes| {
+                    let (name, size) = match picture {
+                        SystemPicture::Icon => ("icon", ImageSize::Thumb),
+                        SystemPicture::Cover => ("cover", ImageSize::Full),
+                    };
+                    decode(&bytes, size, Crop::None).map_err(|message| ThemeError::Asset {
+                        theme: id.clone(),
+                        asset: format!("systems.{system}.{name}"),
+                        message,
+                    })
+                })?;
+                Ok((system, decoded))
+            })
+            .collect::<Result<bind::ThemeArt, ThemeError>>()?;
         let definition = compile(&resolved)?;
         let platform = |e: slint_interpreter::PlatformError| ThemeError::Platform(e.to_string());
         let instance = match &self.live {
@@ -239,14 +259,14 @@ impl ThemeHost {
         // A new theme: the view comes fresh from the core, and the lists start again.
         self.last_view = None;
         self.cards.clear();
-        self.bind_view(&instance, &resolved, &self.core.view()).map_err(binding)?;
+        self.bind_view(&instance, &resolved, &art, &self.core.view()).map_err(binding)?;
         if save {
             self.core.theme_switched(id.clone()).map_err(|e| ThemeError::Platform(e.to_string()))?;
         }
         instance.show().map_err(platform)?;
 
         let stamp = resolved.stamp();
-        let old = self.live.replace(Live { resolved, _definition: definition, instance, options, stamp, sounds });
+        let old = self.live.replace(Live { resolved, _definition: definition, instance, options, stamp, sounds, art });
         drop(old);
         tracing::info!(theme = %id, "theme shown");
         Ok(())
@@ -256,6 +276,7 @@ impl ThemeHost {
         &self,
         instance: &ComponentInstance,
         resolved: &ResolvedTheme,
+        art: &bind::ThemeArt,
         view: &nexus_ui_api::AppView,
     ) -> Result<(), String> {
         let (width, height, scale) = window_size(instance);
@@ -281,8 +302,17 @@ impl ThemeHost {
                 duration: trailer.duration,
             },
         };
-        let values = bind::vm_values(view, &self.images, &self.cards)?;
-        for (name, value) in values.into_iter().chain(bind::host_values(&host, &self.images)?) {
+        // A theme with pictures of its own for some systems: they take the plugins' places.
+        let themed;
+        let view = if art.is_empty() {
+            view
+        } else {
+            themed = bind::with_theme_art(view, art);
+            &themed
+        };
+        let images = bind::ThemedImages { images: &self.images, art };
+        let values = bind::vm_values(view, &images, &self.cards)?;
+        for (name, value) in values.into_iter().chain(bind::host_values(&host, &images)?) {
             bind::set(instance, "Vm", &name, value)?;
         }
         Ok(())
@@ -321,7 +351,7 @@ impl ThemeHost {
         (self.fullscreen)(live.instance.window(), self.core.prefs().fullscreen && !self.windowed);
         self.images.begin_render();
         let bound = self
-            .bind_view(&live.instance, &live.resolved, &view)
+            .bind_view(&live.instance, &live.resolved, &live.art, &view)
             .map_err(|message| ThemeError::Binding { theme: id.clone(), message });
         self.images.end_render();
         // As the old launcher's boot: Home shows once what it shows is loaded.
@@ -693,7 +723,7 @@ mod tests {
     fn a_command_reads_by_its_name_and_its_json_args() {
         assert_eq!(command("Back", ""), Ok(Command::Back));
         assert_eq!(command("LibrarySystem", "null"), Ok(Command::LibrarySystem(None)));
-        // The chips' ids and the sorts' names, as the default theme sends them.
+        // The chips' ids and the sorts' names, as the Classic theme sends them.
         let ps5 = Some(SystemChoice::System("PS5".into()));
         assert_eq!(command("LibrarySystem", "\"PS5\""), Ok(Command::LibrarySystem(ps5)));
         let ingame = Some(SystemChoice::Filter(GridFilter::InGame));

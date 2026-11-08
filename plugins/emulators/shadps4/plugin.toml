@@ -112,4 +112,7 @@ after = "own_build"
 [system]
 id = "PS4"
 name = "PlayStation 4"
+# The system's pictures, in assets/ (made by scripts/make-system-art.sh).
+icon = "icon.png"
+cover = "cover.jpg"
 color = "#8fc2ff"

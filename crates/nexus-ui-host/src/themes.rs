@@ -8,7 +8,7 @@ use std::time::SystemTime;
 use nexus_api::{Files, PluginId, PluginKind, RelPath};
 use nexus_core::Core;
 use nexus_ui_api::contract::{self, RESERVED_FILES, SHELL_FILE};
-use nexus_ui_api::{ComponentId, MergedTheme, ScreenId, ThemeError, ThemeManifest, merge_chain};
+use nexus_ui_api::{Art, ComponentId, MergedTheme, ScreenId, ThemeError, ThemeManifest, merge_chain};
 
 /// One theme in a chain: its manifest and its files.
 #[derive(Clone)]
@@ -205,6 +205,19 @@ impl ResolvedTheme {
                 Ok((name.clone(), bytes))
             })
             .collect()
+    }
+
+    /// Bytes of each system's icon and cover the theme sets, by system id.
+    pub fn system_art(&self) -> Result<BTreeMap<String, Art<Vec<u8>>>, ThemeError> {
+        let read = |_, at: nexus_ui_api::LayerPath| {
+            let layer = &self.layers[at.layer];
+            layer.files.read(&at.path).ok_or_else(|| ThemeError::Asset {
+                theme: layer.manifest.id().clone(),
+                asset: at.path.to_string(),
+                message: "is missing".into(),
+            })
+        };
+        self.merged.system_art.iter().map(|(system, art)| Ok((system.clone(), art.clone().try_map(read)?))).collect()
     }
 
     /// The theme's sound files, by name.

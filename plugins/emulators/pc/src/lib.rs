@@ -58,6 +58,7 @@ impl CodePlugin for PcPlugin {
             configurator: Some(pc.clone()),
             game_installer: Some(pc.clone()),
             slots: Some(pc),
+            assets: Some(nexus_api::system_art!()),
             ..Provided::default()
         })
     }

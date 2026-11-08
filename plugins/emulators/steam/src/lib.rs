@@ -83,6 +83,7 @@ impl CodePlugin for SteamPlugin {
             releases: Some(steam.clone()),
             metadata: Some(steam.clone()),
             slots: Some(steam),
+            assets: Some(nexus_api::system_art!()),
             ..Provided::default()
         })
     }

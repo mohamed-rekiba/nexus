@@ -745,8 +745,8 @@ async fn a_turned_off_plugin_has_no_games_and_cannot_launch_until_turned_on_agai
 
 #[tokio::test]
 async fn a_theme_cannot_be_turned_off() {
-    let test = FakeHost::new().built_in(nexus_api::PluginBox::theme(theme_default::DefaultTheme)).boot_core().await;
-    let theme = PluginId::new("default").unwrap();
+    let test = FakeHost::new().built_in(nexus_api::PluginBox::theme(theme_classic::ClassicTheme)).boot_core().await;
+    let theme = PluginId::new("classic").unwrap();
     let off = test.core.dispatch(Command::SetPluginEnabled { plugin: theme, enabled: false }).await;
     assert!(matches!(off, Err(nexus_core::CoreError::Invalid(_))), "{off:?}");
 }

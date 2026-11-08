@@ -7,6 +7,7 @@ members = [
     "crates/nexus-ui-host",
     "crates/nexus-testkit",
     "crates/nexus-app",
+    "plugins/themes/classic",
     "plugins/themes/default",
     "plugins/shared/emulator-kit",
     "plugins/emulators/kytyps5",
@@ -23,7 +24,7 @@ members = [
 exclude = ["third_party/oozextract"]
 
 [workspace.package]
-version = "0.10.0"
+version = "0.11.0"
 edition = "2024"
 rust-version = "1.99"
 publish = false
@@ -37,6 +38,7 @@ nexus-ui-api = { path = "crates/nexus-ui-api" }
 nexus-core = { path = "crates/nexus-core" }
 nexus-ui-host = { path = "crates/nexus-ui-host" }
 nexus-testkit = { path = "crates/nexus-testkit" }
+theme-classic = { path = "plugins/themes/classic" }
 theme-default = { path = "plugins/themes/default" }
 emulator-kit = { path = "plugins/shared/emulator-kit" }
 emu-kyty = { path = "plugins/emulators/kytyps5" }

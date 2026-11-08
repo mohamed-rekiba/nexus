@@ -496,6 +496,7 @@ impl CodePlugin for KytyPlugin {
             compatibility: Some(emu.clone()),
             game_installer: Some(kyty),
             slots: Some(emu),
+            assets: Some(nexus_api::system_art!()),
             ..Provided::default()
         })
     }

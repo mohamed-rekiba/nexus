@@ -6,18 +6,27 @@ use nexus_core::Command;
 use nexus_ui_api::{ComponentId, ScreenId, ThemeError, TokenValue};
 
 #[test]
-fn the_default_theme_is_complete_and_compiles() {
-    let files = theme_default::DefaultTheme::files();
+fn a_first_run_shows_the_default_theme_and_saves_no_choice() {
+    let mut host = composed_first_run(|h| h);
+    host.ui.start().unwrap();
+    assert_eq!(host.ui.current(), Some(&id(theme_default::ID)));
+    assert_eq!(host.core().kernel().config().get(&["app", "theme"]), serde_json::Value::Null);
+    assert_eq!(host.ui.resolved().unwrap().merged.chain, [id("default"), id("classic")], "it extends Classic");
+}
+
+#[test]
+fn the_classic_theme_is_complete_and_compiles() {
+    let files = theme_classic::ClassicTheme::files();
     for screen in ScreenId::ALL {
-        assert!(files.read(&RelPath::new(screen.file()).unwrap()).is_some(), "default has no {}", screen.file());
+        assert!(files.read(&RelPath::new(screen.file()).unwrap()).is_some(), "classic has no {}", screen.file());
     }
     for component in ComponentId::ALL {
-        assert!(files.read(&RelPath::new(component.file()).unwrap()).is_some(), "default has no {}", component.file());
+        assert!(files.read(&RelPath::new(component.file()).unwrap()).is_some(), "classic has no {}", component.file());
     }
 
     let mut host = composed(|h| h);
-    host.ui.start().expect("the default theme starts");
-    assert_eq!(host.ui.current(), Some(&id("default")));
+    host.ui.start().expect("the Classic theme starts");
+    assert_eq!(host.ui.current(), Some(&id("classic")));
     // Every token has a value: merging would have failed otherwise.
     assert_eq!(host.ui.resolved().unwrap().merged.tokens.len(), nexus_ui_api::TOKENS.len());
 }

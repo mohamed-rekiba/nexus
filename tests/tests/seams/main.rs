@@ -5,6 +5,7 @@
 mod app;
 mod boot;
 mod catalog_refresh;
+mod classic_theme;
 mod common;
 mod compare;
 mod contracts;
@@ -33,6 +34,7 @@ mod sounds;
 mod steam;
 mod switching;
 mod system;
+mod system_art;
 mod system_theme;
 mod themes;
 mod timing;

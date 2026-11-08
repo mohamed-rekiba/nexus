@@ -1,6 +1,6 @@
 [package]
 name = "theme-default"
-description = "The built-in default theme. Always complete: every screen, component and token."
+description = "The built-in Default theme: Home is a list of the systems, and each opens its games."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

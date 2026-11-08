@@ -21,6 +21,51 @@ pub trait ImageSource {
     fn near(&self, grid: &str, index: usize) -> bool;
 }
 
+/// The theme's decoded pictures for each system (`[theme.systems.<SYSTEM>]`).
+pub type ThemeArt = BTreeMap<String, Art<Image>>;
+
+/// `view` with the theme's pictures in place of each system's emulator plugin's: an
+/// [`ImageRef::Theme`], which [`ThemedImages`] serves.
+pub(crate) fn with_theme_art(view: &AppView, art: &ThemeArt) -> AppView {
+    let mut view = view.clone();
+    for emulator in &mut view.emulators.emulators {
+        let Some(theme) = art.get(&emulator.system) else { continue };
+        let at = |picture| ImageRef::Theme { system: emulator.system.clone(), picture };
+        if theme.icon.is_some() {
+            emulator.icon = Some(at(SystemPicture::Icon));
+        }
+        if theme.cover.is_some() {
+            emulator.cover = Some(at(SystemPicture::Cover));
+        }
+    }
+    view
+}
+
+/// The images the view refers to: the theme's own pictures from `art`, the rest from `images`.
+pub(crate) struct ThemedImages<'a> {
+    pub images: &'a dyn ImageSource,
+    pub art: &'a ThemeArt,
+}
+
+impl ImageSource for ThemedImages<'_> {
+    fn image(&self, image: &ImageRef, size: crate::ImageSize, crop: crate::Crop, want: bool) -> Image {
+        match image {
+            ImageRef::Theme { system, picture } => {
+                self.art.get(system).and_then(|art| art.get(*picture)).cloned().unwrap_or_default()
+            }
+            other => self.images.image(other, size, crop, want),
+        }
+    }
+
+    fn failed(&self, image: &ImageRef, size: crate::ImageSize, crop: crate::Crop) -> bool {
+        !matches!(image, ImageRef::Theme { .. }) && self.images.failed(image, size, crop)
+    }
+
+    fn near(&self, grid: &str, index: usize) -> bool {
+        self.images.near(grid, index)
+    }
+}
+
 fn text(s: impl AsRef<str>) -> Value {
     Value::String(SharedString::from(s.as_ref()))
 }

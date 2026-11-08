@@ -208,6 +208,10 @@ fn emulator() -> EmulatorVm {
     EmulatorVm {
         plugin: id(),
         name: s(),
+        system: s(),
+        system_name: s(),
+        icon: Some(image()),
+        cover: Some(image()),
         status: s(),
         has_builds: true,
         installed: vec![s()],
@@ -395,6 +399,7 @@ fn full_view() -> AppView {
             session: 1,
             key: s(),
             title: s(),
+            plugin: id(),
             emulator: s(),
             page: s(),
             state: s(),

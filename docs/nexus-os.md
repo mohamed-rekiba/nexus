@@ -22,7 +22,8 @@ facts.
 The three variables count only when their value is exactly `1`. They exist for tests and
 screenshots. `NEXUS_SESSION=1` is also what the session script sets for the real thing.
 
-What each field changes in the default theme (`plugins/themes/default/theme/`):
+What each field changes in the Classic theme's Settings (`plugins/themes/classic/theme/`), which
+the Default theme shows too:
 
 | Field | Effect |
 | --- | --- |

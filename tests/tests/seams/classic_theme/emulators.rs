@@ -363,11 +363,11 @@ fn a_plugin_s_page_leaves_the_shared_folders_to_settings() {
 
 #[test]
 fn a_theme_s_sheet_in_themes_has_its_options_while_it_is_in_use() {
-    let mut host = default_theme();
+    let mut host = classic_theme();
     host.dispatch(Command::Navigate(nexus_core::Route::Themes));
     host.settle();
     assert_eq!(host.count("plugin:emu-a"), 0, "Themes lists themes only");
-    host.first("plugin:default").invoke_accessible_default_action();
+    host.first("plugin:classic").invoke_accessible_default_action();
     host.pump();
     host.settle();
 
@@ -381,7 +381,7 @@ fn a_theme_s_sheet_in_themes_has_its_options_while_it_is_in_use() {
 
 #[test]
 fn emulators_lists_emulators_only() {
-    let mut host = default_theme();
+    let mut host = classic_theme();
     host.dispatch(Command::Navigate(nexus_core::Route::Emulators));
     host.settle();
     assert_eq!(host.count("plugin:emu-a"), 1);

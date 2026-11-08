@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.11.0](https://github.com/mohamed-rekiba/nexus/compare/v0.10.0...v0.11.0) (2026-11-08)
+
+
+### ⚠ BREAKING CHANGES
+
+* a player whose saved theme is `default` now sees the systems list, and a third-party theme with `extends = "default"` now extends the Default theme (which extends Classic). Use `extends = "classic"` for the old base.
+
+### Features
+
+* each emulator ships its system's icon and cover, and a theme can replace them ([305b4fa](https://github.com/mohamed-rekiba/nexus/commit/305b4fab75b9ed3482ba2d2afd4960e903c31d67))
+* **systems theme:** the project owner's All games icon and picture, and a new Switch icon ([0f6940f](https://github.com/mohamed-rekiba/nexus/commit/0f6940f77868298bae65a12441ff798083ee0740))
+* the systems list is the Default theme, and the old look is the Classic theme ([6bbf738](https://github.com/mohamed-rekiba/nexus/commit/6bbf7385702c4b943c3ae4c139db7789a2e4f998))
+* the Systems theme, where Home is a list of the systems ([e0b5534](https://github.com/mohamed-rekiba/nexus/commit/e0b5534e73d5e4aca8c6509c601000834a799a02))
+
+
+### Bug Fixes
+
+* **deps:** pulldown-cmark 0.13.6 for the wikilinks advisory, and accept pin-utils through Slint ([b10ec18](https://github.com/mohamed-rekiba/nexus/commit/b10ec1877108087a5224bf7c965e82e39143b97c))
+* **package:** build the Apple Silicon app on macos-15, as GitHub retired macos-14 ([bd25130](https://github.com/mohamed-rekiba/nexus/commit/bd251306e117e1637b3ea94caeeaf61db61b8f02))
+* **systems theme:** the list after a game starts, the cover's wait, and the review's findings ([cd902ed](https://github.com/mohamed-rekiba/nexus/commit/cd902ed726c6fd6237164bca5f89c2d19af1d324))
+
 ## [0.10.0](https://github.com/mohamed-rekiba/nexus/compare/v0.9.0...v0.10.0) (2026-11-08)
 
 

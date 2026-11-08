@@ -1,4 +1,4 @@
-//! Renders the default theme's screens on a real library, to compare them with the old
+//! Renders the Classic theme's screens on a real library, to compare them with the old
 //! launcher's. Opt in: `NEXUS_COMPARE_OUT=<folder for the PNGs>`, with the real KytyPS5 plugin
 //! on `NEXUS_COMPARE_GAMES` (default `~/Games`) and, to play, the builds in
 //! `NEXUS_COMPARE_BUILDS` (an `emu-kyty` plugin folder, cloned). Its own test binary: it

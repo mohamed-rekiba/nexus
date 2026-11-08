@@ -220,6 +220,7 @@ impl CodePlugin for LichiiPlugin {
             launcher: Some(lichii.clone()),
             game_installer: Some(lichii),
             slots: Some(emu),
+            assets: Some(nexus_api::system_art!()),
             ..Provided::default()
         })
     }

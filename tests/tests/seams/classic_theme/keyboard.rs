@@ -80,7 +80,7 @@ fn osk_action(host: &mut Composed, label: &str) {
 /// The Library, opened with the controller.
 fn library_by_pad() -> Composed {
     use nexus_ui_host::PadButton;
-    let mut host = default_theme();
+    let mut host = classic_theme();
     host.pad(PadButton::Up);
     host.pad(PadButton::Right);
     host.pad(PadButton::South);

@@ -1,4 +1,4 @@
-//! Seam 3: the default theme's machine settings, over a fake system plugin. The top bar's
+//! Seam 3: the Classic theme's machine settings, over a fake system plugin. The top bar's
 //! network, sound and Bluetooth icons and their panels show when Nexus is the whole screen;
 //! the battery wherever the PC has one; Settings → System; and on Nexus OS's USB stick, the
 //! Welcome and Install screens.
@@ -36,7 +36,7 @@ fn machine() -> FakeSystem {
     system
 }
 
-/// The default theme over `system`, at `place`, with the machine read once.
+/// The Classic theme over `system`, at `place`, with the machine read once.
 fn shown(system: &FakeSystem, place: Place) -> Composed {
     let plugin = system.plugin();
     let mut host = composed(|h| {

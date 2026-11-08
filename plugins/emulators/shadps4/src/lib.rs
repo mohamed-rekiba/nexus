@@ -219,6 +219,7 @@ impl CodePlugin for ShadPlugin {
             compatibility: Some(emu.clone()),
             game_installer: Some(shad),
             slots: Some(emu),
+            assets: Some(nexus_api::system_art!()),
             ..Provided::default()
         })
     }

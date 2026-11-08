@@ -11,7 +11,7 @@
 use nexus_api::{ActionStyle, ConfigScope, PluginId, RelPath, SlotId, Tone};
 use serde::{Deserialize, Serialize};
 
-/// The screens every theme can show. The default theme has all of them.
+/// The screens every theme can show. The Classic theme has all of them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ScreenId {
@@ -78,6 +78,18 @@ pub enum ImageRef {
     PluginAsset { plugin: PluginId, path: RelPath },
     /// A file in a host folder, read with the plugin's folder grants.
     Folder { plugin: PluginId, path: nexus_api::HostPath },
+    /// The shown theme's own picture for a system (`[theme.systems.<SYSTEM>]`). The UI host
+    /// decodes it with the theme and puts it in place of the emulator plugin's; the core has
+    /// no bytes for it.
+    Theme { system: String, picture: SystemPicture },
+}
+
+/// One of a system's two pictures.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SystemPicture {
+    Icon,
+    Cover,
 }
 
 /// One slot item, ready to show. `label` is `<plugin-id>:<item-id>`: themes set it as the
@@ -787,6 +799,16 @@ pub struct EmulatorVm {
     pub plugin: PluginId,
     /// The program's name, the manifest's `emulator_name()`: `KytyPS5`.
     pub name: String,
+    /// The id of the system it plays, from its manifest's `[system]` (`PS5`): what the commands
+    /// LibrarySystem and CatalogSystem take. Empty when the manifest has none.
+    pub system: String,
+    /// The system's full name from the same `[system]` ("PlayStation 5"); empty with no system.
+    pub system_name: String,
+    /// The system's icon and cover from the plugin's assets, or the theme's own for the system.
+    #[serde(serialize_with = "mark::thumb")]
+    pub icon: Option<ImageRef>,
+    #[serde(serialize_with = "mark::picture")]
+    pub cover: Option<ImageRef>,
     /// `loaded`, `active` or `failed`.
     pub status: String,
     /// It installs builds of its own. An emulator that only starts games (PC) has none.
@@ -869,6 +891,8 @@ pub struct RunningVm {
     pub session: u64,
     pub key: String,
     pub title: String,
+    /// The emulator plugin that runs it, as `Emulator.plugin`.
+    pub plugin: PluginId,
     /// The name of the emulator that runs it, for example `KytyPS5`.
     pub emulator: String,
     /// The name of the page with the emulator's keys: its plugin's name, `PS5`.

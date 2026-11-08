@@ -124,6 +124,43 @@ pub struct ThemeSection {
     pub assets: ThemeAssets,
     #[serde(default)]
     pub options: BTreeMap<String, ThemeOption>,
+    /// Pictures for a system, by its id (`[theme.systems.PS5]`), in place of the ones its
+    /// emulator plugin ships: PNG or JPEG files in the theme folder.
+    #[serde(default)]
+    pub systems: BTreeMap<String, Art<RelPath>>,
+}
+
+/// A system's two pictures: a square icon, and a wide cover. A theme names files
+/// (`Art<RelPath>`), the merged theme the layer each comes from, and the UI host decodes them.
+/// A picture left out stays the emulator plugin's.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Art<T> {
+    pub icon: Option<T>,
+    pub cover: Option<T>,
+}
+
+impl<T> Default for Art<T> {
+    fn default() -> Self {
+        Self { icon: None, cover: None }
+    }
+}
+
+impl<T> Art<T> {
+    pub fn get(&self, picture: crate::SystemPicture) -> Option<&T> {
+        match picture {
+            crate::SystemPicture::Icon => self.icon.as_ref(),
+            crate::SystemPicture::Cover => self.cover.as_ref(),
+        }
+    }
+
+    /// Each picture there is, through `f`; the first error stops it.
+    pub fn try_map<U, E>(self, mut f: impl FnMut(crate::SystemPicture, T) -> Result<U, E>) -> Result<Art<U>, E> {
+        Ok(Art {
+            icon: self.icon.map(|t| f(crate::SystemPicture::Icon, t)).transpose()?,
+            cover: self.cover.map(|t| f(crate::SystemPicture::Cover, t)).transpose()?,
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -221,6 +258,8 @@ pub struct MergedTheme {
     pub images: BTreeMap<String, LayerPath>,
     pub fonts: Vec<LayerPath>,
     pub sounds: BTreeMap<String, LayerPath>,
+    /// Each system's pictures from the chain, per picture: the child's wins.
+    pub system_art: BTreeMap<String, Art<LayerPath>>,
     pub breakpoints: Vec<Breakpoint>,
     pub input: Vec<InputMode>,
     pub navigation: Navigation,
@@ -245,6 +284,7 @@ pub fn merge_chain(chain: &[&ThemeManifest], option_values: &serde_json::Value) 
     let mut tokens = BTreeMap::new();
     let mut images = BTreeMap::new();
     let mut sounds = BTreeMap::new();
+    let mut system_art: BTreeMap<String, Art<LayerPath>> = BTreeMap::new();
     let mut fonts = Vec::new();
     let mut breakpoints = Vec::new();
     // Root theme first, so children overwrite.
@@ -259,6 +299,16 @@ pub fn merge_chain(chain: &[&ThemeManifest], option_values: &serde_json::Value) 
         }
         for (name, path) in &section.assets.sounds {
             sounds.insert(name.clone(), LayerPath { layer, path: path.clone() });
+        }
+        for (system, art) in &section.systems {
+            let merged = system_art.entry(system.clone()).or_default();
+            let at = |path: &RelPath| LayerPath { layer, path: path.clone() };
+            if let Some(icon) = &art.icon {
+                merged.icon = Some(at(icon));
+            }
+            if let Some(cover) = &art.cover {
+                merged.cover = Some(at(cover));
+            }
         }
         fonts.extend(section.assets.fonts.iter().map(|path| LayerPath { layer, path: path.clone() }));
         if !section.breakpoints.is_empty() {
@@ -315,6 +365,7 @@ pub fn merge_chain(chain: &[&ThemeManifest], option_values: &serde_json::Value) 
         images,
         fonts,
         sounds,
+        system_art,
         breakpoints,
         input: chain
             .iter()

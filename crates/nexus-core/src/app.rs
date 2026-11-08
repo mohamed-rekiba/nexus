@@ -684,6 +684,9 @@ impl Core {
                 };
                 from_plugin.or_else(from_dir).ok_or_else(|| CoreError::Io(format!("{plugin} has no asset {path}")))
             }
+            nexus_ui_api::ImageRef::Theme { system, .. } => {
+                Err(CoreError::Io(format!("the theme's picture for {system} is the UI host's, not the core's")))
+            }
             nexus_ui_api::ImageRef::Folder { plugin, path } => {
                 let folders = kernel.host_folders(plugin).ok_or_else(|| CoreError::UnknownPlugin(plugin.clone()))?;
                 nexus_api::Folders::read_range(&folders, path, 0, nexus_api::MAX_FOLDER_READ)
@@ -770,7 +773,7 @@ mod tests {
         round_trip(Command::SetFolders { name: "games".into(), paths: vec!["/games".into()] });
         round_trip(Command::ReportResult(None));
         round_trip(Command::ReportResult(Some(nexus_api::CompatLevel::Menus)));
-        // The default theme sends the result's name.
+        // The Classic theme sends the result's name.
         let menus: Command = serde_json::from_str(r#"{"ReportResult":"menus"}"#).unwrap();
         assert_eq!(menus, Command::ReportResult(Some(nexus_api::CompatLevel::Menus)));
         assert!(serde_json::from_str::<Command>(r#"{"ReportResult":"great"}"#).is_err());

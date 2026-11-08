@@ -18,6 +18,7 @@ pub mod contract;
 mod driver;
 mod emulator;
 mod fakes;
+mod files;
 mod host;
 mod network;
 mod platform;
