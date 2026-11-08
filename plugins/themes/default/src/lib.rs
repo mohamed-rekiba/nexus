@@ -1,7 +1,7 @@
-//! The built-in Default theme, the one the app starts with and falls back to. It extends the
-//! Classic theme: its Home is a list of the systems the emulators play, with the focused
-//! system's cover behind it, and each system opens the Library on its games. Every other screen
-//! is the Classic theme's.
+//! The built-in Default theme: the one the app starts with, falls back to and uses in safe mode
+//! (`fallback = true`). Its Home is a list of the systems the emulators play, with the focused
+//! system's cover behind it, and each system opens the Library on its games. It stands alone:
+//! its other screens are the kit's pages in its own frame.
 
 use std::sync::Arc;
 
