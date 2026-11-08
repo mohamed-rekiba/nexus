@@ -137,6 +137,40 @@ async fn games_come_from_the_player_s_folder_with_their_icons_and_community_stat
 }
 
 #[tokio::test]
+async fn a_build_with_a_data_folder_keeps_saves_in_the_shared_folder_after_copying_the_build_s_there_once() {
+    let k = boot(&[V1]).await;
+    let shared = tempfile::tempdir().unwrap();
+    let folders = Command::SetFolders { name: "kyty-data".into(), paths: vec![shared.path().into()] };
+    k.test.core.dispatch(folders).await.unwrap();
+    k.test.core.dispatch(Command::InstallEmulator { plugin: kyty(), version: None }).await.unwrap();
+    let help = b"KytyPS5 git = aaaaaaa\nOptions:\n  --game <dir|elf|zar>   Game.\n  --data-folder <path>   Saves.\n";
+    k.test.spawner.prints(&work_dir(&k.test, V1).join("kyty_emulator"), help);
+    // The build's saves, from before it had the option, and a game the shared folder has already.
+    let build = work_dir(&k.test, V1);
+    for (game, bytes) in [("PPSA01234", b"astro".as_slice()), ("PPSA05678", b"old demon")] {
+        std::fs::create_dir_all(build.join("_SaveData").join(game).join("slot")).unwrap();
+        std::fs::write(build.join("_SaveData").join(game).join("slot/save.dat"), bytes).unwrap();
+    }
+    std::fs::create_dir_all(shared.path().join("_SaveData/PPSA05678/slot")).unwrap();
+    std::fs::write(shared.path().join("_SaveData/PPSA05678/slot/save.dat"), b"demon").unwrap();
+
+    k.test.core.dispatch(Command::Session(SessionCmd::Launch("emu-kyty:PPSA05678".parse().unwrap()))).await.unwrap();
+
+    let process = k.test.spawner.wait_for(1).await;
+    let at = process
+        .command
+        .args
+        .iter()
+        .position(|a| a == "--data-folder")
+        .unwrap_or_else(|| panic!("the option: {:?}", process.command.args));
+    assert_eq!(process.command.args[at + 1], shared.path().display().to_string());
+    let read = |game: &str| std::fs::read(shared.path().join("_SaveData").join(game).join("slot/save.dat")).unwrap();
+    assert_eq!(read("PPSA01234"), b"astro", "copied from the build");
+    assert_eq!(read("PPSA05678"), b"demon", "the shared save stays as it was");
+    assert!(build.join("_SaveData/PPSA01234/slot/save.dat").is_file(), "the build keeps its copy");
+}
+
+#[tokio::test]
 async fn a_build_installs_from_github_and_a_game_launches_with_its_folder() {
     let k = boot(&[V1]).await;
     k.test.core.dispatch(Command::InstallEmulator { plugin: kyty(), version: None }).await.unwrap();

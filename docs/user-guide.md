@@ -323,6 +323,10 @@ has tabs, as Settings does: General and Settings. A plugin with no settings has 
   copies its saves and caches.
 - KytyPS5 asks each build which options it knows (its `--help`) and leaves out a setting that the
   build does not know, with a line in the log at info level.
+- **KytyPS5 saves.** A KytyPS5 build that knows `--data-folder` keeps its saves in one folder that
+  every such build shares: "KytyPS5 saves" on its page, `~/.local/share/KytyPS5` until you change
+  it. The first game such a build starts copies the build's own saves there. A game that already
+  has saves there keeps them. An older build keeps its saves in its own folder, as before.
 - **PC games** run on their own system. A Windows game runs on Linux through umu-launcher (Proton)
   or Wine, and on macOS through Wine.
 - A game's menu has Game settings: the settings of that game only, such as KytyPS5's "Video out" and
