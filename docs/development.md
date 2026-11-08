@@ -81,6 +81,7 @@ builds (`make build`, `make package`) use Cargo's default release profile.
 | `make lint` | `cargo clippy --workspace --all-targets -- -D warnings` |
 | `make test` | `cargo test --workspace` |
 | `make run` / `make run-windowed` | `cargo run -p nexus-app` (full screen) / the same with `--windowed` |
+| `make run-session` / `make run-session-windowed` | The launcher as the Nexus session runs it: in gamescope with `NEXUS_SESSION=1` (needs gamescope; `GAMESCOPE_ARGS` changes its options) / `NEXUS_SESSION=1` in a normal window |
 | `make build` | `cargo build -p nexus-app --release` |
 | `make package` | `scripts/package.sh`: a release package in `dist/nexus-<os>-<arch>/` |
 | `make linux-packages` | `make package`, then the deb, rpm and Arch packages in `dist/packages/`, checked (Linux) |
@@ -135,8 +136,12 @@ Three switches make Nexus behave as it does on Nexus OS, for this run, on any Li
 | `NEXUS_USB=1` | Also Nexus OS's USB stick: "Install Nexus OS" |
 
 ```bash
-NEXUS_SESSION=1 make run-windowed
+make run-session-windowed     # NEXUS_SESSION=1 in a normal window
+make run-session              # also in gamescope, as the session runs it: games open in it too
 ```
+
+`make run-session` doesn't start Nexus again when it ends, and has no fallback to cage, as
+`packaging/linux/nexus-session` does.
 
 The controls act on this computer through `nmcli`, `bluetoothctl` and `pactl`, so joining a Wi-Fi
 network, pairing and the volume are real, and so are Restart and Shut down. System updates and the

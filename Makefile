@@ -2,8 +2,8 @@
 # and this file run the same commands.
 
 .DEFAULT_GOAL := help
-.PHONY: help check fmt fmt-check lint test run run-windowed build package linux-packages appimage test-rpm \
-	os-image os-iso os-vm deny hooks-install hooks-run clean catalog catalog-refresh
+.PHONY: help check fmt fmt-check lint test run run-windowed run-session run-session-windowed build package \
+	linux-packages appimage test-rpm os-image os-iso os-vm deny hooks-install hooks-run clean catalog catalog-refresh
 
 VERSION := $(shell sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
 # The Nexus OS image the os-* targets build and use, and the base they build it on.
@@ -11,9 +11,11 @@ OS_IMAGE ?= localhost/nexus-os:minimal
 OS_BASE ?= quay.io/fedora/fedora-bootc:44
 # The USB stick os-iso makes and os-vm starts, named with Nexus OS's version.
 OS_ISO ?= nexus-os-x86_64-$(shell cat os/version.txt).iso
+# gamescope's options for run-session: the ones packaging/linux/nexus-session uses.
+GAMESCOPE_ARGS ?= -e --xwayland-count 1
 
 help: ## List the targets
-	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
+	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-22s %s\n", $$1, $$2}'
 
 check: ## Format check, clippy (warnings are errors) and every test, as CI runs them
 	scripts/check.sh
@@ -35,6 +37,15 @@ run: ## Run the launcher
 
 run-windowed: ## Run the launcher in a normal window
 	cargo run -p nexus-app -- --windowed
+
+run-session: ## Run the launcher as the Nexus session does: in gamescope, with NEXUS_SESSION=1 (GAMESCOPE_ARGS)
+	@command -v gamescope > /dev/null || { echo "run-session needs gamescope; run-session-windowed needs none" >&2; exit 1; }
+	cargo build -p nexus-app
+	NEXUS_SESSION=1 SDL_VIDEO_DRIVER=x11 SDL_VIDEODRIVER=x11 QT_QPA_PLATFORM=xcb GDK_BACKEND=x11 \
+		gamescope $(GAMESCOPE_ARGS) -- $${CARGO_TARGET_DIR:-target}/debug/nexus
+
+run-session-windowed: ## The session's screens (NEXUS_SESSION=1) in a normal window, without gamescope
+	NEXUS_SESSION=1 cargo run -p nexus-app -- --windowed
 
 build: ## Build the launcher
 	cargo build -p nexus-app --release
