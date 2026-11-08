@@ -118,7 +118,6 @@ default_on = { macos = "~/Library/Application Support/KytyPS5", windows = "~/App
 title = "KytyPS5 saves"
 help = "Saves of every KytyPS5 build that has --data-folder."
 write = true
-after = "release_repo"
 
 # The system its games show under: what the Library and a card call it, and its color.
 [system]

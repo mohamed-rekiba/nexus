@@ -149,9 +149,10 @@ fn kytyps5_s_own_build_folder_is_a_row_in_its_settings_under_the_release_repo() 
     assert_eq!(host.count("settings-tab:Folders"), 0, "the page has no Folders tab");
     host.settings_tab("Settings");
     assert_eq!(host.count("folder:kyty-build"), 1);
-    // Own build, Release repo, then the folder, then Prereleases.
+    assert_eq!(host.count("folder:kyty-data"), 1);
+    // Own build, Release repo, then its two folders, then Prereleases.
     host.navigate(Key::DownArrow);
-    for _ in 0..3 {
+    for _ in 0..4 {
         host.navigate(Key::DownArrow);
     }
     let before = host.first("setting:prereleases").accessible_value().map(|v| v.to_string());
@@ -356,7 +357,7 @@ fn a_plugin_s_page_leaves_the_shared_folders_to_settings() {
     host.settle();
     let page = host.core().view().plugin_page.expect("KytyPS5's page");
     let names: Vec<_> = page.folders.iter().map(|f| f.name.as_str()).collect();
-    assert_eq!(names, ["kyty-build"], "its own folder only: the shared ones are in Settings");
+    assert_eq!(names, ["kyty-build", "kyty-data"], "its own folders only: the shared ones are in Settings");
     assert_eq!(host.count("folder:packages"), 0);
     assert_eq!(host.count("folder:games"), 0);
 }
