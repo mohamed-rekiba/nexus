@@ -87,24 +87,27 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # warm-cache.yml saves this cache on main; a release only restores it.
       - uses: ./.github/actions/setup
         with:
-          cache-key: package-${{ matrix.name }}
-          save-cache: ${{ github.ref == 'refs/heads/main' }}
+          shared-key: package-${{ matrix.name }}
       # libmpv for the trailer player and libarchive for RAR and other archives, which the
       # package ships with their licences.
       - uses: ./.github/actions/libmpv
       - uses: ./.github/actions/libarchive
-      # The crates' licences for the package (about.toml), prebuilt.
+      # The crates' licences for the package (about.toml), prebuilt, or from the cache.
       - if: matrix.name != 'macos-x86_64'
-        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+        uses: ./.github/actions/cargo-tool
         with:
-          tool: cargo-about@0.9.2
-      # cargo-about has no Intel Mac build: compile it. Its program needs the `cli` feature,
-      # which install-action's fallback leaves out.
+          tool: cargo-about
+          version: 0.9.2
+      # cargo-about has no Intel Mac build: compile it, unless the cache has it. Its program
+      # needs the `cli` feature, which install-action's fallback leaves out.
       - name: cargo-about (Intel Mac)
         if: matrix.name == 'macos-x86_64'
-        run: cargo install cargo-about@0.9.2 --locked --features cli
+        run: |
+          cargo about --version 2> /dev/null | grep -qw 0.9.2 \
+            || cargo install cargo-about@0.9.2 --locked --features cli
       # Builds, runs `nexus --help` from the package, and packs it on Linux and macOS.
       - run: scripts/package.sh
 

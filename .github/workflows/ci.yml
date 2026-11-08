@@ -43,11 +43,11 @@ on:
 permissions:
   contents: read
 
-# A new push cancels the older run of the same branch or pull request: only the newest commit
-# is checked.
+# A new push to a pull request cancels its older run: only the newest commit is checked. On
+# main every run finishes, so each one saves its cache for the branches after it.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -87,7 +87,7 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           cache-key: clippy
-          save-cache: ${{ github.ref == 'refs/heads/main' }}
+          save-cache: true
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
   test:
@@ -104,10 +104,11 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           cache-key: test
-          save-cache: ${{ github.ref == 'refs/heads/main' }}
-      - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+          save-cache: true
+      - uses: ./.github/actions/cargo-tool
         with:
-          tool: cargo-nextest@0.9.149
+          tool: cargo-nextest
+          version: 0.9.149
       # Each test in its own process, all at once (.config/nextest.toml).
       # nextest doesn't run doc tests; the code has none that run (only JSON and `ignore` blocks).
       - run: cargo nextest run --workspace --locked --no-fail-fast
