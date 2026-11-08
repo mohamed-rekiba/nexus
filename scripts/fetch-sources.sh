@@ -15,7 +15,7 @@ trap 'rm -rf "$work"' EXIT
 for list in $lists; do
     while read -r name url; do
         [ -n "$name" ] || continue
-        curl -fsSL --retry 3 -o "$work/$name-$(basename "$url")" "$url"
+        "$(dirname "$0")/download.sh" "$url" "$work/$name-$(basename "$url")"
     done < "$list"
     cat "$list" >> "$work/SOURCES"
 done

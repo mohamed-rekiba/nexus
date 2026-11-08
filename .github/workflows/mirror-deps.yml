@@ -30,7 +30,7 @@ jobs:
           file=$(sed -n 's/^ *FILE: //p' "$action")
           upstream=$(sed -n 's/^ *UPSTREAM: //p' "$action")
           sha=$(sed -n 's/^ *SHA256: //p' "$action")
-          curl -fsSL --retry 3 -o "$file" "$upstream/$file"
+          scripts/download.sh "$upstream/$file" "$file"
           echo "$sha  $file" | sha256sum -c -
           gh release view deps > /dev/null 2>&1 \
             || gh release create deps --latest=false --title "Build dependencies" --notes "Pinned files the packages are built with, kept here so the builds keep working."

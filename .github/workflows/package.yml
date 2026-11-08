@@ -38,6 +38,9 @@ env:
   HOMEBREW_NO_AUTO_UPDATE: "1"
   HOMEBREW_NO_INSTALL_CLEANUP: "1"
   TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+  # scripts/download.sh logs in to GitHub with it: GitHub can time out logged-out downloads
+  # when it is busy. Each job's token has only that job's permissions.
+  GH_TOKEN: ${{ github.token }}
 
 defaults:
   run:
