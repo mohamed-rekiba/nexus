@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.10.0](https://github.com/mohamed-rekiba/nexus/compare/v0.9.0...v0.10.0) (2026-11-08)
+
+
+### Features
+
+* a game that restarts itself through its launcher is started again in the same session ([5d37692](https://github.com/mohamed-rekiba/nexus/commit/5d3769239d2e4a311b950be0afe1586d060362fe))
+* a Switch catalog from the Switch forum, without its NRO homebrew topics ([749c624](https://github.com/mohamed-rekiba/nexus/commit/749c624fd3ba241852b2d0c8c5b6eb53853ef196))
+* an emulator with a window of its own gets an Open button on its page ([1425b6e](https://github.com/mohamed-rekiba/nexus/commit/1425b6ea89b320db548d5130a8ad55cf54bd846c))
+* CONCURRENCY=4 make catalog reads up to 4 topic pages at once ([5c957d1](https://github.com/mohamed-rekiba/nexus/commit/5c957d15a1511a2bbccfb22a9aec09f982d6de0b))
+* **emulator-kit:** Switch game files, an optional compatibility list, and builds without a test run ([d1c361d](https://github.com/mohamed-rekiba/nexus/commit/d1c361d1bcf5f0ec51d5772f56552c91dd29170a))
+* Lichii games start in eden-cli with players 1 to 4 on the connected controllers ([e26ef11](https://github.com/mohamed-rekiba/nexus/commit/e26ef1108c55c8b2e7a878d9f3d2a108fd6e8482))
+* **lichii:** a GPU split setting, one thread by default ([a6851c1](https://github.com/mohamed-rekiba/nexus/commit/a6851c1b148aaf1e2c16637b3a1072ddd174cf8c))
+* **lichii:** a solid NSZ installs as the NSP it was made from ([1ef4ece](https://github.com/mohamed-rekiba/nexus/commit/1ef4ece210f279c90ddfe41a2d716f482dde4f31))
+* Switch and Switch 2 games with Lichii ([c8919dd](https://github.com/mohamed-rekiba/nexus/commit/c8919dd67cbe37b4135d2f1691f1fc886c673717))
+* the bundled Switch catalog, 7011 topics from the Switch forum ([fa32d4c](https://github.com/mohamed-rekiba/nexus/commit/fa32d4cd73063ac8434f8f615b7740f22af17880))
+* the host unpacks a bare AppImage download, as it does one in a zip ([bd07df8](https://github.com/mohamed-rekiba/nexus/commit/bd07df8ae1ea8ebbdcf2a22d8932ca13f115feb5))
+
+
+### Bug Fixes
+
+* a Switch file tagged DLC is not a game, though a standalone app has a game's title id ([49aadee](https://github.com/mohamed-rekiba/nexus/commit/49aadeea1d05cf2abf9d35f3eeb3cdf32530c047))
+* a Switch game is its install folder with its update and DLC, and Lichii installs from the packages folder ([bc7c207](https://github.com/mohamed-rekiba/nexus/commit/bc7c2070eeb86c1a88c3d01b01baf424804947eb))
+* **default theme:** one click on a Home tile opens the game or the Library ([7de96e6](https://github.com/mohamed-rekiba/nexus/commit/7de96e6f1122d8664ecaf02230457cc899b089bd))
+* make catalog goes on from a run that stopped while it read topic pages ([b47bac8](https://github.com/mohamed-rekiba/nexus/commit/b47bac8538e2c348cc67e17b829fa53026baab75))
+
 ## [0.9.0](https://github.com/mohamed-rekiba/nexus/compare/v0.8.0...v0.9.0) (2026-11-05)
 
 
