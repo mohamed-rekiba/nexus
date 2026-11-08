@@ -242,3 +242,21 @@ fn only_the_running_game_s_emulator_is_marked_when_two_emulators_share_a_name() 
     host.settle();
     assert_eq!(host.values("systems-tag"), ["PlayStation 5: ● PLAYING"]);
 }
+
+#[test]
+fn the_mouse_wheel_moves_along_the_list_down_and_up() {
+    use slint::ComponentHandle;
+    use slint::platform::WindowEvent;
+    let mut host = systems_theme();
+    let shown = host.values("systems-tile");
+    let tile = host.first("systems-tile");
+    let position = slint::LogicalPosition::new(tile.absolute_position().x + 4.0, tile.absolute_position().y + 4.0);
+    // A notch of the wheel toward the user: Slint's delta is negative, as for a list that
+    // scrolls down.
+    host.instance().window().dispatch_event(WindowEvent::PointerScrolled { position, delta_x: 0.0, delta_y: -120.0 });
+    host.settle();
+    assert_eq!(host.focused("systems-tile"), [shown[1].clone()], "wheel down: the next system");
+    host.instance().window().dispatch_event(WindowEvent::PointerScrolled { position, delta_x: 0.0, delta_y: 120.0 });
+    host.settle();
+    assert_eq!(host.focused("systems-tile"), [shown[0].clone()], "wheel up: back");
+}
