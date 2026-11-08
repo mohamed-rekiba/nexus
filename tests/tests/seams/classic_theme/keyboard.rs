@@ -243,7 +243,7 @@ fn with_a_password_field() -> (tempfile::TempDir, Composed) {
     write_theme(
         dir.path(),
         "secrets",
-        "extends = \"default\"\nscreens = [\"emulators\"]",
+        "",
         &[(
             "screens/emulators.slint",
             r#"import { TextField } from "../kit/keyboard.slint";

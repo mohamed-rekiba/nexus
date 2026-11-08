@@ -11,7 +11,6 @@ pub mod theme;
 pub mod tokens;
 pub mod vm;
 
-pub use contract::ComponentId;
 pub use theme::*;
 pub use tokens::*;
 pub use vm::*;

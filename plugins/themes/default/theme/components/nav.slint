@@ -7,7 +7,7 @@ import { Origin } from "../kit/origin.slint";
 // Origin is the kit's; the theme's files read it from here too.
 export { Origin } from "../kit/origin.slint";
 
-// The Default theme's copy of the Classic theme's Nav. Home is a list of systems: "All games"
+// Where the player is, and what each key does there. Home is a list of systems: "All games"
 // (entry 0), then each emulator in `Vm.emulators` (entry 1 on). The keys act on one zone at a
 // time: the top bar (`tabs`), the list (`row`), and in the Library its systems in the top bar
 // (`filters`), its bar (`bar`: search, sort, the genres' list, and in the Catalog the catalog
@@ -17,8 +17,8 @@ export { Origin } from "../kit/origin.slint";
 // screen, the network, sound and Bluetooth icons (5 to 7). A system opens the Library on its
 // games (LibrarySystem); whatever brings the list back clears the filter. `extra` is true while
 // the list shows, so the shell's game keys (Menu, T) stay off it. The list has no buttons under
-// a game: the `actions` zone the shell gives a game that starts is the list's. Every other
-// member is the Classic theme's, for the Classic theme's files that read them.
+// a game: the `actions` zone the shell gives a game that starts is the list's. The shell, the
+// card, the top bar and the running screen read the other members.
 export global Nav {
     // home | library
     in-out property <string> view: "home";

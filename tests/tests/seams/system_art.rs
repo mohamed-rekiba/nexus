@@ -95,10 +95,10 @@ fn each_real_emulator_shows_its_system_s_icon_and_cover() {
     }
 }
 
-/// A theme `id` in `dir` that extends `parent`, with `art` as `[theme.systems.*]` lines and a
-/// picture at each path it names: `(path, width, height)`.
-fn art_theme(dir: &std::path::Path, id: &str, parent: &str, art: &str, pictures: &[(&str, u32, u32)]) {
-    write_theme(dir, id, &format!("extends = \"{parent}\"\n{art}"), &[]);
+/// A theme `id` in `dir` with `art` as `[theme.systems.*]` lines and a picture at each path it
+/// names: `(path, width, height)`.
+fn art_theme(dir: &std::path::Path, id: &str, art: &str, pictures: &[(&str, u32, u32)]) {
+    write_theme(dir, id, art, &[]);
     for (path, width, height) in pictures {
         let file = dir.join(id).join(path);
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
@@ -113,13 +113,7 @@ fn ps4_with_art(h: nexus_testkit::FakeHost) -> nexus_testkit::FakeHost {
 #[test]
 fn a_theme_s_cover_for_a_system_takes_the_place_of_the_plugin_s_and_keeps_its_icon() {
     let dir = tempfile::tempdir().unwrap();
-    art_theme(
-        dir.path(),
-        "arty",
-        "default",
-        "[theme.systems.PS4]\ncover = \"art/ps4.png\"",
-        &[("art/ps4.png", 64, 36)],
-    );
+    art_theme(dir.path(), "arty", "[theme.systems.PS4]\ncover = \"art/ps4.png\"", &[("art/ps4.png", 64, 36)]);
     let mut host = composed(|h| ps4_with_art(h.discover(dir.path())));
     host.ui.start().unwrap();
     host.ui.switch(&nexus_api::PluginId::new("arty").unwrap()).unwrap();
@@ -130,41 +124,27 @@ fn a_theme_s_cover_for_a_system_takes_the_place_of_the_plugin_s_and_keeps_its_ic
 }
 
 #[test]
-fn a_child_theme_s_system_art_wins_over_its_parent_s_per_picture() {
+fn a_theme_s_icon_and_cover_for_a_system_both_take_the_place_of_the_plugin_s() {
     let dir = tempfile::tempdir().unwrap();
     art_theme(
         dir.path(),
-        "parent-art",
-        "default",
+        "arty",
         "[theme.systems.PS4]\nicon = \"art/icon.png\"\ncover = \"art/cover.png\"",
         &[("art/icon.png", 10, 10), ("art/cover.png", 40, 20)],
     );
-    art_theme(
-        dir.path(),
-        "child-art",
-        "parent-art",
-        "[theme.systems.PS4]\nicon = \"mine.png\"",
-        &[("mine.png", 12, 12)],
-    );
     let mut host = composed(|h| ps4_with_art(h.discover(dir.path())));
     host.ui.start().unwrap();
-    host.ui.switch(&nexus_api::PluginId::new("child-art").unwrap()).unwrap();
+    host.ui.switch(&nexus_api::PluginId::new("arty").unwrap()).unwrap();
     let shown = emulators(&mut host);
     let ps4 = of(&shown, "PS4");
-    assert_eq!(size(ps4, "icon"), (12, 12), "the child's");
-    assert_eq!(size(ps4, "cover"), (40, 20), "the parent's");
+    assert_eq!(size(ps4, "icon"), (10, 10), "the theme's");
+    assert_eq!(size(ps4, "cover"), (40, 20), "the theme's");
 }
 
 #[test]
 fn a_theme_s_art_for_a_system_no_emulator_plays_changes_nothing() {
     let dir = tempfile::tempdir().unwrap();
-    art_theme(
-        dir.path(),
-        "arty",
-        "default",
-        "[theme.systems.SWITCH]\ncover = \"art/switch.png\"",
-        &[("art/switch.png", 64, 36)],
-    );
+    art_theme(dir.path(), "arty", "[theme.systems.SWITCH]\ncover = \"art/switch.png\"", &[("art/switch.png", 64, 36)]);
     let mut host = composed(|h| ps4_with_art(h.discover(dir.path())));
     host.ui.start().unwrap();
     host.ui.switch(&nexus_api::PluginId::new("arty").unwrap()).unwrap();
@@ -175,7 +155,7 @@ fn a_theme_s_art_for_a_system_no_emulator_plays_changes_nothing() {
 #[test]
 fn a_theme_whose_system_picture_is_missing_does_not_load_and_the_old_theme_stays() {
     let dir = tempfile::tempdir().unwrap();
-    art_theme(dir.path(), "arty", "default", "[theme.systems.PS4]\ncover = \"art/gone.png\"", &[]);
+    art_theme(dir.path(), "arty", "[theme.systems.PS4]\ncover = \"art/gone.png\"", &[]);
     let mut host = composed(|h| ps4_with_art(h.discover(dir.path())));
     host.ui.start().unwrap();
     let error = host.ui.switch(&nexus_api::PluginId::new("arty").unwrap()).unwrap_err();
@@ -189,7 +169,7 @@ fn a_theme_whose_system_picture_does_not_decode_does_not_load_and_the_old_theme_
     write_theme(
         dir.path(),
         "arty",
-        "extends = \"default\"\n[theme.systems.PS4]\ncover = \"art/bad.png\"",
+        "[theme.systems.PS4]\ncover = \"art/bad.png\"",
         &[("art/bad.png", "not a picture")],
     );
     let mut host = composed(|h| ps4_with_art(h.discover(dir.path())));

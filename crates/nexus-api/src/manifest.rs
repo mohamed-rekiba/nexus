@@ -592,7 +592,7 @@ mod tests {
         optional = true
 
         [theme]
-        extends = "base"
+        ui_api = "^0.2"
     "#;
 
     #[test]

@@ -15,20 +15,9 @@ pub(crate) struct Resolution {
     pub rejected: Vec<(PluginId, LoadError)>,
 }
 
-/// The ids a plugin must load after: its dependencies, plus `extends` for themes.
+/// The ids a plugin must load after: its dependencies.
 pub(crate) fn dependency_ids(manifest: &PluginManifest) -> Vec<(PluginId, semver::VersionReq, bool)> {
-    let mut deps: Vec<_> =
-        manifest.dependencies.iter().map(|d| (d.id.clone(), d.version.clone(), d.optional)).collect();
-    if let Some(parent) = theme_parent(manifest) {
-        deps.push((parent, semver::VersionReq::STAR, false));
-    }
-    deps
-}
-
-/// `[theme] extends = "..."`.
-pub(crate) fn theme_parent(manifest: &PluginManifest) -> Option<PluginId> {
-    let extends = manifest.extra.get("theme")?.get("extends")?.as_str()?;
-    PluginId::new(extends).ok()
+    manifest.dependencies.iter().map(|d| (d.id.clone(), d.version.clone(), d.optional)).collect()
 }
 
 pub(crate) fn resolve(manifests: &[PluginManifest]) -> Resolution {

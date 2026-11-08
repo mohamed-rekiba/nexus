@@ -3,7 +3,7 @@
 use crate::common::*;
 use nexus_api::{Files, RelPath};
 use nexus_core::Command;
-use nexus_ui_api::{ComponentId, ScreenId, ThemeError, TokenValue};
+use nexus_ui_api::{ScreenId, ThemeError, TokenValue};
 
 #[test]
 fn a_first_run_shows_the_default_theme_and_saves_no_choice() {
@@ -11,7 +11,7 @@ fn a_first_run_shows_the_default_theme_and_saves_no_choice() {
     host.ui.start().unwrap();
     assert_eq!(host.ui.current(), Some(&id(theme_default::ID)));
     assert_eq!(host.core().kernel().config().get(&["app", "theme"]), serde_json::Value::Null);
-    assert_eq!(host.ui.resolved().unwrap().merged.chain, [id("default")], "it stands alone");
+    assert_eq!(host.ui.resolved().unwrap().theme.manifest.id(), &id("default"), "it stands alone");
 }
 
 #[test]
@@ -19,15 +19,6 @@ fn the_classic_theme_is_complete_and_compiles() {
     let files = theme_classic::ClassicTheme::files();
     for screen in ScreenId::ALL {
         assert!(files.read(&RelPath::new(screen.file()).unwrap()).is_some(), "classic has no {}", screen.file());
-    }
-    // Each contract component is Classic's own or the kit's.
-    let in_kit = |file: &str| {
-        let name = file.trim_start_matches("components/");
-        nexus_ui_api::contract::KIT.iter().any(|(n, _)| *n == name)
-    };
-    for component in ComponentId::ALL {
-        let file = component.file();
-        assert!(files.read(&RelPath::new(file.clone()).unwrap()).is_some() || in_kit(&file), "no {file}");
     }
 
     let mut host = composed(|h| h);
@@ -67,13 +58,13 @@ fn every_default_screen_renders() {
 }
 
 #[test]
-fn a_child_theme_falls_back_to_its_parent_for_what_it_leaves_out() {
+fn a_theme_s_own_card_and_token_show_and_the_tokens_it_leaves_out_keep_their_defaults() {
     let dir = tempfile::tempdir().unwrap();
-    // Overrides one component and one token; no screens, no shell.
+    // Default's files with its own card and one token.
     write_theme(
         dir.path(),
-        "child",
-        "extends = \"default\"\ncomponents = [\"card\"]\n[theme.tokens]\ncolor-accent = \"#ff0000\"",
+        "own-card",
+        "[theme.tokens]\ncolor-accent = \"#ff0000\"",
         &[(
             "components/card.slint",
             r#"import { GameCard } from "../types.slint";
@@ -86,7 +77,7 @@ export component Card inherits Rectangle {
     height: 100px;
     background: Tokens.color-accent;
     accessible-role: text;
-    accessible-label: "child-card";
+    accessible-label: "own-card";
 }
 "#,
         )],
@@ -96,7 +87,7 @@ export component Card inherits Rectangle {
             .plugin(FakeCatalog::new("emu-kyty").system("PS4").games(["Alpha", "Beta", "Gamma"]).build().console("PS5"))
             .built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default()))
     });
-    host.ui.switch(&id("child")).expect("the child theme loads");
+    host.ui.switch(&id("own-card")).expect("the theme loads");
     // A catalog with three games.
     let topics: Vec<serde_json::Value> = ["Alpha", "Beta", "Gamma"]
         .iter()
@@ -118,34 +109,43 @@ export component Card inherits Rectangle {
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
 
     let resolved = host.ui.resolved().unwrap();
-    assert_eq!(resolved.inherited_screens().len(), ScreenId::ALL.len(), "every screen comes from default");
     assert_eq!(resolved.merged.tokens["color-accent"], TokenValue::Color(0xff0000ff));
-    assert_eq!(resolved.merged.tokens["color-bg"], TokenValue::Color(0x05070fff), "inherited from default");
-    // The default Catalog screen draws the child's Card for each game.
+    assert_eq!(resolved.merged.tokens["color-bg"], TokenValue::Color(0x05070fff), "the default");
+    // The Catalog screen draws the theme's Card for each game.
     host.dispatch(Command::Navigate(nexus_core::Route::Catalog));
     host.dispatch(Command::Search("a".into()));
     host.settle();
-    assert_eq!(host.count("child-card"), 3);
+    assert_eq!(host.count("own-card"), 3);
 }
 
 #[test]
-fn a_theme_whose_parent_is_missing_is_refused() {
+fn a_theme_that_extends_another_is_refused() {
     let dir = tempfile::tempdir().unwrap();
-    write_theme(dir.path(), "orphan", "extends = \"nowhere\"", &[]);
+    write_raw_theme(dir.path(), "extender", "extends = \"default\"", &[]);
     let mut host = composed(|h| h.discover(dir.path()));
+    host.ui.start().unwrap();
 
-    let report = &host.test.host.report;
-    assert!(report.rejection(&id("orphan")).is_some(), "the kernel refuses it: its parent is a missing dependency");
-    assert!(matches!(host.ui.switch(&id("orphan")), Err(ThemeError::Unknown(_))));
+    assert!(!host.ui.themes().contains(&id("extender")), "it isn't offered");
+    assert!(matches!(host.ui.switch(&id("extender")), Err(ThemeError::Unknown(_))));
+}
+
+#[test]
+fn a_theme_without_every_screen_is_refused_with_the_missing_file_named() {
+    let dir = tempfile::tempdir().unwrap();
+    write_theme(dir.path(), "partial", "", &[]);
+    std::fs::remove_file(dir.path().join("partial/screens/downloads.slint")).unwrap();
+    let mut host = composed(|h| h.discover(dir.path()));
+    host.ui.start().unwrap();
+
+    let error = host.ui.switch(&id("partial")).unwrap_err();
+    assert!(matches!(&error, ThemeError::File { file, .. } if file == "screens/downloads.slint"), "{error}");
+    assert_eq!(host.ui.current(), Some(&id("classic")), "the theme on screen stays");
 }
 
 #[test]
 fn a_theme_built_for_another_ui_api_is_refused() {
     let dir = tempfile::tempdir().unwrap();
-    write_theme(dir.path(), "future", "extends = \"default\"", &[]);
-    let toml = dir.path().join("future/theme.toml");
-    let text = std::fs::read_to_string(&toml).unwrap().replace("ui_api = \"^0.2\"", "ui_api = \"^9\"");
-    std::fs::write(&toml, text).unwrap();
+    write_theme(dir.path(), "future", "ui_api = \"^9\"", &[]);
     let mut host = composed(|h| h.discover(dir.path()));
 
     assert!(matches!(host.ui.switch(&id("future")), Err(ThemeError::UiApi { .. })));
@@ -160,12 +160,7 @@ fn imports_that_leave_the_theme_folder_are_refused() {
         "import {{ Evil }} from \"../../../../../../../..{}/evil.slint\";\nexport component HomeScreen inherits Rectangle {{ Evil {{}} }}",
         outside.path().display()
     );
-    write_theme(
-        dir.path(),
-        "escape",
-        "extends = \"default\"\nscreens = [\"home\"]",
-        &[("screens/home.slint", &escape)],
-    );
+    write_theme(dir.path(), "escape", "", &[("screens/home.slint", &escape)]);
     let mut host = composed(|h| h.discover(dir.path()));
 
     let err = host.ui.switch(&id("escape")).unwrap_err();
@@ -182,7 +177,7 @@ fn image_urls_and_font_imports_in_markup_are_refused() {
         ("font", "import \"/Library/Fonts/x.ttf\";\nexport component HomeScreen inherits Rectangle {}"),
     ] {
         let dir = tempfile::tempdir().unwrap();
-        write_theme(dir.path(), name, "extends = \"default\"\nscreens = [\"home\"]", &[("screens/home.slint", source)]);
+        write_theme(dir.path(), name, "", &[("screens/home.slint", source)]);
         let mut host = composed(|h| h.discover(dir.path()));
         let err = host.ui.switch(&id(name)).unwrap_err();
         assert!(matches!(err, ThemeError::File { .. }), "{name}: {err}");
@@ -192,7 +187,7 @@ fn image_urls_and_font_imports_in_markup_are_refused() {
 #[test]
 fn a_theme_may_not_ship_the_files_the_host_serves() {
     let dir = tempfile::tempdir().unwrap();
-    write_theme(dir.path(), "faker", "extends = \"default\"", &[("types.slint", "export global Vm {}")]);
+    write_theme(dir.path(), "faker", "", &[("types.slint", "export global Vm {}")]);
     let mut host = composed(|h| h.discover(dir.path()));
 
     let err = host.ui.switch(&id("faker")).unwrap_err();
@@ -202,12 +197,7 @@ fn a_theme_may_not_ship_the_files_the_host_serves() {
 #[test]
 fn a_screen_that_exports_the_wrong_name_is_refused_with_the_file_named() {
     let dir = tempfile::tempdir().unwrap();
-    write_theme(
-        dir.path(),
-        "misnamed",
-        "extends = \"default\"\nscreens = [\"home\"]",
-        &[("screens/home.slint", "export component Home inherits Rectangle {}")],
-    );
+    write_theme(dir.path(), "misnamed", "", &[("screens/home.slint", "export component Home inherits Rectangle {}")]);
     let mut host = composed(|h| h.discover(dir.path()));
 
     let err = host.ui.switch(&id("misnamed")).unwrap_err();
@@ -254,7 +244,7 @@ fn a_theme_reads_its_option_values_from_the_options_global() {
     write_theme(
         dir.path(),
         "opts",
-        "extends = \"default\"\nscreens = [\"home\"]\n\
+        "\
          [theme.options.motion]\nlabel = \"Motion\"\ntype = \"choice\"\ndefault = \"off\"\n\
          [theme.options.motion.choices.off]\n[theme.options.motion.choices.pan]\n\
          [theme.options.tint]\nlabel = \"Tint\"\ntype = \"color\"\ntoken = \"color-accent\"\ndefault = \"#ff0000\"",
@@ -372,13 +362,8 @@ fn a_theme_gets_the_kit_beneath_its_files_and_its_own_kit_file_wins() {
     let kit = |name: &str| nexus_ui_api::contract::KIT.iter().find(|(n, _)| *n == name).map(|(_, text)| *text).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let own = format!("// This theme's own commands.\n{}", kit("commands.slint"));
-    write_theme(dir.path(), "own-kit", "extends = \"default\"", &[("kit/commands.slint", own.as_str())]);
-    write_theme(
-        dir.path(),
-        "broken-kit",
-        "extends = \"default\"",
-        &[("kit/commands.slint", "export global Commands {}\n")],
-    );
+    write_theme(dir.path(), "own-kit", "", &[("kit/commands.slint", own.as_str())]);
+    write_theme(dir.path(), "broken-kit", "", &[("kit/commands.slint", "export global Commands {}\n")]);
     let mut host = composed(|h| h.discover(dir.path()));
     host.ui.start().unwrap();
     let served = |host: &Composed| host.ui.resolved().unwrap().slint_sources().unwrap()["kit/commands.slint"].clone();
@@ -403,7 +388,7 @@ fn exactly_one_theme_is_the_fallback() {
     assert_eq!(host.ui.current(), Some(&id(theme_default::ID)), "a first run shows the fallback theme");
 
     let dir = tempfile::tempdir().unwrap();
-    write_theme(dir.path(), "second", "fallback = true\nextends = \"default\"", &[]);
+    write_theme(dir.path(), "second", "fallback = true", &[]);
     let mut host = composed_first_run(|h| h.discover(dir.path()));
     let error = host.ui.start().unwrap_err();
     assert!(

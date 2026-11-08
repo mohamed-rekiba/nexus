@@ -1,7 +1,7 @@
 //! What a theme ships and what it can rely on.
 //!
-//! A theme folder holds `theme.toml`, `shell.slint` (optional when the parent has one),
-//! `screens/*.slint`, `components/*.slint` and asset files. The host serves these virtual
+//! A theme stands alone. Its folder holds `theme.toml`, `shell.slint`, every
+//! `screens/<screen>.slint`, any other `.slint` files it wants, and asset files. The host serves these virtual
 //! files to every theme; themes import them and must not ship files with these names:
 //!
 //! - `types.slint`: the `Vm` global (data) and `Host` global (callbacks).
@@ -14,13 +14,11 @@
 //! Rules the host checks before compiling:
 //! - No `@image-url`: images come from `Assets`, view models, or slot icons.
 //! - No font imports: declare fonts in `[theme.assets.fonts]`.
-//! - Each screen file exports its component under the name in [`ScreenId::component`], and
-//!   each component file under [`ComponentId::component`].
+//! - A theme ships every screen. Each screen file exports its component under the name in
+//!   [`ScreenId::component`].
 //! - Rendered slot items set `accessible-role: text; accessible-label: <slot>.label;`.
 
 use std::fmt::Write;
-
-use serde::{Deserialize, Serialize};
 
 use crate::ScreenId;
 use crate::tokens::{TOKENS, TokenKind};
@@ -98,66 +96,6 @@ impl ScreenId {
             Self::Plugin => "PluginScreen",
             Self::GameSettings => "GameSettingsScreen",
             Self::Running => "RunningScreen",
-        }
-    }
-}
-
-/// Building blocks a theme can override one by one.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ComponentId {
-    Card,
-    Button,
-    ListItem,
-    ProgressBar,
-    Dialog,
-    /// A row of badge slot items.
-    SlotBadges,
-    /// The action slot items of a game.
-    SlotActions,
-    /// The section slot items of a game.
-    SlotSections,
-}
-
-impl ComponentId {
-    pub const ALL: [ComponentId; 8] = [
-        Self::Card,
-        Self::Button,
-        Self::ListItem,
-        Self::ProgressBar,
-        Self::Dialog,
-        Self::SlotBadges,
-        Self::SlotActions,
-        Self::SlotSections,
-    ];
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Card => "card",
-            Self::Button => "button",
-            Self::ListItem => "list-item",
-            Self::ProgressBar => "progress-bar",
-            Self::Dialog => "dialog",
-            Self::SlotBadges => "slot-badges",
-            Self::SlotActions => "slot-actions",
-            Self::SlotSections => "slot-sections",
-        }
-    }
-
-    pub fn file(self) -> String {
-        format!("components/{}.slint", self.as_str())
-    }
-
-    pub fn component(self) -> &'static str {
-        match self {
-            Self::Card => "Card",
-            Self::Button => "Button",
-            Self::ListItem => "ListItem",
-            Self::ProgressBar => "ProgressBar",
-            Self::Dialog => "Dialog",
-            Self::SlotBadges => "SlotBadges",
-            Self::SlotActions => "SlotActions",
-            Self::SlotSections => "SlotSections",
         }
     }
 }
@@ -319,6 +257,21 @@ mod tests {
             assert!(name.ends_with(".slint"), "{name}");
             lint(source, None).unwrap_or_else(|m| panic!("kit/{name}: {m}"));
             assert!(!hex(&strip_comments(source)), "kit/{name} has a color that isn't a token");
+        }
+    }
+
+    #[test]
+    fn kit_files_import_only_the_host_s_files_and_each_other() {
+        for (name, source) in KIT {
+            let code = strip_comments(source);
+            for statement in
+                code.split(';').map(str::trim_start).filter(|s| s.starts_with("import") || s.starts_with("export {"))
+            {
+                let Some(target) = statement.rsplit('"').nth(1) else { continue };
+                let host_file = target.strip_prefix("../").is_some_and(|f| RESERVED_FILES.contains(&f));
+                let kit_file = KIT.iter().any(|(n, _)| *n == target);
+                assert!(host_file || kit_file, "kit/{name} imports {target:?}, which is a theme's file");
+            }
         }
     }
 

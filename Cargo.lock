@@ -4247,6 +4247,7 @@ dependencies = [
  "theme-classic",
  "theme-default",
  "tokio",
+ "toml",
  "zip",
  "zstd",
 ]
