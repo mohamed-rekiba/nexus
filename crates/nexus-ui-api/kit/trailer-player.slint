@@ -51,7 +51,7 @@ export component TrailerPlayer inherits Rectangle {
     changed pokes => { hide.restart(); }
     property <bool> controls: Trailers.controls || !Vm.trailer.playing;
     Timer { interval: 16ms; running: !root.entered; triggered => { root.entered = true; } }
-    background: root.entered ? #000000 : #00000000;
+    background: root.entered ? Tokens.color-shade : transparent;
     animate background { duration: Tokens.motion-normal; }
     TouchArea {
         clicked => { Trailers.poke(); Host.pause-trailer(); }
@@ -78,10 +78,10 @@ export component TrailerPlayer inherits Rectangle {
         width: 120 * Look.px;
         height: 120 * Look.px;
         border-radius: self.width / 2;
-        background: #00000080;
+        background: Tokens.color-shade.with-alpha(0.502);
         accessible-role: text;
         accessible-label: "trailer-paused";
-        Icon { name: "play"; color: #ffffff; width: 56 * Look.px; height: 56 * Look.px; }
+        Icon { name: "play"; color: Tokens.color-tint; width: 56 * Look.px; height: 56 * Look.px; }
     }
     // The game's name at the top, with the controls.
     Rectangle {
@@ -89,7 +89,7 @@ export component TrailerPlayer inherits Rectangle {
         height: 140 * Look.px;
         opacity: root.controls ? 1 : 0;
         animate opacity { duration: Tokens.motion-normal; easing: ease-out-quad; }
-        background: @linear-gradient(180deg, #000000b0 0%, #00000000 100%);
+        background: @linear-gradient(180deg, Tokens.color-shade.with-alpha(0.69) 0%, transparent 100%);
         Text {
             x: Look.rtl ? parent.width - self.width - 60 * Look.px : 60 * Look.px;
             y: 40 * Look.px;
@@ -111,7 +111,7 @@ export component TrailerPlayer inherits Rectangle {
         opacity: root.controls ? 1 : 0;
         animate opacity { duration: Tokens.motion-normal; easing: ease-out-quad; }
         height: 180 * Look.px;
-        background: @linear-gradient(0deg, #000000d0 0%, #00000000 100%);
+        background: @linear-gradient(0deg, Tokens.color-shade.with-alpha(0.816) 0%, transparent 100%);
         // Above the key hints at the bottom. Right to left, the pause button is on the right, and
         // the bar fills from the right.
         pause := Rectangle {
@@ -120,11 +120,11 @@ export component TrailerPlayer inherits Rectangle {
             width: 56 * Look.px;
             height: 56 * Look.px;
             border-radius: self.width / 2;
-            background: pause-area.has-hover ? #ffffff2e : #ffffff1a;
+            background: pause-area.has-hover ? Tokens.color-tint.with-alpha(0.18) : Tokens.color-tint.with-alpha(0.102);
             accessible-role: button;
             accessible-label: "trailer-pause";
             accessible-action-default => { Host.pause-trailer(); }
-            Icon { name: Vm.trailer.playing ? "stop" : "play"; color: #ffffff; width: 26 * Look.px; height: 26 * Look.px; }
+            Icon { name: Vm.trailer.playing ? "stop" : "play"; color: Tokens.color-tint; width: 26 * Look.px; height: 26 * Look.px; }
             pause-area := TouchArea { mouse-cursor: pointer; clicked => { Host.pause-trailer(); } }
         }
         VerticalLayout {
@@ -146,12 +146,12 @@ export component TrailerPlayer inherits Rectangle {
             Rectangle {
                 height: 6 * Look.px;
                 border-radius: 3 * Look.px;
-                background: #ffffff33;
+                background: Tokens.color-tint.with-alpha(0.2);
                 Rectangle {
                     x: Look.rtl ? parent.width - self.width : 0;
                     width: Vm.trailer.duration > 0 ? parent.width * Math.min(1, Vm.trailer.position / Vm.trailer.duration) : 0;
                     border-radius: 3 * Look.px;
-                    background: #ffffff;
+                    background: Tokens.color-tint;
                     animate width { duration: Look.timed(250ms); }
                     accessible-role: text;
                     accessible-label: "trailer-progress";
@@ -168,12 +168,12 @@ export component TrailerPlayer inherits Rectangle {
         width: 56 * Look.px;
         height: 56 * Look.px;
         border-radius: self.width / 2;
-        background: close.has-hover ? #ffffff2e : #ffffff1a;
+        background: close.has-hover ? Tokens.color-tint.with-alpha(0.18) : Tokens.color-tint.with-alpha(0.102);
         accessible-role: button;
         accessible-label: "trailer-close";
         accessible-action-default => { Host.close-trailer(); }
         // A drawn cross: the theme's fonts have no "✕".
-        Icon { name: "close"; color: #ffffff; width: 26 * Look.px; height: 26 * Look.px; }
+        Icon { name: "close"; color: Tokens.color-tint; width: 26 * Look.px; height: 26 * Look.px; }
         close := TouchArea { mouse-cursor: pointer; clicked => { Host.close-trailer(); } }
     }
 }

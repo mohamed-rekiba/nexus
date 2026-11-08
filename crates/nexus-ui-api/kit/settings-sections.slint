@@ -1,6 +1,5 @@
 import { Vm, Host } from "../types.slint";
-import { Commands } from "../kit/commands.slint";
-import { Assets } from "../assets.slint";
+import { Commands } from "commands.slint";
 import { Tokens } from "../tokens.slint";
 import { Look } from "look.slint";
 import { Prefs, Row, Value, Editor, FolderRow } from "settings-rows.slint";
@@ -344,6 +343,8 @@ export component DownloadsSection inherits VerticalLayout {
 
 // What this computer has, and how each emulator's games run on it. It only shows.
 export component PcSection inherits VerticalLayout {
+    // The theme's logo, for the About card.
+    in property <image> logo;
     callback reveal(length, length);
 
         // What this computer has, then how each emulator's games run on it. The rows
@@ -408,11 +409,11 @@ export component PcSection inherits VerticalLayout {
         Rectangle { height: 24 * Look.px; }
         Rectangle {
             border-radius: 14 * Look.px;
-            background: #ffffff0b;
+            background: Tokens.color-tint.with-alpha(0.043);
             HorizontalLayout {
                 padding: 18 * Look.px;
                 spacing: 16 * Look.px;
-                Image { source: Assets.logo; width: 60 * Look.px; height: 60 * Look.px; image-fit: contain; }
+                Image { source: root.logo; width: 60 * Look.px; height: 60 * Look.px; image-fit: contain; }
                 VerticalLayout {
                     alignment: center;
                     spacing: 4 * Look.px;

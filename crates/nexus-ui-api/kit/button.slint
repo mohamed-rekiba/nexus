@@ -21,14 +21,14 @@ export component Button inherits Rectangle {
     min-width: label.preferred-width + 48 * Look.px;
     min-height: 48 * Look.px;
     border-radius: self.height / 2;
-    background: !root.enabled ? #ffffff08
-        : root.solid ? (root.lit ? #ffffff : #ffffffeb)
-        : root.lit ? #ffffff2e : #ffffff14;
+    background: !root.enabled ? Tokens.color-tint.with-alpha(0.031)
+        : root.solid ? (root.lit ? Tokens.color-tint : Tokens.color-tint.with-alpha(0.922))
+        : root.lit ? Tokens.color-tint.with-alpha(0.18) : Tokens.color-tint.with-alpha(0.078);
     border-width: root.ringed ? 3 * Look.px : 1px;
     // On a white button a white ring can't show: the accent does.
     border-color: !root.ringed ? Look.line : root.solid ? Tokens.color-accent : Look.ring;
     drop-shadow-blur: root.lit && root.solid ? 22 * Look.px : 0;
-    drop-shadow-color: #8cb9ff88;
+    drop-shadow-color: Tokens.color-accent-soft.with-alpha(0.533);
     opacity: root.enabled ? 1 : 0.5;
     transform-scale: touch.pressed ? 0.96 : root.lit ? 1.03 : 1;
     accessible-role: button;

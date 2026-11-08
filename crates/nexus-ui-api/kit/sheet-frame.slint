@@ -1,4 +1,4 @@
-import { Commands } from "../kit/commands.slint";
+import { Commands } from "commands.slint";
 import { Tokens } from "../tokens.slint";
 import { Look } from "look.slint";
 
@@ -14,8 +14,8 @@ export component SheetFrame inherits Rectangle {
     in property <bool> shadow;
     // False where the screen behind draws the wash and closes the sheet on a click outside.
     in property <bool> wash: true;
-    in property <color> panel-top: #111a33;
-    in property <color> panel-bottom: #0a1024;
+    in property <color> panel-top: Tokens.color-surface;
+    in property <color> panel-bottom: Tokens.color-panel;
     property <bool> entered;
     // Slint animates a change from a value it already worked out: read the start (off the
     // edge) now, then slide in after the first frame.
@@ -30,7 +30,7 @@ export component SheetFrame inherits Rectangle {
     Timer { interval: 16ms; running: !root.entered; triggered => { root.entered = true; } }
     // Slid in: from the edge when it opens, back out when it closes.
     property <bool> in-view: root.entered && root.open;
-    background: root.wash && root.in-view ? #03050ccc : #03050c00;
+    background: root.wash && root.in-view ? Tokens.color-overlay.with-alpha(0.8) : Tokens.color-overlay.with-alpha(0);
     animate background { duration: Tokens.motion-normal; }
     TouchArea { enabled: root.open && root.wash; clicked => { Commands.back(); } }
 
@@ -44,7 +44,7 @@ export component SheetFrame inherits Rectangle {
         width: self.width-now;
         background: @linear-gradient(180deg, root.panel-top 0%, root.panel-bottom 100%);
         drop-shadow-blur: root.shadow ? 40 * Look.px : 0;
-        drop-shadow-color: #00000099;
+        drop-shadow-color: Tokens.color-shade.with-alpha(0.6);
         border-width: 1px;
         border-color: Look.line;
         TouchArea {}

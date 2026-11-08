@@ -1,5 +1,5 @@
 import { Vm, Host, SystemJobItem } from "../types.slint";
-import { Commands } from "../kit/commands.slint";
+import { Commands } from "commands.slint";
 import { Tokens } from "../tokens.slint";
 import { Look } from "look.slint";
 import { Icon } from "icon.slint";
@@ -191,9 +191,9 @@ component PanelRow inherits Rectangle {
     callback clicked();
     height: 56 * Look.px;
     border-radius: 12 * Look.px;
-    background: root.focused ? #ffffff26 : ta.has-hover ? #ffffff12 : transparent;
+    background: root.focused ? Tokens.color-tint.with-alpha(0.149) : ta.has-hover ? Tokens.color-tint.with-alpha(0.071) : transparent;
     border-width: root.focused ? 2 * Look.px : 0;
-    border-color: #ffffff;
+    border-color: Tokens.color-tint;
     accessible-role: button;
     accessible-label: root.name;
     accessible-value: root.value;
@@ -239,11 +239,11 @@ export component SystemSheet inherits Rectangle {
         y: 96 * Look.px;
         height: Math.min(root.height - self.y - 40 * Look.px, body.preferred-height);
         border-radius: 22 * Look.px;
-        background: #121b36f2;
+        background: Tokens.color-surface.with-alpha(0.949);
         border-width: 1px;
         border-color: Look.line;
         drop-shadow-blur: 24 * Look.px;
-        drop-shadow-color: #00000080;
+        drop-shadow-color: Tokens.color-shade.with-alpha(0.502);
         accessible-role: list;
         accessible-label: "system-panel";
         accessible-value: Sys.open == 0 ? "network" : Sys.open == 1 ? "sound" : "bluetooth";
@@ -290,7 +290,7 @@ export component SystemSheet inherits Rectangle {
             if Sys.asking != "" : Rectangle {
                 height: 56 * Look.px;
                 border-radius: 12 * Look.px;
-                background: #ffffff14;
+                background: Tokens.color-tint.with-alpha(0.078);
                 border-width: 2 * Look.px;
                 border-color: Tokens.color-accent;
                 field := TextField {
@@ -358,7 +358,7 @@ export component SystemSheet inherits Rectangle {
                     width: parent.width - 36 * Look.px;
                     height: 6 * Look.px;
                     border-radius: 3 * Look.px;
-                    background: #ffffff1f;
+                    background: Tokens.color-tint.with-alpha(0.122);
                     Rectangle {
                         x: 0;
                         width: parent.width * Vm.system.volume / 100;

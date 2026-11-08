@@ -351,10 +351,10 @@ component OskKey inherits Rectangle {
     in property <length> text-size;
     in property <length> line;
     callback clicked();
-    background: root.lit ? #ffffff : root.on ? Tokens.color-accent : ta.has-hover ? #ffffff2e
-        : root.main ? #3d8bff38 : #ffffff17;
+    background: root.lit ? Tokens.color-tint : root.on ? Tokens.color-accent : ta.has-hover ? Tokens.color-tint.with-alpha(0.18)
+        : root.main ? Tokens.color-accent.with-alpha(0.22) : Tokens.color-tint.with-alpha(0.09);
     border-width: root.line;
-    border-color: root.lit ? #ffffff : root.main ? #3d8bff80 : #ffffff1c;
+    border-color: root.lit ? Tokens.color-tint : root.main ? Tokens.color-accent.with-alpha(0.502) : Tokens.color-tint.with-alpha(0.11);
     animate background { duration: Tokens.motion-fast; }
     accessible-role: button;
     accessible-label: "osk-key";
@@ -404,11 +404,11 @@ export component OnScreenKeyboard inherits Rectangle {
         // Over the key hints at the bottom.
         y: root.snap(root.height - self.height - 104 * Look.px);
         border-radius: root.snap(24 * Look.px);
-        background: #0e1526f7;
+        background: Tokens.color-surface.with-alpha(0.969);
         border-width: 1px;
-        border-color: #ffffff28;
+        border-color: Tokens.color-tint.with-alpha(0.157);
         drop-shadow-blur: root.snap(40 * Look.px);
-        drop-shadow-color: #000000a0;
+        drop-shadow-color: Tokens.color-shade.with-alpha(0.627);
         accessible-role: groupbox;
         accessible-label: "osk";
         accessible-value: (Osk.symbols ? "symbols" : "letters") + (Osk.shift && !Osk.symbols ? " shift" : "");
@@ -434,9 +434,9 @@ export component OnScreenKeyboard inherits Rectangle {
             width: root.grid-width;
             height: root.preview-height;
             border-radius: root.snap(14 * Look.px);
-            background: #00000059;
+            background: Tokens.color-shade.with-alpha(0.349);
             border-width: root.line;
-            border-color: #ffffff;
+            border-color: Tokens.color-tint;
             preview := Text {
                 x: Look.rtl ? parent.width - self.width - root.inset : root.inset;
                 width: Math.min(self.preferred-width, parent.width - 2 * root.inset - root.line * 2);

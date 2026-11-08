@@ -1,7 +1,8 @@
+import { Tokens } from "../tokens.slint";
 // The old launcher's icons (assets/icons/*.svg), drawn as paths: a theme ships no SVG files.
 export component Icon inherits Path {
     in property <string> name;
-    in property <color> color: #ffffff;
+    in property <color> color: Tokens.color-tint;
     viewbox-width: 24;
     viewbox-height: 24;
     fill: root.color;

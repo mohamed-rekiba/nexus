@@ -20,8 +20,14 @@ fn the_classic_theme_is_complete_and_compiles() {
     for screen in ScreenId::ALL {
         assert!(files.read(&RelPath::new(screen.file()).unwrap()).is_some(), "classic has no {}", screen.file());
     }
+    // Each contract component is Classic's own or the kit's.
+    let in_kit = |file: &str| {
+        let name = file.trim_start_matches("components/");
+        nexus_ui_api::contract::KIT.iter().any(|(n, _)| *n == name)
+    };
     for component in ComponentId::ALL {
-        assert!(files.read(&RelPath::new(component.file()).unwrap()).is_some(), "classic has no {}", component.file());
+        let file = component.file();
+        assert!(files.read(&RelPath::new(file.clone()).unwrap()).is_some() || in_kit(&file), "no {file}");
     }
 
     let mut host = composed(|h| h);

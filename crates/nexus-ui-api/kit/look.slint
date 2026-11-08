@@ -1,7 +1,7 @@
 import { Vm } from "../types.slint";
 import { Tokens } from "../tokens.slint";
 
-// Values the Classic theme's screens share. The old launcher lays everything out on a 1920×1080 canvas;
+// Values the kit's widgets and every theme's screens share. The old launcher lays everything out on a 1920×1080 canvas;
 // `k` maps that canvas to the window, so a size here is `N * Look.k` for N px at 1080p.
 export global Look {
     out property <bool> rtl: Tokens.layout-direction == "rtl";
@@ -23,18 +23,18 @@ export global Look {
     // Not an animation: it stays with Animations off.
     out property <duration> select-after: 100ms;
 
-    // Colors of ui/theme.slint that have no token.
-    out property <color> text3: #7d88a3;
-    out property <color> line: #ffffff1c;
+    // Colors the kit's widgets share, drawn from the tokens.
+    out property <color> text3: Tokens.color-text-faint;
+    out property <color> line: Tokens.color-tint.with-alpha(0.11);
     // A button on a dark band, and the same button under the keys.
-    out property <color> fill: #ffffff14;
-    out property <color> fill-lit: #ffffff26;
-    out property <color> glow: #0a6cff8c;
-    out property <color> ring: #ffffff;
-    out property <color> ink: #0a0d18;
+    out property <color> fill: Tokens.color-tint.with-alpha(0.078);
+    out property <color> fill-lit: Tokens.color-tint.with-alpha(0.149);
+    out property <color> glow: Tokens.color-accent.with-alpha(0.549);
+    out property <color> ring: Tokens.color-focus;
+    out property <color> ink: Tokens.color-on-focus;
     // The Library's header band, and the fades at the edges of the genre row over it.
-    out property <color> band: #070a14;
-    out property <color> band-clear: #070a1400;
+    out property <color> band: Tokens.color-bg;
+    out property <color> band-clear: Tokens.color-bg.with-alpha(0);
     out property <duration> move: Tokens.motion-normal > 0 ? 240ms : 0ms;
     // A fixed animation time: `time` with Animations on, 0 with Animations off, as the
     // motion tokens.
@@ -44,10 +44,10 @@ export global Look {
     // orange, nothing red, unknown grey.
     public pure function compat-color(level: string) -> color {
         level == "playable" || level == "ingame" ? Tokens.color-success
-            : level == "menus" ? #ffd24d
-            : level == "boots" ? #ff9f43
+            : level == "menus" ? Tokens.color-caution
+            : level == "boots" ? Tokens.color-warning
             : level == "nothing" ? Tokens.color-danger
-            : #8a93ab
+            : Tokens.color-text-faint
     }
     // An emulator download's state from the core, in the player's words.
     public pure function job-state-label(state: string) -> string {
@@ -65,7 +65,7 @@ export global Look {
         tier == "platinum" || tier == "gold" || tier == "native" ? Tokens.color-success
             : tier == "borked" ? Tokens.color-danger
             : tier == "silver" || tier == "bronze" ? Tokens.color-warning
-            : #8a93ab
+            : Tokens.color-text-faint
     }
     // How a game runs on this PC as a color: green runs well, orange may run slowly, red
     // won't start or doesn't fit.
@@ -73,7 +73,7 @@ export global Look {
         level == "good" ? Tokens.color-success
             : level == "slow" ? Tokens.color-warning
             : level == "no" ? Tokens.color-danger
-            : #8a93ab
+            : Tokens.color-text-faint
     }
     // A badge tone's color.
     public pure function tone(tone: string) -> color {
@@ -92,19 +92,19 @@ export global Look {
     }
     // The art a game without a cover shows: its system's color, deep.
     public pure function console-art(system: color) -> brush {
-        system.alpha == 0 ? @linear-gradient(160deg, #26304f 0%, #0e1222 100%)
+        system.alpha == 0 ? @linear-gradient(160deg, Tokens.color-surface-raised 0%, Tokens.color-panel 100%)
             : @linear-gradient(160deg, deep(system, 0.3) 0%, deep(system, 0.12) 100%)
     }
     // A card's system badge, big enough to tell systems apart at a glance: a dark fill, an edge
     // and text in the system's color.
     public pure function console-fill(system: color) -> color {
-        system.alpha == 0 ? #000000d9 : deep(system, 0.36).with-alpha(0.91)
+        system.alpha == 0 ? Tokens.color-shade.with-alpha(0.851) : deep(system, 0.36).with-alpha(0.91)
     }
     public pure function console-edge(system: color) -> color {
-        system.alpha == 0 ? #ffffff59 : system.with-alpha(0.5)
+        system.alpha == 0 ? Tokens.color-tint.with-alpha(0.349) : system.with-alpha(0.5)
     }
     public pure function console-ink(system: color) -> color {
-        system.alpha == 0 ? #ffffff : system.mix(#ffffff, 0.75)
+        system.alpha == 0 ? Tokens.color-tint : system.mix(Tokens.color-tint, 0.75)
     }
     // How easy a release is to download, as a color: good green, low amber, none or unknown
     // grey.
@@ -120,7 +120,7 @@ export global Look {
         level == "ingame" ? "Reaches gameplay" : level == "menus" ? "Main menu" : level == "boots" ? "Intro logos" : level == "nothing" ? "Doesn't start" : ""
     }
     public pure function result-color(level: string) -> color {
-        level == "ingame" ? Tokens.color-success : level == "menus" ? #ffd24d : level == "boots" ? #ff9f43 : Tokens.color-danger
+        level == "ingame" ? Tokens.color-success : level == "menus" ? Tokens.color-caution : level == "boots" ? Tokens.color-warning : Tokens.color-danger
     }
     // "Shooter · Arcade": the first two, as the old launcher's genre chip.
     public pure function join(items: [string]) -> string {
