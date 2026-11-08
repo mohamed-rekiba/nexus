@@ -1,6 +1,6 @@
-//! Finding themes, resolving inheritance and checking files. No Slint here.
+//! Finding themes, applying their options and checking their files. No Slint here.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -8,11 +8,11 @@ use std::time::SystemTime;
 use nexus_api::{Files, PluginId, PluginKind, RelPath};
 use nexus_core::Core;
 use nexus_ui_api::contract::{self, RESERVED_FILES, SHELL_FILE};
-use nexus_ui_api::{Art, ComponentId, MergedTheme, ScreenId, ThemeError, ThemeManifest, merge_chain};
+use nexus_ui_api::{Art, MergedTheme, ScreenId, ThemeError, ThemeManifest};
 
-/// One theme in a chain: its manifest and its files.
+/// An installed theme: its manifest and its files.
 #[derive(Clone)]
-pub struct ThemeLayer {
+pub struct InstalledTheme {
     pub manifest: ThemeManifest,
     pub files: Arc<dyn Files>,
 }
@@ -20,7 +20,7 @@ pub struct ThemeLayer {
 /// Every installed theme.
 #[derive(Clone, Default)]
 pub struct ThemeSet {
-    themes: BTreeMap<PluginId, ThemeLayer>,
+    themes: BTreeMap<PluginId, InstalledTheme>,
 }
 
 impl ThemeSet {
@@ -39,7 +39,7 @@ impl ThemeSet {
             };
             match kernel.theme_files(&id) {
                 Ok(files) => {
-                    themes.insert(id, ThemeLayer { manifest, files });
+                    themes.insert(id, InstalledTheme { manifest, files });
                 }
                 Err(e) => tracing::warn!(plugin_id = %id, error = %e, "theme skipped"),
             }
@@ -47,8 +47,8 @@ impl ThemeSet {
         Self { themes }
     }
 
-    pub fn insert(&mut self, layer: ThemeLayer) {
-        self.themes.insert(layer.manifest.id().clone(), layer);
+    pub fn insert(&mut self, theme: InstalledTheme) {
+        self.themes.insert(theme.manifest.id().clone(), theme);
     }
 
     pub fn ids(&self) -> impl Iterator<Item = &PluginId> {
@@ -74,47 +74,22 @@ impl ThemeSet {
         }
     }
 
-    /// The theme and its parents, the theme first.
-    pub fn chain(&self, id: &PluginId) -> Result<Vec<ThemeLayer>, ThemeError> {
-        let mut chain: Vec<ThemeLayer> = Vec::new();
-        let mut next = Some(id.clone());
-        while let Some(current) = next.take() {
-            if chain.iter().any(|l| l.manifest.id() == &current) {
-                let ids = chain.iter().map(|l| l.manifest.id().clone()).collect();
-                return Err(ThemeError::Cycle { theme: id.clone(), chain: ids });
-            }
-            let layer = self.themes.get(&current).cloned().ok_or_else(|| match chain.last() {
-                Some(child) => {
-                    ThemeError::MissingParent { theme: child.manifest.id().clone(), parent: current.clone() }
-                }
-                None => ThemeError::Unknown(current.clone()),
-            })?;
-            next = layer.manifest.theme.extends.clone();
-            chain.push(layer);
-        }
-        Ok(chain)
-    }
-
     /// Resolves `id` with the player's option values.
     pub fn resolve(&self, id: &PluginId, options: &serde_json::Value) -> Result<ResolvedTheme, ThemeError> {
-        let layers = self.chain(id)?;
-        let ui_api = nexus_ui_api::ui_api_version();
-        for layer in &layers {
-            layer.manifest.check_ui_api(&ui_api)?;
-        }
-        let manifests: Vec<&ThemeManifest> = layers.iter().map(|l| &l.manifest).collect();
-        let merged = merge_chain(&manifests, options)?;
-        let resolved = ResolvedTheme { merged, layers };
+        let theme = self.themes.get(id).cloned().ok_or_else(|| ThemeError::Unknown(id.clone()))?;
+        theme.manifest.check_ui_api(&nexus_ui_api::ui_api_version())?;
+        let merged = nexus_ui_api::merge(&theme.manifest, options)?;
+        let resolved = ResolvedTheme { merged, theme };
         resolved.check()?;
         Ok(resolved)
     }
 }
 
-/// A theme with its chain, ready to compile.
+/// A theme with its options applied, ready to compile.
 #[derive(Clone)]
 pub struct ResolvedTheme {
     pub merged: MergedTheme,
-    pub layers: Vec<ThemeLayer>,
+    pub theme: InstalledTheme,
 }
 
 impl ResolvedTheme {
@@ -122,63 +97,52 @@ impl ResolvedTheme {
         &self.merged.id
     }
 
-    /// The first layer (the theme, then its parents) that has `path`.
-    pub fn find(&self, path: &RelPath) -> Option<(usize, Vec<u8>)> {
-        self.layers.iter().enumerate().find_map(|(i, l)| l.files.read(path).map(|bytes| (i, bytes)))
+    fn file_error(&self, file: &str, message: String) -> ThemeError {
+        ThemeError::File { theme: self.id().clone(), file: file.to_owned(), message }
     }
 
-    fn file_error(&self, layer: usize, file: &str, message: String) -> ThemeError {
-        ThemeError::File { theme: self.layers[layer].manifest.id().clone(), file: file.to_owned(), message }
+    fn asset_error(&self, asset: &RelPath, message: &str) -> ThemeError {
+        ThemeError::Asset { theme: self.id().clone(), asset: asset.to_string(), message: message.to_owned() }
+    }
+
+    /// The bytes of the theme's file at `path`, or an asset error naming it.
+    fn asset(&self, path: &RelPath) -> Result<Vec<u8>, ThemeError> {
+        self.theme.files.read(path).ok_or_else(|| self.asset_error(path, "is missing"))
     }
 
     /// Every `.slint` file the theme serves: the kit, then the theme's own files over it, with
-    /// inheritance applied and the theme's own rule checks done.
+    /// the theme's own rule checks done.
     pub fn slint_sources(&self) -> Result<BTreeMap<String, String>, ThemeError> {
-        let mut sources = BTreeMap::new();
         // The kit first, so a theme's own `kit/<name>.slint` replaces it.
-        let kit: BTreeMap<String, String> = contract::KIT
+        let mut files: BTreeMap<String, String> = contract::KIT
             .iter()
             .map(|(name, text)| (format!("{}/{name}", contract::KIT_DIR), (*text).to_owned()))
             .collect();
-        for (layer, theme) in self.layers.iter().enumerate().rev() {
-            for path in theme.files.list() {
-                if path.extension() != Some("slint") {
-                    continue;
-                }
-                let bytes = theme.files.read(&path).unwrap_or_default();
-                let text = String::from_utf8(bytes)
-                    .map_err(|_| self.file_error(layer, path.as_str(), "is not UTF-8".into()))?;
-                sources.insert(path.as_str().to_owned(), (layer, text));
-            }
-        }
         let expected = expected_exports();
-        for (path, (layer, text)) in &sources {
-            contract::lint(text, expected.get(path.as_str()).copied()).map_err(|m| self.file_error(*layer, path, m))?;
+        for path in self.theme.files.list() {
+            if path.extension() != Some("slint") {
+                continue;
+            }
+            let bytes = self.theme.files.read(&path).unwrap_or_default();
+            let text = String::from_utf8(bytes).map_err(|_| self.file_error(path.as_str(), "is not UTF-8".into()))?;
+            contract::lint(&text, expected.get(path.as_str()).copied())
+                .map_err(|m| self.file_error(path.as_str(), m))?;
+            files.insert(path.as_str().to_owned(), text);
         }
-        let mut files = kit;
-        files.extend(sources.into_iter().map(|(path, (_, text))| (path, text)));
         Ok(files)
     }
 
-    /// Checks that hold before compiling: reserved names, declared screens and components,
-    /// a shell somewhere in the chain.
+    /// Checks that hold before compiling: no file the host serves, a shell and every screen.
     fn check(&self) -> Result<(), ThemeError> {
-        for (layer, theme) in self.layers.iter().enumerate() {
-            for reserved in RESERVED_FILES {
-                if theme.files.read(&RelPath::new(reserved).expect("valid")).is_some() {
-                    return Err(self.file_error(layer, reserved, "is served by the host; remove it".into()));
-                }
-            }
-            let section = &theme.manifest.theme;
-            let declared = section.screens.iter().map(|s| s.file()).chain(section.components.iter().map(|c| c.file()));
-            for file in declared {
-                if theme.files.read(&RelPath::new(file.clone()).expect("valid")).is_none() {
-                    return Err(self.file_error(layer, &file, "is declared in theme.toml but missing".into()));
-                }
-            }
+        let has = |file: &str| self.theme.files.read(&RelPath::new(file).expect("valid")).is_some();
+        if let Some(reserved) = RESERVED_FILES.into_iter().find(|f| has(f)) {
+            return Err(self.file_error(reserved, "is served by the host; remove it".into()));
         }
-        if self.find(&RelPath::new(SHELL_FILE).expect("valid")).is_none() {
-            return Err(self.file_error(0, SHELL_FILE, "no theme in the chain has one".into()));
+        let required = std::iter::once(SHELL_FILE.to_owned()).chain(ScreenId::ALL.into_iter().map(|s| s.file()));
+        for file in required {
+            if !has(&file) {
+                return Err(self.file_error(&file, "is missing: a theme ships its shell and every screen".into()));
+            }
         }
         Ok(())
     }
@@ -189,21 +153,16 @@ impl ResolvedTheme {
             .fonts
             .iter()
             .map(|font| {
-                let layer = &self.layers[font.layer];
-                let error = |message: &str| ThemeError::Asset {
-                    theme: layer.manifest.id().clone(),
-                    asset: font.path.to_string(),
-                    message: message.to_owned(),
-                };
-                let Some(root) = layer.files.root() else {
+                let error = |message: &str| self.asset_error(font, message);
+                let Some(root) = self.theme.files.root() else {
                     // A theme built into the binary has no folder. Slint imports fonts by path,
                     // so its fonts are written once to a cache folder.
-                    let bytes = layer.files.read(&font.path).ok_or_else(|| error("is missing"))?;
-                    return cached_font(layer.manifest.id().as_str(), &font.path, &bytes)
+                    let bytes = self.asset(font)?;
+                    return cached_font(self.id().as_str(), font, &bytes)
                         .map_err(|e| error(&format!("can't be cached: {e}")));
                 };
                 let root = root.canonicalize().map_err(|_| error("the theme folder is gone"))?;
-                let path = font.path.under(&root).canonicalize().map_err(|_| error("is missing"))?;
+                let path = font.under(&root).canonicalize().map_err(|_| error("is missing"))?;
                 if !path.starts_with(&root) {
                     return Err(error("leaves the theme folder"));
                 }
@@ -214,72 +173,37 @@ impl ResolvedTheme {
 
     /// Bytes of each declared image.
     pub fn images(&self) -> Result<BTreeMap<String, Vec<u8>>, ThemeError> {
-        self.merged
-            .images
-            .iter()
-            .map(|(name, image)| {
-                let layer = &self.layers[image.layer];
-                let bytes = layer.files.read(&image.path).ok_or_else(|| ThemeError::Asset {
-                    theme: layer.manifest.id().clone(),
-                    asset: image.path.to_string(),
-                    message: "is missing".into(),
-                })?;
-                Ok((name.clone(), bytes))
-            })
-            .collect()
+        self.merged.images.iter().map(|(name, path)| Ok((name.clone(), self.asset(path)?))).collect()
     }
 
     /// Bytes of each system's icon and cover the theme sets, by system id.
     pub fn system_art(&self) -> Result<BTreeMap<String, Art<Vec<u8>>>, ThemeError> {
-        let read = |_, at: nexus_ui_api::LayerPath| {
-            let layer = &self.layers[at.layer];
-            layer.files.read(&at.path).ok_or_else(|| ThemeError::Asset {
-                theme: layer.manifest.id().clone(),
-                asset: at.path.to_string(),
-                message: "is missing".into(),
-            })
-        };
-        self.merged.system_art.iter().map(|(system, art)| Ok((system.clone(), art.clone().try_map(read)?))).collect()
+        self.merged
+            .system_art
+            .iter()
+            .map(|(system, art)| Ok((system.clone(), art.clone().try_map(|_, path| self.asset(&path))?)))
+            .collect()
     }
 
     /// The theme's sound files, by name.
     pub fn sounds(&self) -> Result<BTreeMap<String, Vec<u8>>, ThemeError> {
-        self.merged
-            .sounds
-            .iter()
-            .map(|(name, sound)| {
-                let layer = &self.layers[sound.layer];
-                let bytes = layer.files.read(&sound.path).ok_or_else(|| ThemeError::Asset {
-                    theme: layer.manifest.id().clone(),
-                    asset: sound.path.to_string(),
-                    message: "is missing".into(),
-                })?;
-                Ok((name.clone(), bytes))
-            })
-            .collect()
+        self.merged.sounds.iter().map(|(name, path)| Ok((name.clone(), self.asset(path)?))).collect()
     }
 
-    /// Folders on disk in the chain, for dev-mode reload.
+    /// The theme's folder on disk, for dev-mode reload.
     pub fn disk_roots(&self) -> Vec<PathBuf> {
-        self.layers.iter().filter_map(|l| l.files.root()).collect()
+        self.theme.files.root().into_iter().collect()
     }
 
-    /// The newest change time of any file in the chain's folders on disk.
+    /// The newest change time of any file in the theme's folder on disk.
     pub fn stamp(&self) -> Option<SystemTime> {
-        self.layers
-            .iter()
-            .filter_map(|l| Some((l.files.root()?, l.files.list())))
-            .flat_map(|(root, files)| files.into_iter().map(move |f| f.under(&root)))
-            .filter_map(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())
-            .max()
-    }
-
-    /// Screens this theme takes from a parent rather than defining itself.
-    pub fn inherited_screens(&self) -> BTreeSet<ScreenId> {
-        ScreenId::ALL
+        let root = self.theme.files.root()?;
+        self.theme
+            .files
+            .list()
             .into_iter()
-            .filter(|s| self.layers[0].files.read(&RelPath::new(s.file()).expect("valid")).is_none())
-            .collect()
+            .filter_map(|f| std::fs::metadata(f.under(&root)).and_then(|m| m.modified()).ok())
+            .max()
     }
 }
 
@@ -287,7 +211,6 @@ fn expected_exports() -> BTreeMap<String, &'static str> {
     ScreenId::ALL
         .into_iter()
         .map(|s| (s.file(), s.component()))
-        .chain(ComponentId::ALL.into_iter().map(|c| (c.file(), c.component())))
         .chain([(SHELL_FILE.to_owned(), contract::SHELL_COMPONENT)])
         .collect()
 }

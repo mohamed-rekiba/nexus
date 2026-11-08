@@ -1,4 +1,4 @@
-//! Renders a stub library on every Classic theme screen, and in a child theme, to PNG files, with
+//! Renders a stub library on every Classic theme screen, and in another theme, to PNG files, with
 //! Slint's software renderer and no window. Its own test binary: it installs its own Slint
 //! platform.
 
@@ -1129,7 +1129,7 @@ fn the_classic_screens_render_right_to_left() {
 }
 
 #[test]
-fn a_child_theme_renders_the_same_library() {
+fn another_theme_renders_the_same_library() {
     let (window, out) = offscreen();
     let home = tempfile::tempdir().unwrap();
     let mut host = library(home.path());

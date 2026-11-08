@@ -26,4 +26,4 @@ pub use images::{Crop, ImageKey, ImageSize, MAX_HEIGHT, MAX_WIDTH, Prepared, Sti
 pub use input::{PadAction, PadButton};
 pub use loader::sweep_thumbs;
 pub use shell::{AppShell, IMAGES_GAP, Platform, RENDER_GAP, RequestQueue, ShellOptions, TICK, TrailerPoll};
-pub use themes::{ResolvedTheme, ThemeLayer, ThemeSet};
+pub use themes::{InstalledTheme, ResolvedTheme, ThemeSet};

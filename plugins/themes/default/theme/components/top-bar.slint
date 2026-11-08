@@ -7,9 +7,9 @@ import { Icon } from "../kit/icon.slint";
 import { NetIcon, SoundIcon, BluetoothIcon, BatteryIcon, Sys } from "../kit/system-panel.slint";
 import { SystemChips } from "chip-row.slint";
 
-// The Default theme's copy of the Classic theme's top bar. Where Classic has its Home
-// and Library tabs, it has one button back to the list of systems, while a system's games show,
-// and after it the Library's systems (in the Catalog, the Catalog's). The far side is Classic's.
+// The top bar. In place of Home and Library tabs, it has one button back to the list of
+// systems, while a system's games show, and after it the Library's systems (in the Catalog,
+// the Catalog's). The far side holds the screen buttons and, on Nexus OS, the system icons.
 component BackButton inherits Rectangle {
     callback clicked();
     width: row.preferred-width;

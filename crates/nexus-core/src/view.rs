@@ -1058,9 +1058,12 @@ fn settings_vm(s: &Snapshot) -> SettingsVm {
         .collect();
     let theme_options = match &state.theme {
         Some(theme) => {
-            let chain = theme_chain(plugins, theme);
-            let refs: Vec<&ThemeManifest> = chain.iter().collect();
-            let schema = options_schema(&merge_options(&refs));
+            let options = plugins
+                .manifest(theme)
+                .and_then(|m| ThemeManifest::from_plugin(m).ok())
+                .map(|m| m.theme.options)
+                .unwrap_or_default();
+            let schema = options_schema(&options);
             crate::settings_schema::fields(&schema, &s.theme_options)
         }
         None => Vec::new(),
@@ -1513,21 +1516,6 @@ fn running_vm(snapshot: &Snapshot, route: &Route) -> Option<RunningVm> {
         in_front: sessions.game_in_front,
         keymap: manifest.map(|m| m.keymap.clone()).unwrap_or_default(),
     })
-}
-
-/// A theme's manifest and its parents' (the theme first). Stops at a missing or bad manifest.
-fn theme_chain(plugins: &Plugins, theme: &PluginId) -> Vec<ThemeManifest> {
-    let mut chain: Vec<ThemeManifest> = Vec::new();
-    let mut next = Some(theme.clone());
-    while let Some(id) = next.take() {
-        if chain.iter().any(|m| m.id() == &id) {
-            break;
-        }
-        let Some(manifest) = plugins.manifest(&id).and_then(|m| ThemeManifest::from_plugin(m).ok()) else { break };
-        next = manifest.theme.extends.clone();
-        chain.push(manifest);
-    }
-    chain
 }
 
 /// What an emulator's games play with: a controller, and the keyboard when the manifest lists

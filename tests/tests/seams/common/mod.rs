@@ -299,9 +299,35 @@ pub fn rest(host: &mut Composed) {
     host.pump();
 }
 
-/// Writes a data-only theme folder `<parent>/<theme_id>` with `theme.toml` built from
-/// `theme_section` and the given files.
+/// Writes a whole data-only theme `<parent>/<theme_id>`: a copy of the Default theme's files
+/// under that id, with `theme_section` (lines of its `[theme]` section and any tables below it)
+/// merged over Default's manifest, then `files` over its files. It isn't the fallback theme
+/// unless `theme_section` says so.
 pub fn write_theme(parent: &Path, theme_id: &str, theme_section: &str, files: &[(&str, &str)]) {
+    let dir = parent.join(theme_id);
+    let default = theme_default::DefaultTheme::files();
+    for path in default.list() {
+        let file = path.under(&dir);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(file, default.read(&path).unwrap()).unwrap();
+    }
+    let text = String::from_utf8(default.read(&RelPath::new("theme.toml").unwrap()).unwrap()).unwrap();
+    let mut manifest: toml::Table = toml::from_str(&text).unwrap();
+    for (key, value) in [("id", theme_id), ("name", theme_id), ("version", "1.0.0")] {
+        manifest.insert(key.into(), value.into());
+    }
+    manifest.remove("activation");
+    manifest.insert("runtime".into(), toml::Value::Table(toml::from_str("type = \"data\"").unwrap()));
+    manifest["theme"].as_table_mut().unwrap().remove("fallback");
+    let ours: toml::Table = toml::from_str(&format!("[theme]\n{theme_section}")).unwrap();
+    merge_toml(&mut manifest, ours);
+    std::fs::write(dir.join("theme.toml"), toml::to_string(&manifest).unwrap()).unwrap();
+    write_files(&dir, files);
+}
+
+/// Writes a theme `<parent>/<theme_id>` with only `theme_section` in its `[theme]` section and
+/// only `files`: for themes the host must refuse.
+pub fn write_raw_theme(parent: &Path, theme_id: &str, theme_section: &str, files: &[(&str, &str)]) {
     let dir = parent.join(theme_id);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
@@ -312,6 +338,10 @@ pub fn write_theme(parent: &Path, theme_id: &str, theme_section: &str, files: &[
         ),
     )
     .unwrap();
+    write_files(&dir, files);
+}
+
+fn write_files(dir: &Path, files: &[(&str, &str)]) {
     for (path, text) in files {
         let path = dir.join(path);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -319,7 +349,19 @@ pub fn write_theme(parent: &Path, theme_id: &str, theme_section: &str, files: &[
     }
 }
 
-/// The test-only theme in `tests/fixtures/themes`: a grid that extends the Default theme.
+/// `ours` over `base`: tables merge key by key, other values replace.
+fn merge_toml(base: &mut toml::Table, ours: toml::Table) {
+    for (key, value) in ours {
+        match (base.get_mut(&key), value) {
+            (Some(toml::Value::Table(base)), toml::Value::Table(ours)) => merge_toml(base, ours),
+            (_, value) => {
+                base.insert(key, value);
+            }
+        }
+    }
+}
+
+/// The test-only theme in `tests/fixtures/themes`: a light grid theme.
 pub fn fixture_themes() -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/themes")
 }

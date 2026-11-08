@@ -15,8 +15,6 @@ activation = "eager"
 ui_api = "^0.2.0"
 # The theme the app starts with, falls back to, and uses in safe mode.
 fallback = true
-screens = ["home", "game-detail", "catalog", "downloads", "settings", "emulators", "themes", "plugin", "running", "game-settings"]
-components = ["card"]
 input = ["gamepad", "pointer"]
 navigation = "focus"
 
