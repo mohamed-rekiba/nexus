@@ -144,18 +144,30 @@ mod system {
         xdotool(&["getactivewindow", "getwindowpid"])?.parse().ok()
     }
 
+    /// Tags the windows `windows` with the app id `appid`: Gamescope shows them when the id
+    /// is in the root window's `GAMESCOPECTRL_BASELAYER_APPID`.
+    fn tag(windows: &[&str], appid: u32) {
+        for w in windows {
+            run("xprop", &["-id", w, "-f", "STEAM_GAME", "32c", "-set", "STEAM_GAME", &appid.to_string()]);
+        }
+    }
+
     /// Gamescope shows the windows whose `STEAM_GAME` id comes first in the root window's
     /// `GAMESCOPECTRL_BASELAYER_APPID`. The launcher stays behind a game as the fallback.
     fn gamescope_show(ids: &[u32], appid: u32) -> bool {
         let windows = windows(ids);
-        for w in &windows {
-            run("xprop", &["-id", w, "-f", "STEAM_GAME", "32c", "-set", "STEAM_GAME", &appid.to_string()]);
-        }
         if windows.is_empty() {
             return false;
         }
+        tag(&windows.iter().map(String::as_str).collect::<Vec<_>>(), appid);
         let order = if appid == LAUNCHER_APPID { appid.to_string() } else { format!("{appid},{LAUNCHER_APPID}") };
-        tracing::info!(appid, ?ids, ?windows, order, "gamescope: showing the windows of these processes");
+        tracing::info!(
+            appid,
+            ?ids,
+            ?windows,
+            order,
+            "gamescope: tagged the windows of these processes, and shows them"
+        );
         run(
             "xprop",
             &["-root", "-f", "GAMESCOPECTRL_BASELAYER_APPID", "32c", "-set", "GAMESCOPECTRL_BASELAYER_APPID", &order],
@@ -163,11 +175,10 @@ mod system {
         true
     }
 
-    /// The app id Gamescope shows first: the first of the root window's
-    /// `GAMESCOPECTRL_BASELAYER_APPID`, which reads `NAME(CARDINAL) = 1234, 7`.
-    fn shown_appid() -> Option<u32> {
-        let out = run("xprop", &["-root", "GAMESCOPECTRL_BASELAYER_APPID"])?;
-        out.split_once('=')?.1.split(',').next()?.trim().parse().ok()
+    /// The first app id in `xprop -root GAMESCOPECTRL_BASELAYER_APPID`'s answer, which reads
+    /// `GAMESCOPECTRL_BASELAYER_APPID(CARDINAL) = 1234, 7`: the id Gamescope shows.
+    pub(super) fn first_appid(xprop: &str) -> Option<u32> {
+        xprop.split_once('=')?.1.split(',').next()?.trim().parse().ok()
     }
 
     /// The name of process `pid`, for the log.
@@ -175,50 +186,53 @@ mod system {
         std::fs::read_to_string(format!("/proc/{pid}/comm")).map(|n| n.trim().to_owned()).unwrap_or_default()
     }
 
-    /// What `keep_game` last wrote to the log, so a game that stays behind writes it once.
-    static KEPT_LOG: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+    /// The windows on screen that `keep_game` saw before, with their processes. A window's
+    /// process is asked for once.
+    static SEEN: std::sync::Mutex<std::collections::BTreeMap<String, Option<u32>>> =
+        std::sync::Mutex::new(std::collections::BTreeMap::new());
 
-    /// Under Gamescope, while the game is the one shown: when Gamescope's focus isn't on a
-    /// window of the game's processes `ids`, tags their windows with the game's id, which
-    /// takes in the windows the game opened after it showed. Gamescope then shows them, in
-    /// place of the launcher behind them. The launcher shown (only its id in the list) is left
-    /// as it is.
+    /// Under Gamescope, while the game's app id is the one Gamescope shows: tags each window
+    /// of the game's processes `ids` that is new on screen with that id. The game's windows
+    /// that opened after it showed then show too, in place of the launcher. The log gets one
+    /// line for each new window: the game's, or another process's. With the launcher's id
+    /// shown (the player brought the launcher), nothing changes.
     pub fn keep_game(ids: &[u32]) {
-        if !gamescope() || super::kwin::Kwin::get().is_some() {
+        if !gamescope() {
             return;
         }
-        let Some(appid) = shown_appid().filter(|id| *id != LAUNCHER_APPID) else { return };
-        let focused = front();
-        if focused.is_some_and(|pid| ids.contains(&pid)) {
-            return;
-        }
-        let windows = windows(ids);
-        for w in &windows {
-            run("xprop", &["-id", w, "-f", "STEAM_GAME", "32c", "-set", "STEAM_GAME", &appid.to_string()]);
-        }
-        let focused = focused.map(|pid| format!("{pid} ({})", process_name(pid))).unwrap_or_else(|| "none".into());
-        let names: Vec<String> = ids.iter().map(|id| format!("{id} ({})", process_name(*id))).collect();
-        let line = format!(
-            "gamescope: the focus is on process {focused}, not the game's; tagged the game's windows {windows:?} \
-             with app id {appid}. The game's processes: {names:?}"
-        );
-        let mut last = KEPT_LOG.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        if *last != line {
-            // Once per change: every window on screen and its process, for a game window that
-            // belongs to a process outside the game's.
-            let all = xdotool(&["search", "--onlyvisible", "--name", ""]).unwrap_or_default();
-            let all: Vec<String> = all
-                .split_whitespace()
-                .map(|w| {
-                    let pid = xdotool(&["getwindowpid", w]).and_then(|p| p.parse::<u32>().ok());
-                    match pid {
-                        Some(pid) => format!("{w}: {pid} ({})", process_name(pid)),
-                        None => format!("{w}: no process"),
-                    }
-                })
-                .collect();
-            tracing::info!("{line}. Every window on screen: {all:?}");
-            *last = line;
+        let shown = run("xprop", &["-root", "GAMESCOPECTRL_BASELAYER_APPID"]);
+        let Some(appid) = shown.as_deref().and_then(first_appid).filter(|id| *id != LAUNCHER_APPID) else { return };
+        let Some(visible) = xdotool(&["search", "--onlyvisible", ""]) else { return };
+        let visible: Vec<&str> = visible.split_whitespace().collect();
+        let mut seen = SEEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        seen.retain(|w, _| visible.contains(&w.as_str()));
+        let new: Vec<(&str, Option<u32>)> = visible
+            .iter()
+            .filter(|w| !seen.contains_key(**w))
+            .map(|w| (*w, xdotool(&["getwindowpid", w]).and_then(|p| p.parse().ok())))
+            .collect();
+        let game: Vec<&str> =
+            new.iter().filter(|(_, pid)| pid.is_some_and(|p| ids.contains(&p))).map(|(w, _)| *w).collect();
+        tag(&game, appid);
+        for (w, pid) in &new {
+            match pid {
+                Some(pid) if ids.contains(pid) => tracing::info!(
+                    window = w,
+                    pid,
+                    process = process_name(*pid),
+                    appid,
+                    "gamescope: a new window of the game; tagged it"
+                ),
+                Some(pid) => tracing::info!(
+                    window = w,
+                    pid,
+                    process = process_name(*pid),
+                    game = ?ids,
+                    "gamescope: a new window of a process outside the game"
+                ),
+                None => tracing::info!(window = w, "gamescope: a new window with no process id"),
+            }
+            seen.insert((*w).to_owned(), *pid);
         }
     }
 
@@ -769,6 +783,16 @@ pub mod login {
 
 #[cfg(test)]
 mod tests {
+    /// Gamescope shows the first app id in its root window's list.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_app_id_gamescope_shows_is_the_first_in_its_list() {
+        use super::system::first_appid;
+        assert_eq!(first_appid("GAMESCOPECTRL_BASELAYER_APPID(CARDINAL) = 4242, 7"), Some(4242));
+        assert_eq!(first_appid("GAMESCOPECTRL_BASELAYER_APPID(CARDINAL) = 7"), Some(7));
+        assert_eq!(first_appid("GAMESCOPECTRL_BASELAYER_APPID:  not found."), None);
+    }
+
     /// The script answers to the launcher's bus name, through `/nexus`, after KWin's names.
     #[cfg(target_os = "linux")]
     #[test]

@@ -280,7 +280,8 @@ the ports it names. The kernel has no getter for a single port.
   its process group, and what a sandbox moved out of the group. `end` closes or kills them, and
   `find(text)` finds the processes with that text in their command line (Unix only).
 - `Windows` says which window is in front, brings the game's window or the launcher's up, and
-  answers `has_window`, `window_close_ends_game` and `problem`.
+  answers `has_window`, `window_close_ends_game` and `problem`. `keep_game` tells Gamescope about
+  the windows a game opened after it showed; on other desktops it does nothing.
 - `LoginSession` starts the launcher at login and installs the launcher's own package with
   the administrator prompt.
 - `Opener` opens a link or a path with the system's opener.
@@ -430,8 +431,9 @@ A launch needs the plugin first, so the core resolves it (`launch.rs`):
 
 The watch (`sessions/watch.rs`) follows the session until it ends. A game is its processes, as
 `ProcessTree::members` lists them, and it ends when none is left. Until the game has a window or
-`show_timeout` passes, the watch tries `show_game` every `SHOW_EVERY`. After that it reads `front`
-and `has_window` every `watch_every`. On a system where `window_close_ends_game` is true (macOS),
+`show_timeout` passes, the watch tries `show_game` every `SHOW_EVERY`. After that, every
+`watch_every`, it calls `keep_game` (unless the player brought the launcher with the PS button),
+then reads `front` and `has_window`. On a system where `window_close_ends_game` is true (macOS),
 a window that was seen and is gone for `WINDOW_GONE_FOR` reads in a row stops the game.
 
 A launch can hand the game to another program: `LaunchSpec.game_process` holds words of the game's

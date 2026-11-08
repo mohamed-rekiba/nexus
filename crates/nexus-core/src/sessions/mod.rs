@@ -146,6 +146,9 @@ struct State {
     /// The last window the launcher brought to the front was the game's. It stands in for
     /// the desktop when the desktop doesn't say which window is in front.
     game_in_front: bool,
+    /// The player brought the launcher in front of the game (the PS button). Until the game
+    /// comes back, the watch doesn't keep the game's windows on screen.
+    launcher_asked: bool,
     /// A launch is between its checks and its session: no other game may start.
     launching: bool,
     stops: HashMap<SessionId, oneshot::Sender<()>>,
@@ -251,6 +254,14 @@ impl SessionsSubsystem {
     pub fn game_in_front(&self) -> bool {
         let state = self.state();
         !state.sessions.is_empty() && state.game_in_front
+    }
+
+    /// The game's windows stay on screen: a game runs, and the player didn't bring the
+    /// launcher in front of it. The desktop may still say the launcher is in front, when it
+    /// shows the launcher in place of a game window it wasn't told about.
+    fn keeps_game(&self) -> bool {
+        let state = self.state();
+        !state.sessions.is_empty() && !state.launcher_asked
     }
 
     /// Runs a command that is the subsystem's alone. The core resolves [`SessionCmd::Launch`]
@@ -377,6 +388,7 @@ impl SessionsSubsystem {
             let mut state = self.state();
             state.stops.remove(&session);
             state.game_in_front = false;
+            state.launcher_asked = false;
             state.sessions.remove(&session)
         };
         if let (Some(ended), Some(played)) = (&ended, played) {
@@ -408,7 +420,11 @@ impl SessionsSubsystem {
         if !watch::show(self, pid).await {
             return Err(CoreError::Invalid("the game has no window to show yet".into()));
         }
-        self.state().game_in_front = true;
+        {
+            let mut state = self.state();
+            state.game_in_front = true;
+            state.launcher_asked = false;
+        }
         self.changed();
         Ok(())
     }
@@ -417,6 +433,8 @@ impl SessionsSubsystem {
     pub async fn toggle_focus(&self) {
         let Some(session) = self.state().sessions.keys().next().copied() else { return };
         if self.game_in_front() {
+            // Before the launcher shows, so a look at the game in the meantime leaves it behind.
+            self.state().launcher_asked = true;
             self.show_launcher().await;
             self.state().game_in_front = false;
             self.changed();
@@ -479,11 +497,7 @@ impl SessionsSubsystem {
             changed
         };
         if changed {
-            tracing::info!(
-                in_front,
-                "the desktop says the game's window is {}",
-                if in_front { "in front" } else { "not in front" }
-            );
+            tracing::info!(in_front, "the desktop says whether the game's window is in front");
             self.changed();
         }
     }
