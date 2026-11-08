@@ -6,61 +6,33 @@ import { Nav } from "nav.slint";
 import { Icon } from "icon.slint";
 import { NetIcon, SoundIcon, BluetoothIcon, BatteryIcon, Sys } from "system-panel.slint";
 
-// One system in the top bar, as the old launcher's "Home" and "Library" tabs: white when
-// shown, with a short bar under it; a white outline when the keys are on it.
-component Tab inherits Rectangle {
-    in property <string> text;
-    in property <int> count;
-    in property <bool> active;
-    in property <bool> focused;
+// The Default theme's copy of the Classic theme's top bar. Where Classic has its Home
+// and Library tabs, it has one button back to the list of systems, while a system's games show.
+// The far side is Classic's.
+component BackButton inherits Rectangle {
     callback clicked();
-    width: row.preferred-width + 8 * Look.px;
+    width: row.preferred-width + 36 * Look.px;
+    height: 52 * Look.px;
+    border-radius: 26 * Look.px;
+    background: ta.pressed ? #ffffff40 : ta.has-hover ? #ffffff24 : #ffffff14;
     accessible-role: button;
-    accessible-label: "default-system";
-    accessible-value: root.text;
+    accessible-label: "systems-back";
     accessible-action-default => { root.clicked(); }
-
+    animate background { duration: Tokens.motion-fast; }
     row := HorizontalLayout {
-        x: 4 * Look.px;
+        x: 14 * Look.px;
         spacing: 8 * Look.px;
-        Text {
-            text: root.text;
-            font-size: 30 * Look.px;
-            font-weight: 500;
-            color: root.active || root.focused ? Tokens.color-text : Look.text3;
-            vertical-alignment: center;
-            animate color { duration: Tokens.motion-fast; }
+        alignment: center;
+        Icon {
+            name: Look.rtl ? "chevr" : "chevl";
+            color: Tokens.color-text;
+            width: 24 * Look.px;
+            height: 24 * Look.px;
+            y: (parent.height - self.height) / 2;
         }
-        Text {
-            text: root.count > 0 ? root.count : "";
-            font-size: 17 * Look.px;
-            color: root.active ? Tokens.color-text-muted : Look.text3;
-            vertical-alignment: center;
-            opacity: root.active || root.focused ? 1 : 0;
-            animate opacity { duration: Tokens.motion-fast; }
-        }
+        Text { text: "Systems"; font-size: 22 * Look.px; font-weight: 600; color: Tokens.color-text; vertical-alignment: center; }
     }
-    Rectangle {
-        x: Look.rtl ? parent.width - self.width - 4 * Look.px : 4 * Look.px;
-        y: parent.height / 2 + 28 * Look.px;
-        width: root.active ? 28 * Look.px : 0;
-        height: 3 * Look.px;
-        border-radius: 2 * Look.px;
-        background: #ffffff;
-        animate width { duration: Look.move; easing: cubic-bezier(0.2, 0.8, 0.2, 1); }
-    }
-    Rectangle {
-        x: -14 * Look.px;
-        width: parent.width + 28 * Look.px;
-        y: parent.height / 2 - 26 * Look.px;
-        height: 52 * Look.px;
-        border-radius: 26 * Look.px;
-        border-width: 3 * Look.px;
-        border-color: #ffffff;
-        opacity: root.focused ? 1 : 0;
-        animate opacity { duration: Tokens.motion-fast; }
-    }
-    TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+    ta := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
 }
 
 // A round button on the far side of the top bar. It turns white under the keys.
@@ -127,8 +99,8 @@ component PillButton inherits Rectangle {
     ta := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
 }
 
-// The old launcher's top bar: Home and Library on the reading side; a running game, the
-// active download, the screen buttons and the clock on the other.
+// The old launcher's top bar: the way back to the systems on the reading side; a running game,
+// the active download, the screen buttons and the clock on the other.
 export component TopBar inherits Rectangle {
     // The keys are on the top bar (home only).
     in property <bool> keys;
@@ -136,22 +108,11 @@ export component TopBar inherits Rectangle {
 
     property <int> download: Vm.downloads.length > 0 ? 0 : -1;
 
-    tabs := HorizontalLayout {
+    // Back to the list of systems, while a system's games show.
+    if Vm.screen == "home" && Nav.library : BackButton {
         x: Look.rtl ? parent.width - self.width - 96 * Look.px : 96 * Look.px;
-        y: 0;
-        height: root.height;
-        width: self.preferred-width;
-        spacing: 44 * Look.px;
-        for t[i] in ["Home", "Library"] : Tab {
-            text: t;
-            count: i == 1 ? Vm.home.games.length : 0;
-            active: Vm.screen == "home" && (Nav.view == "library") == (i == 1);
-            focused: root.keys && Nav.zone == "tabs" && Nav.tab == i;
-            clicked => {
-                if (Vm.screen != "home") { Commands.navigate("home"); }
-                Nav.activate-tab(i);
-            }
-        }
+        y: (root.height - self.height) / 2;
+        clicked => { Nav.leave(); }
     }
 
     side := HorizontalLayout {

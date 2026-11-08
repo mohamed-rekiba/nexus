@@ -86,7 +86,7 @@ mod tests {
     #[test]
     fn the_default_theme_s_sounds_decode() {
         for name in ["move", "select", "back", "error", "start"] {
-            let path = format!("{}/../../plugins/themes/default/theme/sounds/{name}.wav", env!("CARGO_MANIFEST_DIR"));
+            let path = format!("{}/../../plugins/themes/classic/theme/sounds/{name}.wav", env!("CARGO_MANIFEST_DIR"));
             let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
             let sound = rodio::Decoder::new(std::io::Cursor::new(bytes)).expect("a WAV rodio plays");
             assert!(rodio::Source::total_duration(&sound).is_some_and(|d| d.as_millis() > 10), "{name}");

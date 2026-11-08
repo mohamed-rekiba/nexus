@@ -109,7 +109,7 @@ The options are the ones `nexus --help` prints (`USAGE` in `crates/nexus-app/src
 | Option | What it does |
 |---|---|
 | `--theme <id>` | Shows this theme now. Not saved. |
-| `--safe-mode` | Loads the built-in plugins and the default theme only. |
+| `--safe-mode` | Loads the built-in plugins and the Default theme only. |
 | `--dev` | Reloads a theme loaded from a folder when one of its files changes. A broken edit logs an error and keeps the last good version on screen. The built-in `default` theme is compiled into the binary, so an edit to it needs `make run` again. |
 | `--windowed` | A normal window for this run. Full screen is the default. |
 | `--monitor <name>` | Opens on this monitor for this run, such as `DP-2`. A screen picked in Settings wins. |
@@ -175,8 +175,8 @@ cd scripts/catalog && npm test               # the catalog collector's tests (No
 [architecture.md](architecture.md#tests).
 
 The tests need no window, GPU, controller or sound device: they use Slint's testing backend and
-fakes. `cargo test -p nexus-tests --test seams screenshots::` renders each default theme screen,
-and the Systems theme's Home in both directions, to PNG files in `target/tmp/screenshots/`.
+fakes. `cargo test -p nexus-tests --test seams screenshots::` renders each Classic theme screen,
+and the Default theme's Home in both directions, to PNG files in `target/tmp/screenshots/`.
 
 Some tests touch the real system, the network or files you supply. Each one skips, or returns at
 once, unless its variable is set:
@@ -193,7 +193,7 @@ once, unless its variable is set:
 | `NEXUS_REAL_ARCHIVES=<folder>` | `cargo test -p nexus-tests --test seams real_archives::`: installs real release archives through the plugins on a fake web | The archives, named as GitHub names them. A missing one is skipped. |
 | `NEXUS_CATALOG_FILES=<file>[:<file>…]` | `cargo test -p release-catalog catalog_files -- --nocapture`: reads catalog files through the plugin's reader and prints what each holds | Catalog files, such as the collector's |
 | `NEXUS_TIMING=1` | `cargo test -p nexus-tests --test seams timing:: -- --nocapture`: times the Catalog view with the bundled catalogs | |
-| `NEXUS_COMPARE_OUT=<folder>` | `cargo test -p nexus-tests --test seams compare::`: renders the default theme's screens on a real library into that folder | A KytyPS5 game library in `NEXUS_COMPARE_GAMES` (default `~/Games`). Optional: `NEXUS_COMPARE_BUILDS`, `NEXUS_COMPARE_WEB`. |
+| `NEXUS_COMPARE_OUT=<folder>` | `cargo test -p nexus-tests --test seams compare::`: renders the Classic theme's screens on a real library into that folder | A KytyPS5 game library in `NEXUS_COMPARE_GAMES` (default `~/Games`). Optional: `NEXUS_COMPARE_BUILDS`, `NEXUS_COMPARE_WEB`. |
 | `PS4_TEST_PKG=<file>` | `cargo test --release -p emu-shadps4 real_ps4_package -- --ignored --nocapture`: lists a real PS4 package | A PS4 fake package |
 | `PS5_TEST_PKG=<file>` | `cargo test -p emulator-kit real_package -- --ignored`: lists a real PS5 debug package and decodes its largest file (`PS5_TEST_FULL=1` decodes every file) | A PS5 debug package |
 

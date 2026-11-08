@@ -1,8 +1,9 @@
-# The default theme
+# The Classic theme
 
-This page says what the built-in `default` theme does, screen by screen. It is for theme
-authors, who need to know what a child theme starts from, and for contributors who change the
-theme.
+This page says what the built-in `classic` theme, the old launcher's look, does, screen by
+screen. It is for theme authors, who need to know what a child theme starts from, and for
+contributors who change the theme. The Default theme (`default`) extends it and replaces its
+Home; [../themes.md](../themes.md#where-themes-live) describes that Home.
 
 Terms follow [GLOSSARY.md](../../GLOSSARY.md). For the contract between a theme and the host,
 read [../themes.md](../themes.md). For the layers around it, read
@@ -14,18 +15,18 @@ Text in quotes is the exact text on screen, copied from the `.slint` files.
 
 ## What the theme is
 
-The default theme is a theme plugin compiled into the app (`plugins/themes/default/src/lib.rs`,
-`DefaultTheme`). It is the default, and the app falls back to it when another theme fails to
-load. The code says every other theme extends it, directly or through a parent.
+The Classic theme is a theme plugin compiled into the app (`plugins/themes/classic/src/lib.rs`,
+`ClassicTheme`). Every other theme extends it, directly or through a parent, the Default theme
+included. The app starts with the Default theme and falls back to it.
 
 | Path | What is in it |
 | --- | --- |
-| `plugins/themes/default/theme/theme.toml` | The manifest: id `default`, kind `theme`, screens, components, input, tokens, options, assets |
-| `plugins/themes/default/theme/shell.slint` | `Shell`: the window, the key router, the layers of screens, the hints |
-| `plugins/themes/default/theme/commands.slint` | `Commands`: one function for each thing the player asks of the core |
-| `plugins/themes/default/theme/screens/` | One file for each screen id in the manifest |
-| `plugins/themes/default/theme/components/` | The parts: top bar, library view, menus, prompts, sheets, keyboard, system panel |
-| `plugins/themes/default/theme/fonts/`, `images/`, `sounds/` | The assets the manifest names |
+| `plugins/themes/classic/theme/theme.toml` | The manifest: id `classic`, kind `theme`, screens, components, input, tokens, options, assets |
+| `plugins/themes/classic/theme/shell.slint` | `Shell`: the window, the key router, the layers of screens, the hints |
+| `plugins/themes/classic/theme/commands.slint` | `Commands`: one function for each thing the player asks of the core |
+| `plugins/themes/classic/theme/screens/` | One file for each screen id in the manifest |
+| `plugins/themes/classic/theme/components/` | The parts: top bar, library view, menus, prompts, sheets, keyboard, system panel |
+| `plugins/themes/classic/theme/fonts/`, `images/`, `sounds/` | The assets the manifest names |
 
 `shell.slint` imports `types.slint` and `tokens.slint`. Those two files are not in the theme's
 folder. The host supplies them from `crates/nexus-ui-api/contract/`.
@@ -66,7 +67,7 @@ Screens use many colors that have no token. Those are in `components/look.slint`
 ## Options
 
 The theme has two options. The player sets them on the page of the theme in Themes. They show
-only while the default theme is in use. Each choice sets tokens.
+only while the Classic theme is in use. Each choice sets tokens.
 
 | Option | Label | Choices | Effect |
 | --- | --- | --- | --- |
@@ -743,7 +744,8 @@ When Nexus runs from the Nexus OS USB stick (`Vm.system.stick`), `components/ins
 ## Accessible labels
 
 The seam tests drive the theme only through accessible labels, values, keys and clicks. The
-labels are part of what the tests pin, so keep them when you change a screen. Examples:
+labels are part of what the tests pin, so keep them when you change a screen. Labels from
+before the theme was named Classic keep their `default-` prefix. Examples:
 
 | Area | Labels |
 | --- | --- |
@@ -760,7 +762,7 @@ labels are part of what the tests pin, so keep them when you change a screen. Ex
 
 The tests of the theme are in `tests/tests/seams/`:
 
-- `default_theme/` has one module for each area: `home`, `library`, `catalog`, `game_hub`,
+- `classic_theme/` has one module for each area: `home`, `library`, `catalog`, `game_hub`,
   `releases`, `downloads`, `installs`, `emulators`, `settings`, `keyboard`, `notices`,
   `trailer`, `play` and `theme_files`. Each drives the shown theme with keys, clicks and
   accessible labels (the theme driver), against fake plugins.
@@ -768,7 +770,7 @@ The tests of the theme are in `tests/tests/seams/`:
   Every `duration:` and `delay:` time goes through `Look.timed`, so "Animations: Off" cuts it.
 - `screenshots.rs` renders the screens off screen with the software renderer and writes
   pictures. It checks that the pictures of Home, Library, Game Hub, Settings and Running are
-  not blank. It renders the default screens right to left, and renders a child theme
+  not blank. It renders the Classic screens right to left, and renders a child theme
   (`fixture-grid`) over the same library.
 
 For how to run the tests, read [../development.md](../development.md).
@@ -776,7 +778,7 @@ For how to run the tests, read [../development.md](../development.md).
 ## Limitations
 
 - The theme reads no breakpoint. The `compact` and `regular` breakpoints in the manifest have
-  no effect on the default theme's layout.
+  no effect on the Classic theme's layout.
 - The "Hide" and "Show" button on the Game Hub is for the pointer only, outside the key order.
   A pad uses the "Hide from the Catalog" item of the game's menu.
 - The Welcome step labels and details, the boot status text, and the notice texts come from

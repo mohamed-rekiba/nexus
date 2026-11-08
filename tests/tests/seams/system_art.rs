@@ -51,7 +51,7 @@ fn of<'a>(emulators: &'a [slint_interpreter::Struct], system: &str) -> &'a slint
     emulators.iter().find(|e| text(e, "system") == system).unwrap_or_else(|| panic!("no emulator for {system}"))
 }
 
-// The default theme draws no system art, so this also shows that every system's pictures load
+// The Classic theme draws no system art, so this also shows that every system's pictures load
 // as soon as the view binds them, not when a theme first shows one.
 #[test]
 fn the_emulator_s_icon_and_cover_reach_the_theme_with_its_system() {
@@ -180,7 +180,7 @@ fn a_theme_whose_system_picture_is_missing_does_not_load_and_the_old_theme_stays
     host.ui.start().unwrap();
     let error = host.ui.switch(&nexus_api::PluginId::new("arty").unwrap()).unwrap_err();
     assert!(error.to_string().contains("art/gone.png"), "{error}");
-    assert_eq!(host.ui.current().map(|id| id.as_str()), Some("default"));
+    assert_eq!(host.ui.current().map(|id| id.as_str()), Some("classic"));
 }
 
 #[test]
@@ -196,5 +196,5 @@ fn a_theme_whose_system_picture_does_not_decode_does_not_load_and_the_old_theme_
     host.ui.start().unwrap();
     let error = host.ui.switch(&nexus_api::PluginId::new("arty").unwrap()).unwrap_err();
     assert!(error.to_string().contains("systems.PS4.cover"), "{error}");
-    assert_eq!(host.ui.current().map(|id| id.as_str()), Some("default"));
+    assert_eq!(host.ui.current().map(|id| id.as_str()), Some("classic"));
 }

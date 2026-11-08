@@ -1,6 +1,6 @@
 [package]
-name = "theme-systems"
-description = "The built-in Systems theme: Home is a list of the systems, and each opens its games."
+name = "theme-classic"
+description = "The built-in Classic theme, the old launcher's look. Always complete: every screen, component and token."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

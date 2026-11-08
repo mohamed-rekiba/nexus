@@ -4,7 +4,7 @@ use super::*;
 
 #[test]
 fn the_library_shows_every_game_and_a_filter_shows_one_system() {
-    let mut host = default_theme();
+    let mut host = classic_theme();
     host.press("default-system", "Library");
     assert_eq!(host.values("default-count"), ["3 games"]);
     assert!(host.values("default-tile").is_empty(), "the tile row is hidden behind the Library");
@@ -21,7 +21,7 @@ fn the_library_shows_every_game_and_a_filter_shows_one_system() {
 
 #[test]
 fn the_library_searches_and_sorts_in_the_core() {
-    let mut host = default_theme();
+    let mut host = classic_theme();
     host.press("default-system", "Library");
     host.dispatch(Command::LibrarySearch("gam".into()));
     host.settle();
@@ -40,7 +40,7 @@ fn the_library_searches_and_sorts_in_the_core() {
 #[test]
 fn leaving_the_library_closes_the_sorts_and_gives_the_keys_back() {
     use slint::platform::Key;
-    let mut host = default_theme();
+    let mut host = classic_theme();
     host.press("default-system", "Library");
     host.first("library-sort").invoke_accessible_default_action();
     host.pump();
@@ -59,7 +59,7 @@ fn enter_on_sort_opens_the_sorts_and_the_keys_pick_one() {
     use slint::platform::Key;
     // The Catalog's sorts too.
     let mut host =
-        default_theme_with(|h| h.built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default())));
+        classic_theme_with(|h| h.built_in(nexus_api::PluginBox::code(release_catalog::ReleaseCatalog::default())));
     host.press("default-system", "Library");
     // Up to the bar, right to Sort, Enter.
     host.navigate(Key::UpArrow);
@@ -98,7 +98,7 @@ fn enter_on_sort_opens_the_sorts_and_the_keys_pick_one() {
 
 #[test]
 fn one_click_on_a_library_card_opens_its_game() {
-    let mut host = default_theme();
+    let mut host = classic_theme();
     use slint::platform::Key;
     host.navigate(Key::UpArrow);
     host.navigate(Key::RightArrow);
@@ -118,7 +118,7 @@ fn one_click_on_a_library_card_opens_its_game() {
 fn letters_in_the_library_search_and_the_pad_and_keys_have_their_shortcuts() {
     use nexus_ui_host::PadButton;
     use slint::platform::Key;
-    let mut host = default_theme();
+    let mut host = classic_theme();
     // Into the Library's grid.
     host.navigate(Key::UpArrow);
     host.navigate(Key::RightArrow);
@@ -174,7 +174,7 @@ fn letters_in_the_library_search_and_the_pad_and_keys_have_their_shortcuts() {
 
 #[test]
 fn the_keys_reach_the_library_s_filters_and_its_card_size() {
-    let mut host = default_theme();
+    let mut host = classic_theme();
     use slint::platform::Key;
     // Up to the top bar, right to Library, and in.
     host.navigate(Key::UpArrow);
@@ -279,7 +279,7 @@ fn right_to_left_the_library_s_header_and_genre_row_are_mirrored() {
 
 #[test]
 fn without_genres_the_library_s_grid_starts_under_the_systems() {
-    let mut host = default_theme();
+    let mut host = classic_theme();
     host.press("default-system", "Library");
     assert_eq!(host.count("filter:Action"), 0, "the stub games have no genres");
     let chip = host.first("filter:All");
@@ -356,7 +356,7 @@ fn the_library_grid_scrolls_only_when_the_selected_row_leaves_the_view() {
 #[test]
 fn a_move_in_the_library_grid_shows_at_once() {
     use slint::platform::Key;
-    let mut host = default_theme();
+    let mut host = classic_theme();
     host.navigate(Key::UpArrow);
     host.navigate(Key::RightArrow);
     host.navigate(Key::Return);

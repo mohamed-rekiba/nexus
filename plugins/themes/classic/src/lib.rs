@@ -1,6 +1,6 @@
-//! The built-in Systems theme. It extends the default theme: its Home is a list of the systems
-//! the emulators play, with the focused system's cover behind it, and each system opens the
-//! Library on its games. Every other screen is the default theme's.
+//! The built-in Classic theme, the old launcher's look. Every other theme extends it, directly or
+//! through a parent, so it has every screen, component and token. It is compiled into the
+//! binary. The Default theme (`theme-default`) extends it.
 
 use std::sync::Arc;
 
@@ -8,11 +8,11 @@ use nexus_api::{EmbeddedFiles, Files, Plugin, PluginManifest, ThemePlugin, async
 
 static FILES: EmbeddedFiles = EmbeddedFiles::new(include!(concat!(env!("OUT_DIR"), "/files.rs")));
 
-pub const ID: &str = "systems";
+pub const ID: &str = "classic";
 
-pub struct SystemsTheme;
+pub struct ClassicTheme;
 
-impl SystemsTheme {
+impl ClassicTheme {
     /// The theme's files, for tools and tests.
     pub fn files() -> &'static EmbeddedFiles {
         &FILES
@@ -20,18 +20,18 @@ impl SystemsTheme {
 }
 
 #[async_trait]
-impl Plugin for SystemsTheme {
+impl Plugin for ClassicTheme {
     fn manifest(&self) -> PluginManifest {
         let text = FILES.read(&nexus_api::RelPath::new("theme.toml").expect("valid path")).expect("theme.toml");
         PluginManifest::from_toml(std::str::from_utf8(&text).expect("UTF-8"))
-            .expect("the Systems theme manifest is valid")
+            .expect("the Classic theme manifest is valid")
     }
 }
 
-impl ThemePlugin for SystemsTheme {
+impl ThemePlugin for ClassicTheme {
     fn files(&self) -> Arc<dyn Files> {
         Arc::new(FILES)
     }
 }
 
-nexus_api::inventory::submit! { nexus_api::PluginFactory::theme(|| Box::new(SystemsTheme)) }
+nexus_api::inventory::submit! { nexus_api::PluginFactory::theme(|| Box::new(ClassicTheme)) }

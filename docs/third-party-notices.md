@@ -102,7 +102,7 @@ Windows.
 
 ### Fonts
 
-The default theme carries Inter and Tajawal. `plugins/themes/default/theme/theme.toml` lists the
+The Classic theme carries Inter and Tajawal. `plugins/themes/classic/theme/theme.toml` lists the
 font files, and `package.sh` says the theme carries them in the binary.
 
 | Font | Copyright line in the licence file | Licence |
@@ -110,7 +110,7 @@ font files, and `package.sh` says the theme carries them in the binary.
 | Inter | Copyright (c) 2016 The Inter Project Authors (<https://github.com/rsms/inter>) | SIL Open Font License 1.1 (`OFL-Inter.txt`) |
 | Tajawal | Copyright 2018 Boutros International (<http://www.boutrosfonts.com>) | SIL Open Font License 1.1 (`OFL-Tajawal.txt`) |
 
-The licence files sit beside the fonts in `plugins/themes/default/theme/fonts/`.
+The licence files sit beside the fonts in `plugins/themes/classic/theme/fonts/`.
 
 ### System pictures
 
@@ -119,7 +119,7 @@ Each built-in emulator carries its system's icon and cover in the binary
 third-party game art and console marks, such as the PlayStation, Nintendo Switch, Windows and
 Steam logos and characters from their games. The project owner supplied them. The repository
 holds no licence information for them. The marks belong to their owners. The icons
-(`assets/system-art/*.svg`) and the Systems theme's "All games" pictures were made for this
+(`assets/system-art/*.svg`) and the Default theme's "All games" pictures were made for this
 project; the project owner supplied the "All games" icon and picture and the Switch icon.
 
 ### libmpv
@@ -228,7 +228,7 @@ no licence text for the driver or the key.
   build's own FFmpeg commit is not in the file name.
 - **Windows libarchive packages are not pinned.** The MSYS2 packages are the ones the runner
   installs on that day. The package's `NOTICE` and `SOURCES` record the versions.
-- **The theme's images and sounds have no recorded licence.** `plugins/themes/default/theme/images/`
+- **The theme's images and sounds have no recorded licence.** `plugins/themes/classic/theme/images/`
   holds `logo.png`, and `sounds/` holds five `.wav` files. The icons in `assets/` (`nexus.png`,
   `nexus.ico`, `nexus.icns`, `logo.svg`) have none either. This page does not guess who owns
   them.

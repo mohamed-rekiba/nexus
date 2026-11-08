@@ -82,7 +82,7 @@ fn the_catalog_is_the_library_s_view_and_loads_a_page_at_a_time() {
     assert!(host.core().view().home.selected.is_some(), "Home's game, not the Catalog's");
 }
 
-/// The default theme on the Catalog, with three games a catalog offers: Astro, Bolt, Comet.
+/// The Classic theme on the Catalog, with three games a catalog offers: Astro, Bolt, Comet.
 fn three_on_the_catalog() -> Composed {
     let mut host = composed(|h| {
         h.plugin(FakeCatalog::new("emu-kyty").system("PS4").games([]).build().console("PS5"))

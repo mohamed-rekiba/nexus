@@ -7,8 +7,8 @@ members = [
     "crates/nexus-ui-host",
     "crates/nexus-testkit",
     "crates/nexus-app",
+    "plugins/themes/classic",
     "plugins/themes/default",
-    "plugins/themes/systems",
     "plugins/shared/emulator-kit",
     "plugins/emulators/kytyps5",
     "plugins/emulators/shadps4",
@@ -38,8 +38,8 @@ nexus-ui-api = { path = "crates/nexus-ui-api" }
 nexus-core = { path = "crates/nexus-core" }
 nexus-ui-host = { path = "crates/nexus-ui-host" }
 nexus-testkit = { path = "crates/nexus-testkit" }
+theme-classic = { path = "plugins/themes/classic" }
 theme-default = { path = "plugins/themes/default" }
-theme-systems = { path = "plugins/themes/systems" }
 emulator-kit = { path = "plugins/shared/emulator-kit" }
 emu-kyty = { path = "plugins/emulators/kytyps5" }
 emu-shadps4 = { path = "plugins/emulators/shadps4" }

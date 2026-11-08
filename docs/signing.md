@@ -160,7 +160,7 @@ Each entry has a `url` into the release and a `sha256`. Files such as
 The launcher checks its update in `crates/nexus-core/src/launcher_update.rs`. The startup code
 that applies it is `crates/nexus-app/src/update.rs`.
 
-The default theme's Settings row sends the command `LauncherUpdate` with `Check`, then with
+The Classic theme's Settings row sends the command `LauncherUpdate` with `Check`, then with
 `Download` when an update is available. This page found no automatic check at startup.
 
 ### Check

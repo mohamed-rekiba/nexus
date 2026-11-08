@@ -333,7 +333,7 @@ Limits of the plugins that ship today:
 | [docs/development.md](docs/development.md) | Building, testing, packaging and CI |
 | [docs/plugins.md](docs/plugins.md) | Writing a plugin |
 | [docs/themes.md](docs/themes.md) | Writing a theme |
-| [docs/reference/default-theme.md](docs/reference/default-theme.md) | The default theme, screen by screen |
+| [docs/reference/classic-theme.md](docs/reference/classic-theme.md) | The Classic theme, screen by screen |
 | [docs/reference/desktop.md](docs/reference/desktop.md) | Windows, focus and controllers on each system |
 | [docs/reference/archives-and-pc-games.md](docs/reference/archives-and-pc-games.md) | Archives in downloads, and PC games |
 | [docs/nexus-os.md](docs/nexus-os.md) | What Nexus and Nexus OS expect from each other |
@@ -353,7 +353,7 @@ or `fix: …`: Release Please makes the releases from them. `docs:`, `ci:`, `ref
 ## Licence
 
 Nexus is licensed under the GNU General Public License, version 2 or later (`LICENSE`), because the
-PS4 package reader is a port of shadPS4 code. The default theme's fonts, Inter and Tajawal, are under
+PS4 package reader is a port of shadPS4 code. The Classic theme's fonts, Inter and Tajawal, are under
 the SIL Open Font License 1.1. Other code and the libraries the packages ship (libmpv, FFmpeg,
 libarchive) keep their own licences: see
 [docs/third-party-notices.md](docs/third-party-notices.md).

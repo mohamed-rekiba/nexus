@@ -34,7 +34,7 @@ fn settings_show_this_pc_and_how_each_emulator_runs_on_it() {
 
 #[test]
 fn with_two_monitors_settings_choose_the_one_the_launcher_fills() {
-    let mut host = default_theme();
+    let mut host = classic_theme();
     host.ui.set_monitors(vec!["Built-in Retina Display".into(), "LEN G32qc-10".into()]);
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
     host.settle();
@@ -49,7 +49,7 @@ fn with_two_monitors_settings_choose_the_one_the_launcher_fills() {
 
 #[test]
 fn the_direction_option_moves_the_top_bar_to_the_right() {
-    let mut host = default_theme();
+    let mut host = classic_theme();
     let left = host.first("default-system").absolute_position().x;
     assert!(left < 400.0, "the systems start on the left: {left}");
 
@@ -61,7 +61,7 @@ fn the_direction_option_moves_the_top_bar_to_the_right() {
 
 #[test]
 fn the_layout_direction_option_exists_but_the_theme_page_does_not_offer_it() {
-    let host = default_theme();
+    let host = classic_theme();
     let options = &host.ui.resolved().unwrap().merged.option_values;
     let mut names: Vec<&str> = options.keys().map(String::as_str).collect();
     names.sort();
@@ -74,7 +74,7 @@ fn the_layout_direction_option_exists_but_the_theme_page_does_not_offer_it() {
     assert_eq!(choice("motion"), "on");
     // The theme's page lists Animations only.
     let mut host = host;
-    host.dispatch(Command::Navigate(nexus_core::Route::Plugin("default".parse().unwrap())));
+    host.dispatch(Command::Navigate(nexus_core::Route::Plugin("classic".parse().unwrap())));
     host.settle();
     assert_eq!(host.count("option:motion"), 1);
     assert_eq!(host.count("option:direction"), 0, "Layout direction is hidden for now");
@@ -83,7 +83,7 @@ fn the_layout_direction_option_exists_but_the_theme_page_does_not_offer_it() {
 #[test]
 fn the_keys_move_through_settings_tabs_and_change_the_focused_row() {
     use slint::platform::Key;
-    let mut host = default_theme();
+    let mut host = classic_theme();
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
     host.settle();
 
@@ -194,7 +194,7 @@ fn settings_turn_automatic_updates_off() {
 #[test]
 fn settings_change_the_size_of_everything_and_the_rows_grow_with_it() {
     use slint::platform::Key;
-    let mut host = default_theme();
+    let mut host = classic_theme();
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
     host.settle();
     host.settings_tab("Launcher");
@@ -224,7 +224,7 @@ fn settings_change_the_size_of_everything_and_the_rows_grow_with_it() {
 
 #[test]
 fn nexus_scale_wins_over_the_setting_for_the_run() {
-    let mut host = default_theme();
+    let mut host = classic_theme();
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
     host.settle();
     host.settings_tab("Launcher");
@@ -240,7 +240,7 @@ fn nexus_scale_wins_over_the_setting_for_the_run() {
 
 #[test]
 fn settings_start_the_launcher_at_login_and_say_why_the_system_refused() {
-    let mut host = default_theme();
+    let mut host = classic_theme();
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
     host.settle();
     host.settings_tab("Launcher");
@@ -292,7 +292,7 @@ fn settings_have_no_emulator_settings() {
 
 #[test]
 fn the_window_is_full_screen_by_default_and_settings_turn_it_off() {
-    let mut host = default_theme();
+    let mut host = classic_theme();
     assert!(host.instance().window().is_fullscreen(), "full screen by default, as in the old launcher");
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
     host.settle();
