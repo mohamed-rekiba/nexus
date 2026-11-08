@@ -224,9 +224,16 @@ impl CodePlugin for ShadPlugin {
                 BackupItem::new(
                     "data",
                     "PS4 settings and saves",
-                    BackupPlace::Folder(HostPath::new("shadps4-data", 0, RelPath::root())),
+                    BackupPlace::Folder(HostPath::new(DATA, 0, RelPath::root())),
                 )
-                .skip(&["cache", "log", "shader", "temp", "download"]),
+                .skip(&["cache", "log", "shader", "temp", "download", "addcont"]),
+                // DLC can take many GB: only when asked for.
+                BackupItem::new(
+                    "dlc",
+                    "PS4 DLC",
+                    BackupPlace::Folder(HostPath::new(DATA, 0, RelPath::new("addcont")?)),
+                )
+                .large(),
             ])),
             assets: Some(nexus_api::system_art!()),
             ..Provided::default()

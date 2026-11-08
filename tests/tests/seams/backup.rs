@@ -96,7 +96,11 @@ async fn a_backup_from_one_computer_restores_into_another_s_folders_and_keeps_it
     assert!(!b.keys.path().join("prod.keys").exists(), "a folder the plugin may only read isn't written");
     assert!(!b.data().join("prefixes").exists(), "large items are in a backup only when asked for");
     assert_eq!(b.config(&["app", "folders"]), b_folders, "b keeps its own folders");
-    assert_eq!(b.config(&["app", "playtime"]), serde_json::json!({ "emu-b:G0": { "secs": 60 } }));
+    assert_eq!(b.config(&["app", "playtime"]), serde_json::Value::Null, "the settings wait for the next start");
+    let pending: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(b.test.data_dir().join("restored-settings.json")).unwrap()).unwrap();
+    assert_eq!(pending["app"]["playtime"], serde_json::json!({ "emu-b:G0": { "secs": 60 } }));
+    assert!(pending["app"].get("folders").is_none(), "with no folder of a's");
     let now = files(backups.path());
     assert!(now.iter().any(|f| f.contains("-before-restore")), "what b had is backed up first: {now:?}");
 }
@@ -174,4 +178,34 @@ async fn the_emulators_keys_firmware_settings_and_saves_go_to_another_computer()
     assert_eq!(read("shadps4-data", "config.json").as_deref(), Some(&b"{}"[..]));
     assert_eq!(read("shadps4-data", "shader/big.bin"), None, "shadPS4's caches stay out");
     assert_eq!(read("kyty-data", "_SaveData/PPSA1/slot/save.dat").as_deref(), Some(&b"ps5 save"[..]));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn nothing_is_restored_when_the_backup_of_what_is_here_fails() {
+    use std::os::unix::fs::PermissionsExt;
+    let backups = tempfile::tempdir().unwrap();
+    let a = Pc::new(backups.path()).await;
+    write(&a.saves.path().join("GAME/slot.dat"), b"a's");
+    a.run(BackupCmd::BackUp { large: false }).await.unwrap();
+    let file = files(backups.path()).remove(0);
+
+    let b = Pc::new(backups.path()).await;
+    write(&b.saves.path().join("GAME/slot.dat"), b"b's");
+    // The backup folder takes no new file: the backup of b's saves can't be written.
+    std::fs::set_permissions(backups.path(), std::fs::Permissions::from_mode(0o555)).unwrap();
+    let restored = b.run(BackupCmd::Restore(file)).await;
+    std::fs::set_permissions(backups.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+    let error = restored.unwrap_err().to_string();
+    assert!(error.contains("Nothing was restored"), "{error}");
+    assert_eq!(std::fs::read(b.saves.path().join("GAME/slot.dat")).unwrap(), b"b's", "b's save stays");
+}
+
+#[tokio::test]
+async fn a_second_job_waits_for_the_first() {
+    let backups = tempfile::tempdir().unwrap();
+    let a = Pc::new(backups.path()).await;
+    write(&a.saves.path().join("GAME/slot.dat"), b"progress");
+    let (one, two) = tokio::join!(a.run(BackupCmd::BackUp { large: false }), a.run(BackupCmd::BackUp { large: false }));
+    assert!(one.is_ok() != two.is_ok(), "one runs and one is refused: {one:?} {two:?}");
 }

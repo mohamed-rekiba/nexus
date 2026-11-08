@@ -234,6 +234,8 @@ pub struct Core {
 impl Core {
     /// Starts the app on a booted kernel and resumes installs a crash interrupted.
     pub async fn start(kernel: Kernel) -> Core {
+        // The settings of a restore go back before anything reads them.
+        crate::backup::apply_pending(kernel.config(), &kernel.host().data_dir);
         let theme = Pref::Theme.load(kernel.config()).as_str().and_then(|s| PluginId::new(s).ok());
         let state = AppState::new(theme);
         let ports = kernel.ports().clone();
@@ -334,6 +336,7 @@ impl Core {
             );
             let backup = crate::backup::BackupSubsystem::new(
                 kernel.config().clone(),
+                kernel.host().data_dir.clone(),
                 Notifier::new(changes.clone(), kernel.events().clone()),
             );
             Inner {
@@ -366,7 +369,11 @@ impl Core {
         crate::catalog_reads::watch_catalogs(&core);
         crate::catalog_reads::watch_store_installs(&core);
         let lister = core.clone();
-        tokio::spawn(async move { crate::backups::handle(&lister, crate::BackupCmd::Refresh).await.ok() });
+        tokio::spawn(async move {
+            if let Err(e) = crate::backups::handle(&lister, crate::BackupCmd::Refresh).await {
+                tracing::warn!(error = %e, "the backup folder wasn't read");
+            }
+        });
         core
     }
 
@@ -424,11 +431,12 @@ impl Core {
         &self.inner.notices
     }
 
-    /// The launcher's own update.
+    /// Settings → Backup.
     pub(crate) fn backup(&self) -> &crate::backup::BackupSubsystem {
         &self.inner.backup
     }
 
+    /// The launcher's own update.
     pub(crate) fn launcher_update(&self) -> &crate::launcher_update::LauncherUpdateSubsystem {
         &self.inner.launcher_update
     }
@@ -589,13 +597,7 @@ impl Core {
                 plugin_settings::set_plugin_enabled(self, &plugin, enabled).await
             }
             Command::ThemeSwitched(theme) => self.theme_switched(theme),
-            Command::Pref(Pref::BackupFolder, value) => {
-                let set = self.preferences().set(Pref::BackupFolder, value).await;
-                if set.is_ok() {
-                    crate::backups::handle(self, crate::BackupCmd::Refresh).await.ok();
-                }
-                set
-            }
+            Command::Pref(Pref::BackupFolder, value) => crate::backups::set_folder(self, value).await,
             Command::Pref(pref, value) => self.preferences().set(pref, value).await,
             Command::Torrent(command) => release_downloads::torrent(self, command).await,
             Command::GameInstall(command) => release_downloads::game_install(self, command).await,

@@ -148,6 +148,7 @@ files.
 | `slots` | `Slots` (badges, actions, sections as data) | all four emulators, `release-catalog` |
 | `releases` | `Releases` (what the Catalog offers) | `emu-steam`, `release-catalog` |
 | `metadata` | `Metadata` (store art and details) | `emu-steam`, `playstation-store` |
+| `backup` | `Backup` (what Settings → Backup saves) | `emu-kyty`, `emu-shadps4`, `emu-lichii`, `emu-pc` |
 | `theme` | `ThemePlugin::files` | themes only |
 | `network`, `vpn`, `bluetooth`, `audio`, `power` | `NetworkSettings`, `VpnSettings`, `BluetoothSettings`, `AudioSettings`, `PowerSettings` | `system` |
 | `os_updates`, `os_install` | `OsUpdates`, `OsInstall` | `system` |
@@ -342,7 +343,9 @@ settings. `backups.rs` asks the plugins with the `Backup` capability for their i
 each is on this computer through the plugin's grants, and hands the paths to the backup subsystem,
 which writes and reads the `.tar.gz` (`backup/archive.rs`): `backup.json` first, then the settings
 without this computer's folders, then `items/<plugin>/<item>/…`. A restore checks every entry
-before it writes one, refuses links, and writes nothing through a link it finds. The commands keep flat names (`Command::Back`, `Command::LibrarySort`), which the themes
+before it writes one, refuses links, and writes nothing through a link it finds. A restore's
+settings belong to other subsystems, so it leaves them in `restored-settings.json` in the data
+folder, and `Core::start` puts them back before any subsystem starts. The commands keep flat names (`Command::Back`, `Command::LibrarySort`), which the themes
 send. [ADR 0002](adr/0002-game-page-reads-stay-as-flows.md) records why the reads for a game's page
 stay separate flows.
 

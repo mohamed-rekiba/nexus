@@ -29,7 +29,7 @@ pub struct BackupItem {
     /// What Settings calls it, such as "Saves".
     pub title: String,
     pub place: BackupPlace,
-    /// Names left out wherever they are below `place`, such as `cache` and `log`.
+    /// Paths below `place` left out, from its top: `cache`, or `GAME/log`.
     #[serde(default)]
     pub skip: Vec<String>,
     /// Large, such as PC games' Wine prefixes: in a backup only when the player turns on
@@ -43,7 +43,7 @@ impl BackupItem {
         Self { name: name.into(), title: title.into(), place, skip: Vec::new(), large: false }
     }
 
-    /// Leaves out the entries named `names` wherever they are below the item.
+    /// Leaves out the paths `names` below the item, from its top.
     pub fn skip(mut self, names: &[&str]) -> Self {
         self.skip.extend(names.iter().map(|n| (*n).to_owned()));
         self

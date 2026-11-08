@@ -8,7 +8,7 @@ mod app;
 mod app_state;
 mod archive_plan;
 mod archives;
-pub mod backup;
+pub(crate) mod backup;
 mod backups;
 mod bus;
 mod catalog_reads;

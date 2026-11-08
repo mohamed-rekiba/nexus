@@ -126,11 +126,6 @@ impl FakeBackup {
     pub fn new(items: Vec<nexus_api::BackupItem>) -> Self {
         Self { items: Arc::new(std::sync::Mutex::new(items)) }
     }
-
-    /// The items from now on.
-    pub fn set(&self, items: Vec<nexus_api::BackupItem>) {
-        *self.items.lock().unwrap() = items;
-    }
 }
 
 #[async_trait::async_trait]
