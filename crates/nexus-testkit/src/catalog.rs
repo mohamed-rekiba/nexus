@@ -10,6 +10,7 @@ use futures::StreamExt;
 use nexus_api::*;
 use nexus_core::Clock;
 
+use crate::files::MemFiles;
 use crate::{FakeClock, StubPlugin};
 
 /// The emulator build a [`FakeCatalog`] downloads and installs.
@@ -642,27 +643,5 @@ impl Slots for FakeService {
     }
     async fn run_action(&self, _: &str, _: Option<&str>, _: &serde_json::Value) -> PluginResult<()> {
         Ok(())
-    }
-}
-
-/// Files held in memory: a plugin's assets in a test.
-pub struct MemFiles(Vec<(RelPath, Vec<u8>)>);
-
-impl MemFiles {
-    /// Every path must be a valid [`RelPath`].
-    pub fn new<'a>(files: impl IntoIterator<Item = (&'a str, Vec<u8>)>) -> Self {
-        Self(files.into_iter().map(|(path, bytes)| (RelPath::new(path).expect("a valid path"), bytes)).collect())
-    }
-}
-
-impl Files for MemFiles {
-    fn read(&self, path: &RelPath) -> Option<Vec<u8>> {
-        self.0.iter().find(|(p, _)| p == path).map(|(_, bytes)| bytes.clone())
-    }
-
-    fn list(&self) -> Vec<RelPath> {
-        let mut paths: Vec<RelPath> = self.0.iter().map(|(p, _)| p.clone()).collect();
-        paths.sort();
-        paths
     }
 }

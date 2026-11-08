@@ -1186,24 +1186,25 @@ fn emulators_vm(s: &Snapshot) -> EmulatorsVm {
         .filter(manages_an_emulator)
         .map(|id| {
             let emu = state.emulators.get(&id).cloned().unwrap_or_default();
-            let look = plugins.manifest(&id).and_then(|m| m.system.as_ref());
+            let manifest = plugins.manifest(&id);
+            let look = manifest.and_then(|m| m.system.as_ref());
             let art = |path: Option<&nexus_api::RelPath>| {
                 path.map(|path| ImageRef::PluginAsset { plugin: id.clone(), path: path.clone() })
             };
             EmulatorVm {
-                name: plugins.manifest(&id).map(|m| m.emulator_name().to_owned()).unwrap_or_default(),
+                name: manifest.map(|m| m.emulator_name().to_owned()).unwrap_or_default(),
                 system: look.map(|l| l.id.clone()).unwrap_or_default(),
                 system_name: look.map(|l| l.name.clone()).unwrap_or_default(),
                 icon: art(look.and_then(|l| l.icon.as_ref())),
                 cover: art(look.and_then(|l| l.cover.as_ref())),
                 status: status_text(plugins.status(&id)),
-                has_builds: plugins.manifest(&id).is_some_and(|m| m.capabilities.contains(&Capability::Installer)),
+                has_builds: manifest.is_some_and(|m| m.capabilities.contains(&Capability::Installer)),
                 update: emu.update(),
                 installed: emu.installed,
                 available: emu.available,
                 busy: emu.busy,
                 panels: slot_vms(&id, SlotId::EmulatorPanel, emu.panels),
-                controllers: controllers(plugins.manifest(&id)),
+                controllers: controllers(manifest),
                 controllers_text: String::new(),
                 plugin: id,
             }
@@ -1421,6 +1422,7 @@ fn running_vm(snapshot: &Snapshot, route: &Route) -> Option<RunningVm> {
         session: session.0,
         key: s.game.to_string(),
         title: s.title.clone(),
+        plugin: s.game.plugin.clone(),
         emulator: manifest.as_ref().map(|m| m.emulator_name().to_owned()).unwrap_or_default(),
         page: manifest.as_ref().map(|m| m.name.clone()).unwrap_or_default(),
         state: if s.stopping {

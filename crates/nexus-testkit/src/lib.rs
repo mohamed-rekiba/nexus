@@ -18,6 +18,7 @@ pub mod contract;
 mod driver;
 mod emulator;
 mod fakes;
+mod files;
 mod host;
 mod network;
 mod platform;
@@ -28,7 +29,7 @@ mod system;
 mod torrents;
 
 pub use archives::FakeArchives;
-pub use catalog::{FakeCatalog, FakeService, FakeStore, MemFiles};
+pub use catalog::{FakeCatalog, FakeService, FakeStore};
 pub use clock::FakeClock;
 pub use driver::ThemeDriver;
 pub use emulator::{FAKE_EMULATOR_PERMISSIONS, FakeEmulator};

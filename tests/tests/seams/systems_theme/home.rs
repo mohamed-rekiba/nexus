@@ -57,10 +57,10 @@ fn up_from_the_first_system_goes_to_the_top_bar() {
 #[test]
 fn the_cover_behind_the_list_follows_the_focus() {
     let mut host = systems_theme();
-    assert_eq!(host.value("systems-background"), "all");
+    assert_eq!(host.value("systems-background"), "All games");
     focus_on(&mut host, "PlayStation 5");
     cover_follows(&mut host);
-    assert_eq!(host.value("systems-background"), "PS5");
+    assert_eq!(host.value("systems-background"), "PlayStation 5");
 }
 
 #[test]
@@ -197,4 +197,48 @@ fn the_default_theme_comes_back_whole_after_the_systems_theme() {
     assert_eq!(host.count("systems-tile"), 0);
     assert_eq!(host.values("default-system"), ["Home", "Library"]);
     assert!(host.count("default-tile") > 0, "the default Home's game tiles");
+}
+
+#[test]
+fn the_cover_changes_once_the_moves_stop_not_while_a_key_is_held() {
+    use std::time::Duration;
+    let mut host = systems_theme();
+    for _ in 0..2 {
+        host.tap(Key::DownArrow);
+        host.wait(Duration::from_millis(100));
+    }
+    assert_eq!(host.value("systems-background"), "All games", "still moving");
+    host.wait(Duration::from_millis(100));
+    assert_eq!(host.value("systems-background"), host.focused("systems-tile")[0]);
+}
+
+#[test]
+fn after_a_game_starts_the_list_has_the_keys_and_the_library_s_filter_is_gone() {
+    let mut host = systems_theme();
+    focus_on(&mut host, "PlayStation 5");
+    host.navigate(Key::Return);
+    assert_eq!(library_titles(&host), ["Gamma"]);
+    host.dispatch(Command::Session(SessionCmd::Launch("emu-b:G0".parse().unwrap())));
+    host.until(Area::Sessions, |core| core.game_running());
+    host.ui.render().unwrap();
+    host.settle();
+    host.pump();
+    host.settle();
+    assert_eq!(host.focused("systems-tile"), ["PlayStation 5"]);
+    assert_eq!(library_titles(&host), ["Alpha", "Beta", "Gamma"], "the filter is gone");
+    host.navigate(Key::UpArrow);
+    assert_ne!(host.focused("systems-tile"), ["PlayStation 5"], "Up moves along the list");
+}
+
+#[test]
+fn only_the_running_game_s_emulator_is_marked_when_two_emulators_share_a_name() {
+    let mut host = systems_theme_of(|h| {
+        h.plugin(FakeCatalog::new("emu-a").emulator("Same").playable().system("PS4").games(["Alpha"]).build())
+            .plugin(FakeCatalog::new("emu-b").emulator("Same").playable().system("PS5").games(["Gamma"]).build())
+    });
+    host.dispatch(Command::Session(SessionCmd::Launch("emu-b:G0".parse().unwrap())));
+    host.until(Area::Sessions, |core| core.game_running());
+    host.dispatch(Command::Navigate(Route::Home));
+    host.settle();
+    assert_eq!(host.values("systems-tag"), ["PlayStation 5: ● PLAYING"]);
 }

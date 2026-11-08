@@ -336,5 +336,6 @@ theme keeps the screen you are on, your selection, the downloads and a running g
 theme's option is "Animations" (off makes the transitions cuts). The Systems theme's Home is a
 list of your systems, "All games" first, with the focused system's picture behind it: Enter or a
 click shows that system's games, Back comes back to the list, and Options (Menu) opens the
-emulator's page. Third-party plugins are themes only: they are data and run no code. To write a theme, see
+emulator's page.
+Third-party plugins are themes only: they are data and run no code. To write a theme, see
 [themes.md](themes.md).

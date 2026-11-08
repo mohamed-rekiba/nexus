@@ -18,7 +18,13 @@ component SystemsView inherits Rectangle {
     // From the window's far edge to the tiles.
     property <length> edge: 96 * Look.px;
     property <length> top: 150 * Look.px;
-    property <bool> keys: Nav.zone == "row";
+    // A game that starts gives the keys to `actions`, which is the list here too.
+    property <bool> keys: Nav.zone == "row" || Nav.zone == "actions";
+    // The corners of a tile `size` wide: the icons' own (27 of 128), so the clip, the ring and
+    // the playing frame follow them.
+    pure function corner(size: length) -> length {
+        size * 27 / 128
+    }
 
     // Each entry's pictures and words: 0 is All games, `i` is `Vm.emulators[i - 1]`.
     pure function icon-of(i: int) -> image {
@@ -32,21 +38,21 @@ component SystemsView inherits Rectangle {
             : Vm.emulators[i - 1].system-name != "" ? Vm.emulators[i - 1].system-name
             : Vm.emulators[i - 1].name
     }
-    pure function system-of(i: int) -> string {
-        i == 0 ? "all" : Vm.emulators[i - 1].system
-    }
-    // A tag under the name: the game running, an emulator that didn't load, or one to install.
-    pure function tag-of(i: int) -> string {
+    // How entry `i`'s emulator is: `playing` (the running game is its), `failed` (it didn't
+    // load), `missing` (it has no build installed), or "".
+    pure function state-of(i: int) -> string {
         i == 0 ? ""
-            : Vm.has-running && Vm.running.emulator == Vm.emulators[i - 1].name ? "● PLAYING"
-            : Vm.emulators[i - 1].status == "failed" ? "Didn't load"
-            : Vm.emulators[i - 1].has-builds && Vm.emulators[i - 1].installed.length == 0 ? "Not installed"
+            : Vm.has-running && Vm.running.plugin == Vm.emulators[i - 1].plugin ? "playing"
+            : Vm.emulators[i - 1].status == "failed" ? "failed"
+            : Vm.emulators[i - 1].has-builds && Vm.emulators[i - 1].installed.length == 0 ? "missing"
             : ""
     }
-    pure function tag-color(i: int) -> color {
-        root.tag-of(i) == "● PLAYING" ? Tokens.color-success
-            : root.tag-of(i) == "Didn't load" ? Tokens.color-danger
-            : Tokens.color-text-muted
+    // The tag under the name for a `state`, and its color.
+    pure function tag-text(state: string) -> string {
+        state == "playing" ? "● PLAYING" : state == "failed" ? "Didn't load" : state == "missing" ? "Not installed" : ""
+    }
+    pure function tag-color(state: string) -> color {
+        state == "playing" ? Tokens.color-success : state == "failed" ? Tokens.color-danger : Tokens.color-text-muted
     }
 
     // Where entry `i` starts, from the top of the list, before the scroll.
@@ -58,15 +64,19 @@ component SystemsView inherits Rectangle {
     property <length> scroll: Math.max(0, root.at-y(Nav.entry) + root.big - (root.height - root.top - 150 * Look.px));
 
     // The cover follows the focus a moment after the last move, so a held key doesn't flash
-    // each one. Two layers take turns, the new one fading in over the old.
+    // each one: each move starts the wait again. Two layers take turns, the new one fading in
+    // over the old.
     property <int> layer-a: 0;
     property <int> layer-b: 0;
     property <bool> front-b;
     property <int> shown: 0;
-    changed entry => { root.waiting = true; }
     property <int> entry: Nav.entry;
+    changed entry => {
+        root.waiting = true;
+        cover-wait.restart();
+    }
     property <bool> waiting;
-    Timer {
+    cover-wait := Timer {
         interval: 150ms;
         running: root.waiting;
         triggered => {
@@ -88,12 +98,11 @@ component SystemsView inherits Rectangle {
         opacity: self.front ? 1 : 0;
         animate opacity { duration: Look.timed(Tokens.motion-slow); easing: ease-out-quad; }
     }
-    // The cover the screen shows, for tests and screen readers: the system's id, "all" for All
-    // games.
+    // The cover the screen shows, for tests and screen readers: its entry's name.
     Rectangle {
         accessible-role: text;
         accessible-label: "systems-background";
-        accessible-value: root.system-of(root.shown);
+        accessible-value: root.title-of(root.shown);
     }
     // Dark behind the list and under the top bar, so both read on any cover.
     if !Look.rtl : Rectangle { background: @linear-gradient(270deg, #05070ff5 0%, #05070fd8 30%, #05070f70 55%, #05070f00 78%); }
@@ -133,11 +142,11 @@ component SystemsView inherits Rectangle {
                 accessible-value: root.title-of(i);
                 accessible-item-selected: row.focused;
                 accessible-action-default => { Nav.entry = i; Nav.open-entry(); }
-                opacity: root.tag-of(i) == "Not installed" && !row.focused ? 0.6 : 1;
+                opacity: root.state-of(i) == "missing" && !row.focused ? 0.6 : 1;
                 animate x, width, height { duration: Look.timed(Tokens.motion-slow - 60ms); easing: ease-out-expo; }
-                FocusRing { w: parent.width; h: parent.height; on: (row.focused && root.keys) || touch.has-hover; radius: 18 * Look.px; }
+                FocusRing { w: parent.width; h: parent.height; on: (row.focused && root.keys) || touch.has-hover; radius: root.corner(row.size); }
                 Cover {
-                    radius: 18 * Look.px;
+                    radius: root.corner(row.size);
                     source: root.icon-of(i);
                     state: "";
                     title: root.title-of(i);
@@ -145,8 +154,8 @@ component SystemsView inherits Rectangle {
                     name-size: parent.width * 0.14;
                 }
                 // The running game's system: a green frame, as the default Home's tile.
-                if root.tag-of(i) == "● PLAYING" : Rectangle {
-                    border-radius: 18 * Look.px;
+                if root.state-of(i) == "playing" : Rectangle {
+                    border-radius: root.corner(row.size);
                     border-width: 3 * Look.px;
                     border-color: Tokens.color-success;
                 }
@@ -175,12 +184,12 @@ component SystemsView inherits Rectangle {
                     horizontal-alignment: Look.rtl ? left : right;
                     animate color { duration: Look.timed(Tokens.motion-fast); }
                 }
-                if root.tag-of(i) != "" : Text {
-                    text: root.tag-of(i);
+                if root.state-of(i) != "" : Text {
+                    text: root.tag-text(root.state-of(i));
                     font-size: 16 * Look.px;
                     font-weight: 700;
                     letter-spacing: 1 * Look.px;
-                    color: root.tag-color(i);
+                    color: root.tag-color(root.state-of(i));
                     horizontal-alignment: Look.rtl ? left : right;
                     accessible-role: text;
                     accessible-label: "systems-tag";

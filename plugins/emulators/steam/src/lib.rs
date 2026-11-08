@@ -22,12 +22,6 @@ use nexus_api::serde_json::Value;
 use nexus_api::*;
 
 const MANIFEST: &str = include_str!("../plugin.toml");
-
-/// The system's icon and cover, as the manifest's `[system]` names them.
-static ASSETS: EmbeddedFiles = EmbeddedFiles::new(&[
-    ("icon.png", include_bytes!("../assets/icon.png")),
-    ("cover.jpg", include_bytes!("../assets/cover.jpg")),
-]);
 /// The link that asks Steam to uninstall a game: its uninstall dialog.
 const UNINSTALL: &str = "steam://uninstall/";
 /// What the Library calls the system of Steam's games: their own, beside PC, PS5 and PS4.
@@ -89,7 +83,7 @@ impl CodePlugin for SteamPlugin {
             releases: Some(steam.clone()),
             metadata: Some(steam.clone()),
             slots: Some(steam),
-            assets: Some(std::sync::Arc::new(ASSETS)),
+            assets: Some(nexus_api::system_art!()),
             ..Provided::default()
         })
     }

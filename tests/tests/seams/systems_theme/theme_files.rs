@@ -1,6 +1,6 @@
 //! The Systems theme's files: its animation times and its pictures.
 
-use crate::default_theme::theme_files::{fixed_times, without_timed};
+use crate::default_theme::theme_files::times_outside_look_timed;
 
 fn theme_folder() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../plugins/themes/systems/theme")
@@ -15,21 +15,7 @@ fn every_animation_time_goes_through_look_timed_so_animations_off_cuts_it() {
             files.push(entry.unwrap().path());
         }
     }
-    let mut wrong = Vec::new();
-    for file in &files {
-        let source = std::fs::read_to_string(file).unwrap();
-        for (number, line) in source.lines().enumerate() {
-            for field in ["duration:", "delay:"] {
-                let Some(at) = line.find(field) else { continue };
-                let value = &line[at + field.len()..];
-                let value = &value[..value.find([';', '}']).unwrap_or(value.len())];
-                if !fixed_times(&without_timed(value)).is_empty() {
-                    let name = file.strip_prefix(&theme).unwrap().display();
-                    wrong.push(format!("{name}:{}: {}", number + 1, value.trim()));
-                }
-            }
-        }
-    }
+    let wrong = times_outside_look_timed(&theme, &files);
     assert!(wrong.is_empty(), "times outside Look.timed:\n{}", wrong.join("\n"));
 }
 
