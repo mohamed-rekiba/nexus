@@ -1,4 +1,4 @@
-//! Seam 3, composed host: a gamepad drives the default theme through the keys it already handles.
+//! Seam 3, composed host: a gamepad drives the Classic theme through the keys it already handles.
 
 use crate::common::*;
 use nexus_core::{Command, Route, SessionCmd};

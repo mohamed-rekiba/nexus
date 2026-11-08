@@ -51,7 +51,8 @@ emulator-kit, and nexus-testkit serves the tests.
 | `plugins/emulators/*` | `emu-kyty` (PS5), `emu-shadps4` (PS4), `emu-pc` (PC games), `emu-steam` (Steam games, Linux only). |
 | `plugins/services/*` | `playstation-store` (store art and details) and `release-catalog` (the Game Catalog). |
 | `plugins/system/host` | `system-host`, the system plugin with the id `system` ("This PC"). |
-| `plugins/themes/default` | The built-in theme `default`. A crate only so the binary embeds its files. |
+| `plugins/themes/classic` | The built-in theme `classic`, which every theme extends. A crate only so the binary embeds its files. |
+| `plugins/themes/default` | The built-in theme `default`, which extends `classic`: the one the app starts with. |
 | `plugins/shared/emulator-kit` | Code the emulators share. A library, not a plugin. |
 | `tests/` | The seam tests, in the crate `nexus-tests`. |
 
@@ -193,7 +194,7 @@ plugin is a data-only theme.
    dependency. A plugin with a missing, rejected or wrong-version dependency is rejected.
 3. **Load**: a built-in plugin is already code; a folder goes to a `Loader`. A theme manifest
    with code, or a code manifest with a theme, is rejected.
-4. **Init** the `eager` plugins (the default theme, which has no `init`). Others init on the
+4. **Init** the `eager` plugins (the built-in themes, which have no `init`). Others init on the
    first `Kernel::provided` call. Dependencies init first.
 5. **Deactivate**: `Kernel::deactivate` deactivates dependents first, then calls `shutdown`
    under `shutdown_timeout`, at most once for each activation. `Kernel::shutdown` does this for
@@ -552,7 +553,7 @@ contract is in `crates/nexus-ui-api`:
 - `contract::lint` refuses `@image-url` and font imports before compiling. Images and fonts are
   declared in `theme.toml` and reach the theme through `Assets` and `Tokens`.
 
-`ThemeSet` builds the `extends` chain up to `default`, which has every screen, component and
+`ThemeSet` builds the `extends` chain up to `classic`, which has every screen, component and
 token. Imports resolve in the theme first, then each parent. Tokens, images, fonts, sounds and
 options merge, the child winning.
 

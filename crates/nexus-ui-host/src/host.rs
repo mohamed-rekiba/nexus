@@ -723,7 +723,7 @@ mod tests {
     fn a_command_reads_by_its_name_and_its_json_args() {
         assert_eq!(command("Back", ""), Ok(Command::Back));
         assert_eq!(command("LibrarySystem", "null"), Ok(Command::LibrarySystem(None)));
-        // The chips' ids and the sorts' names, as the default theme sends them.
+        // The chips' ids and the sorts' names, as the Classic theme sends them.
         let ps5 = Some(SystemChoice::System("PS5".into()));
         assert_eq!(command("LibrarySystem", "\"PS5\""), Ok(Command::LibrarySystem(ps5)));
         let ingame = Some(SystemChoice::Filter(GridFilter::InGame));

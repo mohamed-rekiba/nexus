@@ -11,7 +11,7 @@
 use nexus_api::{ActionStyle, ConfigScope, PluginId, RelPath, SlotId, Tone};
 use serde::{Deserialize, Serialize};
 
-/// The screens every theme can show. The default theme has all of them.
+/// The screens every theme can show. The Classic theme has all of them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ScreenId {

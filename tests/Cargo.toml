@@ -25,8 +25,8 @@ slint = { workspace = true, features = ["renderer-software"] }
 slint-interpreter.workspace = true
 tempfile.workspace = true
 zstd.workspace = true
+theme-classic.workspace = true
 theme-default.workspace = true
-theme-systems.workspace = true
 futures.workspace = true
 nexus-api.workspace = true
 nexus-core.workspace = true

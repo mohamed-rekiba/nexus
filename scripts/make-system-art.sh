@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Makes each system's icon and cover, and the Systems theme's "All games" icon and cover.
+# Makes each system's icon and cover, and the Default theme's "All games" icon and cover.
 #
 #   Emulator plugins   plugins/emulators/<plugin>/assets/icon.png (256 px) and cover.jpg
-#   Systems theme      plugins/themes/systems/theme/images/all-games-icon.png and -cover.jpg
+#   Default theme      plugins/themes/default/theme/images/all-games-icon.png and -cover.jpg
 #
 # The icons come from the SVGs in assets/system-art, each cropped to its rounded square. The
 # covers come from the folder given as the first argument, one <system>-cover.png per system
@@ -20,7 +20,7 @@ all_games="$(realpath "${2:?usage: $0 <covers-folder> <all-games-picture>}")"
 cd "$(dirname "$0")/.."
 
 art=assets/system-art
-theme=plugins/themes/systems/theme/images
+theme=plugins/themes/default/theme/images
 
 # A square SVG as a PNG `size` pixels wide.
 icon() { magick -background none -density 600 "$1" -resize "$2x$2" -strip "$3"; }

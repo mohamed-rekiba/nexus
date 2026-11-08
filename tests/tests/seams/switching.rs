@@ -41,7 +41,7 @@ fn switching_keeps_screen_selection_and_running_games() {
     host.dispatch(Command::Session(SessionCmd::Launch("emu-a:G2".parse().unwrap())));
     host.dispatch(Command::OpenGame("emu-a:G1".parse().unwrap()));
 
-    for theme in ["fixture-grid", "default"] {
+    for theme in ["fixture-grid", "default", "classic"] {
         let before = host.instance().as_weak();
         host.ui.switch(&id(theme)).unwrap_or_else(|e| panic!("{theme}: {e}"));
         assert!(before.upgrade().is_none(), "{theme}: the old view tree was released");
@@ -69,7 +69,7 @@ fn a_switch_emits_theme_changed_and_saves_the_choice() {
     host.pump();
 
     let changed: Vec<_> = drain(&mut events).into_iter().filter(|e| matches!(e, Event::ThemeChanged { .. })).collect();
-    assert_eq!(changed, [Event::ThemeChanged { from: Some(id("default")), to: id("fixture-grid") }]);
+    assert_eq!(changed, [Event::ThemeChanged { from: Some(id("classic")), to: id("fixture-grid") }]);
     assert_eq!(host.core().kernel().config().get(&["app", "theme"]), serde_json::json!("fixture-grid"));
     assert_eq!(host.core().selected_theme(), Some(id("fixture-grid")));
 }

@@ -212,11 +212,11 @@ async fn the_kernel_loads_an_emulator_and_a_theme_each_through_its_own_trait() {
         "id = \"emu\"\nkind = \"emulator\"\nname = \"E\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"",
     );
     let host =
-        FakeHost::new().plugin(emu).built_in(nexus_api::PluginBox::theme(theme_default::DefaultTheme)).boot().await;
+        FakeHost::new().plugin(emu).built_in(nexus_api::PluginBox::theme(theme_classic::ClassicTheme)).boot().await;
     assert!(host.report().rejected.is_empty(), "{:?}", host.report().rejected);
     let order = host.kernel.order();
-    assert!(order.contains(&id("emu")) && order.contains(&id("default")));
-    let files = host.kernel.theme_files(&id("default")).expect("a theme has files");
+    assert!(order.contains(&id("emu")) && order.contains(&id("classic")));
+    let files = host.kernel.theme_files(&id("classic")).expect("a theme has files");
     assert!(files.read(&nexus_api::RelPath::new("theme.toml").unwrap()).is_some());
     assert!(host.kernel.theme_files(&id("emu")).is_err(), "an emulator has no theme files");
 }
@@ -239,7 +239,7 @@ async fn code_of_one_kind_with_a_manifest_of_the_other_is_rejected() {
     }
     impl nexus_api::ThemePlugin for ThemeCode {
         fn files(&self) -> std::sync::Arc<dyn nexus_api::Files> {
-            <theme_default::DefaultTheme as nexus_api::ThemePlugin>::files(&theme_default::DefaultTheme)
+            <theme_classic::ClassicTheme as nexus_api::ThemePlugin>::files(&theme_classic::ClassicTheme)
         }
     }
     let host = FakeHost::new().plugin(wrong).built_in(nexus_api::PluginBox::theme(ThemeCode)).boot().await;
@@ -318,6 +318,7 @@ fn the_built_in_plugins_and_themes_accept_this_host() {
         "services/release-catalog/plugin.toml",
         "services/playstation-store/plugin.toml",
         "system/host/plugin.toml",
+        "themes/classic/theme/theme.toml",
         "themes/default/theme/theme.toml",
     ];
     for file in manifests {

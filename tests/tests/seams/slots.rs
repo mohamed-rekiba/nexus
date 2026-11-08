@@ -13,8 +13,8 @@ fn shown(theme: &str, width: f32, height: f32) -> Composed {
     host.ui.switch(&id(theme)).unwrap();
     host.resize(width, height);
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
-    if theme == "default" {
-        // The default theme shows games, and their badges, in the Library.
+    if theme == "classic" {
+        // The Classic theme shows games, and their badges, in the Library.
         let tabs = i_slint_backend_testing::ElementHandle::find_by_accessible_label(host.instance(), "default-system");
         let library =
             tabs.into_iter().find(|t| t.accessible_value().as_deref() == Some("Library")).expect("a Library tab");
@@ -28,7 +28,7 @@ fn shown(theme: &str, width: f32, height: f32) -> Composed {
 #[test]
 fn the_same_plugin_badges_render_in_both_themes_in_different_places() {
     let mut positions = Vec::new();
-    for theme in ["fixture-grid", "default"] {
+    for theme in ["fixture-grid", "classic"] {
         let host = shown(theme, 1600.0, 900.0);
         assert_eq!(host.count("emu-a:region"), GAMES.len(), "{theme}: one region badge per game");
         let badge = host.first("emu-a:region");
@@ -39,7 +39,7 @@ fn the_same_plugin_badges_render_in_both_themes_in_different_places() {
 
 #[test]
 fn slot_actions_and_sections_render_on_the_detail_screen_of_both_themes() {
-    for theme in ["fixture-grid", "default"] {
+    for theme in ["fixture-grid", "classic"] {
         let mut host = shown(theme, 1600.0, 900.0);
         host.dispatch(Command::OpenGame("emu-a:G0".parse().unwrap()));
         assert_eq!(host.count("emu-a:verify"), 1, "{theme}: the action button");

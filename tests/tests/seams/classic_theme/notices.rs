@@ -5,7 +5,7 @@ use super::*;
 #[test]
 fn a_notice_opens_what_it_is_about() {
     // A game whose plugin can't start games: Play leaves a notice about it.
-    let mut host = default_theme();
+    let mut host = classic_theme();
     let core = host.core().clone();
     let failed = host.rt.block_on(core.dispatch(Command::Session(SessionCmd::Launch("emu-a:G0".parse().unwrap()))));
     assert!(failed.is_err());
@@ -22,7 +22,7 @@ fn a_notice_opens_what_it_is_about() {
 
 #[test]
 fn a_notice_goes_after_a_while_and_one_with_a_link_stays_longer() {
-    let mut host = default_theme();
+    let mut host = classic_theme();
     host.core().report("Couldn't read the folder".into());
     host.ui.render().unwrap();
     host.wait(std::time::Duration::from_millis(100));
@@ -73,7 +73,7 @@ fn a_notice_goes_after_a_while_and_one_with_a_link_stays_longer() {
 
 #[test]
 fn delete_closes_the_notice() {
-    let mut host = default_theme();
+    let mut host = classic_theme();
     host.core().report("Couldn't read the folder".into());
     host.ui.render().unwrap();
     host.wait(std::time::Duration::from_millis(100));
@@ -88,7 +88,7 @@ fn delete_closes_the_notice() {
 
 #[test]
 fn notices_stack_up_to_three_and_delete_closes_only_the_newest() {
-    let mut host = default_theme();
+    let mut host = classic_theme();
     for text in ["First", "Second", "Third", "Fourth"] {
         host.core().report(text.into());
     }
@@ -107,7 +107,7 @@ fn notices_stack_up_to_three_and_delete_closes_only_the_newest() {
 
 #[test]
 fn each_notice_keeps_its_own_time_when_an_older_one_goes() {
-    let mut host = default_theme();
+    let mut host = classic_theme();
     host.core().report("First".into());
     host.ui.render().unwrap();
     host.wait(std::time::Duration::from_millis(100));

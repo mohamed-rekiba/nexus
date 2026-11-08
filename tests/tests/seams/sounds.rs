@@ -28,7 +28,7 @@ fn a_step_in_the_default_theme_plays_its_move_sound() {
 
     assert_eq!(asked_for(&host), ["move"]);
     let declared = std::fs::read(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../plugins/themes/default/theme/sounds/move.wav"),
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../plugins/themes/classic/theme/sounds/move.wav"),
     )
     .unwrap();
     assert_eq!(host.ui.sound("move").as_deref(), Some(declared.as_slice()));
@@ -60,7 +60,7 @@ fn a_theme_whose_sound_file_is_missing_does_not_load_and_the_old_one_stays() {
     let err = host.ui.switch(&id("quiet")).unwrap_err();
 
     assert!(err.to_string().contains("click.wav"), "{err}");
-    assert_eq!(host.ui.current(), Some(&id("default")));
+    assert_eq!(host.ui.current(), Some(&id("classic")));
 }
 
 #[test]
@@ -69,7 +69,7 @@ fn the_default_theme_has_upstream_s_five_sounds() {
     for name in ["move", "select", "back", "error", "start"] {
         let declared = std::fs::read(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join(format!("../plugins/themes/default/theme/sounds/{name}.wav")),
+                .join(format!("../plugins/themes/classic/theme/sounds/{name}.wav")),
         )
         .unwrap();
         assert_eq!(host.ui.sound(name).as_deref(), Some(declared.as_slice()), "{name}");

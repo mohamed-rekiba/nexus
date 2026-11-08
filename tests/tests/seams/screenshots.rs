@@ -1,4 +1,4 @@
-//! Renders a stub library on every default theme screen, and in a child theme, to PNG files, with
+//! Renders a stub library on every Classic theme screen, and in a child theme, to PNG files, with
 //! Slint's software renderer and no window. Its own test binary: it installs its own Slint
 //! platform.
 
@@ -105,8 +105,8 @@ fn key(host: &mut Composed, key: slint::platform::Key) {
     host.load_images();
 }
 
-/// Every default theme screen in one direction, as `default[-rtl]-<screen>.png`.
-fn shoot_default(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path, prefix: &str) {
+/// Every Classic theme screen in one direction, as `classic[-rtl]-<screen>.png`.
+fn shoot_classic(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path, prefix: &str) {
     use slint::platform::Key;
     host.dispatch(Command::Navigate(Route::Home));
     host.load_images();
@@ -242,7 +242,7 @@ fn shoot_default(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path
     shoot(window, &out.join(format!("{prefix}-catalog-plugin.png")));
     // A theme's sheet beside Themes: use it, and its options.
     host.dispatch(Command::Navigate(Route::Themes));
-    host.dispatch(Command::Navigate(Route::Plugin("default".parse().unwrap())));
+    host.dispatch(Command::Navigate(Route::Plugin("classic".parse().unwrap())));
     host.load_images();
     shoot(window, &out.join(format!("{prefix}-theme.png")));
     host.dispatch(Command::Navigate(Route::Home));
@@ -413,8 +413,8 @@ fn shoot_vpn(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path, pr
 }
 
 /// Settings at its LAUNCHER rows, with "Size of everything" focused and then "Start at login",
-/// then Home at the smallest and the largest size, as `default-settings-launcher.png`,
-/// `default-settings-login.png` and `default-home-<percent>.png`.
+/// then Home at the smallest and the largest size, as `classic-settings-launcher.png`,
+/// `classic-settings-login.png` and `classic-home-<percent>.png`.
 fn shoot_sizes(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path) {
     use slint::platform::Key;
     host.dispatch(Command::Navigate(Route::Settings));
@@ -422,22 +422,22 @@ fn shoot_sizes(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path) 
     // Up to the tabs, then down into LAUNCHER, the first tab, to Full screen.
     key(host, Key::UpArrow);
     key(host, Key::DownArrow);
-    shoot(window, &out.join("default-settings-launcher.png"));
+    shoot(window, &out.join("classic-settings-launcher.png"));
     // Down past the size, Back to the launcher and Interface sounds to Start at login.
     for _ in 0..4 {
         key(host, Key::DownArrow);
     }
-    shoot(window, &out.join("default-settings-login.png"));
+    shoot(window, &out.join("classic-settings-login.png"));
     key(host, Key::Escape);
     for (size, name) in [(0.8, "80"), (1.4, "140")] {
         host.dispatch(Command::Pref(Pref::Scale, size.into()));
         host.dispatch(Command::Navigate(Route::Home));
         host.load_images();
-        shoot(window, &out.join(format!("default-home-{name}.png")));
+        shoot(window, &out.join(format!("classic-home-{name}.png")));
         // Settings at the size: the tabs and the longest rows.
         host.dispatch(Command::Navigate(Route::Settings));
         host.load_images();
-        shoot(window, &out.join(format!("default-settings-{name}.png")));
+        shoot(window, &out.join(format!("classic-settings-{name}.png")));
         key(host, Key::Escape);
     }
     host.dispatch(Command::Pref(Pref::Scale, 1.0.into()));
@@ -476,17 +476,17 @@ fn shoot_steam_offers(host: &mut Composed, window: &MinimalSoftwareWindow, out: 
     let key_of = |title: &str| offers.iter().find(|o| o.title == title).map(|o| o.key.clone()).unwrap();
     host.dispatch(Command::OpenGame(key_of("Sample Without Title Id").parse().unwrap()));
     host.load_images();
-    shoot(window, &out.join("default-offer-package.png"));
+    shoot(window, &out.join("classic-offer-package.png"));
     key(host, Key::DownArrow);
     key(host, Key::Return);
-    shoot(window, &out.join("default-download-sheet-package.png"));
+    shoot(window, &out.join("classic-download-sheet-package.png"));
     key(host, Key::Escape);
     key(host, Key::Escape);
     host.dispatch(Command::OpenGame(key_of("Sample Windows Game").parse().unwrap()));
     host.load_images();
-    shoot(window, &out.join("default-offer-pc.png"));
+    shoot(window, &out.join("classic-offer-pc.png"));
     key(host, Key::Menu);
-    shoot(window, &out.join("default-offer-pc-menu.png"));
+    shoot(window, &out.join("classic-offer-pc-menu.png"));
     key(host, Key::Escape);
     key(host, Key::Escape);
     host.dispatch(Command::Navigate(Route::Home));
@@ -512,7 +512,7 @@ fn this_pc(vulkan: (u32, u32)) -> nexus_core::Specs {
 }
 
 /// A PS5 offer on a PC that can't start it, with the notice at the start and the sheet's
-/// warnings, then on a PC where it doesn't fit, as `default-this-pc-*.png`.
+/// warnings, then on a PC where it doesn't fit, as `classic-this-pc-*.png`.
 fn shoot_this_pc(window: &MinimalSoftwareWindow, out: &Path) {
     use slint::platform::Key;
     for (name, vulkan) in [("no", (1, 2)), ("space", (1, 3))] {
@@ -539,22 +539,22 @@ fn shoot_this_pc(window: &MinimalSoftwareWindow, out: &Path) {
         host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
         host.dispatch(Command::Navigate(Route::Home));
         host.load_images();
-        shoot(window, &out.join(format!("default-this-pc-{name}-start.png")));
+        shoot(window, &out.join(format!("classic-this-pc-{name}-start.png")));
         host.dispatch(Command::OpenGame("release-catalog:emu-kyty/PPSA01234".parse().unwrap()));
         host.load_images();
-        shoot(window, &out.join(format!("default-this-pc-{name}.png")));
+        shoot(window, &out.join(format!("classic-this-pc-{name}.png")));
         key(&mut host, Key::DownArrow);
         key(&mut host, Key::Return);
-        shoot(window, &out.join(format!("default-this-pc-{name}-sheet.png")));
+        shoot(window, &out.join(format!("classic-this-pc-{name}-sheet.png")));
         assert_served(&host, &[]);
     }
 }
 
-/// A Game Hub's releases as `default[-rtl]-releases.png`: long titles, New tags, a warning, and
+/// A Game Hub's releases as `classic[-rtl]-releases.png`: long titles, New tags, a warning, and
 /// the keys on the second row. Each row's Download button ends at the same place.
 fn shoot_releases(window: &MinimalSoftwareWindow, out: &Path) {
     use slint::platform::Key;
-    for (name, direction) in [("default", "ltr"), ("default-rtl", "rtl")] {
+    for (name, direction) in [("classic", "ltr"), ("classic-rtl", "rtl")] {
         let home = tempfile::tempdir().unwrap();
         let mut host = composed_on_current_platform(|h| {
             h.home(home.path())
@@ -594,8 +594,8 @@ fn shoot_releases(window: &MinimalSoftwareWindow, out: &Path) {
     }
 }
 
-/// The Library's header with a controller, as `default-pad-hints.png`, and its key hints cut
-/// out at four times the size as `default-pad-hints-zoom.png`: the d-pad's two pairs, ⮜  ⮞ and
+/// The Library's header with a controller, as `classic-pad-hints.png`, and its key hints cut
+/// out at four times the size as `classic-pad-hints-zoom.png`: the d-pad's two pairs, ⮜  ⮞ and
 /// ⮝  ⮟, are the same size.
 fn shoot_pad_hints(window: &MinimalSoftwareWindow, out: &Path) {
     use nexus_ui_host::PadButton;
@@ -614,23 +614,23 @@ fn shoot_pad_hints(window: &MinimalSoftwareWindow, out: &Path) {
     for button in [PadButton::Up, PadButton::Right, PadButton::South, PadButton::Up] {
         pad(&mut host, button);
     }
-    let full = out.join("default-pad-hints.png");
+    let full = out.join("classic-pad-hints.png");
     shoot(window, &full);
     let image = image::open(&full).unwrap();
     let (w, h) = (image.width(), image.height());
     let hints = image.crop_imm(w / 2, h - 90, w / 2, 90);
     hints
         .resize(hints.width() * 4, hints.height() * 4, image::imageops::FilterType::Nearest)
-        .save(out.join("default-pad-hints-zoom.png"))
+        .save(out.join("classic-pad-hints-zoom.png"))
         .unwrap();
 }
 
 /// The Library's genres in a narrow window, with the keys on the last chip, left to right and
-/// right to left, as `default[-rtl]-genres.png`: the row scrolls, and fades where chips hide.
+/// right to left, as `classic[-rtl]-genres.png`: the row scrolls, and fades where chips hide.
 fn shoot_genres(window: &MinimalSoftwareWindow, out: &Path) {
     use slint::platform::Key;
     window.set_size(slint::PhysicalSize::new(640, 900));
-    for (direction, prefix) in [("ltr", "default"), ("rtl", "default-rtl")] {
+    for (direction, prefix) in [("ltr", "classic"), ("rtl", "classic-rtl")] {
         let mut host = composed_on_current_platform(|h| {
             h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha"]).build())
                 .plugin(FakeStore::new("store").knows("CUSA00000", 4.5, "").build())
@@ -656,11 +656,11 @@ fn shoot_genres(window: &MinimalSoftwareWindow, out: &Path) {
 }
 
 /// A trailer in the window: playing with its controls, playing once they hid, and paused, left
-/// to right and right to left, as `default[-rtl]-trailer[-hidden|-paused].png`. No frame comes,
+/// to right and right to left, as `classic[-rtl]-trailer[-hidden|-paused].png`. No frame comes,
 /// so the picture is black.
 fn shoot_trailer(window: &MinimalSoftwareWindow, out: &Path) {
     use nexus_ui_host::TrailerStatus;
-    for (direction, prefix) in [("ltr", "default"), ("rtl", "default-rtl")] {
+    for (direction, prefix) in [("ltr", "classic"), ("rtl", "classic-rtl")] {
         let mut host = composed_on_current_platform(|h| {
             h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha"]).build())
                 .plugin(FakeStore::new("store").knows("CUSA00000", 4.5, "").build())
@@ -690,10 +690,10 @@ fn shoot_trailer(window: &MinimalSoftwareWindow, out: &Path) {
 }
 
 /// The on-screen keyboard over the Library's search, opened with the controller: letters with
-/// Shift on as `default-keyboard.png`, the symbols as `default-keyboard-symbols.png`, then at
+/// Shift on as `classic-keyboard.png`, the symbols as `classic-keyboard-symbols.png`, then at
 /// the smallest and largest size, at a 1.5 scale factor and right to left, as
-/// `default-keyboard-<percent>.png`, `default-keyboard-scale-150.png` and
-/// `default-rtl-keyboard.png`. The keys are drawn on whole pixels at every one of them.
+/// `classic-keyboard-<percent>.png`, `classic-keyboard-scale-150.png` and
+/// `classic-rtl-keyboard.png`. The keys are drawn on whole pixels at every one of them.
 fn shoot_keyboard(window: &MinimalSoftwareWindow, out: &Path) {
     use nexus_ui_host::PadButton;
     let mut host = composed_on_current_platform(|h| {
@@ -710,30 +710,30 @@ fn shoot_keyboard(window: &MinimalSoftwareWindow, out: &Path) {
         pad(&mut host, button);
     }
     pad(&mut host, PadButton::LeftShoulder);
-    shoot(window, &out.join("default-keyboard.png"));
+    shoot(window, &out.join("classic-keyboard.png"));
     pad(&mut host, PadButton::RightShoulder);
-    shoot(window, &out.join("default-keyboard-symbols.png"));
+    shoot(window, &out.join("classic-keyboard-symbols.png"));
     pad(&mut host, PadButton::RightShoulder);
     for (size, name) in [(0.8, "80"), (1.4, "140")] {
         host.dispatch(Command::Pref(Pref::Scale, size.into()));
-        shoot(window, &out.join(format!("default-keyboard-{name}.png")));
+        shoot(window, &out.join(format!("classic-keyboard-{name}.png")));
     }
     host.dispatch(Command::Pref(Pref::Scale, 1.0.into()));
     // The same window on a screen with 1.5 pixels to the point.
     window.dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: 1.5 });
     window.set_size(slint::PhysicalSize::new(WIDTH * 3 / 2, HEIGHT * 3 / 2));
     host.ui.render().unwrap();
-    shoot(window, &out.join("default-keyboard-scale-150.png"));
+    shoot(window, &out.join("classic-keyboard-scale-150.png"));
     window.dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: 1.0 });
     window.set_size(slint::PhysicalSize::new(WIDTH, HEIGHT));
     host.dispatch(Command::SetThemeOption { key: "direction".into(), value: "rtl".into() });
-    shoot(window, &out.join("default-rtl-keyboard.png"));
+    shoot(window, &out.join("classic-rtl-keyboard.png"));
 }
 
 /// The machine's settings as the whole screen, over a fake system plugin: the top bar's icons
-/// with the network panel open as `default-system-network.png`, the sound and Bluetooth panels,
+/// with the network panel open as `classic-system-network.png`, the sound and Bluetooth panels,
 /// the panel at the smallest and largest size and at a 1.5 scale factor, and the USB stick's
-/// confirmation as `default-system-install.png`.
+/// confirmation as `classic-system-install.png`.
 fn shoot_system(window: &MinimalSoftwareWindow, out: &Path) {
     use nexus_core::system::{Place, SystemCommand};
     let system = nexus_testkit::FakeSystem::new();
@@ -784,21 +784,21 @@ fn shoot_system(window: &MinimalSoftwareWindow, out: &Path) {
         follow(host);
     };
     open(&mut host, "status:network");
-    shoot(window, &out.join("default-system-network.png"));
+    shoot(window, &out.join("classic-system-network.png"));
     open(&mut host, "status:sound");
-    shoot(window, &out.join("default-system-sound.png"));
+    shoot(window, &out.join("classic-system-sound.png"));
     open(&mut host, "status:bluetooth");
-    shoot(window, &out.join("default-system-bluetooth.png"));
+    shoot(window, &out.join("classic-system-bluetooth.png"));
     open(&mut host, "status:network");
     for (size, name) in [(0.8, "80"), (1.4, "140")] {
         host.dispatch(Command::Pref(Pref::Scale, size.into()));
-        shoot(window, &out.join(format!("default-system-{name}.png")));
+        shoot(window, &out.join(format!("classic-system-{name}.png")));
     }
     host.dispatch(Command::Pref(Pref::Scale, 1.0.into()));
     window.dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: 1.5 });
     window.set_size(slint::PhysicalSize::new(WIDTH * 3 / 2, HEIGHT * 3 / 2));
     host.ui.render().unwrap();
-    shoot(window, &out.join("default-system-scale-150.png"));
+    shoot(window, &out.join("classic-system-scale-150.png"));
     window.dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: 1.0 });
     window.set_size(slint::PhysicalSize::new(WIDTH, HEIGHT));
     drop(host);
@@ -816,7 +816,7 @@ fn shoot_system(window: &MinimalSoftwareWindow, out: &Path) {
         host.instance().window().dispatch_event(slint::platform::WindowEvent::KeyReleased { text });
         follow(&mut host);
     }
-    shoot(window, &out.join("default-system-install.png"));
+    shoot(window, &out.join("classic-system-install.png"));
     drop(host);
 
     // Settings' System and Power tabs in a desktop's Nexus session, where Log out shows.
@@ -832,19 +832,19 @@ fn shoot_system(window: &MinimalSoftwareWindow, out: &Path) {
     for tab in ["games", "updates", "downloads", "this-pc", "system", "power"] {
         key(&mut host, slint::platform::Key::RightArrow);
         if matches!(tab, "system" | "power") {
-            shoot(window, &out.join(format!("default-settings-tab-{tab}-session.png")));
+            shoot(window, &out.join(format!("classic-settings-tab-{tab}-session.png")));
         }
     }
 }
 
 /// The launch splash of an emulator that lists its keyboard keys, left to right and right to
-/// left, as `default[-rtl]-splash-keys.png`.
+/// left, as `classic[-rtl]-splash-keys.png`.
 fn shoot_splash(window: &MinimalSoftwareWindow, out: &Path) {
     let emulator = emu_kyty::KEYS
         .iter()
         .fold(FakeCatalog::new("emu-a").playable(), |emulator, (button, keys)| emulator.key(button, keys))
         .games(["Alpha"]);
-    for (direction, prefix) in [("ltr", "default"), ("rtl", "default-rtl")] {
+    for (direction, prefix) in [("ltr", "classic"), ("rtl", "classic-rtl")] {
         let emulator = emulator.clone();
         let mut host = composed_on_current_platform(move |h| h.plugin(emulator.build()));
         host.ui.start().unwrap();
@@ -859,11 +859,11 @@ fn shoot_splash(window: &MinimalSoftwareWindow, out: &Path) {
 }
 
 /// Emulators named by their console, left to right and right to left: the first start's steps
-/// as `default[-rtl]-names-welcome.png`, the Emulators list with each build as
-/// `default[-rtl]-names-emulators.png`, and a first play's prompt as
-/// `default[-rtl]-names-install-prompt.png`.
+/// as `classic[-rtl]-names-welcome.png`, the Emulators list with each build as
+/// `classic[-rtl]-names-emulators.png`, and a first play's prompt as
+/// `classic[-rtl]-names-install-prompt.png`.
 fn shoot_console_names(window: &MinimalSoftwareWindow, out: &Path) {
-    for (direction, prefix) in [("ltr", "default"), ("rtl", "default-rtl")] {
+    for (direction, prefix) in [("ltr", "classic"), ("rtl", "classic-rtl")] {
         let mut host = composed_on_current_platform(|h| {
             h.first_run()
                 .plugin(
@@ -935,7 +935,7 @@ fn ps4_box_art() -> Vec<u8> {
 }
 
 /// A PS4 game whose store art is box art with the blue band, and whose community result says
-/// when it was tested: its card and its Game Hub, as `default-ps4-*.png`.
+/// when it was tested: its card and its Game Hub, as `classic-ps4-*.png`.
 fn shoot_ps4_cover(window: &MinimalSoftwareWindow, out: &Path) {
     use slint::platform::Key;
     let mut host = composed_on_current_platform(|h| {
@@ -947,14 +947,14 @@ fn shoot_ps4_cover(window: &MinimalSoftwareWindow, out: &Path) {
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::Navigate(Route::Home));
     host.load_images();
-    shoot(window, &out.join("default-ps4-home.png"));
+    shoot(window, &out.join("classic-ps4-home.png"));
     key(&mut host, Key::Return);
     host.load_images();
-    shoot(window, &out.join("default-ps4-detail.png"));
+    shoot(window, &out.join("classic-ps4-detail.png"));
     // The same Game Hub from right to left: its buttons, the trailer's among them, and its facts.
     host.dispatch(Command::SetThemeOption { key: "direction".into(), value: "rtl".into() });
     host.load_images();
-    shoot(window, &out.join("default-rtl-ps4-detail.png"));
+    shoot(window, &out.join("classic-rtl-ps4-detail.png"));
     host.dispatch(Command::SetThemeOption { key: "direction".into(), value: "ltr".into() });
     // The stub's screenshots: this picture is about the cover, so the Game Hub shows none.
     assert_served(&host, &["https://art.example/1.png".into(), "https://art.example/2.png".into()]);
@@ -1061,16 +1061,16 @@ fn not_blank(out: &Path, names: &[&str]) {
 }
 
 #[test]
-fn every_default_screen_renders_the_library() {
+fn every_classic_screen_renders_the_library() {
     let (window, out) = offscreen();
     let home = tempfile::tempdir().unwrap();
     let mut host = library(home.path());
-    shoot_default(&mut host, &window, &out, "default");
+    shoot_classic(&mut host, &window, &out, "classic");
     shoot_sizes(&mut host, &window, &out);
     shoot_steam_offers(&mut host, &window, &out);
     // A first play asks before the emulator downloads.
     host.dispatch(Command::Session(SessionCmd::Launch("emu-x:G0".parse().unwrap())));
-    shoot(&window, &out.join("default-install-prompt.png"));
+    shoot(&window, &out.join("classic-install-prompt.png"));
     host.dispatch(Command::CancelInstall);
     // A game runs; the PS button brought the launcher back in front of it.
     host.dispatch(Command::Session(SessionCmd::Launch("emu-p:G0".parse().unwrap())));
@@ -1081,21 +1081,21 @@ fn every_default_screen_renders_the_library() {
     slint::platform::update_timers_and_animations();
     host.pump();
     host.load_images();
-    shoot(&window, &out.join("default-running.png"));
+    shoot(&window, &out.join("classic-running.png"));
     // The other stub emulators name no console, so no catalog is asked for them.
     assert_served(&host, &[]);
     println!("screenshots in {}", out.display());
-    not_blank(&out, &["default-home", "default-library", "default-detail", "default-settings", "default-running"]);
+    not_blank(&out, &["classic-home", "classic-library", "classic-detail", "classic-settings", "classic-running"]);
 }
 
 #[test]
-fn the_default_screens_render_right_to_left() {
+fn the_classic_screens_render_right_to_left() {
     let (window, out) = offscreen();
     let home = tempfile::tempdir().unwrap();
     let mut host = library(home.path());
     host.dispatch(Command::SetThemeOption { key: "direction".into(), value: "rtl".into() });
-    shoot_default(&mut host, &window, &out, "default-rtl");
-    not_blank(&out, &["default-rtl-home"]);
+    shoot_classic(&mut host, &window, &out, "classic-rtl");
+    not_blank(&out, &["classic-rtl-home"]);
 }
 
 #[test]
@@ -1109,17 +1109,16 @@ fn a_child_theme_renders_the_same_library() {
     not_blank(&out, &["fixture-grid-home"]);
 }
 
-/// The Systems theme's Home, left to right and right to left, on the five built-in emulators
-/// with their own icons and covers, as `systems-all-games.png` (All games focused),
-/// `systems-home.png` and `systems-rtl-home.png`.
+/// The Default theme's Home, left to right and right to left, on the five built-in emulators
+/// with their own icons and covers, as `default-all-games.png` (All games focused),
+/// `default-home.png` and `default-rtl-home.png`.
 #[test]
-fn the_systems_theme_renders_its_list_both_ways() {
+fn the_default_theme_renders_its_list_both_ways() {
     use nexus_api::PluginBox;
     let (window, out) = offscreen();
     let home = tempfile::tempdir().unwrap();
     let mut host = composed_on_current_platform(|h| {
         h.home(home.path())
-            .built_in(PluginBox::theme(theme_systems::SystemsTheme))
             .built_in(PluginBox::code(emu_kyty::KytyPlugin))
             .built_in(PluginBox::code(emu_shadps4::ShadPlugin))
             .built_in(PluginBox::code(emu_lichii::LichiiPlugin))
@@ -1127,20 +1126,20 @@ fn the_systems_theme_renders_its_list_both_ways() {
             .built_in(PluginBox::code(emu_steam::SteamPlugin))
     });
     host.ui.start().unwrap();
-    host.ui.switch(&id(theme_systems::ID)).unwrap();
+    host.ui.switch(&id(theme_default::ID)).unwrap();
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     // The fake network has no emulator builds: their notices would cover the list.
     host.dispatch(Command::Notice(nexus_core::NoticeCmd::DismissAll));
     host.load_images();
-    shoot(&window, &out.join("systems-all-games.png"));
+    shoot(&window, &out.join("default-all-games.png"));
     // The focus on the third entry, so the list shows a big tile between small ones.
     for _ in 0..2 {
         key(&mut host, slint::platform::Key::DownArrow);
     }
-    shoot(&window, &out.join("systems-home.png"));
+    shoot(&window, &out.join("default-home.png"));
     host.dispatch(Command::SetThemeOption { key: "direction".into(), value: "rtl".into() });
     host.load_images();
-    shoot(&window, &out.join("systems-rtl-home.png"));
+    shoot(&window, &out.join("default-rtl-home.png"));
     println!("screenshots in {}", out.display());
-    not_blank(&out, &["systems-all-games", "systems-home", "systems-rtl-home"]);
+    not_blank(&out, &["default-all-games", "default-home", "default-rtl-home"]);
 }

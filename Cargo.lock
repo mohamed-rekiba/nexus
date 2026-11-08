@@ -4160,8 +4160,8 @@ dependencies = [
  "slint-interpreter",
  "system-host",
  "tar",
+ "theme-classic",
  "theme-default",
- "theme-systems",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -4244,8 +4244,8 @@ dependencies = [
  "slint-interpreter",
  "tar",
  "tempfile",
+ "theme-classic",
  "theme-default",
- "theme-systems",
  "tokio",
  "zip",
  "zstd",
@@ -6826,14 +6826,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f18aa187839b2bdb1ad2fa35ead8c4c2976b64e4363c386d45ac0f7ee85c9233"
 
 [[package]]
-name = "theme-default"
+name = "theme-classic"
 version = "0.10.0"
 dependencies = [
  "nexus-api",
 ]
 
 [[package]]
-name = "theme-systems"
+name = "theme-default"
 version = "0.10.0"
 dependencies = [
  "nexus-api",

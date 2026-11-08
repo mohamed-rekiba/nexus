@@ -54,12 +54,18 @@ impl std::ops::DerefMut for Composed {
     }
 }
 
-/// Boots a core with the default theme plus whatever `build` adds, and an app shell on it.
-/// Starts Slint's testing backend for this thread.
+/// Boots a core with the built-in themes plus whatever `build` adds, and an app shell on it,
+/// with the Classic theme as the saved choice when the test saved none: most seam tests drive
+/// its screens. A test of the Default theme switches to it. Starts Slint's testing backend for this thread.
 pub fn composed(build: impl FnOnce(FakeHost) -> FakeHost) -> Composed {
+    testing_backend();
+    composed_on_current_platform(build)
+}
+
+/// Slint's testing backend on this thread, once.
+fn testing_backend() {
     thread_local!(static SLINT: () = quiet_testing_backend());
     SLINT.with(|_| {});
-    composed_on_current_platform(build)
 }
 
 /// False for the log line Slint's element search writes for the items its interpreter keeps no
@@ -118,9 +124,28 @@ fn quiet_testing_backend() {
 
 /// Like [`composed`], for a test that set its own Slint platform.
 pub fn composed_on_current_platform(build: impl FnOnce(FakeHost) -> FakeHost) -> Composed {
+    boot_composed(build, true)
+}
+
+/// Like [`composed`], with no theme saved, as on a first run.
+pub fn composed_first_run(build: impl FnOnce(FakeHost) -> FakeHost) -> Composed {
+    testing_backend();
+    boot_composed(build, false)
+}
+
+/// The core and the shell, with the built-in themes; `classic` saves the Classic theme as the
+/// choice when the test saved none.
+fn boot_composed(build: impl FnOnce(FakeHost) -> FakeHost, classic: bool) -> Composed {
     let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-    let host = build(FakeHost::new().built_in(nexus_api::PluginBox::theme(theme_default::DefaultTheme)));
+    let host = build(
+        FakeHost::new()
+            .built_in(nexus_api::PluginBox::theme(theme_classic::ClassicTheme))
+            .built_in(nexus_api::PluginBox::theme(theme_default::DefaultTheme)),
+    );
     let test = rt.block_on(host.boot_core());
+    if classic && test.core.selected_theme().is_none() {
+        test.core.theme_switched(nexus_api::PluginId::new(theme_classic::ID).unwrap()).unwrap();
+    }
     let platform = FakePlatform::default();
     let options = ShellOptions { dev: false, monitor: None, thumbs: test.data_dir().join("cache/thumbs") };
     let clock = Arc::new(test.clock.clone());
@@ -286,7 +311,7 @@ pub fn write_theme(parent: &Path, theme_id: &str, theme_section: &str, files: &[
     }
 }
 
-/// The test-only theme in `tests/fixtures/themes`: a grid that extends the default theme.
+/// The test-only theme in `tests/fixtures/themes`: a grid that extends the Default theme.
 pub fn fixture_themes() -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/themes")
 }

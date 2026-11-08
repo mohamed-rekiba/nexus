@@ -45,8 +45,8 @@ use emu_steam as _;
 use playstation_store as _;
 use release_catalog as _;
 use system_host as _;
+use theme_classic as _;
 use theme_default as _;
-use theme_systems as _;
 
 fn main() {
     tracing_subscriber::fmt()

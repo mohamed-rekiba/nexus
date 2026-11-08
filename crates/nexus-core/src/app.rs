@@ -773,7 +773,7 @@ mod tests {
         round_trip(Command::SetFolders { name: "games".into(), paths: vec!["/games".into()] });
         round_trip(Command::ReportResult(None));
         round_trip(Command::ReportResult(Some(nexus_api::CompatLevel::Menus)));
-        // The default theme sends the result's name.
+        // The Classic theme sends the result's name.
         let menus: Command = serde_json::from_str(r#"{"ReportResult":"menus"}"#).unwrap();
         assert_eq!(menus, Command::ReportResult(Some(nexus_api::CompatLevel::Menus)));
         assert!(serde_json::from_str::<Command>(r#"{"ReportResult":"great"}"#).is_err());

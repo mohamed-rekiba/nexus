@@ -1,4 +1,4 @@
-//! The design token schema. Every theme sets values for these names; the default theme sets all.
+//! The design token schema. Every theme sets values for these names; the Classic theme sets all.
 
 use serde::{Deserialize, Serialize};
 

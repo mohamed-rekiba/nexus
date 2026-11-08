@@ -4,7 +4,7 @@ use super::*;
 
 #[test]
 fn the_game_s_menu_lists_what_the_game_has_and_rates_it() {
-    let mut host = default_theme();
+    let mut host = classic_theme();
     host.press("game-options", "Options");
     let items = host.values("game-menu");
     assert_eq!(
@@ -111,7 +111,7 @@ fn the_game_hub_s_screenshot_row_scrolls_to_the_focused_shot() {
 #[test]
 fn the_game_hub_s_cover_grows_from_the_card_it_opened_from() {
     use slint::platform::Key;
-    let mut host = default_theme();
+    let mut host = classic_theme();
     host.press("default-system", "Library");
     host.navigate(Key::RightArrow);
     let found = i_slint_backend_testing::ElementHandle::find_by_accessible_label(host.instance(), "default-game");
