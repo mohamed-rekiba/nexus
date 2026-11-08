@@ -11,8 +11,9 @@ OS_IMAGE ?= localhost/nexus-os:minimal
 OS_BASE ?= quay.io/fedora/fedora-bootc:44
 # The USB stick os-iso makes and os-vm starts, named with Nexus OS's version.
 OS_ISO ?= nexus-os-x86_64-$(shell cat os/version.txt).iso
-# gamescope's options for run-session: the ones packaging/linux/nexus-session uses.
-GAMESCOPE_ARGS ?= -e --xwayland-count 1
+# gamescope's options for run-session: the ones packaging/linux/nexus-session uses, and -f, as
+# here gamescope is a window in the desktop: full screen, not a small window.
+GAMESCOPE_ARGS ?= -f -e --xwayland-count 1
 
 help: ## List the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-22s %s\n", $$1, $$2}'
@@ -41,8 +42,10 @@ run-windowed: ## Run the launcher in a normal window
 run-session: ## Run the launcher as the Nexus session does: in gamescope, with NEXUS_SESSION=1 (GAMESCOPE_ARGS)
 	@command -v gamescope > /dev/null || { echo "run-session needs gamescope; run-session-windowed needs none" >&2; exit 1; }
 	cargo build -p nexus-app
-	NEXUS_SESSION=1 SDL_VIDEO_DRIVER=x11 SDL_VIDEODRIVER=x11 QT_QPA_PLATFORM=xcb GDK_BACKEND=x11 \
-		gamescope $(GAMESCOPE_ARGS) -- $${CARGO_TARGET_DIR:-target}/debug/nexus
+	@# The X11 settings are Nexus's, not gamescope's: gamescope draws its own window with GTK on
+	@# Wayland, and GDK_BACKEND=x11 would stop it ("Failed to initialize GTK").
+	gamescope $(GAMESCOPE_ARGS) -- env NEXUS_SESSION=1 SDL_VIDEO_DRIVER=x11 SDL_VIDEODRIVER=x11 \
+		QT_QPA_PLATFORM=xcb GDK_BACKEND=x11 $${CARGO_TARGET_DIR:-target}/debug/nexus
 
 run-session-windowed: ## The session's screens (NEXUS_SESSION=1) in a normal window, without gamescope
 	NEXUS_SESSION=1 cargo run -p nexus-app -- --windowed
