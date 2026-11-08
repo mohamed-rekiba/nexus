@@ -32,4 +32,7 @@ folder = "packages"
 [system]
 id = "PC"
 name = "PC"
+# The system's pictures, in assets/ (made by scripts/make-system-art.sh).
+icon = "icon.png"
+cover = "cover.jpg"
 color = "#7ee2b0"

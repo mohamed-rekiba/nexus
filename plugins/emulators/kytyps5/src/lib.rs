@@ -33,6 +33,12 @@ mod install;
 pub use data::DATA_DIRS;
 
 const MANIFEST: &str = include_str!("../plugin.toml");
+
+/// The system's icon and cover, as the manifest's `[system]` names them.
+static ASSETS: EmbeddedFiles = EmbeddedFiles::new(&[
+    ("icon.png", include_bytes!("../assets/icon.png")),
+    ("cover.jpg", include_bytes!("../assets/cover.jpg")),
+]);
 /// KytyPS5's releases on GitHub: the default release repo.
 pub const RELEASES: &str = "https://api.github.com/repos/KytyPS5/KytyPS5/releases?per_page=10";
 const UPSTREAM_REPO: &str = "KytyPS5/KytyPS5";
@@ -496,6 +502,7 @@ impl CodePlugin for KytyPlugin {
             compatibility: Some(emu.clone()),
             game_installer: Some(kyty),
             slots: Some(emu),
+            assets: Some(std::sync::Arc::new(ASSETS)),
             ..Provided::default()
         })
     }

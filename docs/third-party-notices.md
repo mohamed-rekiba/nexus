@@ -112,6 +112,16 @@ font files, and `package.sh` says the theme carries them in the binary.
 
 The licence files sit beside the fonts in `plugins/themes/default/theme/fonts/`.
 
+### System pictures
+
+Each built-in emulator carries its system's icon and cover in the binary
+(`plugins/emulators/*/assets/`, made by `scripts/make-system-art.sh`). The covers show
+third-party game art and console marks, such as the PlayStation, Nintendo Switch, Windows and
+Steam logos and characters from their games. The project owner supplied them. The repository
+holds no licence information for them. The marks belong to their owners. The icons
+(`assets/system-art/*.svg`) and the Systems theme's "All games" pictures are drawn for this
+project and use no game art.
+
 ### libmpv
 
 libmpv plays the trailers. `scripts/bundle-libmpv.sh` copies it and the libraries it needs into

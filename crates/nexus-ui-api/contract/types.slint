@@ -303,9 +303,15 @@ export struct ThemeChoice { id: string, name: string, current: bool }
 // shown: `text` (or the default) as Settings shows it, with the home folder as ~.
 export struct Folder { name: string, title: string, help: string, text: string, shown: string, default: string, requested-by: string, write: bool }
 
+// system: the id of the system it plays ("PS5"), what LibrarySystem takes; "" for none.
+// icon, cover: the system's square icon and its wide picture, from the emulator plugin or the
+// theme's `[theme.emulators.<system>]`; empty when neither has one.
 export struct Emulator {
     plugin: string,
     name: string,
+    system: string,
+    icon: image,
+    cover: image,
     status: string,
     // It installs builds of its own. An emulator that only starts games (PC) has none.
     has-builds: bool,

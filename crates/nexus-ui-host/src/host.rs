@@ -76,6 +76,8 @@ struct Live {
     options: serde_json::Value,
     stamp: Option<SystemTime>,
     sounds: BTreeMap<String, std::sync::Arc<[u8]>>,
+    /// The theme's pictures for each system, decoded once.
+    art: BTreeMap<String, bind::ThemeArt>,
 }
 
 pub struct ThemeHost {
@@ -222,6 +224,20 @@ impl ThemeHost {
             })
             .collect::<Result<BTreeMap<String, Image>, _>>()?;
         let sounds = resolved.sounds()?.into_iter().map(|(name, bytes)| (name, bytes.into())).collect();
+        let art = resolved
+            .system_art()?
+            .into_iter()
+            .map(|(system, bytes)| {
+                let decoded = |picture: &str, bytes: Option<Vec<u8>>, size: ImageSize| {
+                    bytes.map(|bytes| decode(&bytes, size, Crop::None)).transpose().map_err(|message| {
+                        ThemeError::Asset { theme: id.clone(), asset: format!("emulators.{system}.{picture}"), message }
+                    })
+                };
+                let icon = decoded("icon", bytes.icon, ImageSize::Thumb)?;
+                let cover = decoded("cover", bytes.cover, ImageSize::Full)?;
+                Ok((system, bind::ThemeArt { icon, cover }))
+            })
+            .collect::<Result<BTreeMap<_, _>, ThemeError>>()?;
         let definition = compile(&resolved)?;
         let platform = |e: slint_interpreter::PlatformError| ThemeError::Platform(e.to_string());
         let instance = match &self.live {
@@ -239,14 +255,14 @@ impl ThemeHost {
         // A new theme: the view comes fresh from the core, and the lists start again.
         self.last_view = None;
         self.cards.clear();
-        self.bind_view(&instance, &resolved, &self.core.view()).map_err(binding)?;
+        self.bind_view(&instance, &resolved, &art, &self.core.view()).map_err(binding)?;
         if save {
             self.core.theme_switched(id.clone()).map_err(|e| ThemeError::Platform(e.to_string()))?;
         }
         instance.show().map_err(platform)?;
 
         let stamp = resolved.stamp();
-        let old = self.live.replace(Live { resolved, _definition: definition, instance, options, stamp, sounds });
+        let old = self.live.replace(Live { resolved, _definition: definition, instance, options, stamp, sounds, art });
         drop(old);
         tracing::info!(theme = %id, "theme shown");
         Ok(())
@@ -256,6 +272,7 @@ impl ThemeHost {
         &self,
         instance: &ComponentInstance,
         resolved: &ResolvedTheme,
+        art: &BTreeMap<String, bind::ThemeArt>,
         view: &nexus_ui_api::AppView,
     ) -> Result<(), String> {
         let (width, height, scale) = window_size(instance);
@@ -283,6 +300,7 @@ impl ThemeHost {
         };
         let values = bind::vm_values(view, &self.images, &self.cards)?;
         for (name, value) in values.into_iter().chain(bind::host_values(&host, &self.images)?) {
+            let value = if name == "emulators" && !art.is_empty() { bind::with_theme_art(value, art) } else { value };
             bind::set(instance, "Vm", &name, value)?;
         }
         Ok(())
@@ -321,7 +339,7 @@ impl ThemeHost {
         (self.fullscreen)(live.instance.window(), self.core.prefs().fullscreen && !self.windowed);
         self.images.begin_render();
         let bound = self
-            .bind_view(&live.instance, &live.resolved, &view)
+            .bind_view(&live.instance, &live.resolved, &live.art, &view)
             .map_err(|message| ThemeError::Binding { theme: id.clone(), message });
         self.images.end_render();
         // As the old launcher's boot: Home shows once what it shows is loaded.

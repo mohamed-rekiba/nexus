@@ -511,7 +511,9 @@ pub struct PluginManifest {
 
 /// A system's look: `id` is the code a game's `platform` has (`PS5`, `PC`, `Steam`), `name` its
 /// full name ("PlayStation 5"), and `color` its color as `#rrggbb`. Without a color a theme
-/// draws the system in its neutral look.
+/// draws the system in its neutral look. `icon` and `cover` are pictures in the plugin's assets:
+/// a square icon, and a wide picture a theme can show behind the system. A theme can put its own
+/// in their place.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SystemLook {
@@ -519,6 +521,10 @@ pub struct SystemLook {
     pub name: String,
     #[serde(default)]
     pub color: Option<String>,
+    #[serde(default)]
+    pub icon: Option<RelPath>,
+    #[serde(default)]
+    pub cover: Option<RelPath>,
 }
 
 impl SystemLook {

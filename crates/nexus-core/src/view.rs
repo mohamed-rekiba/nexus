@@ -1186,8 +1186,15 @@ fn emulators_vm(s: &Snapshot) -> EmulatorsVm {
         .filter(manages_an_emulator)
         .map(|id| {
             let emu = state.emulators.get(&id).cloned().unwrap_or_default();
+            let look = plugins.manifest(&id).and_then(|m| m.system.as_ref());
+            let art = |path: Option<&nexus_api::RelPath>| {
+                path.map(|path| ImageRef::PluginAsset { plugin: id.clone(), path: path.clone() })
+            };
             EmulatorVm {
                 name: plugins.manifest(&id).map(|m| m.emulator_name().to_owned()).unwrap_or_default(),
+                system: look.map(|l| l.id.clone()).unwrap_or_default(),
+                icon: art(look.and_then(|l| l.icon.as_ref())),
+                cover: art(look.and_then(|l| l.cover.as_ref())),
                 status: status_text(plugins.status(&id)),
                 has_builds: plugins.manifest(&id).is_some_and(|m| m.capabilities.contains(&Capability::Installer)),
                 update: emu.update(),

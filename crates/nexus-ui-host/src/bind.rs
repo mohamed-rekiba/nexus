@@ -21,6 +21,39 @@ pub trait ImageSource {
     fn near(&self, grid: &str, index: usize) -> bool;
 }
 
+/// A system's icon and cover from the theme, decoded. They take the place of its emulator
+/// plugin's; `None` leaves the plugin's.
+#[derive(Clone, Default)]
+pub struct ThemeArt {
+    pub icon: Option<Image>,
+    pub cover: Option<Image>,
+}
+
+/// `emulators`, the value of `Vm.emulators`, with the theme's pictures for each system in
+/// place of the plugin's.
+pub(crate) fn with_theme_art(emulators: Value, art: &BTreeMap<String, ThemeArt>) -> Value {
+    let Value::Model(model) = emulators else { return emulators };
+    let rows: Vec<Value> = model
+        .iter()
+        .map(|row| {
+            let Value::Struct(mut fields) = row else { return row };
+            let system = match fields.get_field("system") {
+                Some(Value::String(system)) => system.to_string(),
+                _ => String::new(),
+            };
+            if let Some(theme) = art.get(&system) {
+                for (field, image) in [("icon", &theme.icon), ("cover", &theme.cover)] {
+                    if let Some(image) = image {
+                        fields.set_field(field.into(), Value::Image(image.clone()));
+                    }
+                }
+            }
+            Value::Struct(fields)
+        })
+        .collect();
+    Value::Model(ModelRc::new(VecModel::from(rows)))
+}
+
 fn text(s: impl AsRef<str>) -> Value {
     Value::String(SharedString::from(s.as_ref()))
 }

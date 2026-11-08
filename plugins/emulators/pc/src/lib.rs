@@ -25,6 +25,12 @@ use nexus_api::*;
 pub use crate::manifest::{GAME_FILE, GameManifest, Start};
 
 const MANIFEST: &str = include_str!("../plugin.toml");
+
+/// The system's icon and cover, as the manifest's `[system]` names them.
+static ASSETS: EmbeddedFiles = EmbeddedFiles::new(&[
+    ("icon.png", include_bytes!("../assets/icon.png")),
+    ("cover.jpg", include_bytes!("../assets/cover.jpg")),
+]);
 pub const GAMES: &str = nexus_api::GAMES_FOLDER;
 pub const PACKAGES: &str = nexus_api::PACKAGES_FOLDER;
 /// Where installs go in the games folder.
@@ -58,6 +64,7 @@ impl CodePlugin for PcPlugin {
             configurator: Some(pc.clone()),
             game_installer: Some(pc.clone()),
             slots: Some(pc),
+            assets: Some(std::sync::Arc::new(ASSETS)),
             ..Provided::default()
         })
     }

@@ -28,7 +28,7 @@ mod system;
 mod torrents;
 
 pub use archives::FakeArchives;
-pub use catalog::{FakeCatalog, FakeService, FakeStore};
+pub use catalog::{FakeCatalog, FakeService, FakeStore, MemFiles};
 pub use clock::FakeClock;
 pub use driver::ThemeDriver;
 pub use emulator::{FAKE_EMULATOR_PERMISSIONS, FakeEmulator};

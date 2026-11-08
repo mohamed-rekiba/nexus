@@ -29,6 +29,12 @@ mod install;
 mod nsz;
 
 const MANIFEST: &str = include_str!("../plugin.toml");
+
+/// The system's icon and cover, as the manifest's `[system]` names them.
+static ASSETS: EmbeddedFiles = EmbeddedFiles::new(&[
+    ("icon.png", include_bytes!("../assets/icon.png")),
+    ("cover.jpg", include_bytes!("../assets/cover.jpg")),
+]);
 /// Every release is a pre-release; a build comes out several times a day.
 pub const RELEASES: &str = "https://api.github.com/repos/zortos293/Lichii/releases?per_page=30";
 /// The console, as its games' platform and the catalog name it: the manifest's `[system]` id.
@@ -220,6 +226,7 @@ impl CodePlugin for LichiiPlugin {
             launcher: Some(lichii.clone()),
             game_installer: Some(lichii),
             slots: Some(emu),
+            assets: Some(std::sync::Arc::new(ASSETS)),
             ..Provided::default()
         })
     }
