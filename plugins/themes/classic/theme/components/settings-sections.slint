@@ -522,7 +522,6 @@ export component SystemSection inherits VerticalLayout {
         }
 }
 
-// Leaving Nexus, and the machine's power. Log out, Restart and Shut down ask again: the first press arms them, the second acts.
 // Settings → Backup: one file with the settings, keys, firmware and saves, in the backup folder,
 // and each backup there, which a press restores.
 export component BackupSection inherits VerticalLayout {
@@ -558,7 +557,7 @@ export component BackupSection inherits VerticalLayout {
         }
         Row {
             label: "Include large items";
-            hint: "PC games' Wine prefixes, with their saves · can take many GB";
+            hint: "PC games' Wine prefixes, with their saves, and PS4 DLC · can take many GB";
             focused: Prefs.is(Prefs.backup-section, 1);
             accessible-role: button;
             accessible-label: "backup-large";
@@ -641,6 +640,7 @@ export component BackupSection inherits VerticalLayout {
         }
 }
 
+// Leaving Nexus, and the machine's power. Log out, Restart and Shut down ask again: the first press arms them, the second acts.
 export component PowerSection inherits VerticalLayout {
     callback reveal(length, length);
 

@@ -541,3 +541,15 @@ async fn the_game_watcher_reads_the_desktop_every_round_on_the_clock_and_not_bet
     t.clock.advance(WATCH_EVERY / 2 + Duration::from_millis(3)).await;
     assert!(!t.core.game_in_front(), "the next round read the launcher in front");
 }
+
+#[tokio::test]
+async fn neither_a_backup_nor_a_restore_starts_while_a_game_runs() {
+    let (t, _) = core_with(FakeEmulator::new(vec!["A"])).await;
+    play(&t).await;
+    for command in
+        [nexus_core::BackupCmd::BackUp { large: false }, nexus_core::BackupCmd::Restore("nexus-backup-x.tar.gz".into())]
+    {
+        let error = t.core.dispatch(Command::Backup(command)).await.unwrap_err().to_string();
+        assert!(error.contains("Close the game first"), "{error}");
+    }
+}
