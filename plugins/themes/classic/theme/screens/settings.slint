@@ -1,11 +1,12 @@
 import { Vm, Host } from "../types.slint";
 import { Commands } from "../kit/commands.slint";
-import { SheetFrame } from "../components/sheet-frame.slint";
+import { SheetFrame } from "../kit/sheet-frame.slint";
 import { Tokens } from "../tokens.slint";
-import { Look } from "../components/look.slint";
-import { BackButton } from "../components/widgets.slint";
-import { Prefs, Tab } from "../components/settings-rows.slint";
-import { GamesSection, UpdatesSection, LauncherSection, DownloadsSection, PcSection, SystemSection, BackupSection, PowerSection } from "../components/settings-sections.slint";
+import { Assets } from "../assets.slint";
+import { Look } from "../kit/look.slint";
+import { BackButton } from "../kit/widgets.slint";
+import { Prefs, Tab } from "../kit/settings-rows.slint";
+import { GamesSection, UpdatesSection, LauncherSection, DownloadsSection, PcSection, SystemSection, BackupSection, PowerSection } from "../kit/settings-sections.slint";
 
 export component SettingsScreen inherits SheetFrame {
     panel-width: 1000 * Look.tpx;
@@ -67,7 +68,7 @@ export component SettingsScreen inherits SheetFrame {
             if Prefs.section == 2 : UpdatesSection { reveal(y, h) => { root.reveal(y, h); } }
             if Prefs.section == 0 : LauncherSection { reveal(y, h) => { root.reveal(y, h); } }
             if Prefs.section == 3 : DownloadsSection { reveal(y, h) => { root.reveal(y, h); } }
-            if Prefs.section == 4 : PcSection { reveal(y, h) => { root.reveal(y, h); } }
+            if Prefs.section == 4 : PcSection { logo: Assets.logo; reveal(y, h) => { root.reveal(y, h); } }
             if Prefs.section == 5 && Vm.system.whole-screen : SystemSection { reveal(y, h) => { root.reveal(y, h); } }
             if Prefs.section == Prefs.backup-section : BackupSection { reveal(y, h) => { root.reveal(y, h); } }
             if Prefs.section == Prefs.power-section : PowerSection { reveal(y, h) => { root.reveal(y, h); } }

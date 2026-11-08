@@ -44,7 +44,39 @@ pub const KIT_DIR: &str = "kit";
 /// The kit: behaviour and widgets drawn only from tokens, which every theme may import from
 /// `kit/<name>.slint`. A theme that ships a file at the same path replaces the kit's. Kit files
 /// import the host's files as `../types.slint` and each other by bare name.
-pub const KIT: &[(&str, &str)] = &[("commands.slint", include_str!("../kit/commands.slint"))];
+pub const KIT: &[(&str, &str)] = &[
+    ("button.slint", include_str!("../kit/button.slint")),
+    ("commands.slint", include_str!("../kit/commands.slint")),
+    ("dialog.slint", include_str!("../kit/dialog.slint")),
+    ("downloads.slint", include_str!("../kit/downloads.slint")),
+    ("game-detail.slint", include_str!("../kit/game-detail.slint")),
+    ("game-menu.slint", include_str!("../kit/game-menu.slint")),
+    ("icon.slint", include_str!("../kit/icon.slint")),
+    ("install-os.slint", include_str!("../kit/install-os.slint")),
+    ("install-prompt.slint", include_str!("../kit/install-prompt.slint")),
+    ("keyboard.slint", include_str!("../kit/keyboard.slint")),
+    ("lingering.slint", include_str!("../kit/lingering.slint")),
+    ("list-item.slint", include_str!("../kit/list-item.slint")),
+    ("look.slint", include_str!("../kit/look.slint")),
+    ("notices.slint", include_str!("../kit/notices.slint")),
+    ("origin.slint", include_str!("../kit/origin.slint")),
+    ("plugin-list.slint", include_str!("../kit/plugin-list.slint")),
+    ("plugin.slint", include_str!("../kit/plugin.slint")),
+    ("power-menu.slint", include_str!("../kit/power-menu.slint")),
+    ("progress-bar.slint", include_str!("../kit/progress-bar.slint")),
+    ("result-prompt.slint", include_str!("../kit/result-prompt.slint")),
+    ("settings-layout.slint", include_str!("../kit/settings-layout.slint")),
+    ("settings-rows.slint", include_str!("../kit/settings-rows.slint")),
+    ("settings-sections.slint", include_str!("../kit/settings-sections.slint")),
+    ("sheet-frame.slint", include_str!("../kit/sheet-frame.slint")),
+    ("shot-viewer.slint", include_str!("../kit/shot-viewer.slint")),
+    ("slot-actions.slint", include_str!("../kit/slot-actions.slint")),
+    ("slot-badges.slint", include_str!("../kit/slot-badges.slint")),
+    ("slot-sections.slint", include_str!("../kit/slot-sections.slint")),
+    ("system-panel.slint", include_str!("../kit/system-panel.slint")),
+    ("trailer-player.slint", include_str!("../kit/trailer-player.slint")),
+    ("widgets.slint", include_str!("../kit/widgets.slint")),
+];
 
 /// The fixed contract file. See `contract/types.slint`.
 pub const TYPES_SLINT: &str = include_str!("../contract/types.slint");
@@ -276,11 +308,28 @@ mod tests {
     }
 
     #[test]
-    fn kit_files_pass_the_theme_rules() {
+    fn kit_files_pass_the_theme_rules_and_draw_only_from_tokens() {
+        let hex = |code: &str| {
+            code.split('#').skip(1).any(|rest| {
+                let digits = rest.chars().take_while(char::is_ascii_hexdigit).count();
+                digits == 6 || digits == 8
+            })
+        };
         for (name, source) in KIT {
             assert!(name.ends_with(".slint"), "{name}");
             lint(source, None).unwrap_or_else(|m| panic!("kit/{name}: {m}"));
+            assert!(!hex(&strip_comments(source)), "kit/{name} has a color that isn't a token");
         }
+    }
+
+    #[test]
+    fn every_kit_file_on_disk_is_served() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("kit");
+        let mut on_disk: Vec<String> =
+            std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        on_disk.sort();
+        let served: Vec<String> = KIT.iter().map(|(name, _)| (*name).to_owned()).collect();
+        assert_eq!(on_disk, served);
     }
 
     #[test]

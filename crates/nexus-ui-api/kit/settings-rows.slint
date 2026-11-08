@@ -1,5 +1,5 @@
 import { Vm, Host, Field, Folder } from "../types.slint";
-import { Commands } from "../kit/commands.slint";
+import { Commands } from "commands.slint";
 import { Tokens } from "../tokens.slint";
 import { Look } from "look.slint";
 import { Icon } from "icon.slint";
@@ -238,10 +238,10 @@ export component Tab inherits Rectangle {
     in property <int> section;
     property <bool> current: Prefs.current-tab == root.section;
     property <bool> focused: Prefs.tabs && root.current;
-    background: root.current ? #ffffff1f : (touch.has-hover ? #ffffff0f : #ffffff00);
+    background: root.current ? Tokens.color-tint.with-alpha(0.122) : (touch.has-hover ? Tokens.color-tint.with-alpha(0.059) : Tokens.color-tint.with-alpha(0));
     border-radius: 12 * Look.px;
     border-width: root.focused ? 3 * Look.px : 0;
-    border-color: #ffffff;
+    border-color: Tokens.color-tint;
     min-height: 48 * Look.tpx;
     animate background { duration: Tokens.motion-fast; }
     accessible-role: tab;
@@ -294,13 +294,13 @@ export component Row inherits Rectangle {
     callback clicked();
 
     property <length> r: 14 * Look.px;
-    background: root.focused ? (root.danger ? #ff5a6a33 : #ffffff1f) : (root.danger ? #ff5a6a0d : #ffffff0b);
+    background: root.focused ? (root.danger ? Tokens.color-danger.with-alpha(0.2) : Tokens.color-tint.with-alpha(0.122)) : (root.danger ? Tokens.color-danger.with-alpha(0.051) : Tokens.color-tint.with-alpha(0.043));
     border-top-left-radius: root.first || root.focused ? root.r : 0;
     border-top-right-radius: root.first || root.focused ? root.r : 0;
     border-bottom-left-radius: root.last || root.focused ? root.r : 0;
     border-bottom-right-radius: root.last || root.focused ? root.r : 0;
     border-width: root.focused ? 3 * Look.px : 0;
-    border-color: root.danger ? Tokens.color-danger : #ffffff;
+    border-color: root.danger ? Tokens.color-danger : Tokens.color-tint;
     min-height: body.preferred-height;
     animate background { duration: Tokens.motion-fast; }
     changed focused => { if (root.focused) { root.reveal(self.absolute-position.y, self.height); } }
@@ -328,7 +328,7 @@ export component Row inherits Rectangle {
                 text: root.label;
                 font-size: 19 * Look.tpx;
                 font-weight: 500;
-                color: root.danger ? #ffb3bb : Tokens.color-text;
+                color: root.danger ? Tokens.color-danger.mix(Tokens.color-tint, 0.46) : Tokens.color-text;
                 vertical-alignment: center;
                 horizontal-stretch: 1;
                 overflow: elide;
@@ -339,7 +339,7 @@ export component Row inherits Rectangle {
                 text: root.label;
                 font-size: 19 * Look.tpx;
                 font-weight: 500;
-                color: root.danger ? #ffb3bb : Tokens.color-text;
+                color: root.danger ? Tokens.color-danger.mix(Tokens.color-tint, 0.46) : Tokens.color-text;
                 vertical-alignment: center;
                 horizontal-stretch: 1;
                 overflow: elide;
@@ -383,7 +383,7 @@ export component Value inherits HorizontalLayout {
         y: (parent.height - self.height) / 2;
     }
     if root.kind == "action" && root.text != "" : Rectangle {
-        background: #ffffff1a;
+        background: Tokens.color-tint.with-alpha(0.102);
         border-radius: 10 * Look.px;
         VerticalLayout {
             padding-left: 16 * Look.px;
@@ -436,7 +436,7 @@ export component Editor inherits Rectangle {
     height: 50 * Look.tpx;
     min-width: 320 * Look.tpx;
     border-radius: 10 * Look.px;
-    background: #00000040;
+    background: Tokens.color-shade.with-alpha(0.251);
     border-width: 1px;
     border-color: Look.line;
     // The on-screen keyboard types here too, when the controller opened it.

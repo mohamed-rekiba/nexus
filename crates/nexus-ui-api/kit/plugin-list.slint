@@ -1,5 +1,5 @@
 import { Vm, Host, PluginRow } from "../types.slint";
-import { Commands } from "../kit/commands.slint";
+import { Commands } from "commands.slint";
 import { Tokens } from "../tokens.slint";
 import { Look } from "look.slint";
 import { BackButton } from "widgets.slint";
@@ -49,7 +49,7 @@ export component PluginListSheet inherits Rectangle {
     Timer { interval: 16ms; running: !root.entered; triggered => { root.entered = true; } }
     // Slid in: from the edge when it opens, back out when it closes.
     property <bool> in-view: root.entered && root.open;
-    background: root.in-view ? #03050ccc : #03050c00;
+    background: root.in-view ? Tokens.color-overlay.with-alpha(0.8) : Tokens.color-overlay.with-alpha(0);
     animate background { duration: Tokens.motion-normal; }
     // Outside the sheets: back, which closes the plugin's sheet first.
     TouchArea { enabled: root.open; clicked => { Commands.back(); } }
@@ -64,7 +64,7 @@ export component PluginListSheet inherits Rectangle {
         animate x { duration: Tokens.motion-slow; easing: ease-out-expo; }
         animate opacity { duration: Look.timed(Tokens.motion-normal - 40ms); easing: ease-out-quad; }
         width: self.panel-width;
-        background: @linear-gradient(180deg, #111a33 0%, #0a1024 100%);
+        background: @linear-gradient(180deg, Tokens.color-surface 0%, Tokens.color-panel 100%);
         border-width: 1px;
         border-color: Look.line;
         TouchArea {}

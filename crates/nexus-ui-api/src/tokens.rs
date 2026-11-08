@@ -58,6 +58,19 @@ pub const TOKENS: &[TokenDef] = &[
     t("color-danger", Color, "color", "#ff5a6a"),
     t("color-info", Color, "color", "#7ab4ff"),
     t("color-overlay", Color, "color", "#03050ccc"),
+    // Deeper than the surface: sheets, hints, the backs of panels.
+    t("color-panel", Color, "color", "#0b1020"),
+    // Less than muted: hints and the third line of a row.
+    t("color-text-faint", Color, "color", "#7d88a3"),
+    // Text and marks drawn on `color-focus`.
+    t("color-on-focus", Color, "color", "#0a0d18"),
+    // The accent, light: links, and the glow of a focused field.
+    t("color-accent-soft", Color, "color", "#8dbaff"),
+    // Between success and warning: a game that reaches its menus.
+    t("color-caution", Color, "color", "#ffd24d"),
+    // Light and dark marks laid over anything, at an alpha the kit picks: lines, fills, shades.
+    t("color-tint", Color, "color", "#ffffff"),
+    t("color-shade", Color, "color", "#000000"),
     t("font-family", Text, "typography", "Inter"),
     t("font-size-s", Length, "typography", "15"),
     t("font-size-m", Length, "typography", "19"),

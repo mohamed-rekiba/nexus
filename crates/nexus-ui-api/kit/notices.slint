@@ -1,5 +1,5 @@
 import { Vm, Host, Notice } from "../types.slint";
-import { Commands } from "../kit/commands.slint";
+import { Commands } from "commands.slint";
 import { Tokens } from "../tokens.slint";
 import { Look } from "look.slint";
 import { Icon } from "icon.slint";
@@ -83,12 +83,12 @@ component NoticeCard inherits Rectangle {
         animate x { duration: Tokens.motion-slow; easing: ease-out-expo; }
         animate opacity { duration: Look.timed(Tokens.motion-normal - 20ms); easing: ease-out-quad; }
         border-radius: 18 * Look.px;
-        background: #141c33fa;
+        background: Tokens.color-surface.with-alpha(0.98);
         border-width: 1px;
-        border-color: #ffffff1f;
+        border-color: Tokens.color-tint.with-alpha(0.122);
         drop-shadow-blur: 36 * Look.px;
         drop-shadow-offset-y: 10 * Look.px;
-        drop-shadow-color: #00000099;
+        drop-shadow-color: Tokens.color-shade.with-alpha(0.6);
         row := HorizontalLayout {
             padding: 18 * Look.px;
             spacing: 16 * Look.px;

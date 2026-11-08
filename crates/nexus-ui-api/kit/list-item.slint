@@ -20,7 +20,7 @@ export component ListItem inherits Rectangle {
     property <bool> lit: root.selected || touch.has-hover;
     min-height: 64 * Look.px;
     border-radius: 14 * Look.px;
-    background: root.selected ? #ffffff1f : touch.has-hover ? #ffffff14 : #ffffff0b;
+    background: root.selected ? Tokens.color-tint.with-alpha(0.122) : touch.has-hover ? Tokens.color-tint.with-alpha(0.078) : Tokens.color-tint.with-alpha(0.043);
     border-width: root.selected ? 3 * Look.px : 0;
     border-color: Look.ring;
     accessible-role: button;

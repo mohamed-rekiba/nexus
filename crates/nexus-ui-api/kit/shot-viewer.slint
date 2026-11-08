@@ -37,7 +37,7 @@ export global Viewer {
 export component ShotViewer inherits Rectangle {
     property <bool> entered;
     Timer { interval: 16ms; running: !root.entered; triggered => { root.entered = true; } }
-    background: root.entered ? #000000f2 : #00000000;
+    background: root.entered ? Tokens.color-shade.with-alpha(0.949) : transparent;
     animate background { duration: Tokens.motion-normal; }
     TouchArea { clicked => { Viewer.open = false; } }
     shot := Image {
@@ -69,8 +69,8 @@ export component ShotViewer inherits Rectangle {
         height: 56 * Look.px;
         border-radius: self.width / 2;
         visible: side < 0 ? Viewer.index > 0 : Viewer.index < Viewer.count - 1;
-        background: arrow.has-hover ? #ffffff2e : #ffffff14;
-        Icon { name: side < 0 ? "chevl" : "chevr"; color: #ffffff; width: 28 * Look.px; height: 28 * Look.px; }
+        background: arrow.has-hover ? Tokens.color-tint.with-alpha(0.18) : Tokens.color-tint.with-alpha(0.078);
+        Icon { name: side < 0 ? "chevl" : "chevr"; color: Tokens.color-tint; width: 28 * Look.px; height: 28 * Look.px; }
         arrow := TouchArea { mouse-cursor: pointer; clicked => { Viewer.step(side); } }
     }
 }

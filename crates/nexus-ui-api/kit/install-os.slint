@@ -1,5 +1,5 @@
 import { Vm, Host, DiskItem, SystemJobItem } from "../types.slint";
-import { Commands } from "../kit/commands.slint";
+import { Commands } from "commands.slint";
 import { Tokens } from "../tokens.slint";
 import { Look } from "look.slint";
 import { Icon } from "icon.slint";
@@ -84,7 +84,7 @@ component Choice inherits Rectangle {
     callback clicked();
     min-height: 64 * Look.px;
     border-radius: 16 * Look.px;
-    background: root.focused ? (root.danger ? Tokens.color-danger : #ffffff) : ta.has-hover ? #ffffff1f : #ffffff12;
+    background: root.focused ? (root.danger ? Tokens.color-danger : Tokens.color-tint) : ta.has-hover ? Tokens.color-tint.with-alpha(0.122) : Tokens.color-tint.with-alpha(0.071);
     accessible-role: button;
     accessible-label: root.name;
     accessible-value: root.text;
@@ -110,15 +110,15 @@ component Choice inherits Rectangle {
             width: parent.width;
             wrap: word-wrap;
             font-size: 16 * Look.tpx;
-            color: root.warn ? (root.focused && !root.danger ? #9a5b00 : Tokens.color-warning)
-                : root.focused && !root.danger ? #3a4258 : Look.text3;
+            color: root.warn ? (root.focused && !root.danger ? Tokens.color-warning.mix(Tokens.color-shade, 0.6) : Tokens.color-warning)
+                : root.focused && !root.danger ? Tokens.color-text-faint : Look.text3;
         }
     }
     ta := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
 }
 
 export component InstallOs inherits Rectangle {
-    background: #03050cf2;
+    background: Tokens.color-overlay.with-alpha(0.949);
     TouchArea {}
     // The install job: its progress, and how it ended.
     property <[SystemJobItem]> jobs: Vm.system.jobs;
@@ -179,7 +179,7 @@ export component InstallOs inherits Rectangle {
         if Setup.step == "installing" : Rectangle {
             height: 10 * Look.px;
             border-radius: 5 * Look.px;
-            background: #ffffff1f;
+            background: Tokens.color-tint.with-alpha(0.122);
             Rectangle {
                 x: 0;
                 width: parent.width * Math.max(0, root.job.percent) / 100;

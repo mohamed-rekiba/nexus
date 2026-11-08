@@ -17,7 +17,7 @@ export component SlotBadges inherits HorizontalLayout {
         accessible-value: item.text;
         height: root.size * 2;
         border-radius: 6 * Look.px;
-        background: #000000c4;
+        background: Tokens.color-shade.with-alpha(0.769);
         HorizontalLayout {
             padding-left: 9 * Look.px;
             padding-right: 9 * Look.px;
@@ -37,7 +37,7 @@ export component SlotBadges inherits HorizontalLayout {
             }
             Text {
                 text: root.short && item.short != "" ? item.short : item.text;
-                color: #ffffff;
+                color: Tokens.color-tint;
                 font-size: root.size;
                 font-weight: 700;
                 vertical-alignment: center;

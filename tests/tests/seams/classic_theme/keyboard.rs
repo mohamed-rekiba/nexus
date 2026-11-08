@@ -246,7 +246,7 @@ fn with_a_password_field() -> (tempfile::TempDir, Composed) {
         "extends = \"default\"\nscreens = [\"emulators\"]",
         &[(
             "screens/emulators.slint",
-            r#"import { TextField } from "../components/keyboard.slint";
+            r#"import { TextField } from "../kit/keyboard.slint";
 export component EmulatorsScreen inherits Rectangle {
     in property <bool> open;
     in property <bool> pushed;

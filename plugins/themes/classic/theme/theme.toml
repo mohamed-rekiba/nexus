@@ -12,7 +12,7 @@ activation = "eager"
 [theme]
 ui_api = "^0.2.0"
 screens = ["home", "game-detail", "catalog", "downloads", "settings", "emulators", "themes", "plugin", "running", "game-settings"]
-components = ["card", "button", "list-item", "progress-bar", "dialog", "slot-badges", "slot-actions", "slot-sections"]
+components = ["card"]
 input = ["gamepad", "pointer"]
 navigation = "focus"
 
@@ -60,6 +60,13 @@ color-warning = "#ffb547"
 color-danger = "#ff5a6a"
 color-info = "#7ab4ff"
 color-overlay = "#03050ccc"
+color-panel = "#0b1020"
+color-text-faint = "#7d88a3"
+color-on-focus = "#0a0d18"
+color-accent-soft = "#8dbaff"
+color-caution = "#ffd24d"
+color-tint = "#ffffff"
+color-shade = "#000000"
 font-family = "Inter"
 font-size-s = 15
 font-size-m = 19

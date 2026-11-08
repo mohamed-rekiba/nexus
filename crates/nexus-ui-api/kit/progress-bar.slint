@@ -6,7 +6,7 @@ export component ProgressBar inherits Rectangle {
     in property <brush> bar-color: Tokens.color-accent;
     height: 7 * Look.px;
     border-radius: self.height / 2;
-    background: #ffffff14;
+    background: Tokens.color-tint.with-alpha(0.078);
     Rectangle {
         x: Look.rtl ? parent.width - self.width : 0;
         width: parent.width * Math.clamp(root.progress, 0, 1);

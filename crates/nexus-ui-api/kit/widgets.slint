@@ -26,14 +26,14 @@ export component FocusRing inherits Rectangle {
 export component KeyCap inherits Rectangle {
     in property <string> text;
     in property <bool> round;
-    in property <color> fg: #ffffff;
-    in property <color> bg: #ffffff24;
+    in property <color> fg: Tokens.color-tint;
+    in property <color> bg: Tokens.color-tint.with-alpha(0.141);
     height: 30 * Look.px;
     width: root.round ? 30 * Look.px : Math.max(30 * Look.px, t.preferred-width + 16 * Look.px);
     border-radius: root.round ? 15 * Look.px : 8 * Look.px;
     background: root.bg;
     border-width: 1px;
-    border-color: #ffffff1f;
+    border-color: Tokens.color-tint.with-alpha(0.122);
     t := Text { text: root.text; font-size: 14 * Look.px; font-weight: 700; color: root.fg; }
 }
 
@@ -44,7 +44,7 @@ export component BackButton inherits Rectangle {
     width: 154 * Look.px;
     height: 48 * Look.px;
     border-radius: 12 * Look.px;
-    background: ta.has-hover ? #ffffff16 : transparent;
+    background: ta.has-hover ? Tokens.color-tint.with-alpha(0.086) : transparent;
     accessible-role: button;
     accessible-label: "Back";
     accessible-action-default => { root.clicked(); }
@@ -59,7 +59,7 @@ export component BackButton inherits Rectangle {
             height: 36 * Look.px;
             y: 6 * Look.px;
             border-radius: 18 * Look.px;
-            background: ta.has-hover ? #ffffff24 : #ffffff12;
+            background: ta.has-hover ? Tokens.color-tint.with-alpha(0.141) : Tokens.color-tint.with-alpha(0.071);
             Icon {
                 name: Look.rtl ? "chevr" : "chevl";
                 color: Tokens.color-text;
@@ -71,7 +71,7 @@ export component BackButton inherits Rectangle {
         Text {
             text: root.pad ? "○" : "Esc";
             font-size: 13 * Look.px;
-            color: root.pad ? #ff8f9c : Look.text3;
+            color: root.pad ? Tokens.color-danger.mix(Tokens.color-tint, 0.68) : Look.text3;
             vertical-alignment: center;
             opacity: root.pad || ta.has-hover ? 1 : 0;
             animate opacity { duration: Look.timed(120ms); }
@@ -92,13 +92,13 @@ export component Stars inherits HorizontalLayout {
     for i in [0, 1, 2, 3, 4] : Rectangle {
         width: root.size;
         height: root.size;
-        Icon { name: "star"; color: #ffffff33; width: root.size; height: root.size; }
+        Icon { name: "star"; color: Tokens.color-tint.with-alpha(0.2); width: root.size; height: root.size; }
         Rectangle {
             x: 0;
             width: root.size * Math.clamp(root.score - i, 0, 1);
             height: root.size;
             clip: true;
-            Icon { x: 0; name: "star"; color: #ffc940; width: root.size; height: root.size; }
+            Icon { x: 0; name: "star"; color: Tokens.color-caution; width: root.size; height: root.size; }
         }
     }
 }
@@ -112,9 +112,9 @@ export component Chip inherits Rectangle {
     in property <float> stars;
     height: 40 * Look.px;
     border-radius: 20 * Look.px;
-    background: #ffffff17;
+    background: Tokens.color-tint.with-alpha(0.09);
     border-width: 1px;
-    border-color: #ffffff12;
+    border-color: Tokens.color-tint.with-alpha(0.071);
     HorizontalLayout {
         padding-left: 16 * Look.px;
         padding-right: 16 * Look.px;
@@ -163,22 +163,22 @@ export component Pill inherits Rectangle {
 
     property <bool> solid: root.focused || (root.primary && !root.dim);
     property <bool> open: !root.round || root.focused || ta.has-hover;
-    property <color> fg: root.solid && !(root.focused && root.danger) ? Look.ink : #ffffff;
+    property <color> fg: root.solid && !(root.focused && root.danger) ? Look.ink : Tokens.color-tint;
     height: root.h;
     width: !root.open ? root.h : Math.max(root.primary ? 240 * Look.px : 0px, row.preferred-width);
     clip: true;
     opacity: root.enabled ? 1 : 0.45;
     transform-scale: root.focused ? 1.05 : 1.0;
     border-radius: root.h / 2;
-    background: root.focused ? (root.danger ? Tokens.color-danger : #ffffff)
-        : root.primary && !root.dim ? #ffffffeb
-        : root.danger ? #ff5a6a2e
-        : root.primary ? #ffffff38
-        : ta.has-hover ? #ffffff38 : #ffffff24;
+    background: root.focused ? (root.danger ? Tokens.color-danger : Tokens.color-tint)
+        : root.primary && !root.dim ? Tokens.color-tint.with-alpha(0.922)
+        : root.danger ? Tokens.color-danger.with-alpha(0.18)
+        : root.primary ? Tokens.color-tint.with-alpha(0.22)
+        : ta.has-hover ? Tokens.color-tint.with-alpha(0.22) : Tokens.color-tint.with-alpha(0.141);
     border-width: 1px;
-    border-color: root.danger && !root.focused ? #ff5a6a5a : #ffffff1a;
+    border-color: root.danger && !root.focused ? Tokens.color-danger.with-alpha(0.353) : Tokens.color-tint.with-alpha(0.102);
     drop-shadow-blur: root.focused ? 28 * Look.px : 0;
-    drop-shadow-color: root.focused ? #8cb9ffaa : transparent;
+    drop-shadow-color: root.focused ? Tokens.color-accent-soft.with-alpha(0.667) : transparent;
     accessible-role: button;
     accessible-label: root.text;
     accessible-item-selected: root.focused;
@@ -225,7 +225,7 @@ export component Kicker inherits HorizontalLayout {
     if root.tag != "" : Rectangle {
         width: tag-t.preferred-width + 16 * Look.px;
         border-radius: 6 * Look.px;
-        background: #ffffff24;
+        background: Tokens.color-tint.with-alpha(0.141);
         tag-t := Text { text: root.tag; font-size: 15 * Look.px; font-weight: 700; color: Tokens.color-text; }
     }
     if root.accent != "" : Text {
@@ -251,7 +251,7 @@ export component Switch inherits Rectangle {
     width: 58 * Look.px;
     height: 32 * Look.px;
     border-radius: 16 * Look.px;
-    background: root.on ? Tokens.color-accent : #ffffff33;
+    background: root.on ? Tokens.color-accent : Tokens.color-tint.with-alpha(0.2);
     animate background { duration: Tokens.motion-fast; }
     Rectangle {
         x: root.on ? 30 * Look.px : 4 * Look.px;
@@ -259,7 +259,7 @@ export component Switch inherits Rectangle {
         width: 24 * Look.px;
         height: 24 * Look.px;
         border-radius: 12 * Look.px;
-        background: #ffffff;
+        background: Tokens.color-tint;
         animate x { duration: Look.move; easing: cubic-bezier(0.2, 0.8, 0.2, 1); }
     }
 }
@@ -278,12 +278,12 @@ export component Shimmer inherits Rectangle {
         Rectangle {
             x: 0;
             width: parent.width / 2;
-            background: @linear-gradient(90deg, #ffffff00 0%, #ffffff12 100%);
+            background: @linear-gradient(90deg, Tokens.color-tint.with-alpha(0) 0%, Tokens.color-tint.with-alpha(0.071) 100%);
         }
         Rectangle {
             x: parent.width / 2;
             width: parent.width / 2;
-            background: @linear-gradient(90deg, #ffffff12 0%, #ffffff00 100%);
+            background: @linear-gradient(90deg, Tokens.color-tint.with-alpha(0.071) 0%, Tokens.color-tint.with-alpha(0) 100%);
         }
     }
 }
@@ -324,7 +324,7 @@ export component Cover inherits Rectangle {
                 text: root.title;
                 font-size: root.name-size;
                 font-weight: 700;
-                color: #e8ecf6;
+                color: Tokens.color-text;
                 wrap: word-wrap;
                 horizontal-alignment: center;
                 vertical-alignment: center;
