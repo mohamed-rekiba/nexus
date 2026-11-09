@@ -72,6 +72,7 @@ pub(crate) async fn handle(core: &Core, command: BackupCmd) -> CoreResult<()> {
             core.backup().back_up(&folder(core)?, crate::sessions::now_secs(), &computer, sources).await.map(|_| ())
         }
         BackupCmd::Restore(file) => {
+            // Before the folder is looked up: a running game is the reason to give first.
             ready(core)?;
             restore(core, folder(core)?.join(in_folder(&file)?)).await
         }
@@ -123,25 +124,20 @@ pub(crate) async fn handle(core: &Core, command: BackupCmd) -> CoreResult<()> {
 
 /// The folders restores came from that are still there, newest first.
 fn recent(core: &Core) -> Vec<PathBuf> {
+    saved_recent(core).into_iter().map(PathBuf::from).filter(|p| p.is_absolute() && p.is_dir()).collect()
+}
+
+/// The folders restores came from, as the settings keep them, newest first.
+fn saved_recent(core: &Core) -> Vec<String> {
     let saved = core.preferences().get(Pref::BackupRecent);
-    let paths = saved.as_array().into_iter().flatten().filter_map(serde_json::Value::as_str);
-    paths.map(PathBuf::from).filter(|p| p.is_absolute() && p.is_dir()).collect()
+    saved.as_array().into_iter().flatten().filter_map(serde_json::Value::as_str).map(str::to_owned).collect()
 }
 
 /// Keeps `from` first among the folders restores came from, at most [`RECENT`] of them.
 fn remember(core: &Core, from: &std::path::Path) {
-    let saved = core.preferences().get(Pref::BackupRecent);
     let from = from.display().to_string();
     let mut paths = vec![from.clone()];
-    paths.extend(
-        saved
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(serde_json::Value::as_str)
-            .filter(|p| *p != from)
-            .map(str::to_owned),
-    );
+    paths.extend(saved_recent(core).into_iter().filter(|p| *p != from));
     paths.truncate(RECENT);
     if let Err(e) = core.preferences().save(Pref::BackupRecent, serde_json::json!(paths)) {
         tracing::warn!(error = %e, "the folder the restore came from isn't kept as a recent place");

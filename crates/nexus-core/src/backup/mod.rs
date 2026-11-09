@@ -127,12 +127,14 @@ pub struct Browser {
 }
 
 impl Browser {
-    /// The entries the filter lets through.
+    /// The entries the filter lets through: by the name, or by the date a backup's row shows.
     pub fn shown(&self) -> impl Iterator<Item = &BrowseEntry> {
         let filter = self.filter.to_lowercase();
         self.entries.iter().filter(move |e| {
+            let holds = |text: &str| text.to_lowercase().contains(&filter);
             filter.is_empty()
-                || e.path.file_name().is_some_and(|n| n.to_string_lossy().to_lowercase().contains(&filter))
+                || e.path.file_name().is_some_and(|n| holds(&n.to_string_lossy()))
+                || e.backup.as_ref().is_some_and(|b| holds(&crate::display::date_time_text(b.made)))
         })
     }
 }
