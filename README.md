@@ -33,17 +33,17 @@ the colours. You can add more themes; a theme is data and runs no code.
 | --- | --- |
 | ![Home](docs/screenshots/home.jpg) | ![Library](docs/screenshots/library.jpg) |
 
-| Game Hub | Catalog |
+| Game Hub | Downloads |
 | --- | --- |
-| ![Game Hub](docs/screenshots/detail.jpg) | ![Catalog](docs/screenshots/catalog.jpg) |
+| ![Game Hub](docs/screenshots/detail.jpg) | ![Downloads](docs/screenshots/downloads.jpg) |
 
-| Downloads | Settings |
+| Settings | Settings → Backup |
 | --- | --- |
-| ![Downloads](docs/screenshots/downloads.jpg) | ![Settings](docs/screenshots/settings.jpg) |
+| ![Settings](docs/screenshots/settings.jpg) | ![Settings, Backup tab](docs/screenshots/backup.jpg) |
 
-| Settings → Backup | The backup browser |
-| --- | --- |
-| ![Settings, Backup tab](docs/screenshots/backup.jpg) | ![The backup browser](docs/screenshots/backup-browser.jpg) |
+The backup browser:
+
+![The backup browser](docs/screenshots/backup-browser.jpg)
 
 The screenshots show the Default theme at 1600 × 900.
 
