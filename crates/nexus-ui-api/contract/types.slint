@@ -388,11 +388,12 @@ export struct BackupFile { file: string, date: string, size: string, items: stri
 // Backup Browse or Backup RestoreFile; only those whose name holds `filter`. A folder's detail:
 // "2 backups", "empty", "can't be read", or empty. A backup's computer: the computer that made
 // it, empty when it doesn't say; newer: a newer Nexus made it and this one doesn't restore it.
-// hidden: hidden folders are listed.
+// hidden: hidden folders are listed. place: the index in places of the folder shown, -1 when
+// it is no place.
 export struct BrowseCrumb { name: string, path: string }
 export struct BrowsePlace { name: string, path: string, kind: string, detail: string }
 export struct BrowseEntry { name: string, path: string, folder: bool, detail: string, date: string, size: string, items: string, computer: string, newer: bool }
-export struct BackupBrowser { open: bool, shown: string, parent: string, crumbs: [BrowseCrumb], places: [BrowsePlace], entries: [BrowseEntry], hidden: bool, filter: string }
+export struct BackupBrowser { open: bool, shown: string, parent: string, crumbs: [BrowseCrumb], places: [BrowsePlace], place: int, entries: [BrowseEntry], hidden: bool, filter: string }
 
 // holds: what a backup holds on this computer now. large: the large items a backup takes only
 // when asked, empty when no plugin has one. default-folder: the folder when none is chosen.

@@ -1142,6 +1142,7 @@ fn browser_vm(browser: &crate::backup::Browser, home: Option<&str>) -> nexus_ui_
         shown: crate::display::short_home(&full(&browser.at), home),
         parent: browser.at.parent().map(full).unwrap_or_default(),
         crumbs: crumbs(&browser.at, home),
+        place: browser.places.iter().position(|p| p.path == browser.at).map_or(-1, |i| i as i32),
         places: browser
             .places
             .iter()

@@ -208,7 +208,7 @@ fn places(core: &Core) -> Vec<BrowsePlace> {
     for drive in drives(home.as_deref()) {
         let name =
             drive.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| drive.display().to_string());
-        let size = hardware.disk_bytes(&drive).map(crate::display::size_text).unwrap_or_default();
+        let size = hardware.disk_bytes(&drive).map(disk_text).unwrap_or_default();
         add(name, drive, PlaceKind::Drive, size);
     }
     for path in recent(core) {
@@ -221,6 +221,11 @@ fn places(core: &Core) -> Vec<BrowsePlace> {
         out.push(BrowsePlace { name, path, kind: PlaceKind::Recent, detail: shown });
     }
     out
+}
+
+/// A drive's size: `1.6 TB` from 1000 GB up, else as other sizes (`32.0 GB`).
+fn disk_text(bytes: u64) -> String {
+    if bytes >= 1_000_000_000_000 { format!("{:.1} TB", bytes as f64 / 1e12) } else { crate::display::size_text(bytes) }
 }
 
 /// The drives that are there: USB sticks and other disks the system mounted.
@@ -348,5 +353,14 @@ fn place(core: &Core, plugin: &PluginId, item: &BackupItem) -> CoreResult<PathBu
             let folders = kernel.host_folders(plugin).ok_or_else(|| CoreError::UnknownPlugin(plugin.clone()))?;
             folders.resolve(path).map_err(refused)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_drive_of_a_thousand_gb_or_more_says_tb() {
+        assert_eq!(super::disk_text(1_645_500_000_000), "1.6 TB");
+        assert_eq!(super::disk_text(32_000_000_000), "32.0 GB");
     }
 }
