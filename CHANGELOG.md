@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.13.0](https://github.com/mohamed-rekiba/nexus/compare/v0.12.0...v0.13.0) (2026-11-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* **themes:** themes stand alone; extends, screens and components are refused
+
+### Features
+
+* **backup:** a backup capability, the backup subsystem and its archive, and the Backup view model ([f27ed9b](https://github.com/mohamed-rekiba/nexus/commit/f27ed9b0ee6ad273e1219d8bdde31077f3385ec6))
+* **backup:** delete from a backup's menu, restore from another folder through a browser, and the tab's words follow the plugins ([ae1a047](https://github.com/mohamed-rekiba/nexus/commit/ae1a0478330d91acc9f19066230dda0e0c7e3787))
+* **backup:** Lichii, shadPS4, KytyPS5 and PC name their keys, firmware, settings and saves for a backup ([e2ff3eb](https://github.com/mohamed-rekiba/nexus/commit/e2ff3eb355f874929242c7ced105edaf35bd752e))
+* **backup:** one click in the backup browser opens a place or a folder, or asks to restore ([7d03860](https://github.com/mohamed-rekiba/nexus/commit/7d03860179468c9cf7982b5af4a1dd3a769fc790))
+* **backup:** Settings has a Backup tab: back up now, large items, the backup folder, and a restore on a second press ([79121c4](https://github.com/mohamed-rekiba/nexus/commit/79121c451c72c27b01bfe12d75f515ca62631500))
+* **backup:** the backup browser is a sheet in the kit; the Backup tab's browser rows go ([85276d0](https://github.com/mohamed-rekiba/nexus/commit/85276d00734e65503ac3d71f95f988656d214fca))
+* **backup:** the browser's core: places by kind, folder details, filter, hidden folders, recent folders ([b189427](https://github.com/mohamed-rekiba/nexus/commit/b189427e41503d9c88b545b71e7d58db22fe29fb))
+* **contract:** the Game Hub's compatibility-layer rating has generic fields ([b5a09d1](https://github.com/mohamed-rekiba/nexus/commit/b5a09d1ad5059c5b056ca95b270d4b8d089b32e2))
+* **kyty:** builds with --data-folder share one saves folder, with the build's saves copied there once ([5c02e59](https://github.com/mohamed-rekiba/nexus/commit/5c02e59b0cad82e534e610cdf6b77acdd1649a1f))
+* **themes:** Classic's behaviour and token-drawn widgets move into the kit ([ad5a379](https://github.com/mohamed-rekiba/nexus/commit/ad5a3797cdcf53a40d92446fff5ec5d821dd6fa5))
+* **themes:** the Default theme stands alone ([01d0211](https://github.com/mohamed-rekiba/nexus/commit/01d02114906f78980d4d5e5680873ada314587d1))
+* **themes:** the host serves a kit under kit/ beneath every theme, tokens have defaults, and fallback = true replaces BASE_THEME ([bdea7e2](https://github.com/mohamed-rekiba/nexus/commit/bdea7e28289588b3e39ba8943ea4ceb4270d562e))
+* **themes:** themes stand alone; extends, screens and components are refused ([834372b](https://github.com/mohamed-rekiba/nexus/commit/834372bf65cad49f4734711e287b2dfad6b225e6))
+
+
+### Bug Fixes
+
+* **backup:** a held Enter in the backup browser doesn't answer the dialog it opened ([c376d2d](https://github.com/mohamed-rekiba/nexus/commit/c376d2d7b422a9c075ea105445f5cff67c980d24))
+* **backup:** a restore checks kinds, sizes and free space first, writes each file whole, keeps one job, and leaves its settings for the next start ([debe629](https://github.com/mohamed-rekiba/nexus/commit/debe629bf12f9f28952ded6f94ca8212b310e906))
+* **backup:** the browser's filter also finds a backup by the date its row shows ([9e60bae](https://github.com/mohamed-rekiba/nexus/commit/9e60bae20481a52c5e2e9eb4bf9bc68ee1078ac3))
+* **backup:** the browser's places start at the folder's place, drives say TB, and an empty folder shows no Enter hint ([dfe2752](https://github.com/mohamed-rekiba/nexus/commit/dfe275284f114248caea66c963f6a6624c622937))
+* **backup:** the host restores into the folders a plugin names, so Lichii's keys and firmware folders stay read only for the plugin ([06e2d9b](https://github.com/mohamed-rekiba/nexus/commit/06e2d9b1ba644dd2931133be8ea216891d13ac07))
+* **sessions:** keep the game's new windows until the player brings the launcher, and tag each new one once ([bd73f97](https://github.com/mohamed-rekiba/nexus/commit/bd73f977cfe9f6fe7f54c6561b0102d71143e6f5))
+* **sessions:** under gamescope, a game in front keeps the windows it opens after it showed, with logs of the focus ([dc9c337](https://github.com/mohamed-rekiba/nexus/commit/dc9c3376b589d66e82da2682886f9dcea2580e2a))
+
 ## [0.12.0](https://github.com/mohamed-rekiba/nexus/compare/v0.11.1...v0.12.0) (2026-11-08)
 
 
