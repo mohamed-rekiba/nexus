@@ -14,7 +14,9 @@ import { Osk } from "keyboard.slint";
 // ○ (Escape) clears the typed text first, then goes up a folder (the places: closes; the top:
 // closes). □ (Insert) or Ctrl+H shows the hidden folders, or not. Letters type into the text
 // that filters the files, Backspace takes the last one back. A restore asks once, in a dialog.
-// Mouse: a click focuses, a double click opens, the wheel scrolls.
+// Mouse: a click opens a place or a folder, and asks to restore a backup; the wheel scrolls.
+// For a moment after a click opens a folder, clicks wait: the second click of a double click
+// would open a row of the new folder.
 export global Browser {
     out property <bool> open: Vm.backup.browser.open;
     // 0: the places; 1: the files.
@@ -28,6 +30,8 @@ export global Browser {
     // The text typed to filter the files. The sheet keeps it, so keys typed faster than the
     // core answers each add to it; the core gets all of it each time.
     in-out property <string> typed;
+    // A click just opened something: the next clicks wait a moment (`clicked`).
+    in-out property <bool> resting;
     out property <int> places: Vm.backup.browser.places.length;
     out property <int> entries: Vm.backup.browser.entries.length;
 
@@ -94,6 +98,12 @@ export global Browser {
         root.typed = text;
         root.at-entry = 0;
         Commands.filter-backups(text);
+    }
+    // A click on the place `place`, or on the file `entry`: it acts as Enter does there.
+    public function clicked(place: int, entry: int) {
+        if (root.resting) { return; }
+        root.resting = true;
+        if (place >= 0) { root.pane = 0; root.go(place); } else { root.open-entry(entry); }
     }
     public function toggle-hidden() {
         Commands.show-hidden-backups(!Vm.backup.browser.hidden);
@@ -187,14 +197,12 @@ component BrowserRow inherits Rectangle {
     in property <bool> marked;
     in property <bool> dim;
     callback picked();
-    callback opened();
     height: 56 * Look.px;
     border-radius: 12 * Look.px;
     background: root.lit ? Tokens.color-focus : root.marked ? Look.fill-lit : touch.has-hover ? Look.fill : transparent;
     animate background { duration: Look.timed(120ms); }
     touch := TouchArea {
         clicked => { root.picked(); }
-        double-clicked => { root.opened(); }
     }
     HorizontalLayout {
         padding-left: 14 * Look.px;
@@ -300,7 +308,9 @@ component SheetButton inherits Rectangle {
 export component BackupBrowser inherits Rectangle {
     property <bool> entered;
     Timer { interval: 16ms; running: !root.entered; triggered => { root.entered = true; } }
-    init => { Browser.arrived(); }
+    // The clicks wait this long after one that opened something.
+    Timer { interval: 400ms; running: Browser.resting; triggered => { Browser.resting = false; } }
+    init => { Browser.resting = false; Browser.arrived(); }
     // The folder changed, or the filter: the focus goes back to the first row.
     property <string> shown: Vm.backup.browser.shown;
     changed shown => { Browser.arrived(); }
@@ -455,8 +465,7 @@ export component BackupBrowser inherits Rectangle {
                                     accessible-value: place.name;
                                     accessible-item-selected: Browser.pane == 0 && Browser.at-place == i;
                                     accessible-action-default => { Browser.go(i); }
-                                    picked => { Browser.pane = 0; Browser.at-place = i; }
-                                    opened => { Browser.go(i); }
+                                    picked => { Browser.clicked(i, -1); }
                                 }
                             }
                         }
@@ -488,8 +497,7 @@ export component BackupBrowser inherits Rectangle {
                                 accessible-description: entry.folder ? entry.detail : entry.newer ? "newer" : "";
                                 accessible-item-selected: Browser.pane == 1 && Browser.at-entry == i;
                                 accessible-action-default => { Browser.open-entry(i); }
-                                picked => { Browser.pane = 1; Browser.at-entry = i; }
-                                opened => { Browser.open-entry(i); }
+                                picked => { Browser.clicked(-1, i); }
                             }
                         }
                     }

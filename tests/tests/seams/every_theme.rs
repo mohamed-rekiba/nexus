@@ -229,32 +229,37 @@ fn a_restore_from_the_backup_browser_asks_once_then_restores_in_every_theme() {
 }
 
 #[test]
-fn the_mouse_focuses_with_a_click_and_opens_with_a_double_click_in_every_theme() {
+fn one_click_opens_and_a_double_click_opens_only_one_folder_in_every_theme() {
     for theme in THEMES {
         let backups = tempfile::tempdir().unwrap();
         let mut host = browsing(theme, backups.path());
-        host.click("browser-place");
-        assert_eq!(host.focused("browser-place").len(), 1, "{theme}: a click focuses");
-        assert!(
-            host.value("backup-browser").ends_with(&*backups.path().display().to_string()),
-            "{theme}: and opens nothing"
-        );
-        // A double click opens: the first folder, old-pc. The driver's click waits after
-        // each, too long for a double click: here the two come at once.
+        // One click on a folder opens it.
         host.click("browser-folder");
-        assert!(!host.value("backup-browser").ends_with("old-pc"), "{theme}: one click opens nothing");
+        assert!(host.value("backup-browser").ends_with("old-pc"), "{theme}: one click opens");
+        host.wait(std::time::Duration::from_millis(500));
+        // One click on a backup asks to restore it.
+        host.click("browser-backup");
+        assert_eq!(host.count("browser-confirm"), 1, "{theme}: one click asks to restore");
+        host.navigate(Key::Escape);
+        host.wait(std::time::Duration::from_millis(500));
+        // A double click on old-pc opens it, and its second click doesn't ask to restore the
+        // backup now under the pointer.
+        host.navigate(Key::Escape);
+        host.wait(std::time::Duration::from_millis(500));
         let target = host.first("browser-folder");
         let (at, size) = (target.absolute_position(), target.size());
         let position = slint::LogicalPosition::new(at.x + size.width / 2.0, at.y + size.height / 2.0);
         let button = slint::platform::PointerEventButton::Left;
-        let window = host.instance().window();
         for _ in 0..2 {
+            let window = host.instance().window();
             window.dispatch_event(slint::platform::WindowEvent::PointerPressed { position, button });
             window.dispatch_event(slint::platform::WindowEvent::PointerReleased { position, button });
+            host.pump();
         }
-        host.pump();
         host.settle();
-        assert!(host.value("backup-browser").ends_with("old-pc"), "{theme}: a double click opens");
+        assert!(host.value("backup-browser").ends_with("old-pc"), "{theme}");
+        assert_eq!(host.count("browser-confirm"), 0, "{theme}: the second click waited");
+        host.wait(std::time::Duration::from_millis(500));
         host.press_first("browser-close");
         assert_eq!(host.count("backup-browser"), 0, "{theme}");
     }
