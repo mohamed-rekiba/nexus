@@ -1,0 +1,31 @@
+name: Cargo tool
+description: >-
+  A prebuilt cargo tool (cargo-nextest, cargo-about) at a pinned version, in ~/.cargo/bin. The
+  setup action's cache keeps ~/.cargo/bin, so a job with a warm cache finds the tool there and
+  downloads nothing. Run it after the setup action.
+inputs:
+  tool:
+    description: The tool's crate name (cargo-nextest)
+    required: true
+  version:
+    description: The version to have (0.9.149)
+    required: true
+runs:
+  using: composite
+  steps:
+    - id: have
+      shell: bash
+      env:
+        TOOL: ${{ inputs.tool }}
+        VERSION: ${{ inputs.version }}
+      # `cargo nextest --version` prints "cargo-nextest 0.9.149 (...)"; cargo-about the same.
+      run: |
+        sub="${TOOL#cargo-}"
+        if command -v "$TOOL" > /dev/null && cargo "$sub" --version 2> /dev/null | grep -qw "$VERSION"; then
+          echo "$TOOL $VERSION is in the cache"
+          echo "found=true" >> "$GITHUB_OUTPUT"
+        fi
+    - if: steps.have.outputs.found != 'true'
+      uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+      with:
+        tool: ${{ inputs.tool }}@${{ inputs.version }}

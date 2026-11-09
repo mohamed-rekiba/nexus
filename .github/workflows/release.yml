@@ -1,0 +1,76 @@
+name: Release
+
+# Release Please keeps a release pull request open on main for each package: Nexus (the
+# workspace; os/ is left out) and Nexus OS (os/, tags nexus-os-v<version>). It reads the
+# Conventional Commit messages since the last release, bumps the version and writes the
+# changelog. Merging the pull request makes a draft release and its tag (force-tag-creation:
+# without the tag Release Please can't find a draft and opens the same pull request again).
+#
+# This workflow only makes the releases. It starts the workflow that builds each one, on its
+# tag, as a run of its own:
+# - a Nexus tag (a change to the app): package.yml, which publishes the release, then starts
+#   os.yml for new images;
+# - a Nexus OS tag (a change to the OS): os.yml. When the same push made a Nexus tag too,
+#   package.yml starts it once Nexus's release is published, since the images bundle it.
+# GitHub doesn't start workflows for a tag made with a workflow's own token, but it does start
+# one asked for by name (workflow_dispatch), and `--ref <tag>` runs it on the tag.
+#
+# package.yml starts this one by name too, after it names a new Nexus in os/nexus.txt (a push
+# with the workflow's own token, which starts nothing), so the OS release pull request opens.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+# Two pushes close together never edit the release pull requests at once.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: Release Please
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      nexus: ${{ steps.rp.outputs.release_created == 'true' && steps.rp.outputs.tag_name || '' }}
+      # Release Please prefixes a package's outputs with its path.
+      os: ${{ steps.rp.outputs['os--release_created'] == 'true' && steps.rp.outputs['os--tag_name'] || '' }}
+    steps:
+      - id: rp
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          # Pull requests opened with the default token don't start CI. To get checks on the
+          # release pull request, add a personal access token (or a GitHub App's) as the
+          # RELEASE_PLEASE_TOKEN secret.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          config-file: .github/release-please-config.json
+          manifest-file: .github/release-please-manifest.json
+
+  start:
+    name: Start the builds
+    needs: release-please
+    if: needs.release-please.outputs.nexus != '' || needs.release-please.outputs.os != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      # To start package.yml and os.yml.
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      NEXUS: ${{ needs.release-please.outputs.nexus }}
+      OS: ${{ needs.release-please.outputs.os }}
+    steps:
+      - run: |
+          if [ -n "$NEXUS" ]; then
+            # package.yml starts the OS release, if any, once Nexus's is published.
+            gh workflow run package.yml --ref "$NEXUS" -f os-release="$OS"
+          else
+            gh workflow run os.yml --ref "$OS"
+          fi

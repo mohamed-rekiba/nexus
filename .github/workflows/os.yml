@@ -1,0 +1,311 @@
+name: Nexus OS
+
+# Nexus OS: its images and its USB stick (os/README.md).
+#
+# - Images: ghcr.io/<owner>/nexus-os:minimal (os/Containerfile) and :minimal-nvidia (the same
+#   plus NVIDIA's driver, os/nvidia/). Built, checked and pushed every day, and after each Nexus
+#   release (package.yml starts this once the release is published), so installed PCs get
+#   Fedora's fixes and the newest Nexus (the image installs the latest Nexus release's rpm).
+#   They also get a dated tag, and on an OS release a version tag (minimal-0.2.0).
+# - An OS release: a run on an OS tag (nexus-os-v<version>). release.yml starts it on the tag
+#   Release Please made; when the same push released Nexus too, package.yml starts it after
+#   Nexus's release is published, since the images bundle it. The images are built from the
+#   tag and tagged with the version, then the stick is built, attached to the draft release,
+#   and the release is published, never as the latest: Nexus's updater reads the latest
+#   release, which stays a Nexus one.
+# - The stick is one file, nexus-os-x86_64-<version>.iso (os/version.txt; a test run's ends
+#   -test.iso), or 1500 MB parts when it's over 2 GiB (GitHub's limit for a release file), each
+#   with a .sha256. It's also this run's `nexus-os-iso` artifact.
+# - Test mode (by hand on a branch, the default): the images go under -test tags
+#   (:minimal-test), which no PC follows, and the stick is only kept as an artifact for a few
+#   days.
+on:
+  schedule:
+    - cron: "30 5 * * *"
+  workflow_dispatch:
+    inputs:
+      test:
+        description: "Test run: images under -test tags no PC follows, the stick as an artifact only (not on an OS tag)"
+        type: boolean
+        default: true
+      iso:
+        description: Build the stick too (test runs; an OS release always builds it)
+        type: boolean
+        default: true
+      nexus:
+        description: A Nexus release tag to bundle instead of the latest (for example v0.2.0)
+        type: string
+        default: ""
+
+# Each job asks for what it needs.
+permissions: {}
+
+# One run per kind at a time, so two runs never push the same tags at once.
+concurrency:
+  group: nexus-os-${{ github.ref_type == 'tag' && github.ref_name || (inputs.test && 'test') || 'images' }}
+  cancel-in-progress: false
+
+env:
+  # Test runs push under -test tags (":minimal-test"), which no PC follows.
+  # An OS release when it runs on an OS tag.
+  RELEASE: ${{ startsWith(github.ref, 'refs/tags/nexus-os-v') && github.ref_name || '' }}
+  SUFFIX: ${{ inputs.test && !startsWith(github.ref, 'refs/tags/nexus-os-v') && '-test' || '' }}
+  BASE: quay.io/fedora/fedora-bootc:44
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  minimal:
+    name: minimal image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Free disk space (the base image is large)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache /usr/local/share/boost \
+            /usr/local/lib/node_modules /usr/share/swift /usr/local/.ghcup /opt/microsoft || true
+          docker system prune -af >/dev/null 2>&1 || true
+          df -h /
+
+      - name: The Nexus rpm from the latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          NEXUS: ${{ inputs.nexus }}
+        run: |
+          if [ -n "$RELEASE" ] && [ "$RELEASE" != "nexus-os-v$(cat os/version.txt)" ]; then
+            echo "::error::the tag is $RELEASE, but os/version.txt says $(cat os/version.txt)"
+            exit 1
+          fi
+          # OS releases are never the latest, so the latest release is Nexus's.
+          if [ -z "$NEXUS" ] && ! gh api "repos/$GH_REPO/releases/latest" >/dev/null 2>&1; then
+            echo "::error::No Nexus release is published yet: release Nexus first, then run this again"
+            exit 1
+          fi
+          os/fetch-nexus.sh ${NEXUS:+"$NEXUS"}
+
+      - name: Build
+        run: |
+          owner=$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE=ghcr.io/$owner/nexus-os" >> "$GITHUB_ENV"
+          IMAGE="ghcr.io/$owner/nexus-os" REPO="$GITHUB_REPOSITORY" \
+            os/build-image.sh "ghcr.io/$owner/nexus-os:minimal$SUFFIX"
+
+      - name: Check the image
+        run: |
+          sudo podman run --rm --entrypoint /usr/bin/bash "$IMAGE:minimal$SUFFIX" -c '
+            set -e
+            for tool in gamescope cage nmcli bluetoothctl pactl bootc rpm-ostree mokutil xprop xdotool nexus nexus-session; do
+              command -v "$tool" >/dev/null || { echo "missing $tool"; exit 1; }
+            done
+            for lib in libmpv.so.2 libarchive.so.13 libxkbcommon-x11.so.0 libvulkan.so.1 libpulse.so.0 libXss.so.1 libasound.so.2 libEGL.so.1; do
+              ldconfig -p | grep -q "$lib " || { echo "missing $lib"; exit 1; }
+            done
+            systemctl is-enabled greetd.service NetworkManager.service bluetooth.service chronyd.service nexus-os-update.timer
+            test "$(systemctl is-enabled bootc-fetch-apply-updates.timer)" = masked
+            grep -q "/usr/bin/nexus-session" /etc/greetd/config.toml
+            grep -q systemd.gpt_auto=0 /usr/lib/bootc/install/50-nexus-os.toml
+            test -s /usr/lib/nexus-os/release
+            grep -q "^ghcr.io/.*/nexus-os$" /usr/lib/nexus-os/image
+            test -f /usr/share/polkit-1/rules.d/50-nexus-os.rules
+            grep -q "^NAME=\"Nexus OS\"" /usr/lib/os-release
+            cat /usr/lib/nexus-os/release
+            nexus --version
+            nexus --supports gamescope'
+
+      - name: Push
+        id: push
+        run: |
+          echo "${{ github.token }}" | sudo podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+          img="$IMAGE:minimal$SUFFIX"
+          refs="$img"
+          # Dated and version tags keep earlier versions at hand (not for test runs).
+          if [ -z "$SUFFIX" ]; then
+            sudo podman tag "$img" "$IMAGE:minimal-$(date -u +%Y%m%d)"
+            refs="$refs $IMAGE:minimal-$(date -u +%Y%m%d)"
+            if [ -n "$RELEASE" ]; then VERSION=${RELEASE#nexus-os-v}; sudo podman tag "$img" "$IMAGE:minimal-$VERSION"; refs="$refs $IMAGE:minimal-$VERSION"; fi
+          fi
+          for ref in $refs; do
+            for try in 1 2 3; do sudo podman push --digestfile /tmp/digest "$ref" && break; [ "$try" = 3 ] && exit 1; sleep 30; done
+          done
+          echo "digest=$(cat /tmp/digest)" >> "$GITHUB_OUTPUT"
+
+      # The installers and installed PCs pull without logging in, so a private package fails
+      # every install. GitHub creates packages private, and only the web settings page can
+      # change that.
+      - name: Can anyone pull it?
+        run: |
+          if ! skopeo inspect --no-creds --raw "docker://$IMAGE:minimal$SUFFIX" >/dev/null; then
+            echo "::error::$IMAGE:minimal$SUFFIX can't be pulled without logging in: make the nexus-os package public in its settings on GitHub (Danger Zone → Change visibility)"
+            exit 1
+          fi
+
+  # NVIDIA's driver on top of the minimal edition just pushed, for its exact kernel: only the
+  # driver's layers differ, so that's all an NVIDIA PC downloads.
+  minimal-nvidia:
+    name: NVIDIA image
+    needs: minimal
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build
+        env:
+          DIGEST: ${{ needs.minimal.outputs.digest }}
+        run: |
+          owner=$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE=ghcr.io/$owner/nexus-os" >> "$GITHUB_ENV"
+          core="ghcr.io/$owner/nexus-os@$DIGEST"
+          sudo podman pull "$core"
+          kernel=$(sudo podman run --rm "$core" rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}' kernel-core)
+          # Universal Blue builds the modules for each new Fedora kernel within about a day; until
+          # then NVIDIA PCs keep the previous :minimal-nvidia.
+          if ! skopeo inspect --raw "docker://ghcr.io/ublue-os/akmods-nvidia-lts:main-44-$kernel" >/dev/null; then
+            echo "::notice::No NVIDIA modules for kernel $kernel yet: :minimal-nvidia stays as it is"
+            echo "SKIP=1" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          sudo podman build --build-arg CORE="$core" --build-arg KERNEL="$kernel" -f os/nvidia/Containerfile \
+            -t "ghcr.io/$owner/nexus-os:minimal-nvidia$SUFFIX" .
+
+      - name: Check the image
+        if: env.SKIP != '1'
+        run: |
+          sudo podman run --rm --entrypoint /usr/bin/bash "$IMAGE:minimal-nvidia$SUFFIX" -c '
+            set -e
+            kver=$(rpm -q --qf "%{VERSION}-%{RELEASE}.%{ARCH}" kernel-core)
+            test "$(rpm -q --qf "%{VERSION}" kmod-nvidia)" = "$(rpm -q --qf "%{VERSION}" nvidia-driver)"
+            find /usr/lib/modules/$kver -name "nvidia.ko*" | grep -q .
+            grep -q nvidia-drm.modeset=1 /usr/lib/bootc/kargs.d/00-nvidia.toml
+            if grep -l "^enabled=1" /etc/yum.repos.d/*nvidia* 2>/dev/null; then exit 1; fi
+            systemctl is-enabled greetd.service nexus-os-update.timer
+            test "$(systemctl is-enabled bootc-fetch-apply-updates.timer)" = masked
+            test -s /usr/lib/nexus-os/release
+            nexus --version
+            nexus --supports gamescope'
+
+      - name: Push
+        if: env.SKIP != '1'
+        run: |
+          echo "${{ github.token }}" | sudo podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+          img="$IMAGE:minimal-nvidia$SUFFIX"
+          refs="$img"
+          if [ -z "$SUFFIX" ]; then
+            sudo podman tag "$img" "$IMAGE:minimal-nvidia-$(date -u +%Y%m%d)"
+            refs="$refs $IMAGE:minimal-nvidia-$(date -u +%Y%m%d)"
+            if [ -n "$RELEASE" ]; then VERSION=${RELEASE#nexus-os-v}; sudo podman tag "$img" "$IMAGE:minimal-nvidia-$VERSION"; refs="$refs $IMAGE:minimal-nvidia-$VERSION"; fi
+          fi
+          for ref in $refs; do
+            for try in 1 2 3; do sudo podman push "$ref" && break; [ "$try" = 3 ] && exit 1; sleep 30; done
+          done
+
+      - name: Can anyone pull it?
+        if: env.SKIP != '1'
+        run: |
+          if ! skopeo inspect --no-creds --raw "docker://$IMAGE:minimal-nvidia$SUFFIX" >/dev/null; then
+            echo "::error::$IMAGE:minimal-nvidia$SUFFIX can't be pulled without logging in: make the nexus-os package public in its settings on GitHub (Danger Zone → Change visibility)"
+            exit 1
+          fi
+
+  iso:
+    name: USB stick
+    needs: minimal
+    # An OS release, or by hand in test mode.
+    if: startsWith(github.ref, 'refs/tags/nexus-os-v') || (inputs.iso && inputs.test)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache /usr/local/share/boost \
+            /usr/local/lib/node_modules /usr/share/swift /usr/local/.ghcup /opt/microsoft || true
+          docker system prune -af >/dev/null 2>&1 || true
+          df -h /
+
+      - name: Build the stick
+        env:
+          DIGEST: ${{ needs.minimal.outputs.digest }}
+        run: |
+          owner=$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
+          # The very image the minimal job pushed, whatever was pushed since.
+          core="ghcr.io/$owner/nexus-os@$DIGEST"
+          sudo podman pull "$core"
+          # nexus-os-x86_64-0.2.0.iso; a test run's is nexus-os-x86_64-0.2.0-test.iso.
+          iso="nexus-os-x86_64-$(cat os/version.txt)$SUFFIX.iso"
+          echo "ISO=$iso" >> "$GITHUB_ENV"
+          os/make-iso.sh "$core" "out/$iso"
+
+      - name: Checksums, and parts when it's over 2 GiB
+        working-directory: out
+        run: |
+          iso=$ISO
+          sha256sum "$iso" > "$iso.sha256"
+          size=$(stat -c %s "$iso")
+          echo "ISO: $size bytes"
+          # GitHub release files must be under 2 GiB: a larger ISO goes as 1500 MB parts
+          # (nexus-os-x86_64-0.2.0.iso.part-aa, -ab, …), which the README shows how to join.
+          if [ "$size" -gt 2147483648 ]; then
+            split -b 1500M "$iso" "$iso.part-"
+            rm "$iso"
+            for part in "$iso".part-*; do sha256sum "$part" > "$part.sha256"; done
+          fi
+          ls -l
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nexus-os-iso
+          path: out/*
+          if-no-files-found: error
+          # A release attaches it right away; a test run keeps it a few days to try.
+          retention-days: ${{ startsWith(github.ref, 'refs/tags/nexus-os-v') && 1 || 3 }}
+          compression-level: 0
+
+  # The ISO (or its parts) and the checksums go on the draft, which is then published, but not as
+  # the latest release: Nexus's updater reads the latest release, which stays a Nexus one.
+  publish:
+    name: publish the release
+    needs: [minimal, minimal-nvidia, iso]
+    if: startsWith(github.ref, 'refs/tags/nexus-os-v')
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: nexus-os-iso
+          path: iso
+      - name: Attach the stick and publish, not as the latest
+        working-directory: iso
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ls -l
+          # The whole ISO's checksum stays when it was split into parts; each part has its own.
+          for sum in ./*.sha256; do [ ! -e "${sum%.sha256}" ] || sha256sum -c "$sum"; done
+          gh release upload "$RELEASE" ./* --clobber
+          gh release edit "$RELEASE" --draft=false --latest=false

@@ -1,0 +1,130 @@
+name: CI
+
+# Format, lint, test and dependency checks on every pull request and every push to main. Linux
+# only: the macOS and Windows builds run in package.yml, by hand or for a release. Slow checks
+# that need the network or real windows run in weekly.yml.
+#
+# Runs only when something that can change the build changed: not for docs, Nexus OS (os.yml
+# checks it) or the other workflows. It skips Release Please's pull requests and the commits
+# they merge too: they only bump the version and the changelog.
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "os/**"
+      - "version.txt"
+      - "LICENSE"
+      - ".github/workflows/os.yml"
+      - ".github/workflows/package.yml"
+      - ".github/workflows/release.yml"
+      - ".github/workflows/weekly.yml"
+      - ".github/workflows/mirror-deps.yml"
+      - ".github/release-please-*.json"
+      - ".github/dependabot.yml"
+  # The same list as for push: keep the two the same.
+  pull_request:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "os/**"
+      - "version.txt"
+      - "LICENSE"
+      - ".github/workflows/os.yml"
+      - ".github/workflows/package.yml"
+      - ".github/workflows/release.yml"
+      - ".github/workflows/weekly.yml"
+      - ".github/workflows/mirror-deps.yml"
+      - ".github/release-please-*.json"
+      - ".github/dependabot.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push to a pull request cancels its older run: only the newest commit is checked. On
+# main every run finishes, so each one saves its cache for the branches after it.
+concurrency:
+  group: ci-${{ github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  # No debug info: smaller builds, links and cache. A failing test still names its file and line.
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  RUST_BACKTRACE: "1"
+
+jobs:
+  fmt:
+    name: Format
+    if: >-
+      !startsWith(github.head_ref, 'release-please--')
+      && !startsWith(github.event.head_commit.message, 'chore(main): release')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  clippy:
+    name: Clippy
+    if: >-
+      !startsWith(github.head_ref, 'release-please--')
+      && !startsWith(github.event.head_commit.message, 'chore(main): release')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          cache-key: clippy
+          save-cache: true
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  test:
+    name: Test
+    if: >-
+      !startsWith(github.head_ref, 'release-please--')
+      && !startsWith(github.event.head_commit.message, 'chore(main): release')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          cache-key: test
+          save-cache: true
+      - uses: ./.github/actions/cargo-tool
+        with:
+          tool: cargo-nextest
+          version: 0.9.149
+      # Each test in its own process, all at once (.config/nextest.toml).
+      # nextest doesn't run doc tests; the code has none that run (only JSON and `ignore` blocks).
+      - run: cargo nextest run --workspace --locked --no-fail-fast
+
+  deny:
+    name: cargo-deny
+    if: >-
+      !startsWith(github.head_ref, 'release-please--')
+      && !startsWith(github.event.head_commit.message, 'chore(main): release')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Advisories, licences, bans and sources, as deny.toml sets them.
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check
