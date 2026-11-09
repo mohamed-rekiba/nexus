@@ -22,7 +22,8 @@ use std::path::{Component, Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// The archive format this build writes and reads.
+/// The archive format this build writes and reads. A backup of a later format is listed, but
+/// not restored: its parts may mean something this build doesn't know.
 pub(crate) const FORMAT: u32 = 1;
 const MANIFEST: &str = "backup.json";
 const CONFIG: &str = "config.json";
@@ -53,9 +54,15 @@ impl std::fmt::Display for ItemKey {
 pub(crate) struct Manifest {
     pub format: u32,
     /// The Nexus version that made it.
+    #[serde(default)]
     pub nexus: String,
+    /// The name of the computer that made it. Empty in a backup from before Nexus kept it.
+    #[serde(default)]
+    pub computer: String,
     /// When, in seconds since 1970 (UTC).
+    #[serde(default)]
     pub made: u64,
+    #[serde(default)]
     pub items: Vec<ItemRecord>,
 }
 
@@ -193,6 +200,7 @@ fn remove_left(path: &Path) {
 pub(crate) fn write(
     dest: &Path,
     nexus: &str,
+    computer: &str,
     made: u64,
     config: &Value,
     sources: &[Source],
@@ -215,7 +223,7 @@ pub(crate) fn write(
         });
         walked.push((source, entries));
     }
-    let manifest = Manifest { format: FORMAT, nexus: nexus.to_owned(), made, items };
+    let manifest = Manifest { format: FORMAT, nexus: nexus.to_owned(), computer: computer.to_owned(), made, items };
     let total: u64 = manifest.items.iter().map(|i| i.bytes).sum();
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent)?;
@@ -280,8 +288,21 @@ fn json<T: serde::de::DeserializeOwned>(entry: impl Read) -> io::Result<T> {
     serde_json::from_slice(&bytes).map_err(|e| invalid(e.to_string()))
 }
 
-/// The manifest at the start of the backup at `path`.
+/// The manifest at the start of the backup at `path`, which this build restores.
 pub(crate) fn read_manifest(path: &Path) -> io::Result<Manifest> {
+    let manifest = peek_manifest(path)?;
+    if manifest.format > FORMAT {
+        return Err(invalid(NEWER));
+    }
+    Ok(manifest)
+}
+
+/// Why a backup of a later format isn't restored.
+pub(crate) const NEWER: &str = "a newer Nexus made this backup: update Nexus to restore it";
+
+/// The manifest at the start of the backup at `path`, of any format from 1 up: for the list.
+/// A later format's manifest gives what it shares with this one.
+pub(crate) fn peek_manifest(path: &Path) -> io::Result<Manifest> {
     let mut archive = open(path)?;
     let mut entries = archive.entries()?;
     let first = entries.next().ok_or_else(|| invalid("the file is empty"))??;
@@ -289,8 +310,8 @@ pub(crate) fn read_manifest(path: &Path) -> io::Result<Manifest> {
         return Err(invalid("this isn't a Nexus backup"));
     }
     let manifest: Manifest = json(first)?;
-    if manifest.format != FORMAT {
-        return Err(invalid(format!("backup format {} isn't one this Nexus reads", manifest.format)));
+    if manifest.format == 0 {
+        return Err(invalid("backup format 0 isn't one this Nexus reads"));
     }
     Ok(manifest)
 }
@@ -540,9 +561,10 @@ mod tests {
             source("emu", "gone", &from.path().join("missing")),
         ];
         let config = serde_json::json!({ "app": { "theme": "default" } });
-        let manifest = write(&file, "1.0.0", 10, &config, &sources, &|_, _| {}).unwrap();
+        let manifest = write(&file, "1.0.0", "gaming-pc", 10, &config, &sources, &|_, _| {}).unwrap();
         assert_eq!(manifest.items.iter().map(|i| i.name.as_str()).collect::<Vec<_>>(), ["saves", "settings"]);
         assert_eq!(read_manifest(&file).unwrap(), manifest);
+        assert_eq!(manifest.computer, "gaming-pc");
 
         let to = tempfile::tempdir().unwrap();
         let targets = BTreeMap::from([
@@ -578,7 +600,8 @@ mod tests {
         let from = tempfile::tempdir().unwrap();
         std::fs::write(from.path().join("keys"), b"k").unwrap();
         let file = from.path().join("b.tar.gz");
-        write(&file, "1", 0, &Value::Null, &[source("old", "keys", &from.path().join("keys"))], &|_, _| {}).unwrap();
+        write(&file, "1", "", 0, &Value::Null, &[source("old", "keys", &from.path().join("keys"))], &|_, _| {})
+            .unwrap();
         let restored = restore(&file, &BTreeMap::new(), &room, &|_, _| {}).unwrap();
         assert_eq!(restored.left_out, [key("old", "keys")]);
     }
@@ -589,7 +612,8 @@ mod tests {
         std::fs::create_dir_all(from.path().join("saves")).unwrap();
         std::fs::write(from.path().join("saves/a"), b"a save").unwrap();
         let file = from.path().join("b.tar.gz");
-        write(&file, "1", 0, &Value::Null, &[source("emu", "saves", &from.path().join("saves"))], &|_, _| {}).unwrap();
+        write(&file, "1", "", 0, &Value::Null, &[source("emu", "saves", &from.path().join("saves"))], &|_, _| {})
+            .unwrap();
         (from, file)
     }
 
@@ -624,7 +648,7 @@ mod tests {
         std::fs::write(from.path().join("saves/a"), b"a").unwrap();
         let file = from.path().join("b.tar.gz");
         let manifest =
-            write(&file, "1", 0, &Value::Null, &[source("emu", "saves", &from.path().join("saves"))], &|_, _| {})
+            write(&file, "1", "", 0, &Value::Null, &[source("emu", "saves", &from.path().join("saves"))], &|_, _| {})
                 .unwrap();
         assert_eq!(manifest.items[0].bytes, 1, "the link is left out");
 
@@ -666,7 +690,25 @@ mod tests {
     fn saves_record(bytes: u64) -> Manifest {
         let item =
             ItemRecord { plugin: "emu".into(), name: "saves".into(), title: "Saves".into(), folder: true, bytes };
-        Manifest { format: FORMAT, nexus: "1".into(), made: 0, items: vec![item] }
+        Manifest { format: FORMAT, nexus: "1".into(), computer: String::new(), made: 0, items: vec![item] }
+    }
+
+    #[test]
+    fn a_backup_of_a_later_format_is_listed_but_not_restored() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut later = saves_record(0);
+        later.format = FORMAT + 1;
+        later.computer = "new-pc".into();
+        let file = raw(dir.path(), &later, &[]);
+        assert_eq!(peek_manifest(&file).unwrap().computer, "new-pc");
+        assert_eq!(read_manifest(&file).unwrap_err().to_string(), NEWER);
+        let to = tempfile::tempdir().unwrap();
+        let targets = BTreeMap::from([(key("emu", "saves"), to.path().join("saves"))]);
+        assert!(restore(&file, &targets, &room, &|_, _| {}).is_err());
+
+        let mut none = saves_record(0);
+        none.format = 0;
+        assert!(peek_manifest(&raw(dir.path(), &none, &[])).is_err(), "format 0 is no format");
     }
 
     #[test]

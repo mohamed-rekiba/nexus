@@ -32,8 +32,13 @@ struct Pc {
 
 impl Pc {
     async fn new(backups: &Path) -> Pc {
+        Pc::on(backups, FakeHost::new()).await
+    }
+
+    /// A computer `host` describes: its home folder, its name.
+    async fn on(backups: &Path, host: FakeHost) -> Pc {
         let plugin = StubPlugin::backs_up(PLUGIN, PERMISSIONS, FakeBackup::new(items()));
-        let test = FakeHost::new().built_in(plugin.boxed()).boot_core().await;
+        let test = host.built_in(plugin.boxed()).boot_core().await;
         let (saves, keys) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         for (name, dir) in [("emu-saves", &saves), ("emu-keys", &keys)] {
             let folders = Command::SetFolders { name: name.into(), paths: vec![dir.path().into()] };
@@ -281,4 +286,184 @@ async fn the_tab_says_what_a_backup_holds_here_and_which_items_are_large() {
     let tab = view(&a);
     assert_eq!(tab.holds, "Nexus settings");
     assert_eq!(tab.large, "", "no large items: no switch");
+}
+
+fn browser(pc: &Pc) -> nexus_ui_api::BackupBrowserVm {
+    view(pc).browser
+}
+
+fn names(browser: &nexus_ui_api::BackupBrowserVm) -> Vec<String> {
+    browser.entries.iter().map(|e| e.name.clone()).collect()
+}
+
+/// A backup file whose manifest is `manifest`, and nothing else.
+fn backup_with(path: &Path, manifest: &serde_json::Value) {
+    let gz = flate2::write::GzEncoder::new(std::fs::File::create(path).unwrap(), flate2::Compression::fast());
+    let mut tar = tar::Builder::new(gz);
+    let bytes = serde_json::to_vec(manifest).unwrap();
+    let mut header = tar::Header::new_gnu();
+    header.set_size(bytes.len() as u64);
+    header.set_mode(0o644);
+    tar.append_data(&mut header, "backup.json", bytes.as_slice()).unwrap();
+    tar.into_inner().unwrap().finish().unwrap();
+}
+
+#[tokio::test]
+async fn a_backup_says_which_computer_made_it() {
+    let backups = tempfile::tempdir().unwrap();
+    let a = Pc::on(backups.path(), FakeHost::new().computer("gaming-pc")).await;
+    a.run(BackupCmd::BackUp { large: false }).await.unwrap();
+    backup_with(
+        &backups.path().join("nexus-backup-2020-01-01-000000.tar.gz"),
+        &serde_json::json!({ "format": 1, "nexus": "0.1", "made": 1, "items": [] }),
+    );
+
+    a.run(BackupCmd::Browse(Some(backups.path().into()))).await.unwrap();
+    let computers: Vec<String> = browser(&a).entries.iter().map(|e| e.computer.clone()).collect();
+    assert_eq!(computers, ["gaming-pc", ""], "a backup from before Nexus kept the name says none");
+}
+
+#[tokio::test]
+async fn a_backup_from_a_newer_nexus_is_listed_but_not_restored() {
+    let (backups, elsewhere) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let newer = elsewhere.path().join("nexus-backup-2030-01-01-000000.tar.gz");
+    let manifest = serde_json::json!({ "format": 2, "nexus": "9.0", "computer": "new-pc", "made": 1_893_456_000u64, "items": [], "parts": {} });
+    backup_with(&newer, &manifest);
+    let b = Pc::new(backups.path()).await;
+    b.run(BackupCmd::Browse(Some(elsewhere.path().into()))).await.unwrap();
+    let entry = &browser(&b).entries[0];
+    assert!(entry.newer && entry.computer == "new-pc", "{entry:?}");
+
+    let refused = b.run(BackupCmd::RestoreFile(newer.clone())).await.unwrap_err();
+    assert!(refused.to_string().contains("newer Nexus"), "{refused}");
+    assert!(browser(&b).open, "the browser stays open");
+    assert!(files(backups.path()).is_empty(), "no backup of what is here: nothing started");
+
+    std::fs::copy(&newer, backups.path().join("nexus-backup-2030-01-01-000000.tar.gz")).unwrap();
+    b.run(BackupCmd::Refresh).await.unwrap();
+    assert!(view(&b).backups.is_empty(), "the backup folder's list holds only backups this Nexus restores");
+}
+
+#[tokio::test]
+async fn folders_say_what_is_in_them_and_those_with_backups_come_first() {
+    let (backups, elsewhere) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let at = elsewhere.path();
+    std::fs::create_dir_all(at.join("a-empty")).unwrap();
+    write(&at.join("b-other/notes.txt"), b"notes");
+    write(&at.join("z-one/nexus-backup-2026-01-01-000000.tar.gz"), b"named as one; not opened");
+    write(&at.join("y-two/nexus-backup-2026-01-01-000000.tar.gz"), b"");
+    write(&at.join("y-two/nexus-backup-2026-01-02-000000-before-restore.tar.gz"), b"");
+    let b = Pc::new(backups.path()).await;
+    b.run(BackupCmd::Browse(Some(at.into()))).await.unwrap();
+    let rows: Vec<(String, String)> = browser(&b).entries.iter().map(|e| (e.name.clone(), e.detail.clone())).collect();
+    let rows: Vec<(&str, &str)> = rows.iter().map(|(n, d)| (n.as_str(), d.as_str())).collect();
+    assert_eq!(rows, [("y-two", "2 backups"), ("z-one", "1 backup"), ("a-empty", "empty"), ("b-other", "")]);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_folder_that_can_t_be_read_says_so() {
+    use std::os::unix::fs::PermissionsExt;
+    let (backups, elsewhere) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let locked = elsewhere.path().join("locked");
+    std::fs::create_dir_all(&locked).unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::read_dir(&locked).is_ok() {
+        // As root every folder can be read: nothing to check.
+        return;
+    }
+    let b = Pc::new(backups.path()).await;
+    b.run(BackupCmd::Browse(Some(elsewhere.path().into()))).await.unwrap();
+    let detail = browser(&b).entries[0].detail.clone();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(detail, "can't be read");
+}
+
+#[tokio::test]
+async fn hidden_folders_show_only_when_asked_and_stay_shown_in_other_folders() {
+    let (backups, elsewhere) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    std::fs::create_dir_all(elsewhere.path().join(".config/.deeper")).unwrap();
+    std::fs::create_dir_all(elsewhere.path().join("seen")).unwrap();
+    let b = Pc::new(backups.path()).await;
+    assert!(b.run(BackupCmd::ShowHidden(true)).await.is_err(), "no browser open");
+    b.run(BackupCmd::Browse(Some(elsewhere.path().into()))).await.unwrap();
+    assert_eq!(names(&browser(&b)), ["seen"]);
+
+    b.run(BackupCmd::ShowHidden(true)).await.unwrap();
+    assert!(browser(&b).hidden);
+    assert_eq!(names(&browser(&b)), [".config", "seen"]);
+    b.run(BackupCmd::Browse(Some(elsewhere.path().join(".config")))).await.unwrap();
+    assert_eq!(names(&browser(&b)), [".deeper"], "still shown in the next folder");
+
+    b.run(BackupCmd::ShowHidden(false)).await.unwrap();
+    assert!(names(&browser(&b)).is_empty());
+}
+
+#[tokio::test]
+async fn typed_text_shows_the_entries_whose_name_holds_it_until_the_folder_changes() {
+    let (backups, elsewhere) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    for name in ["Old-PC", "photos", "older"] {
+        std::fs::create_dir_all(elsewhere.path().join(name)).unwrap();
+    }
+    let b = Pc::new(backups.path()).await;
+    b.run(BackupCmd::Browse(Some(elsewhere.path().into()))).await.unwrap();
+    b.run(BackupCmd::Filter("old".into())).await.unwrap();
+    assert_eq!(browser(&b).filter, "old");
+    assert_eq!(names(&browser(&b)), ["Old-PC", "older"], "in any case");
+
+    b.run(BackupCmd::Browse(Some(elsewhere.path().join("photos")))).await.unwrap();
+    assert_eq!(browser(&b).filter, "", "another folder shows all");
+}
+
+#[tokio::test]
+async fn the_browser_opens_where_the_last_restore_came_from_and_keeps_five_recent_folders() {
+    let backups = tempfile::tempdir().unwrap();
+    let sticks: Vec<tempfile::TempDir> = (0..6).map(|_| tempfile::tempdir().unwrap()).collect();
+    let a = Pc::new(sticks[0].path()).await;
+    a.run(BackupCmd::BackUp { large: false }).await.unwrap();
+    let made = files(sticks[0].path()).remove(0);
+    for stick in &sticks[1..] {
+        std::fs::copy(sticks[0].path().join(&made), stick.path().join(&made)).unwrap();
+    }
+
+    let b = Pc::new(backups.path()).await;
+    b.run(BackupCmd::Browse(None)).await.unwrap();
+    assert_eq!(browser(&b).shown, backups.path().display().to_string(), "no restore yet: the backup folder");
+    for stick in &sticks {
+        b.run(BackupCmd::RestoreFile(stick.path().join(&made))).await.unwrap();
+    }
+
+    b.run(BackupCmd::Browse(None)).await.unwrap();
+    let shown = browser(&b);
+    assert_eq!(shown.shown, sticks[5].path().display().to_string(), "the last one");
+    let recent: Vec<String> = shown.places.iter().filter(|p| p.kind == "recent").map(|p| p.path.clone()).collect();
+    let newest: Vec<String> = sticks[1..].iter().rev().map(|s| s.path().display().to_string()).collect();
+    assert_eq!(recent, newest, "newest first, five of them");
+
+    assert_eq!(b.config(&["app", "backup_recent"]).as_array().unwrap().len(), 5, "kept in the settings");
+}
+
+#[tokio::test]
+async fn the_places_are_home_its_folders_that_are_there_and_the_backup_folder() {
+    let (home, backups) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    std::fs::create_dir_all(home.path().join("Downloads/old-pc")).unwrap();
+    std::fs::create_dir_all(home.path().join("Documents")).unwrap();
+    let b = Pc::on(backups.path(), FakeHost::new().home(home.path())).await;
+    b.run(BackupCmd::Browse(Some(home.path().join("Downloads/old-pc")))).await.unwrap();
+    let shown = browser(&b);
+    let places: Vec<(&str, &str)> = shown.places.iter().map(|p| (p.name.as_str(), p.kind.as_str())).collect();
+    assert_eq!(
+        &places[..4],
+        [("Home", "home"), ("Downloads", "downloads"), ("Documents", "documents"), ("Backup folder", "backups")],
+        "no Desktop: there is none"
+    );
+    assert!(places[4..].iter().all(|(_, kind)| *kind == "drive"), "then the drives: {places:?}");
+
+    let crumbs: Vec<(&str, String)> = shown.crumbs.iter().map(|c| (c.name.as_str(), c.path.clone())).collect();
+    let at = |rel: &str| home.path().join(rel).display().to_string();
+    assert_eq!(
+        crumbs,
+        [("~", home.path().display().to_string()), ("Downloads", at("Downloads")), ("old-pc", at("Downloads/old-pc"))]
+    );
+    assert_eq!(shown.shown, "~/Downloads/old-pc");
 }

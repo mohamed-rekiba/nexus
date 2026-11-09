@@ -31,6 +31,8 @@ pub(crate) const PENDING: &str = "restored-settings.json";
 pub(crate) const SETTINGS: &str = "Nexus settings";
 /// Why a second job can't start.
 pub(crate) const BUSY: &str = "A backup or a restore is already running";
+/// Why the browser's commands do nothing.
+const CLOSED: &str = "the backup browser isn't open";
 
 /// A backup or a restore in progress.
 #[derive(Clone, Debug, PartialEq)]
@@ -52,13 +54,50 @@ pub struct BackupFile {
     pub items: Vec<String>,
     /// The backup a restore made of what was there before.
     pub before_restore: bool,
+    /// The name of the computer that made it; empty when the backup doesn't say.
+    pub computer: String,
+    /// A newer Nexus made it, in a format this one doesn't restore.
+    pub newer: bool,
 }
 
-/// One place the browser starts from: Home, the backup folder, a drive.
+/// What a place the browser goes to is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlaceKind {
+    Home,
+    Downloads,
+    Desktop,
+    Documents,
+    /// The backup folder.
+    Backups,
+    /// A disk the system mounted, such as a USB stick.
+    Drive,
+    /// A folder a restore came from.
+    Recent,
+}
+
+impl PlaceKind {
+    /// Its name for the theme: `home`, `downloads`, … `recent`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PlaceKind::Home => "home",
+            PlaceKind::Downloads => "downloads",
+            PlaceKind::Desktop => "desktop",
+            PlaceKind::Documents => "documents",
+            PlaceKind::Backups => "backups",
+            PlaceKind::Drive => "drive",
+            PlaceKind::Recent => "recent",
+        }
+    }
+}
+
+/// One place the browser goes to: Home, the backup folder, a drive, a recent folder.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BrowsePlace {
     pub name: String,
     pub path: PathBuf,
+    pub kind: PlaceKind,
+    /// A drive's size, such as "32.0 GB"; a recent folder's path. Empty for the others.
+    pub detail: String,
 }
 
 /// A folder or a backup in the browser's folder.
@@ -67,6 +106,9 @@ pub struct BrowseEntry {
     pub path: PathBuf,
     /// A backup's details; `None` for a folder.
     pub backup: Option<BackupFile>,
+    /// A folder's: what is in it ("2 backups", "empty", "can't be read"). Empty for a backup,
+    /// and for a folder with other things but no backups.
+    pub detail: String,
 }
 
 /// "Restore from another folder": the folder the browser shows, and where it can go.
@@ -74,8 +116,25 @@ pub struct BrowseEntry {
 pub struct Browser {
     pub at: PathBuf,
     pub places: Vec<BrowsePlace>,
-    /// Its folders, then its backups newest first. Hidden folders are left out.
+    /// Its folders with backups, its other folders, then its backups newest first. Hidden
+    /// folders only with `hidden`.
     pub entries: Vec<BrowseEntry>,
+    /// Hidden folders are listed.
+    pub hidden: bool,
+    /// The text the player typed: the view shows only the entries whose name holds it, in any
+    /// case. Empty for all.
+    pub filter: String,
+}
+
+impl Browser {
+    /// The entries the filter lets through.
+    pub fn shown(&self) -> impl Iterator<Item = &BrowseEntry> {
+        let filter = self.filter.to_lowercase();
+        self.entries.iter().filter(move |e| {
+            filter.is_empty()
+                || e.path.file_name().is_some_and(|n| n.to_string_lossy().to_lowercase().contains(&filter))
+        })
+    }
 }
 
 /// The subsystem's state, as the view reads it.
@@ -109,6 +168,8 @@ pub(crate) struct RestorePlan {
     pub current: Vec<Source>,
     /// Now, in seconds since 1970: that backup's time.
     pub now: u64,
+    /// This computer's name, for that backup.
+    pub computer: String,
     pub free: FreeSpace,
 }
 
@@ -169,11 +230,42 @@ impl BackupSubsystem {
         self.changed();
     }
 
-    /// Opens the browser at `at`, or moves it there, with `places` to go to.
+    /// Opens the browser at `at`, or moves it there, with `places` to go to. Hidden folders
+    /// stay listed or not as they were; the filter is cleared.
     pub(crate) async fn browse(&self, at: PathBuf, places: Vec<BrowsePlace>) -> CoreResult<()> {
+        let hidden = self.state().browser.as_ref().is_some_and(|b| b.hidden);
         let dir = at.clone();
-        let entries = blocking(move || browse(&dir)).await?;
-        self.state().browser = Some(Arc::new(Browser { at, places, entries }));
+        let entries = blocking(move || browse(&dir, hidden)).await?;
+        self.state().browser = Some(Arc::new(Browser { at, places, entries, hidden, filter: String::new() }));
+        self.changed();
+        Ok(())
+    }
+
+    /// Lists the browser's hidden folders, or not.
+    pub(crate) async fn show_hidden(&self, hidden: bool) -> CoreResult<()> {
+        let open = self.state().browser.clone().ok_or_else(|| CoreError::Invalid(CLOSED.into()))?;
+        let dir = open.at.clone();
+        let entries = blocking(move || browse(&dir, hidden)).await?;
+        let mut state = self.state();
+        // Moved or closed in the meantime: that newer state stays.
+        if state.browser.as_ref().is_some_and(|b| b.at == open.at) {
+            let mut browser = (*open).clone();
+            (browser.entries, browser.hidden) = (entries, hidden);
+            state.browser = Some(Arc::new(browser));
+            drop(state);
+            self.changed();
+        }
+        Ok(())
+    }
+
+    /// Shows only the browser's entries whose name holds `text`; all for empty text.
+    pub(crate) fn filter(&self, text: String) -> CoreResult<()> {
+        let mut state = self.state();
+        let open = state.browser.as_ref().ok_or_else(|| CoreError::Invalid(CLOSED.into()))?;
+        let mut browser = (**open).clone();
+        browser.filter = text;
+        state.browser = Some(Arc::new(browser));
+        drop(state);
         self.changed();
         Ok(())
     }
@@ -245,10 +337,16 @@ impl BackupSubsystem {
     }
 
     /// The backup of `sources` and the app's settings in `folder`, made at `made` (seconds
-    /// since 1970). The file's path.
-    pub(crate) async fn back_up(&self, folder: &Path, made: u64, sources: Vec<Source>) -> CoreResult<PathBuf> {
+    /// since 1970) on the computer named `computer`. The file's path.
+    pub(crate) async fn back_up(
+        &self,
+        folder: &Path,
+        made: u64,
+        computer: &str,
+        sources: Vec<Source>,
+    ) -> CoreResult<PathBuf> {
         self.begin(false)?;
-        let written = self.write(folder, made, sources, Kind::Backup).await;
+        let written = self.write(folder, made, computer, sources, Kind::Backup).await;
         let outcome = match &written {
             Ok(path) => Ok(format!("Backed up to {}", file_name(path))),
             Err(e) => Err(format!("The backup failed: {e}")),
@@ -258,12 +356,22 @@ impl BackupSubsystem {
         written
     }
 
-    async fn write(&self, folder: &Path, made: u64, sources: Vec<Source>, kind: Kind) -> CoreResult<PathBuf> {
+    async fn write(
+        &self,
+        folder: &Path,
+        made: u64,
+        computer: &str,
+        sources: Vec<Source>,
+        kind: Kind,
+    ) -> CoreResult<PathBuf> {
         let config = archive::config_subset(&self.inner.config.get(&["app"]), &self.inner.config.get(&["plugins"]));
         let dest = folder.join(archive::file_name(made, kind));
         let progress = self.progress();
-        let path = dest.clone();
-        blocking(move || archive::write(&path, env!("CARGO_PKG_VERSION"), made, &config, &sources, &progress)).await?;
+        let (path, computer) = (dest.clone(), computer.to_owned());
+        blocking(move || {
+            archive::write(&path, env!("CARGO_PKG_VERSION"), &computer, made, &config, &sources, &progress)
+        })
+        .await?;
         Ok(dest)
     }
 
@@ -292,7 +400,7 @@ impl BackupSubsystem {
         let current: Vec<Source> =
             plan.current.into_iter().filter(|s| has.contains(&s.key) && plan.targets.contains_key(&s.key)).collect();
         let before = self
-            .write(folder, plan.now, current, Kind::BeforeRestore)
+            .write(folder, plan.now, &plan.computer, current, Kind::BeforeRestore)
             .await
             .map_err(|e| format!("Nothing was restored: the backup of what is here failed: {e}"))?;
         let (targets, free, progress) = (plan.targets, plan.free, self.progress());
@@ -361,11 +469,11 @@ fn file_name(path: &Path) -> String {
     path.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_owned()
 }
 
-/// The backup at `path`; `None` for a file that isn't one this Nexus reads.
+/// The backup at `path`, of any format; `None` for a file that isn't a backup.
 fn backup_file(path: &Path) -> Option<BackupFile> {
     let file = path.file_name()?.to_str()?.to_owned();
     let kind = archive::kind_of(&file)?;
-    let manifest = archive::read_manifest(path).ok()?;
+    let manifest = archive::peek_manifest(path).ok()?;
     let mut items: Vec<String> = vec![SETTINGS.to_owned()];
     for item in &manifest.items {
         if !items.contains(&item.title) {
@@ -378,6 +486,8 @@ fn backup_file(path: &Path) -> Option<BackupFile> {
         file,
         made: manifest.made,
         items,
+        computer: manifest.computer,
+        newer: manifest.format > archive::FORMAT,
     })
 }
 
@@ -385,35 +495,83 @@ fn newest_first(backups: &mut [BackupFile]) {
     backups.sort_by(|a, b| b.made.cmp(&a.made).then_with(|| b.file.cmp(&a.file)));
 }
 
-/// The backups in `folder`, newest first.
+/// The backups in `folder` this Nexus restores, newest first.
 fn list(folder: &Path) -> Vec<BackupFile> {
     let Ok(dir) = std::fs::read_dir(folder) else { return Vec::new() };
-    let mut out: Vec<BackupFile> = dir.filter_map(Result::ok).filter_map(|e| backup_file(&e.path())).collect();
+    let mut out: Vec<BackupFile> =
+        dir.filter_map(Result::ok).filter_map(|e| backup_file(&e.path())).filter(|b| !b.newer).collect();
     newest_first(&mut out);
     out
 }
 
-/// The folders of `dir` by name, then its backups newest first. Hidden folders, other files
-/// and links are left out.
-fn browse(dir: &Path) -> std::io::Result<Vec<BrowseEntry>> {
+/// The folders of `dir` that hold backups, its other folders, each by name, then its backups
+/// newest first. Hidden folders only with `hidden`; other files and links are left out.
+fn browse(dir: &Path, hidden: bool) -> std::io::Result<Vec<BrowseEntry>> {
     let mut folders = Vec::new();
     let mut backups = Vec::new();
     for entry in std::fs::read_dir(dir)?.filter_map(Result::ok) {
         let Ok(kind) = entry.file_type() else { continue };
         let name = entry.file_name();
-        if kind.is_dir() && !name.to_string_lossy().starts_with('.') {
-            folders.push(entry.path());
+        if kind.is_dir() && (hidden || !name.to_string_lossy().starts_with('.')) {
+            let inside = inside(&entry.path());
+            folders.push((entry.path(), inside));
         } else if kind.is_file()
             && let Some(backup) = backup_file(&entry.path())
         {
             backups.push((entry.path(), backup));
         }
     }
-    folders.sort_by_key(|p| p.file_name().map(|n| n.to_string_lossy().to_lowercase()));
+    folders.sort_by_key(|(p, inside)| {
+        (!matches!(inside, Inside::Backups(_)), p.file_name().map(|n| n.to_string_lossy().to_lowercase()))
+    });
     backups.sort_by_key(|b| std::cmp::Reverse(b.1.made));
-    let mut out: Vec<BrowseEntry> = folders.into_iter().map(|path| BrowseEntry { path, backup: None }).collect();
-    out.extend(backups.into_iter().map(|(path, backup)| BrowseEntry { path, backup: Some(backup) }));
+    let mut out: Vec<BrowseEntry> =
+        folders.into_iter().map(|(path, inside)| BrowseEntry { path, backup: None, detail: inside.text() }).collect();
+    out.extend(backups.into_iter().map(|(path, backup)| BrowseEntry {
+        path,
+        backup: Some(backup),
+        detail: String::new(),
+    }));
     Ok(out)
+}
+
+/// What is in a folder, as its row says.
+enum Inside {
+    Backups(usize),
+    Empty,
+    Other,
+    Unreadable,
+}
+
+impl Inside {
+    fn text(&self) -> String {
+        match self {
+            Inside::Backups(1) => "1 backup".into(),
+            Inside::Backups(n) => format!("{n} backups"),
+            Inside::Empty => "empty".into(),
+            Inside::Other => String::new(),
+            Inside::Unreadable => "can't be read".into(),
+        }
+    }
+}
+
+/// What is in `dir`, by the names of its files: no backup is opened.
+fn inside(dir: &Path) -> Inside {
+    let Ok(read) = std::fs::read_dir(dir) else { return Inside::Unreadable };
+    let (mut any, mut backups) = (false, 0);
+    for entry in read.filter_map(Result::ok) {
+        any = true;
+        if entry.file_type().is_ok_and(|t| t.is_file())
+            && entry.file_name().to_str().and_then(archive::kind_of).is_some()
+        {
+            backups += 1;
+        }
+    }
+    match (backups, any) {
+        (0, false) => Inside::Empty,
+        (0, true) => Inside::Other,
+        (n, _) => Inside::Backups(n),
+    }
 }
 
 #[cfg(test)]

@@ -89,6 +89,14 @@ pub(crate) fn date_time_text(secs: u64) -> String {
     format!("{}, {hh:02}:{mm:02} UTC", date_text(&format!("{y:04}-{m:02}-{d:02}")))
 }
 
+/// `path` with the home folder as `~`.
+pub(crate) fn short_home(path: &str, home: Option<&str>) -> String {
+    match home.and_then(|h| path.strip_prefix(h)) {
+        Some(rest) if rest.is_empty() || rest.starts_with(std::path::MAIN_SEPARATOR) => format!("~{rest}"),
+        _ => path.to_owned(),
+    }
+}
+
 /// `7.6 GB`, `820 MB`: decimal units, as the PS5 shows them.
 pub(crate) fn size_text(bytes: u64) -> String {
     let gb = bytes as f64 / 1e9;
