@@ -1,165 +1,99 @@
 # Nexus
 
-Nexus is a game launcher that helps players run games from different sources in one place, on a
-screen made for a TV and a controller. It runs on Linux, macOS and Windows.
+Nexus is a game launcher for a TV and a controller. It puts your games from emulators, PC
+folders and Steam in one library, and you play them from the couch. It runs on Linux, macOS and
+Windows, and it is the whole screen of Nexus OS.
 
-Nexus does not hard-code any emulator. Each way of finding and starting games is a plugin, and each
-look is a theme that changes the whole layout, not only the colors. The core handles what every
-game needs: the library, downloads, installs, launching, controller input and updates.
+Nexus finds your games, shows their art and details, downloads and updates the emulators,
+installs games, starts them, and comes back to the front when a game closes. A keyboard and a
+mouse work too.
 
-### Supported today
+## What it plays
+
+Each source of games is a plugin built into Nexus.
 
 | Plugin | What it plays | Systems |
-|---|---|---|
+| --- | --- | --- |
 | PS5 | PS5 games, with [KytyPS5](https://github.com/KytyPS5/KytyPS5) | Linux, macOS, Windows |
 | PS4 | PS4 games, with [shadPS4](https://github.com/shadps4-emu/shadPS4) | Linux, macOS, Windows |
-| Switch | Switch and Switch 2 games, with [Lichii](https://github.com/zortos293/Lichii). Up to 4 controllers are set up for you; you provide your own keys and firmware. | Linux |
-| PC | PC games, natively or through Wine or Proton | Linux, macOS, Windows |
-| Steam | The games Steam installed, played through Steam | Linux |
+| Switch | Switch games, with [Lichii](https://github.com/zortos293/Lichii). You give your own keys and firmware. | Linux |
+| PC | PC games: native games, and Windows games through umu-launcher (Proton) or Wine | Linux, macOS, Windows |
+| Steam | The games Steam installed, started through Steam | Linux |
 
-Two service plugins add data: the Game Catalog (the releases each console's catalog offers) and the
-PlayStation Store (official art and details for PS4 and PS5 games).
+Two service plugins add data. The **Game Catalog** lists the releases each console's catalog
+offers to download. The **PlayStation Store** adds official art and details to PS4 and PS5
+games.
 
-These are the sources supported so far, not the limit of the design. Support for another emulator
-or game source is another plugin, written against `nexus-api` and built into Nexus (a plugin found
-on disk can only be a theme): see [docs/plugins.md](docs/plugins.md).
+Nexus ships two themes, **Default** and **Classic**. A theme changes the whole layout, not only
+the colours. You can add more themes; a theme is data and runs no code.
+
+## Screenshots
 
 | Home | Library |
-|---|---|
+| --- | --- |
 | ![Home](docs/screenshots/home.jpg) | ![Library](docs/screenshots/library.jpg) |
 
-| Game Hub | Settings |
-|---|---|
-| ![Game Hub](docs/screenshots/detail.jpg) | ![Settings](docs/screenshots/settings.jpg) |
+| Game Hub | Catalog |
+| --- | --- |
+| ![Game Hub](docs/screenshots/detail.jpg) | ![Catalog](docs/screenshots/catalog.jpg) |
 
-The screenshots are the running app (`cargo run`, in a window of 1600 × 900) with the built-in theme,
-`default`, on Linux, with a real library of PS5, PC and Steam games. The tests also render every
-screen offscreen with made-up games: run `cargo test -p nexus-tests --test seams screenshots::`, and
-the PNG files go to `target/tmp/screenshots/`.
+| Downloads | Settings |
+| --- | --- |
+| ![Downloads](docs/screenshots/downloads.jpg) | ![Settings](docs/screenshots/settings.jpg) |
 
-## The problem
+| Settings → Backup | The backup browser |
+| --- | --- |
+| ![Settings, Backup tab](docs/screenshots/backup.jpg) | ![The backup browser](docs/screenshots/backup-browser.jpg) |
 
-Games come from many places. Emulators are separate programs, each with its own builds, which
-change often, its own settings and its own command line. PC games sit in folders, and the Windows
-ones need Wine or Proton set up. Other games live in a store's client. None of this is made for a
-couch: you need a keyboard and a mouse to start a game.
-
-Nexus puts all of it behind one library that works with a controller. It finds your games, shows
-their art and facts, downloads and updates the emulator builds, installs games, starts them, and
-brings itself back when they close.
-
-## What it does
-
-- **Library.** Every plugin lists its games into one library. Home is a row of games over the
-  selected game's art. Library is a grid with search, sort and filters.
-- **Game Hub.** One game's page: official art, facts, the community's compatibility result, your
-  own result, how it should run on this PC, screenshots and the trailer.
-- **Catalog and Downloads.** The games a catalog offers. Nexus downloads a release by BitTorrent
-  into your packages folder, and can bind the download to your VPN and pause it when the VPN drops.
-- **Installs.** Each plugin installs the packages it understands, with progress in Downloads.
-  Today that is unsigned PS5 packages, exFAT disc images, PS4 fake packages, Switch game files and
-  PC releases.
-- **Emulator builds.** For an emulator plugin, Nexus downloads and updates the official builds, or
-  runs a build of your own. Today that is KytyPS5, shadPS4 and Lichii.
-- **Themes.** Switching the theme keeps the screen you are on, your selection, the downloads and a
-  running game.
-- **Controller.** Every screen works with a gamepad, a keyboard or a pointer.
-- **Updates.** Nexus updates its emulator builds, and itself from its GitHub releases.
-
-## Does it work?
-
-`make check` runs what CI runs: the format check, clippy with warnings as errors, and every test.
-
-```sh
-make check
-```
-
-CI (`.github/workflows/ci.yml`) runs Format, Clippy, Test and cargo-deny on Linux for every pull
-request and every push to `main`. Most tests are seam tests: they run the real core, and on the
-theme side the real app shell on Slint's testing backend, with fakes in place of the system, the
-network and the clock. No test needs a window, a GPU, a controller or a sound device. A weekly run
-(`weekly.yml`) adds what needs the network or real windows: the tests on Windows, the real KytyPS5
-and shadPS4 releases, the desktop adapter under Xvfb, and the trailer player on a real video.
-
-What no test covers: a real game running on real hardware. macOS and Windows builds run only in
-`package.yml`, by hand or for a release. [docs/development.md](docs/development.md#tests) lists
-the tests that need a real system and the variable that turns each one on.
+The screenshots show the Default theme at 1600 × 900.
 
 ## Install
 
-Each [release](https://github.com/mohamed-rekiba/nexus/releases/latest) has these files, with a
-`.sha256` file beside each and signed build provenance
-(`gh attestation verify <file> --repo mohamed-rekiba/nexus` checks it).
+Download Nexus from the
+[latest release](https://github.com/mohamed-rekiba/nexus/releases/latest). Each file has a
+`.sha256` file beside it and signed build provenance:
+`gh attestation verify <file> --repo mohamed-rekiba/nexus` checks it.
 
-| System | File | How to use it |
-|---|---|---|
+| System | File | How to install |
+| --- | --- | --- |
 | Fedora (x86-64) | `nexus-<version>-1.x86_64.rpm` | `sudo dnf install ./nexus-<version>-1.x86_64.rpm` |
 | Debian, Ubuntu (x86-64) | `nexus_<version>-1_amd64.deb` | `sudo apt install ./nexus_<version>-1_amd64.deb` |
 | Arch (x86-64) | `nexus-<version>-1-x86_64.pkg.tar.zst` | `sudo pacman -U nexus-<version>-1-x86_64.pkg.tar.zst` |
 | Linux (x86-64) | `nexus-linux-x86_64.tar.gz` | Unpack it and run `./install.sh` |
 | Linux (x86-64) | `Nexus-x86_64.AppImage` | Make it executable and run it |
-| macOS (Apple Silicon and Intel) | `nexus-macos-universal.dmg` or `.zip` | Open it and drag Nexus to Applications, or unzip it |
-| Windows (x86-64) | `nexus-windows-x86_64-setup.exe` | Run it: it installs for you only, with no administrator |
-| Windows (x86-64) | `nexus-windows-x86_64.zip` | Unzip it anywhere and run `nexus.exe` |
+| macOS (Apple Silicon and Intel) | `nexus-macos-universal.dmg` or `nexus-macos-universal.zip` | Open the disk image and drag Nexus to Applications, or unzip the app |
+| Windows (x86-64) | `nexus-windows-x86_64-setup.exe` | Run it. It installs Nexus for you only and needs no administrator. |
+| Windows (x86-64) | `nexus-windows-x86_64.zip` | Unzip it and run `nexus.exe` |
 
-Each kind keeps itself up to date from Settings, Nexus updates. The macOS app and disk image, and
-`nexus.exe` with its installer, are signed only when the release has the signing secrets
-([docs/signing.md](docs/signing.md)). Without them, macOS Gatekeeper asks before the first start
-and Windows SmartScreen warns.
+`install.sh` needs no `sudo`. It puts Nexus in `~/.local/lib/nexus` (set `PREFIX` to use another
+place than `~/.local`), links `~/.local/bin/nexus` to it, and adds Nexus to your app menu. Run
+it from a newer package to update. `./install.sh --uninstall` removes Nexus and keeps your
+settings.
 
-### From source
+The deb, rpm and Arch packages also add a **Nexus** session to the login screen: Nexus as the
+whole screen, with no desktop behind it.
 
-You need [Rust](https://rustup.rs) 1.99 or newer and the build packages for your system. On Linux:
+Nexus updates itself from Settings → Updates → **Nexus updates**. The macOS app and the Windows
+program are signed only when the release was made with the signing keys
+([docs/signing.md](docs/signing.md)). An unsigned build makes macOS Gatekeeper ask before the
+first start, and Windows SmartScreen warn.
 
-- Fedora: `sudo dnf install gcc gcc-c++ make pkgconf-pkg-config fontconfig-devel libxkbcommon-devel systemd-devel alsa-lib-devel`
-- Debian and Ubuntu: `sudo apt-get install build-essential pkg-config libfontconfig1-dev libxkbcommon-dev libudev-dev libasound2-dev`
-
-Then:
-
-```sh
-git clone https://github.com/mohamed-rekiba/nexus
-cd nexus
-make run            # build and run the launcher
-```
-
-`make run-windowed` opens a normal window, `make package` makes a release build in
-`dist/nexus-<os>-<arch>/`, and `make` alone lists every target. The macOS and Windows build tools
-are in [docs/development.md](docs/development.md#system-packages).
-
-### First start
-
-Nexus opens full screen. A Welcome screen shows what it sets up. Press Start once it is ready.
-Nexus looks for games in `~/Games` and for packages in `~/Downloads` until you change the folders
-in Settings. It keeps its settings and plugin data in one folder:
-
-| System | Folder |
-|---|---|
-| Linux | `~/.local/share/nexus` (or `$XDG_DATA_HOME/nexus`) |
-| macOS | `~/Library/Application Support/nexus` |
-| Windows | `%APPDATA%\nexus` |
-
-Nexus starts without any extra packages. Each one turns on a feature: `xdotool` brings games to the
-front on X11, libmpv plays trailers in the window, libarchive unpacks RAR files, and umu-launcher
-or Wine runs Windows games. The [user guide](docs/user-guide.md) lists them all, and covers folders,
-the Catalog, installs, controls and Settings.
+To build Nexus from source, see [docs/development.md](docs/development.md). In short: install
+Rust 1.99 or newer and your system's build packages, then run `make run`.
 
 ## Download Nexus OS
 
-Nexus OS turns a spare PC into a console: it starts straight into Nexus, with no desktop, no
-passwords and no pop-ups. It is a small, read-only Fedora system. It updates itself and Nexus in
-the background, applies an update at the next restart, and keeps the previous version in the boot
-menu. On a PC with an NVIDIA card it gets NVIDIA's driver by itself. It needs a 64-bit PC that
-starts with UEFI.
+Nexus OS turns a PC into a console. It starts straight into Nexus, with no desktop.
 
 <!-- x-release-please-start-version -->
 The current version is Nexus OS 0.8.0:
 [its release](https://github.com/mohamed-rekiba/nexus/releases/tag/nexus-os-v0.8.0).
-All Nexus OS releases are tagged `nexus-os-v…` on the
+Every Nexus OS release is tagged `nexus-os-v…` on the
 [releases page](https://github.com/mohamed-rekiba/nexus/releases?q=nexus-os).
 
-The release has one ISO, named with its version (`nexus-os-x86_64-0.8.0.iso`), to write to a USB
-stick of 8 GB or more. When the ISO is over 2 GiB it comes in parts
-(`nexus-os-x86_64-0.8.0.iso.part-aa`, `-ab`, …): download them all and join them into the ISO.
+The release has one ISO file for a USB stick, `nexus-os-x86_64-0.8.0.iso`. An ISO over 2 GiB
+comes in parts (`nexus-os-x86_64-0.8.0.iso.part-aa`, `-ab`, …). Download every part, then join
+them into the ISO:
 
 - Linux and macOS:
 
@@ -168,192 +102,54 @@ stick of 8 GB or more. When the ISO is over 2 GiB it comes in parts
   cat nexus-os-x86_64-$v.iso.part-* > nexus-os-x86_64-$v.iso
   ```
 
-- Windows (Command Prompt), naming every part in order:
+- Windows (Command Prompt). Name every part, in order:
 
   ```bat
   set v=0.8.0
   copy /b nexus-os-x86_64-%v%.iso.part-aa + nexus-os-x86_64-%v%.iso.part-ab nexus-os-x86_64-%v%.iso
   ```
 
-Then check the ISO against `nexus-os-x86_64-0.8.0.iso.sha256` (each part also has its own
-`.sha256`):
+Check the ISO against `nexus-os-x86_64-0.8.0.iso.sha256`. Each part also has its own `.sha256`.
 
 - Linux: `sha256sum -c nexus-os-x86_64-0.8.0.iso.sha256`
 - macOS: `shasum -a 256 -c nexus-os-x86_64-0.8.0.iso.sha256`
-- Windows (PowerShell): `Get-FileHash nexus-os-x86_64-0.8.0.iso`, and compare it with the file's
-  first word.
-
-To try the ISO in a virtual machine first, on Fedora, from a clone of this repository:
-
-```sh
-sudo dnf install qemu-kvm qemu-img edk2-ovmf
-os/run-vm.sh path/to/nexus-os-x86_64-0.8.0.iso
-```
-
 <!-- x-release-please-end -->
 
-The VM starts the ISO as a USB stick in a UEFI virtual machine with Secure Boot, and gives it an
-empty 64 GB disk (`os-vm.qcow2`) to install on, kept between starts. The stick stays attached after
-an install: to start the installed system, run the same command and choose the disk in the VM's boot
-menu (press Esc while it starts). [os/README.md](os/README.md) has what to check.
+Write the ISO to a USB stick and start the PC from it. Nexus OS starts from the stick. Then
+choose:
 
-Write the ISO to the USB stick with [balenaEtcher](https://etcher.balena.io): choose the ISO, the
-USB stick, then **Flash**. Start the PC from the stick (its boot menu key is usually F12, F11, F8
-or Esc). Nexus OS starts from the stick without changing anything on the PC. From there:
+- **Try it**: play from the USB stick.
+- **Install on this PC**: pick a disk of 40 GB or more. The install erases that whole disk.
+- **Choose partitions instead**: Fedora's installer, to keep another system or use free space.
+  The boot menu of the stick has the same entry, "Install Nexus OS (choose partitions)".
 
-- **Try it:** play from the stick.
-- **Install on this PC:** pick a disk in Nexus. It erases that whole disk.
-- **Choose partitions instead:** Fedora's installer, to keep Windows or use free space. It needs a
-  keyboard and a mouse. It is also the boot menu entry "Install Nexus OS (choose partitions)"; hold
-  Esc or Shift while the stick starts to see the menu.
+How Nexus OS is built and tested is in [os/README.md](os/README.md). What Nexus and Nexus OS
+expect from each other is in [docs/nexus-os.md](docs/nexus-os.md).
 
-Both installs copy the system stored on the stick, so neither needs internet. With an NVIDIA card
-and Secure Boot on, a blue "MOK management" screen appears once at the next restart: choose
-**Enroll MOK**, **Continue**, **Yes**, type `universalblue`, then **Reboot**. How Nexus OS is built
-is in [os/README.md](os/README.md), and what Nexus and the OS expect from each other is in
-[docs/nexus-os.md](docs/nexus-os.md).
+## Where to go next
 
-## How it works
+- [docs/user-guide.md](docs/user-guide.md): every screen, the controller keys, backups, where
+  Nexus keeps your data, and what to do when something goes wrong.
 
-![Nexus application overview](docs/images/overview.svg)
-
-The overview: the player uses a theme, which sends commands to the Nexus core and draws the view the
-core builds. The core works with plugins for the emulators, the catalogs and the machine, and
-reaches the system through adapters.
-
-Nexus is one binary built from crates in one Cargo workspace. A small core runs plugins. Emulator,
-service and system plugins are compiled in and reach the host only through `nexus-api`. Themes are
-data that the UI host loads, swaps and rolls back.
-
-### How data moves
-
-Data flows one way: the UI sends a command, the core changes its state, and the UI draws a new view
-of that state.
-
-![How data flows one way](docs/images/data-flow.svg)
-
-The flow: a theme sends a command, the core changes its state and signals a change, the shell
-renders, and the view builds from one snapshot and binds back into the theme.
-
-### Project structure
-
-| Path | What it is |
-|---|---|
-| `crates/nexus-api` | The plugin contract. The only crate a plugin depends on. |
-| `crates/nexus-ui-api` | The theme contract: view models, screens, tokens, `theme.toml`. |
-| `crates/nexus-core` | The core: plugin lifecycle, settings, downloads, torrents, installs, launches, updates. No UI code. |
-| `crates/nexus-ui-host` | Shows themes with Slint: inheritance, switching with rollback, input, and the app shell. |
-| `crates/nexus-app` | The `nexus` binary and the adapters for each system: windows, controllers, sounds, trailers, archives, torrents. |
-| `crates/nexus-testkit` | The fake host, fake clock, fakes for the system, and the plugin contract checks. |
-| `plugins/` | The built-in emulators (KytyPS5, shadPS4, PC, Steam), services (Game Catalog, PlayStation Store), the system plugin, the `default` theme and the code the emulators share. |
-| `tests/` | The seam tests. |
-| `assets/`, `scripts/`, `packaging/`, `os/` | The bundled catalogs and icons, the check and packaging scripts, the Linux, macOS and Windows packaging, and Nexus OS. |
-
-[docs/architecture.md](docs/architecture.md) explains each part.
-
-### Plugins
-
-A plugin has a kind (`emulator`, `service`, `theme` or `system`) and declares the capabilities it
-provides. Each capability is one trait in `nexus-api`: `catalog` lists a plugin's games, `launcher`
-starts one, `downloader` and `installer` manage an emulator's builds, `game_installer` installs a
-package, `releases` offers a catalog's games, and `metadata` adds art and details. The core joins
-the answers of every plugin that provides the same capability. The kind governs privileges only.
-The capability table and the plugin lifecycle are in
-[docs/architecture.md](docs/architecture.md#plugins), and the guide to writing one is
-[docs/plugins.md](docs/plugins.md).
-
-### Decisions and trade-offs
-
-- **Themes are data, and the only third-party code.** Nexus has no runtime for third-party code. A
-  plugin found on disk must be a data-only theme. Slint markup cannot reach the disk, because the
-  compiler serves only a virtual folder (`VFS_ROOT` in `crates/nexus-ui-host/src/compile.rs`), so a
-  theme needs no sandbox. The cost: nobody can add an emulator without building Nexus.
-- **The kind of plugin governs privileges, not capabilities.**
-  [ADR 0001](docs/adr/0001-capabilities-follow-the-capability-not-the-kind.md): any plugin with code
-  may provide the data capabilities, because they only give the core data. Only a `system` plugin
-  may declare the system capabilities. The Steam plugin is an emulator that lists releases and
-  describes games.
-- **The reads for a game's page stay as separate flows.**
-  [ADR 0002](docs/adr/0002-game-page-reads-stay-as-flows.md): each flow crosses a different pair of
-  areas, and no step repeats.
-- **Slint is pinned to one version.** `Cargo.toml` pins `slint` and `slint-interpreter` with `=`
-  because the `internal` feature gives `create_with_existing_window`, which swaps themes in one
-  window.
-- **Dependencies build optimized in debug builds.** `[profile.dev.package."*"]` builds them at
-  `opt-level = 2`, so image decoding, JSON and Slint run near release speed under `cargo run` and
-  in the tests. The workspace's own crates build at `opt-level = 1`, so a change rebuilds fast.
-- **The licence is the GPL.** The PS4 package reader is a port of shadPS4 code, which is
-  GPL-2.0-or-later.
-
-### CI/CD
-
-- **Pull requests and `main`:** `ci.yml` runs Format, Clippy, Test and cargo-deny on Linux. A new
-  push to a pull request cancels its older run. It skips Markdown, `docs/`, `os/` and the other
-  workflows.
-- **Weekly:** `weekly.yml` runs the slow checks listed above.
-- **Releases:** [Release Please](https://github.com/googleapis/release-please) keeps a release pull
-  request open for Nexus and one for Nexus OS, from Conventional Commit messages. Merging one makes
-  a draft release and a tag. `release.yml` then starts `package.yml` (the packages on Linux, macOS
-  and Windows, signed when the secrets are set) or `os.yml` (the Nexus OS images and USB stick) on
-  that tag.
-
-The full list is in [docs/development.md](docs/development.md#ci).
-
-## Limitations
-
-Limits of the design:
-
-- Nexus runs no third-party code. A plugin found on disk can only be a theme, so a new emulator
-  needs a Nexus build that includes its plugin.
-- "This PC" judges by the numbers in each emulator's manifest, not by how fast a game runs here.
-- "Download only through a VPN" is not available on Windows, because the torrent library
-  (librqbit) cannot bind a connection to an interface there.
-- Following a game that another program starts, as Steam does, needs the Unix process search, so it
-  does not work on Windows.
-- On a Wayland desktop other than KDE Plasma, a native Wayland game does not come to the front by
-  itself.
-- On macOS, without the Accessibility permission a notice says so, and the controller stays with
-  the game until the PS button.
-- The catalog refresh brings an existing catalog up to date. It cannot build one from nothing.
-
-Limits of the plugins that ship today:
-
-- Retail PS5 packages do not install, because the console holds their keys. Only unsigned PS5
-  packages, exFAT images and PS4 fake packages do.
-- Steam games play on Linux only, and the Nexus OS image does not include Steam.
-- The PC plugin finds games in the game folders you set. Steam's games come through the Steam
-  plugin.
-
-## Documentation
+For contributors:
 
 | Document | What it covers |
-|---|---|
-| [docs/user-guide.md](docs/user-guide.md) | Setting up each system, folders, the Catalog, installs, controls, Settings |
-| [docs/architecture.md](docs/architecture.md) | How the core, the plugins and the UI host fit together |
+| --- | --- |
 | [docs/development.md](docs/development.md) | Building, testing, packaging and CI |
+| [docs/architecture.md](docs/architecture.md) | How the core, the plugins and the UI host fit together |
 | [docs/plugins.md](docs/plugins.md) | Writing a plugin |
 | [docs/themes.md](docs/themes.md) | Writing a theme |
 | [docs/reference/classic-theme.md](docs/reference/classic-theme.md) | The Classic theme, screen by screen |
 | [docs/reference/desktop.md](docs/reference/desktop.md) | Windows, focus and controllers on each system |
 | [docs/reference/archives-and-pc-games.md](docs/reference/archives-and-pc-games.md) | Archives in downloads, and PC games |
 | [docs/nexus-os.md](docs/nexus-os.md) | What Nexus and Nexus OS expect from each other |
-| [docs/signing.md](docs/signing.md) | Signing and notarizing the release packages |
+| [docs/signing.md](docs/signing.md) | Signing the release packages |
 | [docs/third-party-notices.md](docs/third-party-notices.md) | Code and libraries from other projects, and their licences |
-| [os/README.md](os/README.md) | Building and testing Nexus OS |
-| [scripts/catalog/README.md](scripts/catalog/README.md) | Making and refreshing the catalog files |
 | [GLOSSARY.md](GLOSSARY.md) | The words the code and the docs use |
-
-## Contributing
-
-Run `make check` before you push. `make hooks-install` installs the git hooks (format on commit;
-clippy and tests on push). Write commit messages as Conventional Commits, such as `feat(core): …`
-or `fix: …`: Release Please makes the releases from them. `docs:`, `ci:`, `refactor:`, `test:` and
-`chore:` make no release. Start at [docs/development.md](docs/development.md).
 
 ## Licence
 
-Nexus is licensed under the GNU General Public License, version 2 or later (`LICENSE`), because the
-PS4 package reader is a port of shadPS4 code. The Classic theme's fonts, Inter and Tajawal, are under
-the SIL Open Font License 1.1. Other code and the libraries the packages ship (libmpv, FFmpeg,
-libarchive) keep their own licences: see
+Nexus is under the GNU General Public License, version 2 or later ([LICENSE](LICENSE)). The
+fonts of the built-in themes, Inter and Tajawal, are under the SIL Open Font License 1.1. Other
+code and the libraries the packages ship keep their own licences: see
 [docs/third-party-notices.md](docs/third-party-notices.md).

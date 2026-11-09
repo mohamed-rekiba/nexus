@@ -1,378 +1,521 @@
 # User guide
 
-This guide is for people who play games with Nexus. It covers setting up each system, then using
-Nexus: folders, the Catalog, installs, playing, settings, emulators and themes. For what Nexus is
-and how to install it, start at the [README](../README.md). To build Nexus from source, see
-[development.md](development.md).
+This guide is for people who play with Nexus. It walks through each screen, the controller and
+keyboard keys, backups, where Nexus keeps your data, and what to do when something goes wrong.
+To install Nexus, start at the [README](../README.md).
 
-## Set up your system
-
-Nexus starts without any of the extra packages below. Each one turns on one feature.
-
-### Linux
-
-| For | Fedora | Debian and Ubuntu | Without it |
-|---|---|---|---|
-| Games and Nexus coming to the front, on X11 | `xdotool` | `xdotool` | A notice names it |
-| The same under Gamescope | `xdotool xprop` | `xdotool x11-utils` | A notice names them |
-| The same on KDE Plasma (Wayland) | Nothing: KWin, over D-Bus | Nothing | |
-| Trailers in the window | `mpv-libs` | `libmpv2` | Trailers open in the browser |
-| RAR, tar.xz, tar.bz2, tar.zst and ISO downloads (the release packages ship it) | `libarchive` | `libarchive13` | Those archives do not unpack, and the error names the package |
-| A RAR that libarchive cannot read (a RAR 5 with a big dictionary) | `unar` | `unar` | The unpack fails, and the error says to install `unar` |
-| The "This PC" check | `vulkan-loader mesa-vulkan-drivers` (or your GPU vendor's driver) | `libvulkan1 mesa-vulkan-drivers` | The check lists the graphics cards without their Vulkan version |
-| Windows PC games | [umu-launcher](#umu-launcher-for-windows-games), or `wine` | [umu-launcher](#umu-launcher-for-windows-games), or `wine` | The game's Game Hub says to install one |
-| An old game that fills the screen at its own resolution | `gamescope` | `gamescope` | Play says to install it, or to set the game's Resolution back to Your screen |
-| [Steam games](#steam-for-steam-games) | `steam` (RPM Fusion nonfree) | `steam-installer` (Debian non-free), `steam` (Ubuntu multiverse) | The Steam plugin finds no games |
-| GameMode | `gamemode` | `gamemode` | Games run without it |
-| Saved VPN connections in Settings | `NetworkManager` | `network-manager` | Only the VPNs already up show |
-
-The deb, rpm and Arch packages recommend or depend on some of these. They also add a **Nexus**
-session at the login screen: Nexus full screen in gamescope, with no desktop, for a PC under the
-TV. Install gamescope for it. Cage is the fallback for graphics cards that gamescope cannot drive.
-To change the session's settings, copy a line from `/usr/share/nexus/session.conf` to
-`/etc/nexus/session.conf`.
-
-`install.sh`, in the Linux tarball, installs Nexus for you, with no `sudo`. The package folder goes
-to `~/.local/lib/nexus` (set `PREFIX` for another place than `~/.local`), `~/.local/bin/nexus`
-links to it, and Nexus gets an entry and an icon in your app menu. Run `./install.sh` from a newer
-package to put it in place of the installed one. `./install.sh --uninstall` removes Nexus and keeps
-your settings, games and downloads.
-
-### macOS
-
-Nexus drives System Events through `osascript` to bring a game and itself to the front. Give the
-app that starts Nexus (Terminal, your editor, or Nexus itself) the Accessibility permission, in
-System Settings, Privacy & Security, Accessibility. Without it, a notice says so once. Optional:
-`brew install mpv` (trailers in the window, for a build from source) and Wine (Windows PC games).
-
-### Windows
-
-Nothing more is needed. The graphics driver ships the Vulkan loader. For trailers in the window
-from a build from source, put `libmpv-2.dll` beside `nexus.exe`.
-
-### umu-launcher, for Windows games
-
-Nexus runs a Windows game through [umu-launcher](https://github.com/Open-Wine-Components/umu-launcher)
-when it is installed, and through Wine when it is not. umu-launcher runs games with Proton
-(GE-Proton), as Steam does, and downloads and updates Proton by itself. The first game takes a
-while to start while it does. A repack that brings its own 32-bit Wine cannot run its script on a
-system without 32-bit libraries: pick its `.exe` in its Game settings (Starts) and it runs through
-umu-launcher.
-
-The easiest way: choose **Install umu-launcher** on the PC page (Emulators, then PC). Nexus installs
-the latest release's zipapp for itself, checks it against the checksum GitHub lists, and **Update
-umu-launcher** brings it up to date. It needs only Python 3.
-
-To install it for the whole system instead, use its
-[latest release](https://github.com/Open-Wine-Components/umu-launcher/releases/latest). It is not in
-Fedora's repositories. Its page lists the Fedora, Debian and Ubuntu packages and the zipapp, which
-needs only Python 3 and works on any system. `umu-run --help` answering means Nexus finds it. Nexus
-looks for it each time a Windows game starts, so there is no need to restart Nexus.
-
-### Steam, for Steam games
-
-The games Steam installed show in the Library with Steam's covers, and Play starts them through
-Steam (Linux only). Nexus follows the game that Steam starts: the Running screen, the PS button and
-Stop work as for any game, and Steam keeps running.
-
-1. Install Steam from your distribution, or as the Flatpak (`com.valvesoftware.Steam`). Nexus finds
-   the Flatpak's folder too.
-2. Start Steam once, sign in, and install your games in it.
-3. For GameMode, put yourself in its group, then log out and in again:
-   `sudo usermod -aG gamemode $USER`. Nexus runs PC games through GameMode by itself. For a Steam
-   game, set its Launch Options in Steam to `gamemoderun %command%`.
-4. Set nothing for your Steam libraries: Nexus reads Steam's folder and every library Steam lists
-   (`steamapps/libraryfolders.vdf`), on any drive. A library you add in Steam shows at the next
-   rescan (Settings, Games, **Rescan game folders**). **Steam libraries** in Settings is only for
-   reading other folders. Once set, it replaces Steam's list.
-
-A Steam game's Game Hub has Steam's store's words, genres, developer, release date, screenshots and
-trailer. Your Steam library is also in the Catalog, under **Steam**: the games in your Steam
-collections (Favorites, and the ones you made), read from Steam's own files on this PC. **Install in
-Steam** opens Steam's install dialog, and Downloads shows its progress. **Uninstall**, in a Steam
-game's menu, asks Steam, which confirms in its own dialog. A game you never put in a collection is
-not in those files, so it is not listed.
-
-Steam may ask to sign in or update before the game starts. Nexus waits about 2 minutes for the
-game, then says it did not start.
-
-#### The PS button opens Steam
-
-Nexus starts the Steam client and leaves it running. With Steam Input on, Steam reads the
-controller too. It can take the PS (Guide) button and open its own overlay or Big Picture, and
-Nexus cannot stop that. Turn Steam Input off in Steam:
-
-- For one game: Properties, Controller, **Disable Steam Input**.
-- For every game: Settings, Controller, turn off **Enable Steam Input for PlayStation
-  Controllers**. If Steam has **Guide Button Focuses Steam**, turn it off too.
-
-The names of these options can differ between Steam versions.
-
-### gamescope, for old games
-
-An old game made for a small screen (800 × 600, say) cannot change a Wayland screen's resolution:
-it shows in a corner of a black screen. Set its **Resolution** in its Game Hub (its Game settings)
-to the one it runs at. It then runs inside [gamescope](https://github.com/ValveSoftware/gamescope),
-Valve's compositor from the Steam Deck, which scales it up to fill the screen. **Your screen**, the
-default, runs the game as it is.
-
-On a Wayland desktop other than KDE Plasma, only games under XWayland come to the front, through
-`xdotool`. `ydotool` does not help: it types keys and moves the mouse, but it cannot find a game's
-window.
-
-### UMIP off, for some Windows repacks
-
-Some Windows repacks bypass the game's copy protection with a driver of their own. Their `game`
-folder holds `driver_amd/SimpleSvm.sys` or `driver_intel/hyperkd.sys`, and their ReadMe asks you to
-turn off UMIP, a CPU feature. The ReadMe says which CPUs need it. Without it the game closes as it
-starts. Nexus does not change how your system boots: add the kernel argument yourself, then restart.
-
-- Fedora: `sudo grubby --update-kernel=ALL --args="clearcpuid=514"`
-- Debian and Ubuntu: add `clearcpuid=514` to `GRUB_CMDLINE_LINUX_DEFAULT` in `/etc/default/grub`,
-  then run `sudo update-grub`
-
-`grep -o clearcpuid=514 /proc/cmdline` prints it once it is on. To undo it on Fedora:
-`sudo grubby --update-kernel=ALL --remove-args="clearcpuid=514"`.
+The guide shows the Default theme. The Classic theme has other layouts for Home and the
+Library, but the same keys and the same other screens: see
+[reference/classic-theme.md](reference/classic-theme.md).
 
 ## First start
 
-Nexus opens full screen. On the first start a Welcome screen shows what it sets up (game folders,
-each emulator, official artwork and details, covers and the Home screen). Press Start once it is
-ready. The top bar has the Home and Library tabs, then Search (the Catalog), Downloads, Emulators,
-Themes and Settings.
+Nexus opens full screen. On the first start, a Welcome screen lists what Nexus sets up: your
+game folders, each emulator, official artwork and details, and the covers. Press ✕ (Enter) on
+**Start** when it is ready.
 
-Nexus keeps its settings and plugin data in one folder:
+Nexus looks for games in `~/Games` and for packages to install in `~/Downloads`. To change the
+folders, go to Settings → Games.
+
+## Keys
+
+Every screen works with a controller, a keyboard or a mouse. The table names the PlayStation
+buttons. On an Xbox controller, ✕ is A and ○ is B.
+
+| Controller | Keyboard | What it does |
+| --- | --- | --- |
+| D-pad, left stick | Arrow keys | Move |
+| ✕ (Cross) | Enter | Select |
+| ○ (Circle) | Escape or Backspace | Back |
+| △ (Triangle) | `/` | Search. On the Catalog it searches the Catalog, elsewhere the Library. |
+| □ (Square) | T or Insert | The shown game's trailer |
+| Options | Menu | The shown game's menu. On Home, the focused system's emulator page. |
+| L1, R1 | Shift+Tab, Tab | See below |
+| L2, R2 | Page Up, Page Down | A page up or down |
+| Create (Share, View) | Delete | Close the newest notice |
+| PS (Guide), tap | | Go to Home. Does nothing while a game runs. |
+| PS (Guide), hold | | Close the running game. With no game running, open the power menu. |
+| | Ctrl+P | Open the power menu |
+| | Ctrl+D | Open Downloads |
+| | Ctrl+Q | Quit Nexus |
+
+L1 and R1 do one of three things:
+
+- On Home and in the Library: move along the top bar, round the ends. ✕ opens the item.
+- In Settings, and on a plugin page that has tabs: go to the tab before or after.
+- On other screens: go to the screen before or after, in the order Catalog, Downloads,
+  Emulators, Themes, Settings, then back to Home.
+
+You hold the PS button for 600 ms to make it a hold. A held ✕ does not repeat: it does not
+start, download or install a second time.
+
+While a game is in front, the controller belongs to the game. Nexus reads the controller only
+while its own window has the focus. The PS button is the exception: it always reaches Nexus.
+
+With a mouse, click an item to open it. The mouse wheel scrolls.
+
+### Typing with a controller
+
+A text field opens an on-screen keyboard when you reach it with the controller. A physical
+keyboard types into the field and the on-screen keyboard stays shut.
+
+| Controller | What it does |
+| --- | --- |
+| D-pad | Move between keys |
+| ✕ | Type the key |
+| □ | Delete |
+| △ | Space |
+| L1 | Shift, for one letter |
+| R1 | Symbols |
+| R2 or Options | Done |
+| ○ | Close and keep the text |
+
+## Home
+
+![Home](screenshots/home.jpg)
+
+Home is a list of your systems on the far side of the screen. "All games" comes first, then one
+entry for each emulator. The focused system's picture fills the screen behind the list.
+
+- Press ✕ to open the Library on that system's games.
+- Press Options (Menu) to open the system's emulator page.
+- Press Up from the first entry to reach the top bar.
+
+A tag under a system says how its emulator is: "● PLAYING" while one of its games runs, "Not
+installed" when it has no build yet, or "Didn't load" when the plugin failed to start.
+
+The top bar holds Search (the Catalog), Downloads, Emulators, Themes and Settings, with the
+clock. While a game runs, the top bar shows the game with **Resume** and **Stop**. While a
+download runs, it shows its progress. When Nexus is the whole screen (the Nexus session or Nexus
+OS), the top bar also has network, sound and Bluetooth icons. Each one opens a panel for its
+settings.
+
+## Library
+
+![Library](screenshots/library.jpg)
+
+The Library is a grid of your games. The system you opened is behind it. It has two rows of
+controls above the grid:
+
+1. The systems, in the top bar. ✕ shows only that system's games.
+2. The bar: the search box, the sort, and the genres when there are some.
+
+Up and Down move from the systems to the bar to the grid. In the grid:
+
+- Press ✕ to open the game's Game Hub.
+- Type a letter or a digit to start a search with it (keyboard only).
+- Press L2 or R2 to move three lines at a time.
+- Press ○ to go back to the list of systems.
+
+## Game Hub
+
+![Game Hub](screenshots/detail.jpg)
+
+The Game Hub is one game's page. It shows the game's art, its rating, its age rating and its
+genres. Under them are the buttons:
+
+- **Play**, or **Resume** and **Stop** while the game runs.
+- The emulator's actions for the game, when it has some.
+- **Store**, when the game has a store page.
+- **Trailer**, when the game has a trailer.
+- **Options**: the game's menu.
+
+A game from the Catalog also has **Hide** (or **Show**) for the mouse. With a controller, use the
+game's menu.
+
+Under the buttons are fact cards: how the game runs, how it should run on this PC, how long you
+played, its size, and, for some games, a compatibility layer's rating (such as ProtonDB's).
+Press Down to go on. For a game a catalog offers, Down first goes through its releases (see
+below). After them, Down opens **Technical details**, then reaches the screenshots and the
+ABOUT text. ✕
+on a screenshot opens it full screen.
+
+### The game's menu
+
+Press Options (Menu), or pick **Options**, to open the game's menu. It shows only the items the
+game has:
+
+- **Game Hub** (when you open the menu from Home).
+- The emulator's own actions for the game.
+- **Game settings**: the settings of this game only.
+- **Open game folder** and **View emulator log**.
+- **Watch trailer**.
+- **Rate how it runs**.
+- **Compatibility list**, and the compatibility layer's page (such as "ProtonDB page").
+- **Settings**.
+- **Hide from the Catalog**, or **Show in the Catalog**, for a game a catalog offers.
+- **Uninstall**, for an installed game.
+
+When Nexus is the whole screen, the items that open another program (a folder, a log, a web
+page) do not show.
+
+**Uninstall** asks first. It deletes the game's folder from your game folder, with its update
+and add-ons. A download the game came from stays in Downloads.
+
+### Releases and downloads
+
+A game that a catalog offers lists its releases under "RELEASES · RUNS WITH" and the emulator's
+name. Each release shows its version, size and availability. Press Down from the fact cards to
+reach the releases.
+
+Pick a release to open "Set up a download". It shows the release and the download folder. Choose
+**Look up metadata** to add the download to Downloads. Nexus first reads only the torrent's
+files and size. You look at them in Downloads, then press **Download** there to start it.
+Installing is a separate step.
+
+Only download content you are allowed to get and share. While a release downloads, Nexus also
+uploads pieces of it to other players.
+
+## Catalog
+
+![Catalog](screenshots/catalog.jpg)
+
+The Catalog lists the games each console's catalog offers to download. Open it with Search in
+the top bar. It works like the Library: search, sort, systems and genres above a grid. ✕ on a
+game opens its Game Hub, with its releases. ○ goes back to where you opened the Catalog.
+
+The Catalog has three filters among its systems. Each one shows only when it has games:
+
+- **In-game**: only games that reach gameplay.
+- **Installed**: the games you have.
+- **Hidden**: only the games you hid. Other views leave them out.
+
+The Game Catalog plugin gives the catalogs. Its page is under Emulators. With the Game Catalog
+turned off, there is no Catalog and no Search button. Its settings include **Catalog address**,
+**Sources address**, **Refresh from the forums**, **Show the Hidden filter**, and one "Show
+<console> games" switch for each console. A console turned off leaves the Catalog. Its
+installed games stay in your Library.
+
+## Downloads
+
+![Downloads](screenshots/downloads.jpg)
+
+Downloads lists each download from the Catalog, then each emulator build that downloads. Move
+between the downloads with Up and Down, and between a card's buttons with Left and Right.
+
+A download's buttons change with its state. They include **Download**, **Resume**, **Retry**,
+**Pause**, **Cancel**, **Install**, **Play**, **Stop sharing**, **Remove**, **Remove unpacked
+files**, **Cancel install** and **Open folder**. A Steam game shows **Open in Steam**.
+
+- A download goes on while Nexus is open, also when it is minimized. It stops when you close
+  Nexus. At the next start, unfinished downloads come back paused.
+- **Cancel** stops a download. The downloaded files stay.
+- **Remove** asks first. **Remove from Downloads** keeps the files. **Delete files too** also
+  deletes the download's own folder, with the copies Nexus unpacked. An installed game is in
+  another folder and stays.
+- A finished download goes on sharing while Nexus is open, at most 128 KB/s. **Stop sharing**
+  stops it until the next start. Settings → Downloads → **Keep sharing finished downloads**
+  stops it for all of them.
+
+### Installing a download
+
+Press **Install** on a finished download. The "Install game" sheet shows the game folder it goes
+to. Press **Install** to start. Nexus unpacks or copies the files into the console's folder
+inside your first game folder (`PS5`, `PS4`, `PC` or `Switch`). The install runs in the
+background, checks the free space first, never writes over a game that is there, and leaves the
+downloaded files where they are. **Remove unpacked files** frees the space of the unpacked
+copies afterwards.
+
+Each emulator's page also offers to install the packages it finds in your packages folders.
+
+## Playing a game
+
+Press **Play** on the Game Hub. When the game's emulator is not installed yet, Nexus asks
+"Install <emulator>?". Choose **Install and play** to install it and start the game.
+
+A splash shows while the game starts. Without a controller, it lists the emulator's keyboard
+keys.
+
+When the game closes, Nexus comes back to the front (Settings → Launcher → **Back to the
+launcher**). Nexus may then ask "How far did <game> get?". It asks once for each emulator build.
+**Rate how it runs**, in the game's menu, asks again.
+
+To close a running game, hold the PS button, or choose **Stop** in the top bar or the Game Hub.
+
+## Emulators
+
+Emulators lists the emulator plugins, then the service plugins (Game Catalog and PlayStation
+Store). Each row says whether the plugin is installed, and whether it is on. Press ✕ to open a
+plugin's page beside the list.
+
+A plugin's page has:
+
+- **Turned on**: turns the plugin on or off.
+- The build, for an emulator Nexus installs: install or update it, or **Uninstall** it.
+- The plugin's actions.
+- Its settings, and its folders.
+
+When a page has settings or folders, it has tabs: **General**, one tab for each group of
+settings (one tab named **Settings** when there is one group), then **Folders**. L1 and R1
+change the tab.
+
+For KytyPS5, shadPS4 and Lichii, Nexus downloads the official builds and keeps the build before
+the current one. To run a build of your own, map its folder on the emulator's page: "Your own
+KytyPS5 build", "Your own shadPS4 build" or "Your own Lichii build".
+
+Some emulator notes:
+
+- **KytyPS5**: a build that knows the `--data-folder` option keeps its saves in one folder that
+  every such build shares: "KytyPS5 saves" on its page, `~/.local/share/KytyPS5` until you
+  change it.
+- **Lichii**: you give your own keys and firmware in `~/.local/share/eden`. Nexus does not
+  provide them.
+- **PC**: a Windows game runs through umu-launcher (Proton) or Wine. The PC page has **Install
+  umu-launcher**, and then **Update umu-launcher**.
+- **Steam**: Nexus reads Steam's folder and every library Steam lists. Set **Steam libraries**
+  only to read other folders. In the Catalog, the Steam system lists the games in your Steam
+  collections. Install and Uninstall ask Steam, in Steam's own dialogs.
+
+### Adding a PC game by hand
+
+A PC game that is already unpacked needs no install:
+
+1. Copy the game's folder into `PC/` in a game folder (`~/Games/PC/` by default). One folder is
+   one game.
+2. Optional: put a cover in the game's folder, named `cover.jpg`, `cover.png` or `cover.webp`.
+3. In Settings → Games, choose **Rescan game folders**.
+
+Nexus looks through the folder once and writes `.nexus-game.json` in it. That file holds the
+game's name and the files that can start it. A folder whose name starts with `.` or ends with
+`.part` is never read. The full rules are in
+[reference/archives-and-pc-games.md](reference/archives-and-pc-games.md).
+
+## Themes
+
+Themes lists the built-in themes, Default and Classic, and the themes Nexus finds in
+`extensions` in its data folder and in `extensions` next to the program. Open a theme and choose
+**Use this theme**. If the new theme fails to load, the current theme stays.
+
+Both built-in themes have the option **Animations**. Off turns the transitions into cuts.
+
+## Settings
+
+![Settings](screenshots/settings.jpg)
+
+Settings saves each change at once. It has one tab for each section. Press L1 and R1 to change
+the tab. You can also press Up from the first row to reach the tabs, Left and Right to choose
+one, and Down to go into its rows.
+
+### Launcher
+
+| Setting | What it does |
+| --- | --- |
+| Full screen | Fills the screen, as a console does. On by default. |
+| Size of everything | Text, art and space, from 0.8 to 1.4 times. |
+| Back to the launcher | When a game closes, Nexus comes to the front. |
+| Interface sounds | The theme's sounds for moves, selects, back, starts and errors. |
+| Start at login | Nexus opens when you log in. Only in an installed build. |
+| Screen | The monitor Nexus fills. Only with two monitors or more. |
+
+### Games
+
+Your **Game folders** and **Packages to install**. Separate several folders with `;`. Start a
+path with `~` for your home folder. **Rescan game folders** looks for games again.
+
+### Updates
+
+| Setting | What it does |
+| --- | --- |
+| Update automatically | Checks for emulator updates every few hours. An update waits until you close your game. |
+| Nexus updates | Checks for a new Nexus. Then **Download** (or **Update**), then **Restart** to start the new version. |
+
+On Nexus OS, Nexus comes with the system's update.
+
+### Downloads
+
+| Setting | What it does |
+| --- | --- |
+| Download only through a VPN | Sends the Catalog's downloads only through your VPN. Where the system can do it. |
+| Your VPN | The VPN to use. |
+| Add a VPN | Adds a VPN. Where the system can do it. |
+| Keep sharing finished downloads | Other players download from you, at most 128 KB/s. |
+
+### This PC
+
+Your processor, memory and graphics, and how each emulator's games should run on this PC. It
+only shows information.
+
+### System
+
+Only when Nexus is the whole screen. **Internet**, **Sound** and **Bluetooth** open their
+panels. On Nexus OS, **Nexus OS updates** shows the system's update. On the Nexus OS USB stick,
+**Install Nexus OS on this PC** starts the install.
+
+### Backup
+
+See [Backup and restore](#backup-and-restore).
+
+### Power
+
+**Quit Nexus** closes Nexus (Ctrl+Q). When Nexus is the whole screen it reads **Restart Nexus**,
+and the session starts Nexus again. In the Nexus session on a desktop, **Log out** goes back to
+the login screen. When Nexus is the whole screen and the system allows it, **Restart** and
+**Shut down** restart or turn off the PC. Log out, Restart and Shut down ask you to press twice.
+
+The power menu (hold the PS button, or Ctrl+P) has the same items, from any screen.
+
+## Backup and restore
+
+![Settings, Backup tab](screenshots/backup.jpg)
+
+Settings → Backup keeps your settings, keys, firmware and saves in one file.
+
+| Row | What it does |
+| --- | --- |
+| Back up now | Writes a backup to the backup folder. |
+| Include large items | Adds the large items to the next backup only. It shows when a plugin has large items. |
+| Backup folder | Where backups go. `~/Nexus Backups` until you type another. Empty text goes back to it. |
+| Restore from another folder | Opens the backup browser, to restore a backup from a USB stick, another drive or another folder. |
+| Restart Nexus | Shows after a restore. Finishes it. |
+| A backup | One row for each backup in the backup folder, newest first. |
+
+A backup is one file, `nexus-backup-<date>-<time>.tar.gz`, with the time in UTC. It holds:
+
+- Nexus's settings: play time, hidden games, your results, game art, the theme, which plugins
+  are on, sounds, size, updates, and each plugin's settings. Your folders, downloads and
+  installed games are not in it: they belong to this computer.
+- PS5: "PS5 saves", the KytyPS5 saves folder. Saves of a build without `--data-folder` stay in
+  that build's folder and out of the backup.
+- PS4: "PS4 settings and saves", shadPS4's data folder without its caches, logs and downloads.
+  "PS4 DLC" is a large item.
+- Switch: "Switch keys", "Switch firmware and saves", "Switch SD card", "amiibo", "Switch mods"
+  and "Lichii settings".
+- PC: "PC games' Wine prefixes", where the games keep their saves. A large item.
+
+The file can hold your console keys. Keep it private.
+
+### Restore a backup
+
+On a backup's row, press ✕ to open its menu. Choose **Restore**, **Delete** or **Cancel** with
+Left and Right. Restore and Delete ask you to press ✕ again.
+
+A restore:
+
+1. Backs up what is here now. That backup's row says "Made before a restore".
+2. Checks the whole file and the free space before it writes anything into your folders.
+3. Puts each item into its folder on this computer, so a backup from another computer works. A
+   file in the backup replaces the same file here. Other files stay.
+4. Keeps the settings for the next start. Choose **Restart Nexus** to finish.
+
+If a restore stops part of the way, the "before a restore" backup has the files that were here.
+Neither a backup nor a restore starts while a game runs or installs. No game or install starts
+during one.
+
+### The backup browser
+
+![The backup browser](screenshots/backup-browser.jpg)
+
+**Restore from another folder** opens the backup browser over the whole screen. It opens at the
+last folder you restored from, or else at the backup folder.
+
+It has three panes:
+
+- **Places**: Home, Downloads, Desktop and Documents when they exist, the backup folder, each
+  drive with its size, and under RECENT the last 5 folders you restored from.
+- **Files**: the folders and backups in the folder you are in. A folder says what it holds,
+  such as "2 backups", "empty" or "can't be read".
+- **Details**: what the focused row is. For a backup: when it was made, the computer that made
+  it, its size and what it holds.
+
+| Controller | Keyboard | What it does |
+| --- | --- | --- |
+| Up, Down | Up, Down | Move in a pane |
+| Left, Right, or L1, R1 | Left, Right | Go between the places and the files |
+| ✕ | Enter | Open a place or a folder. On a backup, ask to restore it. |
+| △ | `/` | Ask to restore the focused backup |
+| ○ | Escape | Clear the typed text. Else go up a folder. On the places, or at the top, close the browser. |
+| □ | Insert or Ctrl+H | Show or hide hidden folders |
+| | Letters | Show only the rows whose name holds the text |
+| | Backspace | Take back the last typed letter. With no text, in the files pane, go up a folder. |
+
+With a mouse, one click opens a place or a folder. One click on a backup asks to restore it.
+The path at the top is also clickable: click a folder in it to go there. The mouse wheel
+scrolls.
+
+A restore asks once, in a dialog: "Restore the backup of <date> from <computer>?". The browser
+lists a backup that a newer Nexus made, as "Newer Nexus", but does not restore it. Update Nexus
+first.
+
+## Where Nexus keeps your data
+
+Nexus keeps its settings and the plugins' data in one folder:
 
 | System | Folder |
-|---|---|
+| --- | --- |
 | Linux | `~/.local/share/nexus` (or `$XDG_DATA_HOME/nexus`) |
 | macOS | `~/Library/Application Support/nexus` |
 | Windows | `%APPDATA%\nexus` |
 
-The log goes to the terminal. `RUST_LOG` filters it (`info` by default).
+`nexus --data-dir <path>` uses another folder for one run. Inside the folder:
 
-## Game folders and packages folders
+| Path | What it holds |
+| --- | --- |
+| `config.json` | Your settings |
+| `plugins/<plugin>/` | Each plugin's data, such as the emulator builds |
+| `logs/<plugin>/` | Each game's log, which **View emulator log** opens |
+| `torrents/` | The Catalog's downloads' state |
+| `cache/` | Thumbnails and cached downloads from the network |
+| `updates/` | A Nexus update waiting for the next start |
+| `extensions/` | Themes you add |
+| `restored-settings.json` | The settings of a restore, until the next start puts them back |
 
-Settings, Games, has two lists of folders. Separate several folders with `;`, and start a path with
-`~` for your home folder.
+Your games, packages and backups are in the folders you chose in Settings, not in this folder.
+The emulators keep some data in their own folders, such as "KytyPS5 saves" and "shadPS4 data".
+Each one is on its emulator's page.
 
-- **Game folders**, `~/Games` until you change it: games of any console, in any layout up to three
-  folders down. Each emulator finds its own games there. Installs go into the console's folder
-  inside the first one: `PS5/`, `PS4/` or `PC/`.
-- **Packages to install**, `~/Downloads` until you change it: packages and disc images, each in its
-  console's folder, such as `~/Downloads/PS5` and `~/Downloads/PS4`. Catalog downloads go here too.
+## Troubleshooting
 
-**Rescan game folders**, under the list, looks for games again. An emulator's own folders, such as
-"Your own KytyPS5 build" or "shadPS4 data", are on its page under Emulators.
+**A theme doesn't load.** At the start, Nexus shows the Default theme in its place. When you
+switch themes, the current theme stays. To start with the Default theme
+and the built-in plugins only, run `nexus --safe-mode`.
 
-## Catalog and Downloads
+**An emulator says "Didn't load" on Home.** Its plugin failed to start. Run Nexus from a
+terminal to see why: the log goes to the terminal. Set `RUST_LOG` to change how much it says
+(`info` by default).
 
-The Catalog lists the games each console's catalog offers, newest added first, with the same search,
-sort and filters as the Library. A release's row in the Game Hub shows its version, region, size and
-availability. **Download** opens "Set up a download": the release, the download folder (inside a
-packages folder) and what downloading means. **Look up metadata** adds the download to Downloads,
-which reads its files first. Press Download there to start it.
+**A game doesn't start, or crashes.** Open the game's menu and choose **View emulator log**.
 
-- A download goes on while Nexus is open, also minimized, and stops when it closes. Unfinished
-  downloads come back paused at the next start. Nexus remembers which pieces it checked, so a start
-  does not read every finished download again.
-- With Settings, Downloads, "Keep sharing finished downloads" on (the default), a finished download
-  goes on sharing, at most 128 KB/s. **Stop sharing** stops it until the next start.
-- **Cancel** never deletes the downloaded files. **Remove** asks first: "Remove from Downloads" keeps
-  the folder, and "Delete files too" also deletes the download's own folder with its unpacked
-  copies, but never an installed game.
-- Ctrl+D opens Downloads from anywhere.
-- To hide a game, use the eye on its card, **Hide** in its Game Hub, or "Hide from the Catalog" in
-  its menu. The "Hidden" filter shows only the hidden games, each with the eye to show it again.
-  The Game Catalog's "Show the Hidden filter" setting turns the chip off.
-- The focused card has a button: Uninstall for a game you have, which asks first, and Download for
-  one you do not, which opens its Game Hub on its releases.
+**The Nexus session restarts or shows a black screen.** The session writes its log to
+`~/.cache/nexus-session.log`. To change the session's settings, copy a line from
+`/usr/share/nexus/session.conf` to `/etc/nexus/session.conf`.
 
-The catalogs come from the Game Catalog plugin (Emulators, then Game Catalog). It uses the copies
-bundled in `assets/catalog/` (`ps5.json`, `ps4.json`, `pc.json`, `switch.json`), or newer ones from its **Catalog
-address** setting. With **Refresh from the forums** on, it brings each catalog up to date from the
-forums named in `assets/catalog-sources.json` (or the **Sources address**). Its page shows the last
-refresh and has Refresh now. Its "Show PS5 games" setting (one for each console you have an emulator
-for), when turned off, takes that console out of the Catalog. The games of that console that you
-installed stay in your library and play. With the Game Catalog turned off there is no Catalog: the
-top bar has no Search. How the catalog files are made is in
-[../scripts/catalog/README.md](../scripts/catalog/README.md).
+**A Windows game doesn't start.** Install umu-launcher from the PC page (Emulators → PC), or
+install Wine.
 
-## Installing games
+**An old PC game shows in a corner of the screen** (Linux). Set its **Resolution** in its Game
+settings. It then runs inside gamescope, which needs to be installed.
 
-- **From a catalog download.** When the download is complete, press Install on its card. Nexus
-  unpacks its archives (zip, 7z, tar and tar.gz built in; RAR and the rest through libarchive) and
-  opens "Install game", where you can change the game folder. On the same disk, an unpacked PS5 game
-  is moved into the game folder, not copied. **Remove unpacked files** frees the space after the
-  install.
-- **From your packages folder.** Each emulator's page (Emulators, then the emulator) offers "Install
-  <game>" for each package it finds: unsigned (debug) PS5 packages and exFAT disc images under PS5,
-  and PS4 fake packages (games, updates and DLC) under PS4.
+**A RAR or another archive doesn't unpack.** The error names what is missing: libarchive, or
+`unar` for some RAR files. The release packages ship libarchive.
 
-Where installs go:
+**A trailer opens in the browser.** Nexus plays trailers in its window with libmpv. Without
+libmpv, it opens them in the browser.
 
-| What | Where |
-|---|---|
-| A PS5 game | `PS5/<title id>-app0` in the first game folder |
-| A PS4 game | `PS4/<title id>` in the first game folder |
-| A PS4 update | Beside its game, as `<game folder>-patch` |
-| PS4 DLC | `addcont/` in shadPS4's data folder |
-| A PC game | `PC/` in the first game folder, from its folder, a GOG installer or an AppImage |
+**A backup or restore doesn't start.** The message says why:
 
-The install runs in Downloads. It checks that a package holds a game and never runs what it
-installs. To delete an installed game, open its menu and choose Uninstall: it asks first, then
-deletes the game's folder. It refuses while the game runs.
+- "Close the game first: its files change while it runs"
+- "Wait for the game install to finish"
+- "A backup or a restore is already running"
 
-### Adding a PC game by hand
+**A backup in the browser can't be restored.** A newer Nexus made it. Update Nexus first.
 
-A PC game you already have, unpacked and ready to run, needs no install:
+**Everything is too small or too big on the TV.** Change Settings → Launcher → **Size of
+everything**. `NEXUS_SCALE=<0.8 to 1.4>` sets it for one run.
 
-1. Copy the game's folder into `PC/` of a game folder (`~/Games/PC/` by default). One folder is one
-   game; keep the game's own files as they are inside it.
-2. Optional: put its cover in the game's folder, named `cover.jpg`, `cover.png` or `cover.webp` (a
-   portrait picture, as on a box).
-3. In Settings, Games, choose **Rescan game folders**, or restart Nexus. The game shows in the
-   Library, named after its folder.
+## Command-line options
 
-```text
-~/Games/PC/
-└── Hollow Knight/
-    ├── cover.jpg            ← its cover (optional)
-    ├── start.sh             ← what Play starts (found by itself)
-    └── game/…
-```
+`nexus --help` lists them:
 
-Nexus looks through the folder once and writes `.nexus-game.json` in it: the game's name, and every
-file that can start it, best first. Play starts the first one that runs on this system; **Starts**,
-in the game's Game settings, picks another. A Windows game runs through umu-launcher (Proton) or
-Wine. The name comes from the folder (`hollow_knight` shows as "Hollow Knight"), or from GOG's
-`gameinfo` file when the game has one. To rename the game, rename its folder before Nexus first sees
-it, or edit `name` in `.nexus-game.json`.
-
-A folder with nothing that starts a game stays out of the Library until Nexus restarts. Folders
-whose name starts with `.` or ends with `.part` are never read. The rules are in
-[reference/archives-and-pc-games.md](reference/archives-and-pc-games.md).
-
-## Playing
-
-Press Play on Home or in the Game Hub. When the game's emulator is not installed yet, Play installs
-it first. A splash shows while the game starts; without a controller it lists the emulator's
-keyboard keys. When the game closes, Nexus asks "How far did it get?" (once for each emulator
-build). The answer is "YOUR RESULT" in the Game Hub. "Rate how it runs" in the game's menu asks
-again.
-
-| Controller | Keyboard | What it does |
-|---|---|---|
-| Cross | Enter | Select |
-| Circle | Escape | Back |
-| D-pad, left stick | Arrows | Move |
-| Options | Menu | The game's menu (Game settings, Open game folder, View emulator log, Rate how it runs, Uninstall) |
-| Triangle | `/` | Search |
-| Square | T | The game's trailer. The letter T works outside the Library's search box and the Catalog |
-| L1, R1 | Shift+Tab, Tab | On Home: the item before and after in the top bar, round the ends; Cross opens it. On Settings and a plugin page: the tab before and after, round the ends. Back leaves |
-| L2, R2 | Page Up, Page Down | A page up or down |
-| Create (Share, View) | Delete | Close the newest notice |
-| PS (Guide) | | Hold: closes the running game, or with no game running opens the power menu. Tap: back to Home; nothing while a game runs |
-| | Ctrl+P | The power menu |
-| | Ctrl+D | Downloads |
-| | Ctrl+Q | Quit |
-
-While a game is in front, the controller is the game's. Nexus takes it back only while its own
-window has the focus. Quit, Ctrl+Q, Ctrl-C in the terminal, `SIGTERM` and `SIGHUP` all close Nexus
-cleanly: the downloads stop and are saved first. A second Ctrl-C quits at once. How a game and Nexus
-come to the front on each system is in [reference/desktop.md](reference/desktop.md).
-
-## Settings
-
-Changes save as you make them. Settings has one tab for each section: Launcher, Games, Updates,
-Downloads and This PC, then System when Nexus is the whole screen, Backup, and Power. With a controller or keyboard,
-press Up from the first row to reach the tabs, Left and Right to choose one, and Down to go into its
-rows. With a mouse, click a tab.
-
-| Section | Setting | What it does |
-|---|---|---|
-| LAUNCHER | Full screen | On by default. `--windowed` opens a normal window for one run |
-| LAUNCHER | Size of everything | Text, art and space from 80% to 140%. `NEXUS_SCALE=<0.8 to 1.4>` sets it for one run |
-| LAUNCHER | Back to the launcher | When a game closes, Nexus comes to the front |
-| LAUNCHER | Interface sounds | The theme's sounds for moves, selects, back, starts and errors |
-| LAUNCHER | Start at login | Only in an installed build |
-| LAUNCHER | Screen | With two monitors or more: the one Nexus fills |
-| UPDATES | Update automatically | Checks for emulator updates every few hours. An update waits until you close your game |
-| UPDATES | Nexus updates | Check now, Download, then Restart to put the new version in. Only for an installed package, AppImage or app |
-| DOWNLOADS | Download only through a VPN | Binds the catalog downloads to your VPN, and pauses them while it is down |
-| DOWNLOADS | Your VPN, Add a VPN | On Linux, WireGuard and OpenVPN interfaces are found by themselves. With NetworkManager you connect, disconnect and add one from a `.conf` or `.ovpn` file. On macOS, pick the network your VPN app made |
-| DOWNLOADS | Keep sharing finished downloads | Other players download from you, at most 128 KB/s |
-| THIS PC | | Your processor, memory and graphics, and whether each emulator's games should run well |
-| BACKUP | Back up now | Writes one file with Nexus's settings and each emulator's settings, keys, firmware and saves. See [Backup and restore](#backup-and-restore) |
-| BACKUP | Include large items | For the next backup only: PC games' Wine prefixes, with their saves, and PS4 DLC. Off by default |
-| BACKUP | Backup folder | Where backups go, `~/Nexus Backups` until you type another |
-| BACKUP | A backup | Press twice to restore it |
-| POWER | Quit Nexus | Closes Nexus. As the whole screen it says Restart Nexus, and the session starts it again. Log out, Restart and Shut down show there too, where the system allows them, and ask you to press twice |
-
-The command-line options are listed by `nexus --help` and in [development.md](development.md).
-
-### Backup and restore
-
-**Back up now** writes `nexus-backup-<date>-<time>.tar.gz` (UTC) to the backup folder. It holds:
-
-- Nexus's settings: play time, hidden games, your results, game art, the theme, which plugins are
-  on, and every emulator's settings. Not your folders, downloads or installs: they belong to this
-  computer.
-- Lichii: the keys, the NAND (firmware and saves), the SD card, amiibo, mods and its window's
-  settings, from "Lichii data" and "Lichii settings" on its page.
-- shadPS4: its data folder, without its caches, logs, downloads and DLC. The DLC (`addcont`) comes
-  with **Include large items** only.
-- KytyPS5: the "KytyPS5 saves" folder. Saves of a build without `--data-folder` stay in the build.
-- PC, with **Include large items** only: each game's Wine prefix.
-
-The file holds your console keys: keep it private.
-
-To restore, press a backup twice. Nexus first backs up what is here now (the backup that says "Made
-before a restore"), then puts each item into the folder it has on this computer, so a backup from
-another computer works. A file the backup has replaces the one here; other files stay. Your
-folder settings stay as they are. Then restart Nexus: emulators read their settings when it
-starts: the settings of the backup go back then. Neither a backup nor a restore starts while a
-game runs or installs, and no game or install starts during one. A restore checks the whole file
-and the free space before it writes anything. If it stops part of the way, the backup of what was
-here before has your files.
-
-## Emulators
-
-Emulators lists each plugin by the console it plays: PS5 (KytyPS5), PS4 (shadPS4) and PC, and the
-services: Game Catalog and PlayStation Store (official art and details for PS4 and PS5 games). Each
-page has "Turned on", the build, its actions, settings, folders and keys. With settings or folders it
-has tabs, as Settings does: General and Settings. A plugin with no settings has a Folders tab. L1 and R1 choose the tab.
-
-- **Official builds.** Nexus downloads them from GitHub, runs each new one once with `--help` to
-  check it, and keeps the build before it. The "Release repo" and "Pre-releases" settings change
-  where KytyPS5's builds come from.
-- **Use your own build.** This runs a KytyPS5 or shadPS4 you built or installed. Map its folder on
-  the emulator's page ("Your own KytyPS5 build", "Your own shadPS4 build"), or put `kyty_emulator`
-  or `shadps4` on your `PATH`. Installing an official KytyPS5 build turns your own build off and
-  copies its saves and caches.
-- KytyPS5 asks each build which options it knows (its `--help`) and leaves out a setting that the
-  build does not know, with a line in the log at info level.
-- **KytyPS5 saves.** A KytyPS5 build that knows `--data-folder` keeps its saves in one folder that
-  every such build shares: "KytyPS5 saves" on its page, `~/.local/share/KytyPS5` until you change
-  it. The first game such a build starts copies the build's own saves there. A game that already
-  has saves there keeps them. An older build keeps its saves in its own folder, as before.
-- **PC games** run on their own system. A Windows game runs on Linux through umu-launcher (Proton)
-  or Wine, and on macOS through Wine.
-- A game's menu has Game settings: the settings of that game only, such as KytyPS5's "Video out" and
-  "Extra arguments".
-
-## Themes
-
-Themes lists the built-in themes, Default and Classic, and the themes in `<data-dir>/extensions`
-(one folder each) and in `extensions/` next to the program. Open one and choose "Use this theme".
-Switching the theme keeps the screen you are on, your selection, the downloads and a running game.
-Both built-in themes have the option "Animations" (off makes the transitions cuts).
-
-Nexus starts with the Default theme. Its Home is a list of your systems, "All games" first, with
-the focused system's picture behind it: Enter or a click shows that system's games, Back comes
-back to the list, and Options (Menu) opens the emulator's page. The system's picture stays behind
-its games. The systems are in the top bar, and search, sort and the list of genres are in the row
-under it. Classic is the old launcher's
-look: a row of your games on Home, and a Library tab.
-Third-party plugins are themes only: they are data and run no code. To write a theme, see
-[themes.md](themes.md).
+| Option | What it does |
+| --- | --- |
+| `--theme <id>` | Show this theme now (not saved) |
+| `--safe-mode` | Load built-in plugins and the default theme only |
+| `--dev` | Reload theme files when they change |
+| `--windowed` | Open in a normal window for this run |
+| `--monitor <name>` | Open on this monitor for this run, such as `DP-2` |
+| `--data-dir <path>` | Where settings and plugin data live |
+| `--extensions <path>` | Folder of third-party plugins and themes (default: `<data-dir>/extensions`) |
+| `--folder <name>=<path>` | Map a named host folder, such as `games=/srv/games` (saved) |
+| `--supports <feature>` | Exit 0 when this launcher has the feature (`gamescope`, `system-settings`, `os-install`), else 1 |
+| `--version` | Show the version |
+| `--help` | Show this help |
