@@ -8,7 +8,7 @@ export component Icon inherits Path {
     fill: root.color;
     // The eyes' pupils are holes. The info and alert circles are rings in two halves with the
     // mark inside, not a disc with the mark cut out: the app's GPU renderer fills such holes in.
-    fill-rule: root.name == "eye" || root.name == "eye-off" ? evenodd : nonzero;
+    fill-rule: root.name == "eye" || root.name == "eye-off" || root.name == "clock" ? evenodd : nonzero;
     commands: root.name == "search" ? "M10.5 3a7.5 7.5 0 0 1 5.93 12.1l4.73 4.74-1.41 1.41-4.74-4.73A7.5 7.5 0 1 1 10.5 3zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11z"
         : root.name == "wifi-4" ? "M12 21 1 8.5C4 5.8 7.9 4 12 4s8 1.8 11 4.5L12 21z"
         : root.name == "wifi-3" ? "M12 21 3.5 11.3C5.8 9.3 8.8 8 12 8s6.2 1.3 8.5 3.3L12 21z"
@@ -54,5 +54,12 @@ export component Icon inherits Path {
         : root.name == "gamepad" ? "M21.58 16.09l-1.09-7.66A4 4 0 0 0 16.53 5H7.47a4 4 0 0 0-3.96 3.43l-1.09 7.66A2.55 2.55 0 0 0 4.94 19c.68 0 1.32-.27 1.8-.75L9 16h6l2.25 2.25c.48.48 1.13.75 1.8.75a2.55 2.55 0 0 0 2.53-2.91zM11 11H9v2H8v-2H6v-1h2V8h1v2h2v1zm4-1a1 1 0 1 1 0-2 1 1 0 0 1 0 2zm2 3a1 1 0 1 1 0-2 1 1 0 0 1 0 2z"
         // A painter's palette: themes.
         : root.name == "palette" ? "M12 3a9 9 0 0 0 0 18c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16a5 5 0 0 0 5-5c0-4.42-4.03-8-9-8zm-5.5 9a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm3-4a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm5 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm3 4a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"
+        // The backup browser's places, and a backup.
+        : root.name == "home" ? "M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"
+        : root.name == "desktop" ? "M21 2H3a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h7v2H8v2h8v-2h-2v-2h7a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2zm0 14H3V4h18v12z"
+        : root.name == "document" ? "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"
+        : root.name == "usb" ? "M15 7v4h1v2h-3V5h2l-3-4-3 4h2v8H8v-2.07a2.2 2.2 0 1 0-2 0V13a2 2 0 0 0 2 2h3v3.05a2.2 2.2 0 1 0 2 0V15h3a2 2 0 0 0 2-2v-2h1V7h-4z"
+        : root.name == "clock" ? "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 2a8 8 0 1 1 0 16 8 8 0 0 1 0-16zm-1 3v6l5.2 3.1 1-1.6-4.2-2.5V7h-2z"
+        : root.name == "archive" ? "M20.5 5.2l-1.4-1.7A1.5 1.5 0 0 0 18 3H6c-.5 0-.9.2-1.2.6L3.5 5.2c-.3.4-.5.8-.5 1.3V19a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6.5c0-.5-.2-.9-.5-1.3zM12 17.5 6.5 12H10v-2h4v2h3.5L12 17.5zM5.1 5l.8-1h12l.9 1H5.1z"
         : "";
 }

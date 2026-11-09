@@ -989,10 +989,11 @@ macro_rules! shots {
     )*};
 }
 
-/// Settings → Backup with a backup and its menu open, and the browser of "Restore from another
-/// folder", as `classic-backup-menu.png` and `classic-backup-browser.png`, over the library the
-/// other screens show: the real KytyPS5 plugin names its saves; the home folder is a temporary
-/// one.
+/// Settings → Backup with a backup and its menu open, as `classic-backup-menu.png`; and the
+/// browser of "Restore from another folder" in each built-in theme: a folder, a backup in it, and
+/// the dialog before a restore, as `<theme>-backup-browser[-backup|-confirm].png`. Over the
+/// library the other screens show: the real KytyPS5 plugin names its saves; the home folder is a
+/// temporary one.
 fn shoot_backup(window: &MinimalSoftwareWindow, out: &Path) {
     use slint::platform::Key;
     window.set_size(slint::PhysicalSize::new(WIDTH, HEIGHT));
@@ -1014,8 +1015,32 @@ fn shoot_backup(window: &MinimalSoftwareWindow, out: &Path) {
     }
     key(&mut host, Key::Return);
     shoot(window, &out.join("classic-backup-menu.png"));
-    host.dispatch(Command::Backup(nexus_core::BackupCmd::Browse(Some(home.path().join("Downloads")))));
-    shoot(window, &out.join("classic-backup-browser.png"));
+    key(&mut host, Key::Escape);
+    // A backup on another computer's folder, and folders beside it.
+    let downloads = home.path().join("Downloads");
+    let made = std::fs::read_dir(home.path().join("Nexus Backups")).unwrap().next().unwrap().unwrap().path();
+    std::fs::copy(&made, downloads.join("old-pc").join(made.file_name().unwrap())).unwrap();
+    for folder in ["photos", "Switch saves"] {
+        std::fs::create_dir_all(downloads.join(folder)).unwrap();
+    }
+    for theme in [theme_classic::ID, theme_default::ID] {
+        host.ui.switch(&id(theme)).unwrap();
+        host.dispatch(Command::Backup(nexus_core::BackupCmd::Browse(Some(downloads.clone()))));
+        follow(&mut host);
+        shoot(window, &out.join(format!("{theme}-backup-browser.png")));
+        key(&mut host, Key::Return);
+        follow(&mut host);
+        shoot(window, &out.join(format!("{theme}-backup-browser-backup.png")));
+        // △ on a pad.
+        let triangle: slint::SharedString = "/".into();
+        host.instance().window().dispatch_event(slint::platform::WindowEvent::KeyPressed { text: triangle.clone() });
+        host.instance().window().dispatch_event(slint::platform::WindowEvent::KeyReleased { text: triangle });
+        follow(&mut host);
+        shoot(window, &out.join(format!("{theme}-backup-browser-confirm.png")));
+        key(&mut host, Key::Escape);
+        host.dispatch(Command::Backup(nexus_core::BackupCmd::CloseBrowser));
+    }
+    not_blank(out, &["classic-backup-browser-confirm", "default-backup-browser-confirm"]);
 }
 
 shots! {
@@ -1039,6 +1064,7 @@ fn library(home: &Path) -> Composed {
     let mut host = composed_on_current_platform(|h| {
         h.home(home)
             .hardware(this_pc((1, 3)))
+            .computer("gaming-pc")
             .discover(&fixture_themes())
             .plugin(
                 FakeCatalog::new("emu-a")

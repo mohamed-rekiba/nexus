@@ -98,9 +98,13 @@ export global Commands {
     public function restore-backup(file: string) { Host.command("Backup", "{\"Restore\":" + Json.text(file) + "}"); }
     public function refresh-backups() { Host.command("Backup", "\"Refresh\""); }
     public function delete-backup(file: string) { Host.command("Backup", "{\"Delete\":" + Json.text(file) + "}"); }
-    // The browser of "Restore from another folder": a full path, "" for the backup folder.
+    // The browser of "Restore from another folder": a full path; "" opens it where the last
+    // restore came from, else at the backup folder.
     public function browse-backups(path: string) { Host.command("Backup", "{\"Browse\":" + Json.text-or-null(path) + "}"); }
     public function close-backup-browser() { Host.command("Backup", "\"CloseBrowser\""); }
+    public function show-hidden-backups(on: bool) { Host.command("Backup", "{\"ShowHidden\":" + Json.flag(on) + "}"); }
+    // Only the entries whose name holds `text`; "" for all.
+    public function filter-backups(text: string) { Host.command("Backup", "{\"Filter\":" + Json.text(text) + "}"); }
     public function restore-backup-file(path: string) { Host.command("Backup", "{\"RestoreFile\":" + Json.text(path) + "}"); }
     // "" goes back to ~/Nexus Backups.
     public function set-backup-folder(path: string) { Host.command("Pref", "[\"backup_folder\"," + Json.text-or-null(path) + "]"); }

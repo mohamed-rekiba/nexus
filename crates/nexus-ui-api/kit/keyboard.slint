@@ -84,7 +84,7 @@ export global Osk {
     }
     // The last character of `t`, among those a keyboard types in English (every printable
     // ASCII character, and the symbols layer's); "" for another. Slint strings have no slices.
-    pure function last-char(t: string) -> string {
+    public pure function last-char(t: string) -> string {
         t.ends-with(" ") ? " " : t.ends-with("!") ? "!" : t.ends-with("\"") ? "\"" : t.ends-with("#") ? "#" :
             t.ends-with("$") ? "$" : t.ends-with("%") ? "%" : t.ends-with("&") ? "&" : t.ends-with("'") ? "'" :
             t.ends-with("(") ? "(" : t.ends-with(")") ? ")" : t.ends-with("*") ? "*" : t.ends-with("+") ? "+" :

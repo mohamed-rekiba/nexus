@@ -486,22 +486,24 @@ fn a_backup_s_menu_deletes_it_with_the_keys_after_asking_again() {
 }
 
 #[test]
-fn restore_from_another_folder_browses_folders_and_back_closes_it() {
+fn restore_from_another_folder_opens_the_browser_over_settings_and_closing_it_stays_there() {
     use slint::platform::Key;
     let (backups, elsewhere) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     std::fs::create_dir_all(elsewhere.path().join("old-pc")).unwrap();
     let mut host = backup_tab(backups.path());
     host.dispatch(Command::Backup(nexus_core::BackupCmd::Browse(Some(elsewhere.path().into()))));
     host.settle();
-    assert_eq!(host.count("back-up"), 0, "the browser takes the tab");
+    assert_eq!(host.count("backup-browser"), 1, "the browser opens over the tab");
     assert_eq!(host.values("browser-folder"), ["old-pc"]);
     host.press_first("browser-folder");
     host.settle();
-    assert_eq!(host.value("browser-close"), elsewhere.path().join("old-pc").display().to_string());
-    assert_eq!(host.count("browser-up"), 1);
+    assert_eq!(host.value("backup-browser"), elsewhere.path().join("old-pc").display().to_string());
+    assert_eq!(host.values("browser-crumb").last().map(String::as_str), Some("old-pc"), "the path shows to go up");
+    // The places, then Back there closes it.
+    host.navigate(Key::LeftArrow);
     host.navigate(Key::Escape);
     host.settle();
-    assert_eq!(host.count("browser-close"), 0, "Back closes the browser");
+    assert_eq!(host.count("backup-browser"), 0, "Back closes the browser");
     assert_eq!(host.count("back-up"), 1, "and stays in Settings");
 }
 
