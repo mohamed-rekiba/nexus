@@ -236,6 +236,13 @@ A launch needs the plugin first, so the core resolves it in `launch.rs`. It clai
 It gets the plugin's `LaunchSpec`, checks the program against `permissions.process`, and hands
 the subsystem a `NewSession` to spawn.
 
+A `LaunchSpec` with a `sandbox` runs through bubblewrap on Linux. The core resolves the
+sandbox's folders like any other path, so a plugin can open to a game only what it can reach
+itself. It makes the folders the game writes, and `sandbox::wrap` puts bubblewrap's words in
+front of the command. The display and sound sockets come from `HostConfig::desktop`, read from
+Nexus's environment when it starts. Without `bwrap` on the PATH, the launch fails. Elsewhere a
+sandbox is an error: no plugin asks for one there.
+
 The watch (`sessions/watch.rs`) follows the game until it ends. A game is its processes, as
 `ProcessTree::members` lists them: the process Nexus started, its process group, and what a
 sandbox moved out of the group. The game ends when none of them is left. On the way the watch

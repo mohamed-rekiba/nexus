@@ -422,6 +422,7 @@ impl Launcher for Play {
             cwd: None,
             game_process: None,
             relaunch: None,
+            sandbox: None,
         })
     }
 }

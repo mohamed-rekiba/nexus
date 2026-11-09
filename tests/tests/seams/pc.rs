@@ -239,15 +239,75 @@ async fn a_windows_game_runs_through_proton_on_linux_and_says_what_to_install_wi
     assert!(refused.to_string().contains("install umu-launcher"), "{refused}");
 
     p.test.spawner.on_path("umu-run", Path::new("/usr/bin/umu-run"));
+    p.test.spawner.on_path("bwrap", Path::new("/usr/bin/bwrap"));
     p.test.core.dispatch(launch).await.unwrap();
     let run = p.test.spawner.wait_for(1).await.command;
-    assert_eq!(run.program, Path::new("umu-run"));
     let exe = p.games.path().join(native("PC/Hollow-Knight/hollow_knight.exe"));
-    assert_eq!(run.args, [exe.display().to_string()]);
+    assert_eq!(inside(&run), ["umu-run".to_owned(), exe.display().to_string()], "in its sandbox");
     assert_eq!(run.env.get("PROTONPATH").map(String::as_str), Some("GE-Proton"));
     assert_eq!(run.env.get("PROTON_USE_WOW64"), None, "this system runs 32-bit programs");
     let prefix = p.test.data_dir().join("plugins/emu-pc/prefixes/Hollow-Knight");
     assert_eq!(run.env.get("WINEPREFIX").map(String::as_str), Some(prefix.display().to_string().as_str()));
+}
+
+/// The game's own command in a run through bubblewrap: the words after bwrap's `--`.
+fn inside(run: &nexus_core::SpawnCommand) -> Vec<String> {
+    let at = run.args.iter().position(|a| a == "--").expect("bwrap's `--` before the game's command");
+    run.args[at + 1..].to_vec()
+}
+
+/// Whether `args` hold the three words `--bind <path> <path>`.
+fn binds(args: &[String], how: &str, path: &Path) -> bool {
+    let path = path.display().to_string();
+    args.windows(3).any(|w| w[0] == how && w[1] == path && w[2] == path)
+}
+
+#[tokio::test]
+async fn a_windows_game_runs_in_a_sandbox_that_sees_only_its_own_folders() {
+    let p = boot(Platform::Linux).await;
+    p.test.spawner.on_path("umu-run", Path::new("/usr/bin/umu-run"));
+    // GameMode can't reach its daemon from the sandbox: a sandboxed game runs without it.
+    p.test.spawner.on_path("gamemoderun", Path::new("/usr/bin/gamemoderun"));
+    p.download(&[("Hollow Knight/hollow_knight.exe", &exe())]);
+    assert_eq!(p.install().await, "done");
+    let launch = Command::Session(SessionCmd::Launch("emu-pc:Hollow-Knight".parse().unwrap()));
+
+    // Without bubblewrap the game doesn't run unprotected: it says what to install.
+    let refused = p.test.core.dispatch(launch.clone()).await.unwrap_err().to_string();
+    assert!(refused.contains("install bubblewrap"), "{refused}");
+
+    p.test.spawner.on_path("bwrap", Path::new("/usr/bin/bwrap"));
+    p.test.core.dispatch(launch.clone()).await.unwrap();
+    let first = p.test.spawner.wait_for(1).await;
+    let run = &first.command;
+    assert_eq!(run.program, Path::new("/usr/bin/bwrap"));
+    let exe = p.games.path().join(native("PC/Hollow-Knight/hollow_knight.exe")).display().to_string();
+    assert_eq!(inside(run), ["umu-run", exe.as_str()]);
+    // It writes to its own folder, its Wine prefix and Proton's folders: nothing else of the
+    // player's files. Those folders are made before the game starts.
+    let data = p.test.data_dir().join("plugins/emu-pc");
+    let own =
+        [p.games.path().join(native("PC/Hollow-Knight")), data.join("prefixes/Hollow-Knight"), data.join("proton")];
+    for folder in &own {
+        assert!(binds(&run.args, "--bind", folder), "{} in {:?}", folder.display(), run.args);
+        assert!(folder.is_dir(), "{}", folder.display());
+    }
+    let written: Vec<&String> = run.args.windows(2).filter(|w| w[0] == "--bind").map(|w| &w[1]).collect();
+    assert_eq!(written.len(), own.len(), "{written:?}");
+    assert_eq!(
+        run.env.get("UMU_FOLDERS_PATH").map(String::as_str),
+        Some(data.join("proton").display().to_string().as_str())
+    );
+    first.exit(0);
+
+    // The game's Sandbox setting turns it off: it then runs as before, with the player's access.
+    p.set("Hollow-Knight", "sandbox", "false").await.unwrap();
+    p.test.clock.advance(Duration::from_millis(50)).await;
+    p.test.core.dispatch(launch).await.unwrap();
+    let second = p.test.spawner.wait_for(2).await.command;
+    assert_eq!(second.program, Path::new("gamemoderun"), "and through GameMode");
+    assert_eq!(second.args, ["umu-run".to_owned(), exe]);
+    assert_eq!(second.env.get("UMU_FOLDERS_PATH"), None, "Proton in its usual folders");
 }
 
 const UMU_LATEST: &str = "https://api.github.com/repos/Open-Wine-Components/umu-launcher/releases/latest";
@@ -304,12 +364,15 @@ async fn umu_launcher_installs_from_its_latest_release_and_runs_windows_games_wi
     assert_eq!(rows, ["Run with: Proton, through umu-launcher 1.4.4"]);
     assert_eq!(button, "Update umu-launcher");
 
-    // A Windows game starts through it, with nothing on the PATH.
+    // A Windows game starts through it, with nothing on the PATH but bubblewrap. Its sandbox
+    // reads umu-launcher from the plugin's folder.
+    p.test.spawner.on_path("bwrap", Path::new("/usr/bin/bwrap"));
     p.download(&[("Hollow Knight/hollow_knight.exe", &exe())]);
     assert_eq!(p.install().await, "done");
     p.test.core.dispatch(Command::Session(SessionCmd::Launch("emu-pc:Hollow-Knight".parse().unwrap()))).await.unwrap();
     let run = p.test.spawner.wait_for(1).await.command;
-    assert_eq!(run.program, program);
+    assert_eq!(inside(&run)[0], program.display().to_string());
+    assert!(binds(&run.args, "--ro-bind", program.parent().unwrap()), "{:?}", run.args);
     assert_eq!(run.env.get("PROTONPATH").map(String::as_str), Some("GE-Proton"));
 }
 
@@ -420,6 +483,7 @@ async fn play_runs_the_start_script_as_it_is_even_beside_a_wine_this_system_can_
         .await;
     let p = with_folders(test).await;
     p.test.spawner.on_path("umu-run", Path::new("/usr/bin/umu-run"));
+    p.test.spawner.on_path("bwrap", Path::new("/usr/bin/bwrap"));
     // A portable Wine wrapper: its script starts the 32-bit Wine beside it.
     p.download(&[
         ("Pocket Tanks/start.sh", b"#!/usr/bin/env bash\n"),
@@ -441,8 +505,8 @@ async fn play_runs_the_start_script_as_it_is_even_beside_a_wine_this_system_can_
     p.set("Pocket-Tanks", "starts", "game_info/data/pockettanks.exe").await.unwrap();
     p.test.core.dispatch(launch).await.unwrap();
     let run = p.test.spawner.wait_for(2).await.command;
-    assert_eq!(run.program, Path::new("umu-run"));
-    assert_eq!(run.args, [game.join(native("game_info/data/pockettanks.exe")).display().to_string()]);
+    let exe = game.join(native("game_info/data/pockettanks.exe")).display().to_string();
+    assert_eq!(inside(&run), ["umu-run".to_owned(), exe]);
     // With no 32-bit libraries, a 32-bit game's graphics come from the 64-bit ones.
     assert_eq!(run.env.get("PROTON_USE_WOW64").map(String::as_str), Some("1"));
 }
@@ -475,12 +539,13 @@ async fn a_windows_game_at_a_resolution_of_its_own_fills_the_screen_through_game
     assert!(refused.contains("install gamescope"), "{refused}");
 
     p.test.spawner.on_path("gamescope", Path::new("/usr/bin/gamescope"));
+    p.test.spawner.on_path("bwrap", Path::new("/usr/bin/bwrap"));
     p.test.core.dispatch(launch.clone()).await.unwrap();
     let run = p.test.spawner.wait_for(1).await.command;
-    assert_eq!(run.program, Path::new("gamescope"));
     let exe = p.games.path().join(native("PC/Pocket-Tanks/pockettanks.exe")).display().to_string();
-    let args: Vec<&str> = run.args.iter().map(String::as_str).collect();
-    assert_eq!(args, ["-f", "-w", "800", "-h", "600", "--", "umu-run", &exe]);
+    let inside = inside(&run);
+    let args: Vec<&str> = inside.iter().map(String::as_str).collect();
+    assert_eq!(args, ["gamescope", "-f", "-w", "800", "-h", "600", "--", "umu-run", &exe], "in its sandbox");
     assert_eq!(run.env.get("PROTONPATH").map(String::as_str), Some("GE-Proton"));
 }
 

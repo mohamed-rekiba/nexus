@@ -278,6 +278,10 @@ Nexus to finish").
 nothing). The core may ask after a game closes, and the library subsystem saves it under
 `app.results`.
 
+**Sandbox** (`Sandbox`, nexus-api; `sandbox.rs`, nexus-core): what a game sees of the player's
+files when it runs through bubblewrap on Linux: the system, the display and the sound, an empty
+home folder, and only the folders the plugin names. The PC plugin asks for it for a Windows game.
+
 **Schedule**: the Game Catalog's rules for when a fetch or a refresh runs and how long a hold
 is (`schedule.rs`). They take the time as an input, so the tests need no clock.
 

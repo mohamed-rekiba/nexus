@@ -100,6 +100,8 @@ overrides:
       # Steam's games (the Steam plugin), and GameMode for every game.
       - steam-installer | steam
       - gamemode
+      # The sandbox a Windows game runs in (bwrap).
+      - bubblewrap
   rpm:
     depends:
       - glibc >= 2.35
@@ -147,6 +149,8 @@ overrides:
       # Steam's games (the Steam plugin; RPM Fusion's nonfree repository), and GameMode.
       - steam
       - gamemode
+      # The sandbox a Windows game runs in (bwrap).
+      - bubblewrap
   archlinux:
     depends:
       - glibc
@@ -172,3 +176,5 @@ overrides:
       # Steam's games (the Steam plugin; the multilib repository), and GameMode.
       - steam
       - gamemode
+      # The sandbox a Windows game runs in (bwrap).
+      - bubblewrap
