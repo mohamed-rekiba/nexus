@@ -47,7 +47,9 @@ press() {
     sleep 1.5
 }
 
+# The window may show its last frame a moment late: wait before each capture.
 shoot() {
+    sleep 2
     import -window "$window" -quality 90 "$out/$1.jpg"
     echo "$out/$1.jpg"
 }
@@ -60,15 +62,19 @@ shoot library
 press Return
 sleep 3
 shoot detail
+# Back to Home, from where each screen opens.
 press Escape Escape
-# Ctrl+D opens Downloads; Shift+Tab is the screen before, the Catalog.
+# Ctrl+D opens Downloads.
 press ctrl+d
 shoot downloads
-press shift+Tab
+press Escape
+# L1 (Tab) on Home goes to the top bar's first item, Search: the Catalog.
+press Tab Return
 sleep 2
 shoot catalog
-# Tab on through Downloads, Emulators and Themes to Settings.
-press Tab Tab Tab Tab
+press Escape Escape
+# Settings is the top bar's last item: Search, Downloads, Emulators, Themes, Settings.
+press Tab Tab Tab Tab Tab Return
 shoot settings
 # Up to the tabs, and along them to Backup.
 press Up Right Right Right Right Right
@@ -76,6 +82,9 @@ shoot backup
 # Down to "Restore from another folder": below Back up now, Include large items and the
 # backup folder. Enter opens the browser.
 press Down Down Down Down Return
+# The places, then down from the backup folder to the first drive, which opens.
+press Left Down Return
+sleep 1
 shoot backup-browser
 # The places, where Escape closes it.
 press Left Escape
