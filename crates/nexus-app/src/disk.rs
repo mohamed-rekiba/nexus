@@ -1,5 +1,4 @@
-//! The disks: how much free space the disk that holds a folder has, and its size. And this
-//! computer's name.
+//! The disks: how much free space the disk that holds a folder has, and its size.
 
 use std::path::Path;
 
@@ -71,34 +70,6 @@ pub fn disk_bytes(path: &Path) -> Option<u64> {
     }
 }
 
-/// This computer's name on the network; empty when the system doesn't say.
-#[allow(unsafe_code)] // One system call that fills a buffer this function owns.
-pub fn computer_name() -> String {
-    #[cfg(unix)]
-    {
-        let mut buf = [0u8; 256];
-        // SAFETY: `buf` is writable for its length; the name ends with a nul within it.
-        if unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len() - 1) } != 0 {
-            return String::new();
-        }
-        let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
-        String::from_utf8_lossy(&buf[..end]).into_owned()
-    }
-    #[cfg(windows)]
-    {
-        use windows_sys::Win32::System::SystemInformation::{ComputerNamePhysicalDnsHostname, GetComputerNameExW};
-        let mut buf = [0u16; 256];
-        let mut len = buf.len() as u32;
-        // SAFETY: `buf` is writable for `len` wide characters.
-        if unsafe { GetComputerNameExW(ComputerNamePhysicalDnsHostname, buf.as_mut_ptr(), &mut len) } == 0 {
-            return String::new();
-        }
-        String::from_utf16_lossy(&buf[..len as usize])
-    }
-    #[cfg(not(any(unix, windows)))]
-    String::new()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -112,10 +83,5 @@ mod tests {
     fn a_folder_s_disk_is_at_least_as_big_as_its_free_space() {
         let dir = std::env::temp_dir();
         assert!(disk_bytes(&dir).unwrap() >= free_bytes(&dir).unwrap());
-    }
-
-    #[test]
-    fn this_computer_has_a_name() {
-        assert!(!computer_name().is_empty());
     }
 }

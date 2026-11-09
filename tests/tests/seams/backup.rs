@@ -416,6 +416,26 @@ async fn typed_text_shows_the_entries_whose_name_holds_it_until_the_folder_chang
 }
 
 #[tokio::test]
+async fn typed_text_finds_a_backup_by_the_date_its_row_shows() {
+    let (backups, elsewhere) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    // 1 Feb 2020 and 9 Nov 2026, both at noon UTC.
+    backup_with(
+        &elsewhere.path().join("nexus-backup-a.tar.gz"),
+        &serde_json::json!({ "format": 1, "made": 1_580_558_400u64 }),
+    );
+    backup_with(
+        &elsewhere.path().join("nexus-backup-b.tar.gz"),
+        &serde_json::json!({ "format": 1, "made": 1_794_225_600u64 }),
+    );
+    let b = Pc::new(backups.path()).await;
+    b.run(BackupCmd::Browse(Some(elsewhere.path().into()))).await.unwrap();
+    assert_eq!(browser(&b).entries.len(), 2);
+    b.run(BackupCmd::Filter("nov".into())).await.unwrap();
+    let shown: Vec<String> = browser(&b).entries.iter().map(|e| e.date.clone()).collect();
+    assert_eq!(shown, ["Nov 9, 2026, 12:00 UTC"], "the month as the row shows it");
+}
+
+#[tokio::test]
 async fn the_browser_opens_where_the_last_restore_came_from_and_keeps_five_recent_folders() {
     let backups = tempfile::tempdir().unwrap();
     let sticks: Vec<tempfile::TempDir> = (0..6).map(|_| tempfile::tempdir().unwrap()).collect();

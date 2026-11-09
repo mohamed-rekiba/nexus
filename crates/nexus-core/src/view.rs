@@ -1279,7 +1279,6 @@ fn folders_vm(s: &Snapshot) -> Vec<FolderVm> {
         .collect()
 }
 
-/// `path` with the home folder at its start as `~`.
 fn emulators_vm(s: &Snapshot) -> EmulatorsVm {
     let (plugins, state) = (&s.plugins, &s.state);
     let manages_an_emulator = |id: &PluginId| {
