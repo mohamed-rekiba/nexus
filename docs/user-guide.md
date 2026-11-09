@@ -168,8 +168,6 @@ uploads pieces of it to other players.
 
 ## Catalog
 
-![Catalog](screenshots/catalog.jpg)
-
 The Catalog lists the games each console's catalog offers to download. Open it with Search in
 the top bar. It works like the Library: search, sort, systems and genres above a grid. ✕ on a
 game opens its Game Hub, with its releases. ○ goes back to where you opened the Catalog.
