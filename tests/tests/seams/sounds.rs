@@ -53,7 +53,7 @@ fn the_player_can_turn_sounds_off_on_the_settings_screen() {
 #[test]
 fn a_theme_whose_sound_file_is_missing_does_not_load_and_the_old_one_stays() {
     let dir = tempfile::tempdir().unwrap();
-    write_theme(dir.path(), "quiet", "extends = \"default\"\n[theme.assets.sounds]\nclick = \"sounds/click.wav\"", &[]);
+    write_theme(dir.path(), "quiet", "[theme.assets.sounds]\nclick = \"sounds/click.wav\"", &[]);
     let mut host = composed(|h| h.discover(dir.path()));
     host.ui.start().unwrap();
 

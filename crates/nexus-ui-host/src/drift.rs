@@ -272,8 +272,9 @@ fn detail() -> GameDetailVm {
         age_rating: s(),
         screenshots: vec![image()],
         store_url: s(),
-        protondb: s(),
-        protondb_url: s(),
+        layer_source: s(),
+        layer_rating: s(),
+        layer_url: s(),
         this_pc: Some(verdict()),
         pc_warning: s(),
         your_result: s(),
@@ -377,6 +378,16 @@ fn full_view() -> AppView {
             theme_options: vec![field()],
             folders: vec![folder()],
             vpn: VpnSettingsVm { vpns: vec![VpnVm::default()], ..VpnSettingsVm::default() },
+            backup: BackupVm {
+                backups: vec![BackupFileVm::default()],
+                browser: BackupBrowserVm {
+                    crumbs: vec![BrowseCrumbVm::default()],
+                    places: vec![BrowsePlaceVm::default()],
+                    entries: vec![BrowseEntryVm::default()],
+                    ..BackupBrowserVm::default()
+                },
+                ..BackupVm::default()
+            },
             ..SettingsVm::default()
         },
         emulators: EmulatorsVm {

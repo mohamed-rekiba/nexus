@@ -63,6 +63,40 @@ fn game_text(size_bytes: Option<u64>, last_played_days: Option<u64>, availabilit
     (maybe_size_text(size_bytes), days_text(last_played_days), availability_text(availability))
 }
 
+/// The date of day `days` since 1970-01-01 (Howard Hinnant's civil_from_days).
+fn civil(days: u64) -> (i64, u32, u32) {
+    let z = days as i64 + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (yoe + era * 400 + i64::from(m <= 2), m, d)
+}
+
+/// A time in seconds since 1970 as UTC: year, month, day, hours, minutes and seconds.
+pub(crate) fn utc(secs: u64) -> (i64, u32, u32, u64, u64, u64) {
+    let (y, m, d) = civil(secs / 86_400);
+    let t = secs % 86_400;
+    (y, m, d, t / 3600, t % 3600 / 60, t % 60)
+}
+
+/// A time in seconds since 1970 as `Nov 9, 2026, 14:30 UTC`: the core knows no time zone.
+pub(crate) fn date_time_text(secs: u64) -> String {
+    let (y, m, d, hh, mm, _) = utc(secs);
+    format!("{}, {hh:02}:{mm:02} UTC", date_text(&format!("{y:04}-{m:02}-{d:02}")))
+}
+
+/// `path` with the home folder as `~`.
+pub(crate) fn short_home(path: &str, home: Option<&str>) -> String {
+    match home.and_then(|h| path.strip_prefix(h)) {
+        Some(rest) if rest.is_empty() || rest.starts_with(std::path::MAIN_SEPARATOR) => format!("~{rest}"),
+        _ => path.to_owned(),
+    }
+}
+
 /// `7.6 GB`, `820 MB`: decimal units, as the PS5 shows them.
 pub(crate) fn size_text(bytes: u64) -> String {
     let gb = bytes as f64 / 1e9;

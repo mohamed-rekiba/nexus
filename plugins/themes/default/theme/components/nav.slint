@@ -1,35 +1,13 @@
 import { Vm, Host, GameCard, Library } from "../types.slint";
-import { Commands } from "../commands.slint";
-import { Look } from "look.slint";
-import { GameMenu } from "game-menu.slint";
-import { Sys } from "system-panel.slint";
+import { Commands } from "../kit/commands.slint";
+import { Look } from "../kit/look.slint";
+import { GameMenu } from "../kit/game-menu.slint";
+import { Sys } from "../kit/system-panel.slint";
+import { Origin } from "../kit/origin.slint";
+// Origin is the kit's; the theme's files read it from here too.
+export { Origin } from "../kit/origin.slint";
 
-// The card the Game Hub opens from, for its cover to grow out of it. `from` is "row" for Home's
-// selected tile, "grid" for the Library's or the Catalog's card at `x`, `y` (on screen),
-// `width` and `height`, or "" when the place isn't known: the cover then fades in. The Game
-// Hub reads it as it opens, and sets `from` back to "".
-export global Origin {
-    in-out property <string> from;
-    in-out property <length> x;
-    in-out property <length> y;
-    in-out property <length> width;
-    in-out property <length> height;
-    // The selected grid card's place, kept by the grid on screen.
-    in-out property <length> card-x;
-    in-out property <length> card-y;
-    in-out property <length> card-width;
-    in-out property <length> card-height;
-    // The Game Hub opens from the selected grid card.
-    public function from-grid() {
-        root.from = "grid";
-        root.x = root.card-x;
-        root.y = root.card-y;
-        root.width = root.card-width;
-        root.height = root.card-height;
-    }
-}
-
-// The Default theme's copy of the Classic theme's Nav. Home is a list of systems: "All games"
+// Where the player is, and what each key does there. Home is a list of systems: "All games"
 // (entry 0), then each emulator in `Vm.emulators` (entry 1 on). The keys act on one zone at a
 // time: the top bar (`tabs`), the list (`row`), and in the Library its systems in the top bar
 // (`filters`), its bar (`bar`: search, sort, the genres' list, and in the Catalog the catalog
@@ -39,8 +17,8 @@ export global Origin {
 // screen, the network, sound and Bluetooth icons (5 to 7). A system opens the Library on its
 // games (LibrarySystem); whatever brings the list back clears the filter. `extra` is true while
 // the list shows, so the shell's game keys (Menu, T) stay off it. The list has no buttons under
-// a game: the `actions` zone the shell gives a game that starts is the list's. Every other
-// member is the Classic theme's, for the Classic theme's files that read them.
+// a game: the `actions` zone the shell gives a game that starts is the list's. The shell, the
+// card, the top bar and the running screen read the other members.
 export global Nav {
     // home | library
     in-out property <string> view: "home";

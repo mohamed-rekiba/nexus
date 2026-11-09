@@ -39,6 +39,8 @@ pub struct FakeHost {
     free_space: Option<u64>,
     /// Folders on a disk of their own, and its free bytes.
     disks: Vec<(PathBuf, u64)>,
+    /// The computer's name, for the backups it makes.
+    computer: String,
     first_run: bool,
     clock: FakeClock,
 }
@@ -87,6 +89,7 @@ impl FakeHost {
             controllers: Vec::new(),
             free_space: None,
             disks: Vec::new(),
+            computer: String::new(),
             first_run: false,
             clock: FakeClock::default(),
         }
@@ -119,6 +122,12 @@ impl FakeHost {
     /// `folder` and every folder in it are on a disk of their own, with `bytes` free.
     pub fn disk(mut self, folder: impl Into<PathBuf>, bytes: u64) -> Self {
         self.disks.push((folder.into(), bytes));
+        self
+    }
+
+    /// The computer's name, which its backups keep. Without it the system doesn't say.
+    pub fn computer(mut self, name: &str) -> Self {
+        self.computer = name.to_owned();
         self
     }
 
@@ -257,10 +266,16 @@ impl FakeHost {
         if self.hardware.is_some()
             || self.free_space.is_some()
             || !self.disks.is_empty()
+            || !self.computer.is_empty()
             || !self.controllers.is_empty()
         {
-            let hardware =
-                FixedHardware(self.hardware.unwrap_or_default(), self.free_space, self.disks, self.controllers);
+            let hardware = FixedHardware {
+                specs: self.hardware.unwrap_or_default(),
+                free_space: self.free_space,
+                disks: self.disks,
+                controllers: self.controllers,
+                computer: self.computer,
+            };
             builder = builder.hardware(Arc::new(hardware));
         }
         for (plugin, third_party) in self.plugins {
@@ -386,19 +401,30 @@ impl TestHost {
     }
 }
 
-/// A computer with these specs, this much free space on each disk, and the disks of their own.
-struct FixedHardware(nexus_core::Specs, Option<u64>, Vec<(PathBuf, u64)>, Vec<nexus_api::Controller>);
+/// A computer with these specs, this much free space on each disk, the disks of their own, and
+/// this name.
+struct FixedHardware {
+    specs: nexus_core::Specs,
+    free_space: Option<u64>,
+    disks: Vec<(PathBuf, u64)>,
+    controllers: Vec<nexus_api::Controller>,
+    computer: String,
+}
 
 impl nexus_core::Hardware for FixedHardware {
     fn specs(&self) -> nexus_core::Specs {
-        self.0.clone()
+        self.specs.clone()
     }
 
     fn free_bytes(&self, path: &std::path::Path) -> Option<u64> {
-        self.2.iter().find(|(disk, _)| path.starts_with(disk)).map(|(_, free)| *free).or(self.1)
+        self.disks.iter().find(|(disk, _)| path.starts_with(disk)).map(|(_, free)| *free).or(self.free_space)
     }
 
     fn controllers(&self) -> Vec<nexus_api::Controller> {
-        self.3.clone()
+        self.controllers.clone()
+    }
+
+    fn computer_name(&self) -> String {
+        self.computer.clone()
     }
 }

@@ -14,8 +14,6 @@ use crate::compile::compile;
 use crate::images::{Crop, ImageCache, ImageKey, ImageSize, Window, decode};
 use crate::themes::{ResolvedTheme, ThemeSet};
 
-pub use nexus_ui_api::BASE_THEME;
-
 /// What the theme asked for that the app has to carry out.
 #[derive(Clone, Debug, PartialEq)]
 pub enum UiRequest {
@@ -128,10 +126,6 @@ fn slint_fullscreen(window: &slint::Window, on: bool) {
     }
 }
 
-fn base() -> PluginId {
-    PluginId::new(BASE_THEME).expect("valid id")
-}
-
 impl ThemeHost {
     pub async fn new(core: Core, requests: Requests) -> Self {
         let themes = ThemeSet::from_core(&core).await;
@@ -177,22 +171,23 @@ impl ThemeHost {
         self.live.as_ref().map(|l| &l.resolved)
     }
 
-    /// Shows the player's theme, or the default theme if that fails or in safe mode. The default
-    /// theme always works; if it doesn't, that's a bug and this returns the error.
+    /// Shows the player's theme, or the fallback theme (`fallback = true`) if that fails or in
+    /// safe mode. When the fallback theme fails too, this returns its error.
     pub fn start(&mut self) -> Result<(), ThemeError> {
         self.start_with(None)
     }
 
     /// Like [`Self::start`], showing `theme` instead of the saved choice, without saving it.
     pub fn start_with(&mut self, theme: Option<PluginId>) -> Result<(), ThemeError> {
+        let fallback = self.themes.fallback()?;
         let saved = theme.or_else(|| self.core.selected_theme());
-        let preferred = if self.safe_mode { base() } else { saved.unwrap_or_else(base) };
+        let preferred = if self.safe_mode { fallback.clone() } else { saved.unwrap_or_else(|| fallback.clone()) };
         if let Err(error) = self.load(&preferred, false) {
-            tracing::error!(theme = %preferred, %error, "theme failed; falling back to the default theme");
-            if preferred == base() {
+            tracing::error!(theme = %preferred, %error, "theme failed; falling back to the fallback theme");
+            if preferred == fallback {
                 return Err(error);
             }
-            self.load(&base(), false)?;
+            self.load(&fallback, false)?;
         }
         self.core.set_active_theme(self.current().cloned().expect("loaded"));
         Ok(())
@@ -200,8 +195,8 @@ impl ThemeHost {
 
     /// Swaps to `id`. On any failure the current theme stays, and the error says why.
     pub fn switch(&mut self, id: &PluginId) -> Result<(), ThemeError> {
-        if self.safe_mode && id != &base() {
-            return Err(ThemeError::Platform("safe mode shows the default theme only".into()));
+        if self.safe_mode && id != &self.themes.fallback()? {
+            return Err(ThemeError::Platform("safe mode shows the fallback theme only".into()));
         }
         self.load(id, true)?;
         self.render()

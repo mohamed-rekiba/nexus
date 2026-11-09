@@ -1,4 +1,4 @@
-//! The disks: how much free space the disk that holds a folder has.
+//! The disks: how much free space the disk that holds a folder has, and its size.
 
 use std::path::Path;
 
@@ -36,6 +36,40 @@ pub fn free_bytes(path: &Path) -> Option<u64> {
     }
 }
 
+/// The size in bytes of the disk that holds `path`; `None` when the system doesn't say.
+#[allow(unsafe_code)] // One system call that fills a struct this function owns.
+pub fn disk_bytes(path: &Path) -> Option<u64> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let c = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
+        let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+        // SAFETY: `c` is a valid C string and `stat` a writable statvfs.
+        (unsafe { libc::statvfs(c.as_ptr(), &mut stat) } == 0).then(|| stat.f_blocks as u64 * stat.f_frsize as u64)
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        let mut total = 0u64;
+        // SAFETY: `wide` ends with a nul and `total` is a writable u64.
+        let ok = unsafe {
+            windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW(
+                wide.as_ptr(),
+                std::ptr::null_mut(),
+                &mut total,
+                std::ptr::null_mut(),
+            )
+        };
+        (ok != 0).then_some(total)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = path;
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -43,5 +77,11 @@ mod tests {
     #[test]
     fn the_free_space_of_a_folder_s_disk_is_known() {
         assert!(free_bytes(&std::env::temp_dir()).is_some_and(|f| f > 0));
+    }
+
+    #[test]
+    fn a_folder_s_disk_is_at_least_as_big_as_its_free_space() {
+        let dir = std::env::temp_dir();
+        assert!(disk_bytes(&dir).unwrap() >= free_bytes(&dir).unwrap());
     }
 }

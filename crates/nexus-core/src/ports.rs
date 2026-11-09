@@ -216,6 +216,11 @@ pub trait Windows: Send + Sync {
     fn show_game(&self, ids: &[u32]) -> bool;
     /// Brings the launcher's window to the front.
     fn show_launcher(&self);
+    /// Keeps the game of the processes `ids` on screen while it is in front, with the windows
+    /// it opened after it showed. The core calls it on each look at a game in front. A desktop
+    /// that shows only the windows it was told about (Gamescope) is told about the new ones;
+    /// elsewhere this does nothing, so the player's own window switches stay theirs.
+    fn keep_game(&self, _ids: &[u32]) {}
     /// Whether one of the processes `ids` has a window. `None` when the system doesn't say.
     fn has_window(&self, _ids: &[u32]) -> Option<bool> {
         None
@@ -388,6 +393,16 @@ pub trait Hardware: Send + Sync {
     /// call it off the async threads. None by default.
     fn controllers(&self) -> Vec<nexus_api::Controller> {
         Vec::new()
+    }
+    /// The computer's name on the network, such as "gaming-pc"; empty when the system doesn't
+    /// say. Quick. A backup keeps it, so a restore can say which computer made it.
+    fn computer_name(&self) -> String {
+        String::new()
+    }
+    /// The size in bytes of the disk that holds `path`, which must exist; `None` when the
+    /// system doesn't say. Quick: one system call.
+    fn disk_bytes(&self, _path: &std::path::Path) -> Option<u64> {
+        None
     }
 }
 

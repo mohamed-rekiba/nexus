@@ -87,7 +87,7 @@ fn a_theme_that_does_not_compile_rolls_back() {
     write_theme(
         dir.path(),
         "broken",
-        "extends = \"default\"\nscreens = [\"home\"]",
+        "",
         &[("screens/home.slint", "export component HomeScreen inherits Rectangle { this is not slint }")],
     );
     let mut host = composed(|h| with_examples(h).discover(dir.path()));
@@ -104,7 +104,7 @@ fn a_theme_that_does_not_compile_rolls_back() {
 #[test]
 fn a_theme_with_a_missing_asset_rolls_back() {
     let dir = tempfile::tempdir().unwrap();
-    write_theme(dir.path(), "no-logo", "extends = \"default\"\n[theme.assets.images]\nlogo = \"assets/logo.png\"", &[]);
+    write_theme(dir.path(), "no-logo", "[theme.assets.images]\nlogo = \"assets/logo.png\"", &[]);
     let mut host = composed(|h| with_examples(h).discover(dir.path()));
     host.ui.start().unwrap();
     host.ui.switch(&id("fixture-grid")).unwrap();
@@ -122,7 +122,7 @@ fn a_broken_saved_theme_falls_back_to_the_default_theme_at_start_and_keeps_the_c
     write_theme(
         dir.path(),
         "broken",
-        "extends = \"default\"\nscreens = [\"home\"]",
+        "",
         &[("screens/home.slint", "export component HomeScreen inherits Rectangle { nope }")],
     );
     let mut host = composed(|h| {
@@ -184,12 +184,7 @@ fn dev_reload_picks_up_an_edit_and_keeps_the_last_good_version_on_a_bad_one() {
             "export component HomeScreen inherits Rectangle {{ accessible-role: text; accessible-label: \"{label}\"; }}"
         )
     };
-    write_theme(
-        dir.path(),
-        "live",
-        "extends = \"default\"\nscreens = [\"home\"]",
-        &[("screens/home.slint", &home("v1"))],
-    );
+    write_theme(dir.path(), "live", "", &[("screens/home.slint", &home("v1"))]);
     let mut host = composed(|h| h.discover(dir.path()));
     host.ui.switch(&id("live")).unwrap();
     assert_eq!(host.count("v1"), 1);

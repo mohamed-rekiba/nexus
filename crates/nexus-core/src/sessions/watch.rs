@@ -177,9 +177,17 @@ async fn follow(
             }
             continue;
         }
+        // The game stays on screen with the windows it opened since it showed: Proton opens the
+        // game's own after a helper's, and Gamescope shows only the windows it was told about.
+        // Until the player brings the launcher, even when the desktop says the launcher is in
+        // front: Gamescope shows the launcher when the helper's window closes.
+        let keep = sessions.keeps_game();
         let look = sessions
             .blocking(move |desktop, processes| {
                 let ids = members(processes, root, root_exited);
+                if keep && !ids.is_empty() {
+                    desktop.keep_game(&ids);
+                }
                 let front = desktop.front();
                 let window = if ids.is_empty() { Some(false) } else { desktop.has_window(&ids) };
                 Look { ends_with_window: desktop.window_close_ends_game(), front, window, ids }

@@ -10,7 +10,7 @@ host_api = "^0.2"
 platforms = ["linux", "macos", "windows"]
 # The console it plays: it gets that console's catalog.
 console = "PS5"
-capabilities = ["catalog", "downloader", "installer", "configurator", "launcher", "compatibility", "slots", "game_installer"]
+capabilities = ["catalog", "downloader", "installer", "configurator", "launcher", "compatibility", "slots", "game_installer", "backup"]
 # What the install sheet says this emulator installs from.
 install_note = "Installs a PS5 game from its folder, an exFAT image or an unsigned PS5 package (.pkg). A retail PS5 package can't install: only the console has its key. Installing checks that it holds a game, not that its files are genuine, and never runs them."
 
@@ -107,6 +107,17 @@ default = [
     "~/Applications/KytyPS5", "~/Applications/kyty", "~/Applications/Kyty",
     "~/src/KytyPS5", "~/src/kyty", "~/src/Kyty",
 ]
+
+# The saves and the games' downloaded data, shared by every build that has --data-folder. The
+# first game a build like that starts copies the build's saves here; a game whose saves are
+# here already keeps them.
+[[permissions.filesystem]]
+folder = "kyty-data"
+default = "~/.local/share/KytyPS5"
+default_on = { macos = "~/Library/Application Support/KytyPS5", windows = "~/AppData/Roaming/KytyPS5" }
+title = "KytyPS5 saves"
+help = "Saves of every KytyPS5 build that has --data-folder."
+write = true
 
 # The system its games show under: what the Library and a card call it, and its color.
 [system]

@@ -317,7 +317,7 @@ pub(crate) fn build(s: &Snapshot) -> AppView {
         system: system_vm(s),
         result_prompt: state.result_prompt.as_ref().map(|(key, _)| s.library.title(key)),
     };
-    plugin_lists(&mut view);
+    plugin_lists(&mut view, &s.plugins);
     crate::display::write(&mut view);
     view
 }
@@ -552,8 +552,9 @@ fn detail_vm(s: &Snapshot, owned: &Ownership, key: &GameKey) -> Option<GameDetai
         age_rating: meta.map(|(_, m)| m.age_rating.clone()).unwrap_or_default(),
         screenshots: shown.screenshots.into_iter().map(plugin_image).collect(),
         store_url: text(|m| &m.store_url),
-        protondb: compatibility.0,
-        protondb_url: compatibility.1,
+        layer_source: compatibility.source,
+        layer_rating: compatibility.rating,
+        layer_url: compatibility.url,
         this_pc,
         pc_warning,
         your_result: library.result(key).map(CompatLevel::as_str).unwrap_or_default().to_owned(),
@@ -624,7 +625,9 @@ fn detail_vm(s: &Snapshot, owned: &Ownership, key: &GameKey) -> Option<GameDetai
                 s.plugins.manifest(&o.emulator).map_or_else(|| o.emulator.to_string(), |m| m.emulator_name().to_owned())
             })
             .unwrap_or_default(),
-        download_folder: download_folder.map(|f| short_home(&f.path.display().to_string(), home)).unwrap_or_default(),
+        download_folder: download_folder
+            .map(|f| crate::display::short_home(&f.path.display().to_string(), home))
+            .unwrap_or_default(),
         availability: offer
             .map(|o| crate::releases::availability(owned.best_release(o).seeders).to_owned())
             .unwrap_or_default(),
@@ -724,13 +727,13 @@ fn downloads_vm(s: &Snapshot, owned: &Ownership) -> DownloadsVm {
         .jobs
         .values()
         .map(|j| TorrentVm {
-            folder: short_home(&j.folder.display().to_string(), home.as_deref()),
+            folder: crate::display::short_home(&j.folder.display().to_string(), home.as_deref()),
             install_note: install_note(&s.plugins, &j.emulator),
             install_folder: s
                 .files
                 .install_folders
                 .get(&j.emulator)
-                .map(|path| short_home(&path.display().to_string(), home.as_deref()))
+                .map(|path| crate::display::short_home(&path.display().to_string(), home.as_deref()))
                 .unwrap_or_default(),
             ..torrent_vm(&s.library, installs, owned, j)
         })
@@ -1058,9 +1061,12 @@ fn settings_vm(s: &Snapshot) -> SettingsVm {
         .collect();
     let theme_options = match &state.theme {
         Some(theme) => {
-            let chain = theme_chain(plugins, theme);
-            let refs: Vec<&ThemeManifest> = chain.iter().collect();
-            let schema = options_schema(&merge_options(&refs));
+            let options = plugins
+                .manifest(theme)
+                .and_then(|m| ThemeManifest::from_plugin(m).ok())
+                .map(|m| m.theme.options)
+                .unwrap_or_default();
+            let schema = options_schema(&options);
             crate::settings_schema::fields(&schema, &s.theme_options)
         }
         None => Vec::new(),
@@ -1082,7 +1088,115 @@ fn settings_vm(s: &Snapshot) -> SettingsVm {
         start_at_login: prefs.start_at_login,
         start_at_login_error: prefs.start_at_login_error.clone().unwrap_or_default(),
         vpn: vpn_vm(&s.vpn),
+        backup: backup_vm(s),
     }
+}
+
+fn backup_vm(s: &Snapshot) -> nexus_ui_api::BackupVm {
+    let backup = &s.backup;
+    let home = s.plugins.host().home.as_deref().map(|h| h.display().to_string());
+    let folder =
+        s.backup_folder.as_ref().map(|f| crate::display::short_home(&f.display().to_string(), home.as_deref()));
+    let job = backup.job.as_ref();
+    nexus_ui_api::BackupVm {
+        folder: folder.unwrap_or_default(),
+        running: job.is_some(),
+        restoring: job.is_some_and(|j| j.restoring),
+        progress: job.filter(|j| j.total > 0).map(|j| (j.done as f64 / j.total as f64).min(1.0) as f32).unwrap_or(0.0),
+        status: if backup.error.is_empty() { backup.done.clone() } else { backup.error.clone() },
+        failed: !backup.error.is_empty(),
+        restart: backup.restart,
+        backups: backup
+            .backups
+            .iter()
+            .map(|b| nexus_ui_api::BackupFileVm {
+                file: b.file.clone(),
+                date: crate::display::date_time_text(b.made),
+                size: crate::display::size_text(b.bytes),
+                items: b.items.join(", "),
+                before_restore: b.before_restore,
+            })
+            .collect(),
+        holds: backup.holds.join(", "),
+        large: backup.large.join(", "),
+        default_folder: s
+            .plugins
+            .host()
+            .home
+            .as_ref()
+            .map(|h| {
+                crate::display::short_home(
+                    &h.join(crate::backups::DEFAULT_FOLDER).display().to_string(),
+                    home.as_deref(),
+                )
+            })
+            .unwrap_or_default(),
+        browser: backup.browser.as_deref().map(|b| browser_vm(b, home.as_deref())).unwrap_or_default(),
+    }
+}
+
+fn browser_vm(browser: &crate::backup::Browser, home: Option<&str>) -> nexus_ui_api::BackupBrowserVm {
+    let full = |p: &std::path::Path| p.display().to_string();
+    nexus_ui_api::BackupBrowserVm {
+        open: true,
+        shown: crate::display::short_home(&full(&browser.at), home),
+        parent: browser.at.parent().map(full).unwrap_or_default(),
+        crumbs: crumbs(&browser.at, home),
+        place: browser.places.iter().position(|p| p.path == browser.at).map_or(-1, |i| i as i32),
+        places: browser
+            .places
+            .iter()
+            .map(|p| nexus_ui_api::BrowsePlaceVm {
+                name: p.name.clone(),
+                path: full(&p.path),
+                kind: p.kind.as_str().to_owned(),
+                detail: p.detail.clone(),
+            })
+            .collect(),
+        entries: browser
+            .shown()
+            .map(|e| {
+                let name = e.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                let mut vm = nexus_ui_api::BrowseEntryVm {
+                    name,
+                    path: full(&e.path),
+                    folder: e.backup.is_none(),
+                    detail: e.detail.clone(),
+                    ..Default::default()
+                };
+                if let Some(b) = &e.backup {
+                    vm.date = crate::display::date_time_text(b.made);
+                    vm.size = crate::display::size_text(b.bytes);
+                    vm.items = b.items.join(", ");
+                    vm.computer.clone_from(&b.computer);
+                    vm.newer = b.newer;
+                }
+                vm
+            })
+            .collect(),
+        hidden: browser.hidden,
+        filter: browser.filter.clone(),
+    }
+}
+
+/// `at`'s path one part each, from the home folder (`~`) or the top.
+fn crumbs(at: &std::path::Path, home: Option<&str>) -> Vec<nexus_ui_api::BrowseCrumbVm> {
+    let mut out = Vec::new();
+    for dir in at.ancestors() {
+        let path = dir.display().to_string();
+        let at_home = home.is_some_and(|h| std::path::Path::new(h) == dir);
+        let name = match dir.file_name() {
+            _ if at_home => "~".to_owned(),
+            Some(name) => name.to_string_lossy().into_owned(),
+            None => path.clone(),
+        };
+        out.push(nexus_ui_api::BrowseCrumbVm { name, path });
+        if at_home {
+            break;
+        }
+    }
+    out.reverse();
+    out
 }
 
 fn vpn_vm(vpn: &crate::vpn::VpnSnapshot) -> nexus_ui_api::VpnSettingsVm {
@@ -1157,20 +1271,12 @@ fn folders_vm(s: &Snapshot) -> Vec<FolderVm> {
             f.shown = paths
                 .iter()
                 .filter(|p| !p.is_empty())
-                .map(|p| short_home(p, home.as_deref()))
+                .map(|p| crate::display::short_home(p, home.as_deref()))
                 .collect::<Vec<_>>()
                 .join("; ");
             f
         })
         .collect()
-}
-
-/// `path` with the home folder at its start as `~`.
-fn short_home(path: &str, home: Option<&str>) -> String {
-    match home.and_then(|h| path.strip_prefix(h)) {
-        Some(rest) if rest.is_empty() || rest.starts_with(std::path::MAIN_SEPARATOR) => format!("~{rest}"),
-        _ => path.to_owned(),
-    }
 }
 
 fn emulators_vm(s: &Snapshot) -> EmulatorsVm {
@@ -1253,13 +1359,13 @@ fn emulators_vm(s: &Snapshot) -> EmulatorsVm {
 
 /// The Emulators and the Themes lists, from every plugin, and the Plugin page's actions and
 /// whether its theme is the one shown.
-fn plugin_lists(view: &mut AppView) {
+fn plugin_lists(view: &mut AppView, registry: &Plugins) {
     let shown = view.settings.themes.iter().find(|t| t.current).map(|t| t.id.clone());
     let plugins = &view.emulators.plugins;
     // Emulators, then the services that describe their games.
     let kind = |kind: &'static str| plugins.iter().filter(move |p| p.kind == kind).cloned();
     view.emulators.emulator_plugins = kind("emulator").chain(kind("service")).collect();
-    // A theme's status says whether it is the one shown. The Default theme comes first; the
+    // A theme's status says whether it is the one shown. The fallback theme comes first; the
     // others keep their order.
     view.emulators.theme_plugins = kind("theme")
         .map(|p| PluginRowVm {
@@ -1267,7 +1373,10 @@ fn plugin_lists(view: &mut AppView) {
             ..p
         })
         .collect();
-    view.emulators.theme_plugins.sort_by_key(|p| p.id.as_str() != nexus_ui_api::BASE_THEME);
+    let fallback = |id: &PluginId| {
+        registry.manifest(id).and_then(|m| ThemeManifest::from_plugin(m).ok()).is_some_and(|m| m.theme.fallback)
+    };
+    view.emulators.theme_plugins.sort_by_key(|p| !fallback(&p.id));
     if let Some(page) = &mut view.plugin_page {
         page.actions = page.sections.iter().filter(|s| s.kind == SlotKind::Action).cloned().collect();
         page.current = shown.as_ref() == Some(&page.plugin.id);
@@ -1439,21 +1548,6 @@ fn running_vm(snapshot: &Snapshot, route: &Route) -> Option<RunningVm> {
         in_front: sessions.game_in_front,
         keymap: manifest.map(|m| m.keymap.clone()).unwrap_or_default(),
     })
-}
-
-/// A theme's manifest and its parents' (the theme first). Stops at a missing or bad manifest.
-fn theme_chain(plugins: &Plugins, theme: &PluginId) -> Vec<ThemeManifest> {
-    let mut chain: Vec<ThemeManifest> = Vec::new();
-    let mut next = Some(theme.clone());
-    while let Some(id) = next.take() {
-        if chain.iter().any(|m| m.id() == &id) {
-            break;
-        }
-        let Some(manifest) = plugins.manifest(&id).and_then(|m| ThemeManifest::from_plugin(m).ok()) else { break };
-        next = manifest.theme.extends.clone();
-        chain.push(manifest);
-    }
-    chain
 }
 
 /// What an emulator's games play with: a controller, and the keyboard when the manifest lists

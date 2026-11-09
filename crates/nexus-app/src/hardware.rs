@@ -32,6 +32,14 @@ impl Hardware for SystemHardware {
         crate::disk::free_bytes(path)
     }
 
+    fn computer_name(&self) -> String {
+        computer_name()
+    }
+
+    fn disk_bytes(&self, path: &std::path::Path) -> Option<u64> {
+        crate::disk::disk_bytes(path)
+    }
+
     fn controllers(&self) -> Vec<nexus_api::Controller> {
         let mut probe = std::process::Command::new(match std::env::current_exe() {
             Ok(exe) => exe,
@@ -40,6 +48,34 @@ impl Hardware for SystemHardware {
         probe.arg("--probe-controllers");
         run_probe(probe, CONTROLLER_PROBE_TIME).map(|text| crate::controller_probe::parse(&text)).unwrap_or_default()
     }
+}
+
+/// This computer's name on the network; empty when the system doesn't say.
+#[allow(unsafe_code)] // One system call that fills a buffer this function owns.
+pub fn computer_name() -> String {
+    #[cfg(unix)]
+    {
+        let mut buf = [0u8; 256];
+        // SAFETY: `buf` is writable for its length; the name ends with a nul within it.
+        if unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len() - 1) } != 0 {
+            return String::new();
+        }
+        let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+        String::from_utf8_lossy(&buf[..end]).into_owned()
+    }
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::SystemInformation::{ComputerNamePhysicalDnsHostname, GetComputerNameExW};
+        let mut buf = [0u16; 256];
+        let mut len = buf.len() as u32;
+        // SAFETY: `buf` is writable for `len` wide characters.
+        if unsafe { GetComputerNameExW(ComputerNamePhysicalDnsHostname, buf.as_mut_ptr(), &mut len) } == 0 {
+            return String::new();
+        }
+        String::from_utf16_lossy(&buf[..len as usize])
+    }
+    #[cfg(not(any(unix, windows)))]
+    String::new()
 }
 
 /// How long the controller probe may take: SDL waits half a second for controllers to show up.
@@ -206,6 +242,11 @@ pub fn parse_windows(text: &str) -> Specs {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn this_computer_has_a_name() {
+        assert!(!super::computer_name().is_empty());
+    }
+
     use super::*;
 
     #[test]

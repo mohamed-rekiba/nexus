@@ -104,6 +104,10 @@ pub(crate) async fn session(core: &Core, command: SessionCmd) -> CoreResult<()> 
 pub(crate) async fn launch(core: &Core, game: GameKey) -> CoreResult<()> {
     let kernel = core.kernel();
     let plugin = game.plugin.clone();
+    // A backup or a restore reads and writes the saves: no game starts until it is done.
+    if let Some(why) = crate::backups::busy(core) {
+        return Err(CoreError::Invalid(why.into()));
+    }
     let claim = core.sessions().claim()?;
     // An install or update moves the emulator's files and the games' saves: no game starts
     // until it is done.

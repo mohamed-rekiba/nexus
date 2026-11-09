@@ -1,6 +1,5 @@
-//! The built-in Classic theme, the old launcher's look. Every other theme extends it, directly or
-//! through a parent, so it has every screen, component and token. It is compiled into the
-//! binary. The Default theme (`theme-default`) extends it.
+//! The built-in Classic theme, the old launcher's look: a hero and a row of games on Home. It
+//! stands alone and draws its other screens with the kit. It is compiled into the binary.
 
 use std::sync::Arc;
 

@@ -1,12 +1,12 @@
 import { Vm, Host } from "../types.slint";
-import { Commands } from "../commands.slint";
+import { Commands } from "../kit/commands.slint";
 import { Tokens } from "../tokens.slint";
-import { Look } from "look.slint";
+import { Look } from "../kit/look.slint";
 import { Nav, Origin } from "nav.slint";
-import { Icon } from "icon.slint";
+import { Icon } from "../kit/icon.slint";
 import { Card } from "card.slint";
-import { FocusRing } from "widgets.slint";
-import { Osk, TextField } from "keyboard.slint";
+import { FocusRing } from "../kit/widgets.slint";
+import { Osk, TextField } from "../kit/keyboard.slint";
 
 // One choice in the list under the bar: lit, a soft see-through white, under the keys, with a
 // check on the one in use and, for a genre, how many games it has.
@@ -66,7 +66,7 @@ component Option inherits Rectangle {
     ta := TouchArea { mouse-cursor: pointer; clicked => { root.picked(); } }
 }
 
-// The Default theme's copy of the Classic theme's Library, for the Library and the Catalog: a
+// The Library, for the Library and the Catalog: a
 // short header (search, sort, the genres' list and the count in one row; the systems are in the
 // top bar) and the grid of cards under it, at one size. The core searches, filters and sorts
 // (`Nav.lib`) and sends a page at a time; the grid asks for the next page as it nears the end,

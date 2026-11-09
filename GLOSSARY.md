@@ -23,6 +23,23 @@ checked by the test kit against the app's `HostArchives` and the fake `FakeArchi
 library and so on.
 _Avoid_: section, domain
 
+**Backup**: one file in the backup folder that holds the app's settings and the backup items:
+`nexus-backup-<date>.tar.gz`, with `backup.json` (its manifest, naming the computer that made
+it), `config.json` and `items/…` (`backup/archive.rs`). `BackupCmd::BackUp` makes one. A backup
+made by a newer Nexus is listed but not restored.
+
+**Backup browser** (`backup::Browser`, `kit/backup-browser.slint`): the sheet that "Restore from
+another folder" opens over every screen. It shows the places, the folders and backups of one
+folder, and the details of the focused backup. The core holds its state; the kit draws it.
+_Avoid_: file picker, file dialog
+
+**Backup folder** (`Pref::BackupFolder`): the folder Settings → Backup writes backups to and
+lists them from: `app.backup_folder`, else `~/Nexus Backups`.
+
+**Backup item** (`BackupItem`, nexus-api): one thing of a plugin's data that a backup holds,
+such as its saves or its keys. The plugin names it through the `backup` capability, with a
+name that is the same on every computer and a place on this one. The host reads and writes it.
+
 **Base copy**: the copy of a console's catalog without a refresh: the copy fetched from the
 catalog address, else the bundled one. A refresh is always of one base copy.
 
@@ -90,6 +107,11 @@ _Avoid_: mock time, test time
 **Fake emulator** (`FakeEmulator`, nexus-testkit): an emulator a test scripts, from its catalog
 to the download, install, launch and exit of its build. It keeps every capability contract.
 
+**Fallback theme**: the one built-in theme whose `theme.toml` says `fallback = true`. The app
+starts with it, falls back to it when the player's theme fails, and shows only it in safe mode.
+`ThemeSet::fallback` requires exactly one. Default is the fallback theme.
+_Avoid_: base theme, parent theme
+
 **Flavor** (`Flavor`, emulator-kit): one emulator's description of its builds: release source,
 matching asset, archive format, program, test run, own-build search paths, and the hooks that
 run when the current build changes.
@@ -151,6 +173,15 @@ a plugin's privileges only: the system capabilities, long-running programs and p
 system plugins. Any code plugin may provide the data capabilities.
 _Avoid_: type, category
 
+**Kit**: the shared Slint files the host serves under `kit/`, beneath every theme's own files:
+behaviour and widgets drawn only from tokens. A theme imports what it needs from it. Listed in
+`KIT` (nexus-ui-api `contract.rs`).
+_Avoid_: base theme
+
+**Kit file**: one file of the kit, such as `kit/dialog.slint`. A theme replaces it by shipping a
+file at the same path. A kit file has no hex colours, and imports only the host's files and
+other kit files.
+
 **Library subsystem** (`LibrarySubsystem`): the subsystem that holds the game records, the
 catalogs' copies and their offers, and the library's saved choices (hidden games, kept covers,
 the player's results). It asks no plugin; the core hands it the plugins' answers.
@@ -198,6 +229,10 @@ console. It also picks the release an offer's card shows.
 download, and what the core does next: unpause, stop, finished or stopped. They exist once, in
 the core; the adapter and the fake decide nothing.
 
+**Place** (`BrowsePlace`, `PlaceKind`): a folder the backup browser lists on its side to go to:
+Home, Downloads, Desktop, Documents, the backup folder, a drive, or a recent folder. Not
+`Place` in `system.rs`, which says where Nexus runs.
+
 **Platform** (`Platform`, nexus-ui-host): the app shell's port: running work off the UI thread,
 waking the shell, opening links and paths, quitting, the lines the Nexus session reads, sounds,
 trailers, the local time, and the window's monitors and focus. The test fake records each call.
@@ -223,13 +258,21 @@ _Avoid_: option (a theme's options are something else)
 **Purpose** (`Purpose`, nexus-core `folders.rs`): what a console's folder is for, `Download` or
 `Install`. It picks the grant the folder lies in (`packages` or `games`), the key of the last
 pick, and the words of an error. `HostFolders::place` takes it with a console.
-_Avoid_: place (`Place` in `system.rs` says where Nexus runs), kind (a plugin's kind is something else)
+_Avoid_: place (a place is the backup browser's), kind (a plugin's kind is something else)
+
+**Recent folder** (`PlaceKind::Recent`): a folder a restore came from, kept as a place in the
+backup browser. The core keeps the last five in `app.backup_recent` (`Pref::BackupRecent`).
 
 **Refreshed copy**: a base copy brought up to date from its forums' feeds and forum lists. The
 Game Catalog keeps it in `refreshed/`.
 
 **Release metadata**: a release's `GameMetadata`: its game's words and art from a store, such as
 Steam's. The host fills in from it what the `metadata` plugins leave out.
+
+**Restore** (`BackupCmd::Restore`, `BackupCmd::RestoreFile`): putting a backup back on this
+computer. A restore first backs up what is here of the items the backup holds, then writes each
+backup item where the plugin names it now. The settings go back at the next start ("Restart
+Nexus to finish").
 
 **Result**: how far a game got for the player, a `CompatLevel` (in-game, menus, boots or
 nothing). The core may ask after a game closes, and the library subsystem saves it under
@@ -260,7 +303,7 @@ alone, with no lock and no I/O.
 **Subsystem**: one area of the core's state with its own lock, saved records and ports. The core
 sends it commands, reads its snapshot and turns its events into work. The torrents, the game
 installs, the library, the preferences, the running games, the notices, the VPN setting and
-the launcher's update are subsystems.
+the launcher's update and the backups are subsystems.
 
 **System choice** (`SystemChoice`): a press on a grid's system chip, as `LibrarySystem` and
 `CatalogSystem` carry it: a system, such as `PS5`, or a grid filter. It reads as the chip's id.
@@ -271,6 +314,9 @@ it is removed.
 **Theme driver** (`ThemeDriver`, nexus-testkit): how a test drives a shown theme: by
 accessible labels and values, keys, clicks and Slint's clock, never by the `Vm` globals or the
 theme's callbacks.
+
+**Token default** (`TokenDef::default`): the value a design token has when a theme doesn't set
+it. A theme sets in `[theme.tokens]` only the tokens it changes.
 
 **Topic**: one release thread of a forum, as a catalog file lists it: the title, magnet link,
 size, peers and game info. `topic.rs` has its typed model, which the refresh and the reader

@@ -343,11 +343,12 @@ pub struct GameDetailVm {
     pub screenshots: Vec<ImageRef>,
     /// The game's page in a store, or empty.
     pub store_url: String,
-    /// For a Windows game packed with Wine that the catalog found on Steam: ProtonDB's tier,
-    /// such as `gold` (a release's [`nexus_api::FactKind::Compatibility`] fact). Empty for none.
-    pub protondb: String,
-    /// The game's ProtonDB page, for the same games; empty for none.
-    pub protondb_url: String,
+    /// How the game runs through a compatibility layer, from a release's
+    /// [`nexus_api::FactKind::Compatibility`] fact: who rates it (`ProtonDB`), the rating's word
+    /// (`gold`), and the game's page there. Empty for none.
+    pub layer_source: String,
+    pub layer_rating: String,
+    pub layer_url: String,
     /// How the game runs on this PC, from its emulator's needs: `None` before the check, or
     /// when the system can't say. For a game a catalog offers that doesn't fit in the
     /// download folder, `no` with "Not enough space" and the free space ("10.0 GB free").
@@ -732,6 +733,115 @@ pub struct SettingsVm {
     pub start_at_login_error: String,
     /// "Download only through a VPN", and the VPNs.
     pub vpn: VpnSettingsVm,
+    /// Settings → Backup.
+    pub backup: BackupVm,
+}
+
+/// Settings → Backup: the backup folder, the job in progress, and the backups there.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct BackupVm {
+    /// The backup folder, with the home folder as `~`.
+    pub folder: String,
+    /// A backup or a restore runs.
+    pub running: bool,
+    /// The job running is a restore.
+    pub restoring: bool,
+    /// How far the job is, from 0 to 1.
+    pub progress: f32,
+    /// What the last job did, or why it failed. Empty before one.
+    pub status: String,
+    /// `status` says why it failed.
+    pub failed: bool,
+    /// A restore finished: Nexus starts again to finish it.
+    pub restart: bool,
+    /// Newest first.
+    pub backups: Vec<BackupFileVm>,
+    /// What a backup holds on this computer now, joined with ", ": "Nexus settings, Switch
+    /// keys, PS5 saves".
+    pub holds: String,
+    /// The large items, which a backup takes only when asked, joined with ", ". Empty when no
+    /// plugin has one.
+    pub large: String,
+    /// The backup folder when the player chose none, with the home folder as `~`.
+    pub default_folder: String,
+    /// "Restore from another folder".
+    pub browser: BackupBrowserVm,
+}
+
+/// "Restore from another folder": a folder's folders and backups, and the places to go to.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct BackupBrowserVm {
+    pub open: bool,
+    /// The folder shown, with the home folder as `~`.
+    pub shown: String,
+    /// Its parent, a full path for Backup Browse. Empty at the top.
+    pub parent: String,
+    /// The folder's path, one part each from `~` or the top; the last is the folder.
+    pub crumbs: Vec<BrowseCrumbVm>,
+    pub places: Vec<BrowsePlaceVm>,
+    /// The index in `places` of the place that is the folder shown; -1 when none is.
+    pub place: i32,
+    /// The folders with backups, the other folders, then the backups newest first: those whose
+    /// name holds `filter`.
+    pub entries: Vec<BrowseEntryVm>,
+    /// Hidden folders are listed (Backup ShowHidden).
+    pub hidden: bool,
+    /// The text that filters the entries (Backup Filter). Empty for all.
+    pub filter: String,
+}
+
+/// One part of the browser's path: `~`, `Downloads`, `old-pc`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct BrowseCrumbVm {
+    pub name: String,
+    /// A full path, for Backup Browse.
+    pub path: String,
+}
+
+/// A place the browser goes to: Home, the backup folder, a drive, a recent folder.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct BrowsePlaceVm {
+    pub name: String,
+    /// A full path, for Backup Browse.
+    pub path: String,
+    /// home | downloads | desktop | documents | backups | drive | recent.
+    pub kind: String,
+    /// A drive's size, such as "32.0 GB"; a recent folder's path. Empty for the others.
+    pub detail: String,
+}
+
+/// A folder, or a backup, in the browser's folder.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct BrowseEntryVm {
+    /// The folder's or the file's name.
+    pub name: String,
+    /// A full path: for Backup Browse (a folder) or Backup RestoreFile (a backup).
+    pub path: String,
+    pub folder: bool,
+    /// A folder's: "2 backups", "empty", "can't be read", or empty. Empty for a backup.
+    pub detail: String,
+    /// A backup's: as in [`BackupFileVm`]. Empty for a folder.
+    pub date: String,
+    pub size: String,
+    pub items: String,
+    /// The computer that made the backup; empty when it doesn't say.
+    pub computer: String,
+    /// A newer Nexus made the backup: this one doesn't restore it.
+    pub newer: bool,
+}
+
+/// One backup in the backup folder.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct BackupFileVm {
+    /// Its file name: what Backup Restore takes.
+    pub file: String,
+    /// When it was made: `Nov 9, 2026, 14:30 UTC`.
+    pub date: String,
+    pub size: String,
+    /// What it holds: its items' titles, joined with ", ".
+    pub items: String,
+    /// The backup a restore made of what was there before.
+    pub before_restore: bool,
 }
 
 /// "Download only through a VPN", and the VPNs this computer has.

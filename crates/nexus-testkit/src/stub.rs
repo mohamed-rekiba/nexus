@@ -115,3 +115,33 @@ impl CodePlugin for StubPlugin {
         }
     }
 }
+
+/// A plugin's backup items, as the test sets them: [`StubPlugin::backs_up`].
+#[derive(Clone, Default)]
+pub struct FakeBackup {
+    items: Arc<std::sync::Mutex<Vec<nexus_api::BackupItem>>>,
+}
+
+impl FakeBackup {
+    pub fn new(items: Vec<nexus_api::BackupItem>) -> Self {
+        Self { items: Arc::new(std::sync::Mutex::new(items)) }
+    }
+}
+
+#[async_trait::async_trait]
+impl nexus_api::Backup for FakeBackup {
+    async fn items(&self) -> PluginResult<Vec<nexus_api::BackupItem>> {
+        Ok(self.items.lock().unwrap().clone())
+    }
+}
+
+impl StubPlugin {
+    /// A plugin that provides only `backup`, with `permissions`: TOML for its `[permissions]`.
+    pub fn backs_up(id: &str, permissions: &str, backup: FakeBackup) -> Self {
+        StubPlugin::from_toml(&format!(
+            "id = \"{id}\"\nkind = \"emulator\"\nname = \"{id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
+             capabilities = [\"backup\"]\n[permissions]\n{permissions}\n"
+        ))
+        .provides(move |_| Ok(Provided { backup: Some(Arc::new(backup.clone())), ..Provided::default() }))
+    }
+}

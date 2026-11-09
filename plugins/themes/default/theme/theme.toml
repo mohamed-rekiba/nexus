@@ -1,23 +1,80 @@
 id = "default"
 kind = "theme"
 name = "Default"
-version = "0.1.0"
+version = "0.2.0"
 host_api = "^0.2"
 capabilities = ["theme"]
 activation = "eager"
 
 # The Default theme, the one the app starts with. Home is a list of the systems the emulators
 # play, on the far side, with the focused system's cover behind it; each opens the Library on
-# its games. Every other screen, the tokens, the fonts and the sounds are the Classic theme's. The systems' icons and covers come from their
-# emulator plugins: `[theme.systems.<SYSTEM>]` would put this theme's own in their place.
+# its games. The other screens are the kit's pages in this theme's frame. It sets no tokens:
+# the contract's defaults are its look. The systems' icons and covers come from their emulator
+# plugins: `[theme.systems.<SYSTEM>]` would put this theme's own in their place.
 [theme]
 ui_api = "^0.2.0"
-extends = "classic"
-screens = ["home"]
+# The theme the app starts with, falls back to, and uses in safe mode.
+fallback = true
 input = ["gamepad", "pointer"]
 navigation = "focus"
 
-# The "All games" entry at the top of the list (scripts/make-system-art.sh).
+[[theme.breakpoints]]
+name = "compact"
+max_width = 900
+
+[[theme.breakpoints]]
+name = "regular"
+
+[theme.assets]
+fonts = [
+    "fonts/Inter-Regular.ttf",
+    "fonts/Inter-Medium.ttf",
+    "fonts/Inter-SemiBold.ttf",
+    "fonts/Inter-Bold.ttf",
+    "fonts/Tajawal-Regular.ttf",
+    "fonts/Tajawal-Bold.ttf",
+]
+
 [theme.assets.images]
+# The Nexus emblem (assets/logo.svg in the repository, drawn at 512 px).
+logo = "images/logo.png"
+# The "All games" entry at the top of the list (scripts/make-system-art.sh).
 all-games-icon = "images/all-games-icon.png"
 all-games-cover = "images/all-games-cover.jpg"
+
+# select, back, error and start are made by scripts/make-sounds.py.
+[theme.assets.sounds]
+move = "sounds/move.wav"
+select = "sounds/select.wav"
+back = "sounds/back.wav"
+error = "sounds/error.wav"
+start = "sounds/start.wav"
+
+# Hidden for now: the right-to-left layout is not finished, so Settings does not offer it.
+[theme.options.direction]
+label = "Layout direction"
+hidden = true
+type = "choice"
+default = "ltr"
+
+[theme.options.direction.choices.ltr]
+layout-direction = "ltr"
+
+[theme.options.direction.choices.rtl]
+layout-direction = "rtl"
+
+# "off" turns the transitions into cuts.
+[theme.options.motion]
+label = "Animations"
+type = "choice"
+default = "on"
+
+[theme.options.motion.choices.on]
+motion-fast = 160
+motion-normal = 260
+motion-slow = 420
+
+[theme.options.motion.choices.off]
+motion-fast = 0
+motion-normal = 0
+motion-slow = 0

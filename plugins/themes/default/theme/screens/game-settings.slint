@@ -1,0 +1,76 @@
+import { Vm, Host } from "../types.slint";
+import { Commands } from "../kit/commands.slint";
+import { SheetFrame } from "../kit/sheet-frame.slint";
+import { Tokens } from "../tokens.slint";
+import { Look } from "../kit/look.slint";
+import { BackButton } from "../kit/widgets.slint";
+import { Prefs, Header, FieldRow } from "../kit/settings-rows.slint";
+
+// One game's own settings, from its emulator, as a side sheet like Settings: the rows and
+// keys of every sheet (`Prefs`, section 0). Back returns to the Game Hub.
+export component GameSettingsScreen inherits SheetFrame {
+    panel-width: 760 * Look.tpx;
+    // Keeps the focused row in view, as Settings does.
+    function reveal(y: length, h: length) {
+        let top = y - flick.absolute-position.y;
+        let margin = 120 * Look.px;
+        if (top + h > flick.height - margin) {
+            flick.viewport-y = Math.max(flick.height - flick.viewport-height, flick.viewport-y - (top + h - flick.height + margin));
+        } else if (top < margin) {
+            flick.viewport-y = Math.min(0, flick.viewport-y + (margin - top));
+        }
+    }
+
+
+    flick := Flickable {
+        // Up and down only: nothing drags sideways.
+        viewport-width: self.width;
+        viewport-height: sheet.preferred-height;
+        animate viewport-y { duration: Tokens.motion-normal; easing: ease-out-quad; }
+
+        sheet := VerticalLayout {
+            width: parent.width;
+            padding-left: 56 * Look.px;
+            padding-right: 56 * Look.px;
+            padding-top: 64 * Look.px;
+            padding-bottom: 120 * Look.px;
+            spacing: 0;
+
+            HorizontalLayout {
+                alignment: Look.rtl ? end : start;
+                padding-bottom: 20 * Look.px;
+                BackButton { pad: Vm.input-mode == "gamepad"; clicked => { Commands.back(); } }
+            }
+            Text {
+                text: Vm.detail.title;
+                font-size: 44 * Look.px;
+                font-weight: 600;
+                color: Tokens.color-text;
+                wrap: word-wrap;
+                horizontal-alignment: Look.rtl ? right : left;
+                accessible-role: text;
+                accessible-label: "game-settings-title";
+                accessible-value: self.text;
+            }
+            Text {
+                text: Vm.detail.settings.length > 0 ? Vm.detail.settings[0].slot.text : "";
+                font-size: 18 * Look.tpx;
+                color: Look.text3;
+                horizontal-alignment: Look.rtl ? right : left;
+            }
+            for panel[p] in Vm.detail.settings : VerticalLayout {
+                Header { text: "THIS GAME"; }
+                for field[i] in panel.fields : FieldRow {
+                    field: field;
+                    section: 0;
+                    index: i;
+                    first: i == 0;
+                    last: i == panel.fields.length - 1;
+                    reveal(y, h) => { root.reveal(y, h); }
+                    set(value) => { Commands.set-setting(panel.slot.plugin, panel.slot.scope, field.key, value); }
+                }
+            }
+        }
+    }
+
+}

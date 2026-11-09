@@ -58,6 +58,11 @@ pub enum Pref {
     Theme,
     /// The PC the "games won't start here" notice was last for. The core sets it.
     PcNoticed,
+    /// The folder Settings → Backup writes to and lists, as a path; null for `~/Nexus Backups`.
+    BackupFolder,
+    /// The last folders a restore came from, newest first: the browser's Recent places. The
+    /// core sets it.
+    BackupRecent,
 }
 
 /// What values a [`Pref`] takes.
@@ -69,6 +74,8 @@ pub enum PrefKind {
     Size { min: f32, max: f32 },
     /// A name, or null for none. Empty text is none.
     Name,
+    /// A list of paths.
+    Paths,
 }
 
 /// What a [`Pref`] is: its values, its value when unset, and whether the player sets it.
@@ -82,7 +89,7 @@ pub struct PrefSpec {
 
 impl Pref {
     /// Every preference.
-    pub const ALL: [Pref; 10] = [
+    pub const ALL: [Pref; 12] = [
         Pref::Sounds,
         Pref::Fullscreen,
         Pref::ReturnOnExit,
@@ -93,6 +100,8 @@ impl Pref {
         Pref::Welcomed,
         Pref::Theme,
         Pref::PcNoticed,
+        Pref::BackupFolder,
+        Pref::BackupRecent,
     ];
 
     /// Its key under `app` in the config.
@@ -108,6 +117,8 @@ impl Pref {
             Pref::Welcomed => "welcomed",
             Pref::Theme => "theme",
             Pref::PcNoticed => "pc_noticed",
+            Pref::BackupFolder => "backup_folder",
+            Pref::BackupRecent => "backup_recent",
         }
     }
 
@@ -118,8 +129,9 @@ impl Pref {
             }
             Pref::StartAtLogin | Pref::Welcomed => (PrefKind::Flag, Value::Bool(false), true),
             Pref::Scale => (PrefKind::Size { min: MIN_SCALE, max: MAX_SCALE }, Value::from(1.0), true),
-            Pref::Monitor => (PrefKind::Name, Value::Null, true),
+            Pref::Monitor | Pref::BackupFolder => (PrefKind::Name, Value::Null, true),
             Pref::Theme | Pref::PcNoticed => (PrefKind::Name, Value::Null, false),
+            Pref::BackupRecent => (PrefKind::Paths, Value::Array(Vec::new()), false),
         };
         PrefSpec { kind, default, by_player }
     }
@@ -155,6 +167,7 @@ impl Pref {
         match (self.spec().kind, value) {
             (PrefKind::Flag, Value::Bool(_)) => Some(value.clone()),
             (PrefKind::Name, Value::Null | Value::String(_)) => Some(value.clone()),
+            (PrefKind::Paths, Value::Array(paths)) => paths.iter().all(Value::is_string).then(|| value.clone()),
             (PrefKind::Size { min, max }, Value::Number(n)) => {
                 let size = n.as_f64()? as f32;
                 size.is_finite().then(|| Value::from(f64::from(size.clamp(min, max))))
@@ -293,6 +306,8 @@ mod tests {
             (Pref::Welcomed, Value::Bool(false)),
             (Pref::Theme, Value::Null),
             (Pref::PcNoticed, Value::Null),
+            (Pref::BackupFolder, Value::Null),
+            (Pref::BackupRecent, serde_json::json!([])),
         ];
         assert_eq!(defaults.len(), Pref::ALL.len(), "every pref has a row");
         for (pref, default) in defaults {
@@ -333,6 +348,8 @@ mod tests {
         assert!(Pref::Scale.check(Value::from("big")).is_err());
         assert!(Pref::Sounds.check(Value::from(1)).is_err());
         assert!(Pref::Monitor.check(Value::Bool(true)).is_err());
+        assert!(Pref::BackupRecent.check(serde_json::json!(["/a", 3])).is_err(), "a list of paths only");
+        assert!(Pref::BackupRecent.check(serde_json::json!(["/a"])).is_ok());
     }
 
     #[test]
@@ -344,6 +361,6 @@ mod tests {
     #[test]
     fn the_player_sets_only_their_own_prefs() {
         let by_core: Vec<Pref> = Pref::ALL.into_iter().filter(|p| !p.spec().by_player).collect();
-        assert_eq!(by_core, [Pref::Theme, Pref::PcNoticed]);
+        assert_eq!(by_core, [Pref::Theme, Pref::PcNoticed, Pref::BackupRecent]);
     }
 }

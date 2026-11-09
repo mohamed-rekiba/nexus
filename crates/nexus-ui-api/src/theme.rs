@@ -1,4 +1,4 @@
-//! `theme.toml`: the `[theme]` section, and merging a theme with the themes it extends.
+//! `theme.toml`: the `[theme]` section, and a theme's values with its option values applied.
 
 use std::collections::BTreeMap;
 
@@ -7,11 +7,6 @@ use semver::VersionReq;
 use serde::{Deserialize, Serialize};
 
 use crate::tokens::{TOKENS, TokenValue, token};
-use crate::{ComponentId, ScreenId};
-
-/// The id of the built-in theme the app starts with, falls back to and uses in safe mode. The
-/// Themes list shows it first.
-pub const BASE_THEME: &str = "default";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -105,15 +100,10 @@ pub enum OptionKind {
 pub struct ThemeSection {
     /// The `nexus-ui-api` versions this theme works with.
     pub ui_api: VersionReq,
-    /// The parent theme. Missing screens, components, tokens and assets come from it.
+    /// The theme the app starts with, falls back to when another fails, and uses in safe mode.
+    /// The Themes list shows it first. Exactly one installed theme sets it.
     #[serde(default)]
-    pub extends: Option<PluginId>,
-    /// Screens this theme defines itself.
-    #[serde(default)]
-    pub screens: Vec<ScreenId>,
-    /// Components this theme defines itself.
-    #[serde(default)]
-    pub components: Vec<ComponentId>,
+    pub fallback: bool,
     /// Input devices the theme supports, the main one first.
     #[serde(default)]
     pub input: Vec<InputMode>,
@@ -121,7 +111,7 @@ pub struct ThemeSection {
     pub navigation: Option<Navigation>,
     #[serde(default)]
     pub tokens: BTreeMap<String, toml::Value>,
-    /// Replaces the parent's breakpoints when not empty.
+    /// Named window sizes, the first match wins.
     #[serde(default)]
     pub breakpoints: Vec<Breakpoint>,
     #[serde(default)]
@@ -135,7 +125,7 @@ pub struct ThemeSection {
 }
 
 /// A system's two pictures: a square icon, and a wide cover. A theme names files
-/// (`Art<RelPath>`), the merged theme the layer each comes from, and the UI host decodes them.
+/// (`Art<RelPath>`), and the UI host decodes them.
 /// A picture left out stays the emulator plugin's.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -181,10 +171,8 @@ pub enum ThemeError {
     Manifest { theme: PluginId, message: String },
     #[error("theme {theme} needs UI API {required}, this host has {actual}")]
     UiApi { theme: PluginId, required: String, actual: String },
-    #[error("theme {theme} extends {parent}, which isn't installed")]
-    MissingParent { theme: PluginId, parent: PluginId },
-    #[error("theme {theme} extends itself through {chain:?}")]
-    Cycle { theme: PluginId, chain: Vec<PluginId> },
+    #[error("{0}")]
+    Fallback(String),
     #[error("theme {theme}: token {token}: {message}")]
     Token { theme: PluginId, token: String, message: String },
     #[error("theme {theme}: {file}: {message}")]
@@ -203,6 +191,16 @@ impl ThemeManifest {
     pub fn from_plugin(plugin: &PluginManifest) -> Result<Self, ThemeError> {
         let err = |message: String| ThemeError::Manifest { theme: plugin.id.clone(), message };
         let section = plugin.extra.get("theme").ok_or_else(|| err("no [theme] section".into()))?;
+        // Keys of the old inheritance model, refused with what to do instead.
+        for (key, instead) in [
+            ("extends", "a theme stands alone; import the shared parts from kit/ instead of extending a theme"),
+            ("screens", "a theme ships every screen, so it doesn't list them; remove `screens`"),
+            ("components", "a theme replaces a kit file by shipping kit/<name>.slint; remove `components`"),
+        ] {
+            if section.get(key).is_some() {
+                return Err(err(format!("`{key}` is not supported: {instead}")));
+            }
+        }
         let theme: ThemeSection =
             section.clone().try_into().map_err(|e: toml::de::Error| err(e.message().to_owned()))?;
         for name in theme.assets.images.keys() {
@@ -236,13 +234,6 @@ fn is_identifier(name: &str) -> bool {
         && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
-/// A file a merged theme refers to, with the chain layer it comes from (0 = the theme itself).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LayerPath {
-    pub layer: usize,
-    pub path: RelPath,
-}
-
 /// An option's value, as the theme's `Options` global holds it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OptionValue {
@@ -252,18 +243,16 @@ pub enum OptionValue {
     Color(u32),
 }
 
-/// A theme with everything it inherits filled in.
+/// A theme's values with the token defaults and the player's options applied.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MergedTheme {
     pub id: PluginId,
-    /// The theme first, then its parent, up to the root theme.
-    pub chain: Vec<PluginId>,
     pub tokens: BTreeMap<String, TokenValue>,
-    pub images: BTreeMap<String, LayerPath>,
-    pub fonts: Vec<LayerPath>,
-    pub sounds: BTreeMap<String, LayerPath>,
-    /// Each system's pictures from the chain, per picture: the child's wins.
-    pub system_art: BTreeMap<String, Art<LayerPath>>,
+    pub images: BTreeMap<String, RelPath>,
+    pub fonts: Vec<RelPath>,
+    pub sounds: BTreeMap<String, RelPath>,
+    /// Each system's pictures the theme sets in place of its emulator plugin's.
+    pub system_art: BTreeMap<String, Art<RelPath>>,
     pub breakpoints: Vec<Breakpoint>,
     pub input: Vec<InputMode>,
     pub navigation: Navigation,
@@ -278,53 +267,25 @@ impl MergedTheme {
     }
 }
 
-/// Merges `chain` (the theme first, then its parents) and applies the player's option values.
-/// Every token must end up with a value.
-pub fn merge_chain(chain: &[&ThemeManifest], option_values: &serde_json::Value) -> Result<MergedTheme, ThemeError> {
-    let theme = chain.first().expect("a chain has at least the theme itself").id().clone();
+/// `manifest`'s values with the player's option values applied. A token the theme leaves out
+/// keeps its default.
+pub fn merge(manifest: &ThemeManifest, option_values: &serde_json::Value) -> Result<MergedTheme, ThemeError> {
+    let theme = manifest.id().clone();
+    let section = &manifest.theme;
     let token_error =
         |token: &str, message: String| ThemeError::Token { theme: theme.clone(), token: token.to_owned(), message };
 
-    let mut tokens = BTreeMap::new();
-    let mut images = BTreeMap::new();
-    let mut sounds = BTreeMap::new();
-    let mut system_art: BTreeMap<String, Art<LayerPath>> = BTreeMap::new();
-    let mut fonts = Vec::new();
-    let mut breakpoints = Vec::new();
-    // Root theme first, so children overwrite.
-    for (layer, manifest) in chain.iter().enumerate().rev() {
-        let section = &manifest.theme;
-        for (name, value) in &section.tokens {
-            let def = token(name).ok_or_else(|| token_error(name, "no such token".into()))?;
-            tokens.insert(name.clone(), TokenValue::parse(def.kind, value).map_err(|m| token_error(name, m))?);
-        }
-        for (name, path) in &section.assets.images {
-            images.insert(name.clone(), LayerPath { layer, path: path.clone() });
-        }
-        for (name, path) in &section.assets.sounds {
-            sounds.insert(name.clone(), LayerPath { layer, path: path.clone() });
-        }
-        for (system, art) in &section.systems {
-            let merged = system_art.entry(system.clone()).or_default();
-            let at = |path: &RelPath| LayerPath { layer, path: path.clone() };
-            if let Some(icon) = &art.icon {
-                merged.icon = Some(at(icon));
-            }
-            if let Some(cover) = &art.cover {
-                merged.cover = Some(at(cover));
-            }
-        }
-        fonts.extend(section.assets.fonts.iter().map(|path| LayerPath { layer, path: path.clone() }));
-        if !section.breakpoints.is_empty() {
-            breakpoints = section.breakpoints.clone();
-        }
+    let mut tokens: BTreeMap<String, TokenValue> =
+        TOKENS.iter().map(|t| (t.name.to_owned(), t.default_value())).collect();
+    for (name, value) in &section.tokens {
+        let def = token(name).ok_or_else(|| token_error(name, "no such token".into()))?;
+        tokens.insert(name.clone(), TokenValue::parse(def.kind, value).map_err(|m| token_error(name, m))?);
     }
 
-    // Options the player set change tokens last. Unset options leave the chain's tokens,
-    // which are the theme's default look.
-    let options = merge_options(chain);
+    // Options the player set change tokens last. Unset options leave the theme's tokens, which
+    // are its default look.
     let mut values = BTreeMap::new();
-    for (name, option) in &options {
+    for (name, option) in &section.options {
         if !is_slint_name(name) {
             return Err(ThemeError::Manifest {
                 theme: theme.clone(),
@@ -357,28 +318,17 @@ pub fn merge_chain(chain: &[&ThemeManifest], option_values: &serde_json::Value) 
         }
     }
 
-    if let Some(missing) = TOKENS.iter().find(|t| !tokens.contains_key(t.name)) {
-        return Err(token_error(missing.name, "no theme in the chain sets it".into()));
-    }
-
-    let first = |f: fn(&ThemeSection) -> Option<Navigation>| chain.iter().find_map(|m| f(&m.theme));
     Ok(MergedTheme {
         id: theme.clone(),
-        chain: chain.iter().map(|m| m.id().clone()).collect(),
         tokens,
-        images,
-        fonts,
-        sounds,
-        system_art,
-        breakpoints,
-        input: chain
-            .iter()
-            .map(|m| &m.theme.input)
-            .find(|i| !i.is_empty())
-            .cloned()
-            .unwrap_or(vec![InputMode::Pointer]),
-        navigation: first(|t| t.navigation).unwrap_or_default(),
-        options,
+        images: section.assets.images.clone(),
+        fonts: section.assets.fonts.clone(),
+        sounds: section.assets.sounds.clone(),
+        system_art: section.systems.clone(),
+        breakpoints: section.breakpoints.clone(),
+        input: if section.input.is_empty() { vec![InputMode::Pointer] } else { section.input.clone() },
+        navigation: section.navigation.unwrap_or_default(),
+        options: section.options.clone(),
         option_values: values,
     })
 }
@@ -400,15 +350,6 @@ fn is_slint_name(name: &str) -> bool {
     let mut chars = name.chars();
     chars.next().is_some_and(|c| c.is_ascii_lowercase())
         && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-}
-
-/// The options of a chain (the theme first), the theme's own winning.
-pub fn merge_options(chain: &[&ThemeManifest]) -> BTreeMap<String, ThemeOption> {
-    let mut options = BTreeMap::new();
-    for manifest in chain.iter().rev() {
-        options.extend(manifest.theme.options.clone());
-    }
-    options
 }
 
 /// The options as a JSON Schema, for the Settings screen.
@@ -458,20 +399,35 @@ mod tests {
     }
 
     #[test]
-    fn a_child_overrides_tokens_and_inherits_the_rest() {
-        let base = manifest("base", &all_tokens());
-        let child = manifest("child", "extends = \"base\"\n[theme.tokens]\ncolor-accent = \"#ff0000\"");
-        let merged = merge_chain(&[&child, &base], &serde_json::Value::Null).unwrap();
-        assert_eq!(merged.tokens["color-accent"], TokenValue::Color(0xff0000ff));
-        assert_eq!(merged.tokens["color-bg"], TokenValue::Color(0x000000ff));
-        assert_eq!(merged.chain, [PluginId::new("child").unwrap(), PluginId::new("base").unwrap()]);
+    fn the_old_inheritance_keys_are_refused_with_what_to_do() {
+        for (key, line) in [
+            ("extends", "extends = \"base\""),
+            ("screens", "screens = [\"home\"]"),
+            ("components", "components = [\"card\"]"),
+        ] {
+            let text = format!(
+                "id = \"old\"\nkind = \"theme\"\nname = \"old\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
+                 capabilities = [\"theme\"]\n[theme]\nui_api = \"^0.2\"\n{line}"
+            );
+            let err = ThemeManifest::from_plugin(&PluginManifest::from_toml(&text).unwrap()).unwrap_err();
+            assert!(matches!(&err, ThemeError::Manifest { message, .. } if message.contains(key)), "{err}");
+        }
     }
 
     #[test]
-    fn a_chain_missing_a_token_is_an_error_naming_it() {
+    fn a_token_the_theme_leaves_out_keeps_its_default() {
         let lonely = manifest("lonely", "[theme.tokens]\ncolor-bg = \"#000000\"");
-        let err = merge_chain(&[&lonely], &serde_json::Value::Null).unwrap_err();
-        assert!(matches!(err, ThemeError::Token { ref token, .. } if token == "color-surface"), "{err}");
+        let merged = merge(&lonely, &serde_json::Value::Null).unwrap();
+        assert_eq!(merged.tokens["color-bg"], TokenValue::Color(0x000000ff));
+        assert_eq!(merged.tokens["color-surface"], TokenValue::Color(0x121a31ff), "Classic's surface");
+        assert_eq!(merged.tokens.len(), TOKENS.len());
+    }
+
+    #[test]
+    fn a_wrong_token_value_is_an_error_naming_it() {
+        let wrong = manifest("wrong", "[theme.tokens]\ncolor-bg = \"blue\"");
+        let err = merge(&wrong, &serde_json::Value::Null).unwrap_err();
+        assert!(matches!(err, ThemeError::Token { ref token, .. } if token == "color-bg"), "{err}");
     }
 
     #[test]
@@ -486,11 +442,11 @@ mod tests {
             ),
         );
         // Unset: the theme's own tokens (all_tokens sets colors to black and lengths to 1).
-        let defaults = merge_chain(&[&base], &serde_json::Value::Null).unwrap();
+        let defaults = merge(&base, &serde_json::Value::Null).unwrap();
         assert_eq!(defaults.tokens["color-accent"], TokenValue::Color(0x000000ff));
         assert_eq!(defaults.tokens["space-m"], TokenValue::Length(1.0));
 
-        let picked = merge_chain(&[&base], &serde_json::json!({"accent": "#0000ff", "density": "compact"})).unwrap();
+        let picked = merge(&base, &serde_json::json!({"accent": "#0000ff", "density": "compact"})).unwrap();
         assert_eq!(picked.tokens["color-accent"], TokenValue::Color(0x0000ffff));
         assert_eq!(picked.tokens["space-m"], TokenValue::Length(8.0));
 
@@ -508,7 +464,7 @@ mod tests {
                 all_tokens()
             ),
         );
-        let picked = merge_chain(&[&base], &serde_json::json!({"density": "compact"})).unwrap();
+        let picked = merge(&base, &serde_json::json!({"density": "compact"})).unwrap();
         assert_eq!(picked.tokens["space-m"], TokenValue::Length(8.0), "it still works");
         assert!(options_schema(&picked.options)["properties"].as_object().unwrap().is_empty());
     }
@@ -523,7 +479,7 @@ mod tests {
                 all_tokens()
             ),
         );
-        let merged = merge_chain(&[&base], &serde_json::Value::Null).unwrap();
+        let merged = merge(&base, &serde_json::Value::Null).unwrap();
         assert_eq!(merged.breakpoint(1920.0, 1080.0, 1.0), "tv");
         assert_eq!(merged.breakpoint(1600.0, 1600.0, 1.0), "wide");
         assert_eq!(merged.breakpoint(800.0, 600.0, 2.0), "compact");

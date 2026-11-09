@@ -1,4 +1,4 @@
-//! The design token schema. Every theme sets values for these names; the Classic theme sets all.
+//! The design token schema. A theme sets the tokens it changes; the others keep their defaults.
 
 use serde::{Deserialize, Serialize};
 
@@ -21,51 +21,79 @@ pub struct TokenDef {
     pub name: &'static str,
     pub kind: TokenKind,
     pub group: &'static str,
+    /// The value a theme that doesn't set it gets: the Classic look's. Read with
+    /// [`TokenDef::default_value`].
+    pub default: &'static str,
 }
 
-const fn t(name: &'static str, kind: TokenKind, group: &'static str) -> TokenDef {
-    TokenDef { name, kind, group }
+const fn t(name: &'static str, kind: TokenKind, group: &'static str, default: &'static str) -> TokenDef {
+    TokenDef { name, kind, group, default }
+}
+
+impl TokenDef {
+    /// [`Self::default`] as a value of the token's kind.
+    pub fn default_value(&self) -> TokenValue {
+        let value = match self.kind {
+            Color | Text => toml::Value::String(self.default.to_owned()),
+            Length | Duration => toml::Value::Float(self.default.parse().expect("a token's default is a number")),
+            Int => toml::Value::Integer(self.default.parse().expect("a token's default is a whole number")),
+        };
+        TokenValue::parse(self.kind, &value).expect("a token's default has the token's kind")
+    }
 }
 
 use TokenKind::*;
 
 pub const TOKENS: &[TokenDef] = &[
-    t("color-bg", Color, "color"),
-    t("color-surface", Color, "color"),
-    t("color-surface-raised", Color, "color"),
-    t("color-text", Color, "color"),
-    t("color-text-muted", Color, "color"),
-    t("color-accent", Color, "color"),
-    t("color-on-accent", Color, "color"),
-    t("color-focus", Color, "color"),
-    t("color-success", Color, "color"),
-    t("color-warning", Color, "color"),
-    t("color-danger", Color, "color"),
-    t("color-info", Color, "color"),
-    t("color-overlay", Color, "color"),
-    t("font-family", Text, "typography"),
-    t("font-size-s", Length, "typography"),
-    t("font-size-m", Length, "typography"),
-    t("font-size-l", Length, "typography"),
-    t("font-size-xl", Length, "typography"),
-    t("font-weight-regular", Int, "typography"),
-    t("font-weight-bold", Int, "typography"),
-    t("space-xs", Length, "spacing"),
-    t("space-s", Length, "spacing"),
-    t("space-m", Length, "spacing"),
-    t("space-l", Length, "spacing"),
-    t("space-xl", Length, "spacing"),
-    t("radius-s", Length, "radii"),
-    t("radius-m", Length, "radii"),
-    t("radius-l", Length, "radii"),
-    t("shadow-color", Color, "elevation"),
-    t("shadow-blur-1", Length, "elevation"),
-    t("shadow-blur-2", Length, "elevation"),
-    t("motion-fast", Duration, "motion"),
-    t("motion-normal", Duration, "motion"),
-    t("motion-slow", Duration, "motion"),
+    t("color-bg", Color, "color", "#05070f"),
+    t("color-surface", Color, "color", "#121a31"),
+    t("color-surface-raised", Color, "color", "#1a2440"),
+    t("color-text", Color, "color", "#f5f7fb"),
+    t("color-text-muted", Color, "color", "#b9c3da"),
+    t("color-accent", Color, "color", "#0a6cff"),
+    t("color-on-accent", Color, "color", "#ffffff"),
+    t("color-focus", Color, "color", "#ffffff"),
+    t("color-success", Color, "color", "#3ddc97"),
+    t("color-warning", Color, "color", "#ffb547"),
+    t("color-danger", Color, "color", "#ff5a6a"),
+    t("color-info", Color, "color", "#7ab4ff"),
+    t("color-overlay", Color, "color", "#03050ccc"),
+    // Deeper than the surface: sheets, hints, the backs of panels.
+    t("color-panel", Color, "color", "#0b1020"),
+    // Less than muted: hints and the third line of a row.
+    t("color-text-faint", Color, "color", "#7d88a3"),
+    // Text and marks drawn on `color-focus`.
+    t("color-on-focus", Color, "color", "#0a0d18"),
+    // The accent, light: links, and the glow of a focused field.
+    t("color-accent-soft", Color, "color", "#8dbaff"),
+    // Between success and warning: a game that reaches its menus.
+    t("color-caution", Color, "color", "#ffd24d"),
+    // Light and dark marks laid over anything, at an alpha the kit picks: lines, fills, shades.
+    t("color-tint", Color, "color", "#ffffff"),
+    t("color-shade", Color, "color", "#000000"),
+    t("font-family", Text, "typography", "Inter"),
+    t("font-size-s", Length, "typography", "15"),
+    t("font-size-m", Length, "typography", "19"),
+    t("font-size-l", Length, "typography", "26"),
+    t("font-size-xl", Length, "typography", "44"),
+    t("font-weight-regular", Int, "typography", "400"),
+    t("font-weight-bold", Int, "typography", "700"),
+    t("space-xs", Length, "spacing", "4"),
+    t("space-s", Length, "spacing", "10"),
+    t("space-m", Length, "spacing", "18"),
+    t("space-l", Length, "spacing", "28"),
+    t("space-xl", Length, "spacing", "48"),
+    t("radius-s", Length, "radii", "8"),
+    t("radius-m", Length, "radii", "14"),
+    t("radius-l", Length, "radii", "20"),
+    t("shadow-color", Color, "elevation", "#00000099"),
+    t("shadow-blur-1", Length, "elevation", "18"),
+    t("shadow-blur-2", Length, "elevation", "36"),
+    t("motion-fast", Duration, "motion", "160"),
+    t("motion-normal", Duration, "motion", "260"),
+    t("motion-slow", Duration, "motion", "420"),
     // "ltr" or "rtl": which side a theme puts its leading edge on.
-    t("layout-direction", Text, "layout"),
+    t("layout-direction", Text, "layout", "ltr"),
 ];
 
 pub fn token(name: &str) -> Option<&'static TokenDef> {
@@ -129,6 +157,15 @@ mod tests {
         assert_eq!(parse_color("#10203040"), Some(0x10203040));
         assert_eq!(parse_color("102030"), None);
         assert_eq!(parse_color("#1020"), None);
+    }
+
+    #[test]
+    fn every_default_has_its_tokens_kind() {
+        for t in TOKENS {
+            // Panics with the token's name in the backtrace when a default is wrong.
+            let _ = t.default_value();
+        }
+        assert_eq!(token("color-accent").map(TokenDef::default_value), Some(TokenValue::Color(0x0a6cffff)));
     }
 
     #[test]

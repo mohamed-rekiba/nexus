@@ -224,6 +224,10 @@ async fn download_release(core: &Core, offer: &GameKey, release: &str, folder: O
 
 /// Runs the player's command on game installs.
 pub(crate) async fn game_install(core: &Core, command: GameInstallCmd) -> CoreResult<()> {
+    let starts = matches!(command, GameInstallCmd::Download { .. } | GameInstallCmd::Package { .. });
+    if starts && let Some(why) = crate::backups::busy(core) {
+        return Err(CoreError::Invalid(why.into()));
+    }
     match command {
         GameInstallCmd::Download { id, folder } => {
             if !core.torrents().has(&id) {

@@ -1,0 +1,661 @@
+import { Vm, Host, BrowseEntry } from "../types.slint";
+import { Commands } from "commands.slint";
+import { Tokens } from "../tokens.slint";
+import { Look } from "look.slint";
+import { Icon } from "icon.slint";
+import { Osk } from "keyboard.slint";
+
+// "Restore from another folder": a sheet over everything while `Vm.backup.browser.open`. The
+// places on one side, the folder's folders and backups in the middle, and what the focused one
+// is on the other side. Each shell shows it and sends it the keys first (`Browser.key`).
+//
+// Keys: Up and Down move in a pane; Left and Right, or L1 and R1, go between the places and the
+// files. ✕ (Enter) opens a place or a folder, and asks to restore a backup; △ (/) asks too.
+// ○ (Escape) clears the typed text first, then goes up a folder (the places: closes; the top:
+// closes). □ (Insert) or Ctrl+H shows the hidden folders, or not. Letters type into the text
+// that filters the files, Backspace takes the last one back. A restore asks once, in a dialog.
+// Mouse: a click opens a place or a folder, and asks to restore a backup; the wheel scrolls.
+// For a moment after a click opens a folder, clicks wait: the second click of a double click
+// would open a row of the new folder.
+export global Browser {
+    out property <bool> open: Vm.backup.browser.open;
+    // 0: the places; 1: the files.
+    in-out property <int> pane: 1;
+    in-out property <int> at-place;
+    in-out property <int> at-entry;
+    // The backup the dialog asks about, by its index in the files; -1 while no dialog shows.
+    in-out property <int> confirm: -1;
+    // In the dialog: 0 Restore, 1 Cancel.
+    in-out property <int> choice;
+    // The text typed to filter the files. The sheet keeps it, so keys typed faster than the
+    // core answers each add to it; the core gets all of it each time.
+    in-out property <string> typed;
+    // A click just opened something: the next clicks wait a moment (`clicked`).
+    in-out property <bool> resting;
+    out property <int> places: Vm.backup.browser.places.length;
+    out property <int> entries: Vm.backup.browser.entries.length;
+
+    // The browser opened, or its folder changed: the focus goes to the files' first row, and
+    // in the places to the folder's place when it is one.
+    public function arrived() {
+        root.pane = 1;
+        root.at-entry = 0;
+        root.confirm = -1;
+        root.typed = "";
+        // The place the folder is, else the one the focus was on.
+        root.at-place = Vm.backup.browser.place >= 0 ? Vm.backup.browser.place
+            : Math.min(root.at-place, Math.max(root.places - 1, 0));
+    }
+    public function close() {
+        root.confirm = -1;
+        Commands.close-backup-browser();
+        Host.play-sound("back");
+    }
+    public function go(i: int) {
+        root.at-place = i;
+        Commands.browse-backups(Vm.backup.browser.places[i].path);
+        Host.play-sound("select");
+    }
+    public function up() {
+        if (Vm.backup.browser.parent == "") { root.close(); return; }
+        Commands.browse-backups(Vm.backup.browser.parent);
+        Host.play-sound("back");
+    }
+    // A folder opens; a backup asks to restore.
+    public function open-entry(i: int) {
+        root.pane = 1;
+        root.at-entry = i;
+        if (i < 0 || i >= root.entries) { return; }
+        if (Vm.backup.browser.entries[i].folder) {
+            Commands.browse-backups(Vm.backup.browser.entries[i].path);
+            Host.play-sound("select");
+        } else {
+            root.ask(i);
+        }
+    }
+    // The dialog for the backup `i`. A backup a newer Nexus made can't be restored.
+    public function ask(i: int) {
+        if (i < 0 || i >= root.entries || Vm.backup.browser.entries[i].folder) { return; }
+        if (Vm.backup.browser.entries[i].newer || Vm.backup.running) { Host.play-sound("back"); return; }
+        root.confirm = i;
+        root.choice = 0;
+        Host.play-sound("select");
+    }
+    public function answer(restore: bool) {
+        let i = root.confirm;
+        root.confirm = -1;
+        if (restore && i >= 0 && i < root.entries) {
+            Commands.restore-backup-file(Vm.backup.browser.entries[i].path);
+            Host.play-sound("select");
+        } else {
+            Host.play-sound("back");
+        }
+    }
+    // The icon of a place, by its kind.
+    public pure function place-icon(kind: string) -> string {
+        kind == "home" ? "home" : kind == "downloads" ? "download" : kind == "desktop" ? "desktop"
+            : kind == "documents" ? "document" : kind == "backups" ? "star" : kind == "drive" ? "usb" : "clock"
+    }
+    function find(text: string) {
+        root.typed = text;
+        root.at-entry = 0;
+        Commands.filter-backups(text);
+    }
+    // A click on the place `place`, or on the file `entry`: it acts as Enter does there.
+    public function clicked(place: int, entry: int) {
+        if (root.resting) { return; }
+        root.resting = true;
+        if (place >= 0) { root.pane = 0; root.go(place); } else { root.open-entry(entry); }
+    }
+    public function toggle-hidden() {
+        Commands.show-hidden-backups(!Vm.backup.browser.hidden);
+        Host.play-sound("move");
+    }
+    function step(delta: int) {
+        if (root.pane == 0) {
+            root.at-place = Math.clamp(root.at-place + delta, 0, Math.max(root.places - 1, 0));
+        } else {
+            root.at-entry = Math.clamp(root.at-entry + delta, 0, Math.max(root.entries - 1, 0));
+        }
+        Host.play-sound("move");
+    }
+    // A key while the browser is open: true when it took it. It takes every key but the
+    // Control ones it has no use for, so nothing behind it moves. A held key repeats only the
+    // moves and Backspace: a held ✕ must not answer the dialog it opened.
+    public function key(text: string, repeat: bool, control: bool) -> bool {
+        if (repeat && !control && text != Key.UpArrow && text != Key.DownArrow && text != Key.PageUp
+            && text != Key.PageDown && text != Key.Backspace) {
+            return true;
+        }
+        if (root.confirm >= 0) {
+            if (text == Key.Return) {
+                root.answer(root.choice == 0);
+            } else if (text == Key.Escape || text == Key.Backspace) {
+                root.answer(false);
+            } else if (text == Key.LeftArrow || text == Key.RightArrow || text == Key.UpArrow || text == Key.DownArrow
+                || text == Key.Tab || text == Key.Backtab) {
+                root.choice = 1 - root.choice;
+                Host.play-sound("move");
+            }
+            return true;
+        }
+        if (control) {
+            if (text == "h" || text == "H") { root.toggle-hidden(); return true; }
+            return false;
+        }
+        // The panes don't swap sides right to left: the keys go where the panes are.
+        let toward-places = Key.LeftArrow;
+        let toward-files = Key.RightArrow;
+        if (text == Key.UpArrow || text == Key.DownArrow) {
+            root.step(text == Key.DownArrow ? 1 : -1);
+        } else if (text == Key.PageUp || text == Key.PageDown) {
+            root.step(text == Key.PageDown ? 8 : -8);
+        } else if (text == toward-places || text == Key.Backtab) {
+            if (root.pane != 0) { root.pane = 0; Host.play-sound("move"); }
+        } else if (text == toward-files || text == Key.Tab) {
+            if (root.pane != 1) { root.pane = 1; Host.play-sound("move"); }
+        } else if (text == Key.Return) {
+            if (root.pane == 0) {
+                if (root.places > 0) { root.go(root.at-place); }
+            } else {
+                root.open-entry(root.at-entry);
+            }
+        } else if (text == "/") {
+            if (root.pane == 1) { root.ask(root.at-entry); }
+        } else if (text == Key.Escape) {
+            if (root.typed != "") {
+                root.find("");
+            } else if (root.pane == 0) {
+                root.close();
+            } else {
+                root.up();
+            }
+        } else if (text == Key.Backspace) {
+            if (root.typed != "") {
+                let last = Osk.last-char(root.typed);
+                // A character the keyboard doesn't type can't be taken back alone: all go.
+                root.find(last == "" ? "" : (root.typed + "\u{1}").replace-all(last + "\u{1}", ""));
+            } else if (root.pane == 1) {
+                root.up();
+            }
+        } else if (text == Key.Insert) {
+            root.toggle-hidden();
+        } else if (text.character-count == 1 && text >= " " && text != Key.Delete
+            && !(text >= "\u{f700}" && text <= "\u{f8ff}")) {
+            root.pane = 1;
+            root.find(root.typed + text);
+        }
+        true
+    }
+}
+
+// One row of a pane: an icon, a name, and what it holds on the far side.
+component BrowserRow inherits Rectangle {
+    in property <string> icon;
+    in property <string> name;
+    in property <string> detail;
+    // The focus is here, and in this pane (lit), or in the other pane (marked).
+    in property <bool> lit;
+    in property <bool> marked;
+    in property <bool> dim;
+    callback picked();
+    height: 56 * Look.px;
+    border-radius: 12 * Look.px;
+    background: root.lit ? Tokens.color-focus : root.marked ? Look.fill-lit : touch.has-hover ? Look.fill : transparent;
+    animate background { duration: Look.timed(120ms); }
+    touch := TouchArea {
+        clicked => { root.picked(); }
+    }
+    HorizontalLayout {
+        padding-left: 14 * Look.px;
+        padding-right: 14 * Look.px;
+        spacing: 12 * Look.px;
+        VerticalLayout {
+            alignment: center;
+            Icon {
+                name: root.icon;
+                width: 24 * Look.px;
+                height: 24 * Look.px;
+                color: root.lit ? Look.ink : root.dim ? Look.text3 : Tokens.color-text-muted;
+            }
+        }
+        Text {
+            text: root.name;
+            font-size: 19 * Look.tpx;
+            font-weight: root.lit ? 600 : 400;
+            color: root.lit ? Look.ink : root.dim ? Look.text3 : Tokens.color-text;
+            vertical-alignment: center;
+            horizontal-alignment: Look.rtl ? right : left;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+        if root.detail != "" : Text {
+            text: root.detail;
+            font-size: 16 * Look.tpx;
+            color: root.lit ? Look.ink : Look.text3;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// A key and what it does, in the sheet's last line.
+component KeyHint inherits HorizontalLayout {
+    in property <string> pad;
+    in property <string> key;
+    in property <string> label;
+    property <bool> gamepad: Vm.input-mode == "gamepad";
+    spacing: 8 * Look.px;
+    VerticalLayout {
+        alignment: center;
+        Rectangle {
+        width: Math.max(28 * Look.px, cap.preferred-width + 14 * Look.px);
+        height: 28 * Look.px;
+        border-radius: root.gamepad ? self.height / 2 : 7 * Look.px;
+        background: Look.fill-lit;
+        cap := Text {
+            text: root.gamepad ? root.pad : root.key;
+            font-size: 14 * Look.tpx;
+            font-weight: 600;
+            color: Tokens.color-text;
+        }
+        }
+    }
+    Text {
+        text: root.label;
+        font-size: 16 * Look.tpx;
+        color: Tokens.color-text-muted;
+        vertical-alignment: center;
+    }
+}
+
+// A line of the details: a name and a value.
+component Fact inherits VerticalLayout {
+    in property <string> name;
+    in property <string> value;
+    spacing: 2 * Look.px;
+    Text { text: root.name; font-size: 14 * Look.tpx; color: Look.text3; horizontal-alignment: Look.rtl ? right : left; }
+    Text {
+        text: root.value;
+        font-size: 18 * Look.tpx;
+        color: Tokens.color-text;
+        wrap: word-wrap;
+        horizontal-alignment: Look.rtl ? right : left;
+    }
+}
+
+// A button of the sheet: Close, Restore, the dialog's two.
+component SheetButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> lit;
+    in property <bool> danger;
+    in property <string> name;
+    callback clicked();
+    height: 44 * Look.px;
+    width: Math.max(120 * Look.px, label.preferred-width + 36 * Look.px);
+    border-radius: 22 * Look.px;
+    background: root.lit ? (root.danger ? Tokens.color-danger : Tokens.color-focus) : touch.has-hover ? Look.fill-lit : Look.fill;
+    accessible-role: button;
+    accessible-label: root.name;
+    accessible-item-selected: root.lit;
+    accessible-action-default => { root.clicked(); }
+    touch := TouchArea { clicked => { root.clicked(); } }
+    label := Text {
+        text: root.text;
+        font-size: 17 * Look.tpx;
+        font-weight: 600;
+        color: root.lit ? Look.ink : Tokens.color-text;
+    }
+}
+
+export component BackupBrowser inherits Rectangle {
+    property <bool> entered;
+    Timer { interval: 16ms; running: !root.entered; triggered => { root.entered = true; } }
+    // The clicks wait this long after one that opened something.
+    Timer { interval: 400ms; running: Browser.resting; triggered => { Browser.resting = false; } }
+    init => { Browser.resting = false; Browser.arrived(); }
+    // The folder changed, or the filter: the focus goes back to the first row.
+    property <string> shown: Vm.backup.browser.shown;
+    changed shown => { Browser.arrived(); }
+    // The focused row stays in view.
+    property <int> focus-entry: Browser.at-entry;
+    changed focus-entry => { files.viewport-y = root.scrolled(files.viewport-y, Browser.at-entry, files.height); }
+    property <int> focus-place: Browser.at-place;
+    changed focus-place => { places.viewport-y = root.scrolled(places.viewport-y, Browser.at-place, places.height); }
+    property <length> row-pitch: 60 * Look.px;
+    // The scroll `y` (zero or less) that shows row `i` of a list `height` high.
+    pure function scrolled(y: length, i: int, height: length) -> length {
+        let top = i * root.row-pitch;
+        Math.min(0, top < -y ? -top : top + 2 * root.row-pitch > height - y ? height - top - 2 * root.row-pitch : y)
+    }
+    // The folder shown, as a full path.
+    property <string> here: Vm.backup.browser.crumbs[Vm.backup.browser.crumbs.length - 1].path;
+    // The focused file; an empty one when there is none.
+    property <BrowseEntry> entry: Vm.backup.browser.entries[Browser.at-entry];
+
+    accessible-role: groupbox;
+    accessible-label: "backup-browser";
+    accessible-value: Vm.backup.browser.shown;
+    background: root.entered ? Tokens.color-overlay.with-alpha(0.8) : Tokens.color-overlay.with-alpha(0);
+    animate background { duration: Tokens.motion-normal; }
+    TouchArea {}
+
+    card := Rectangle {
+        width: Math.min(root.width - 96 * Look.px, 1400 * Look.px);
+        height: Math.min(root.height - 96 * Look.px, 860 * Look.px);
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2 + (root.entered ? 0 : 24 * Look.px);
+        opacity: root.entered ? 1 : 0;
+        animate y { duration: Tokens.motion-slow; easing: ease-out-expo; }
+        animate opacity { duration: Tokens.motion-normal; }
+        border-radius: 22 * Look.px;
+        background: @linear-gradient(180deg, Tokens.color-surface 0%, Tokens.color-panel 100%);
+        border-width: 1px;
+        border-color: Look.line;
+        drop-shadow-blur: 48 * Look.px;
+        drop-shadow-color: Tokens.color-shade.with-alpha(0.6);
+        clip: true;
+
+        VerticalLayout {
+            // The title, the path and Close.
+            HorizontalLayout {
+                vertical-stretch: 0;
+                padding: 24 * Look.px;
+                padding-bottom: 16 * Look.px;
+                spacing: 16 * Look.px;
+                VerticalLayout {
+                    spacing: 6 * Look.px;
+                    horizontal-stretch: 1;
+                    Text {
+                        text: "Restore a backup";
+                        font-size: 26 * Look.tpx;
+                        font-weight: 700;
+                        color: Tokens.color-text;
+                        horizontal-alignment: Look.rtl ? right : left;
+                    }
+                    HorizontalLayout {
+                        spacing: 6 * Look.px;
+                        alignment: Look.rtl ? end : start;
+                        for crumb[i] in Vm.backup.browser.crumbs : HorizontalLayout {
+                            spacing: 6 * Look.px;
+                            if i > 0 : Text { text: "›"; font-size: 17 * Look.tpx; color: Look.text3; vertical-alignment: center; }
+                            Text {
+                                text: crumb.name;
+                                font-size: 17 * Look.tpx;
+                                color: i == Vm.backup.browser.crumbs.length - 1 ? Tokens.color-text : Tokens.color-text-muted;
+                                vertical-alignment: center;
+                                accessible-role: button;
+                                accessible-label: "browser-crumb";
+                                accessible-value: crumb.name;
+                                accessible-action-default => { Commands.browse-backups(crumb.path); }
+                                TouchArea { clicked => { Commands.browse-backups(crumb.path); } }
+                            }
+                        }
+                    }
+                }
+                if Browser.typed != "" : VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                    height: 40 * Look.px;
+                    width: typed.preferred-width + 56 * Look.px;
+                    border-radius: 20 * Look.px;
+                    background: Look.fill-lit;
+                    Icon { x: 14 * Look.px; name: "search"; width: 20 * Look.px; height: 20 * Look.px; color: Tokens.color-text-muted; }
+                    typed := Text {
+                        x: 42 * Look.px;
+                        text: Browser.typed;
+                        font-size: 17 * Look.tpx;
+                        color: Tokens.color-text;
+                        accessible-role: text;
+                        accessible-label: "browser-filter";
+                        accessible-value: Browser.typed;
+                    }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    SheetButton {
+                        text: Vm.backup.browser.hidden ? "Hide hidden" : "Show hidden";
+                        name: "browser-hidden";
+                        lit: Vm.backup.browser.hidden;
+                        clicked => { Browser.toggle-hidden(); }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    SheetButton {
+                        text: "Close";
+                        name: "browser-close";
+                        clicked => { Browser.close(); }
+                    }
+                }
+            }
+            Rectangle { height: 1px; background: Look.line; }
+
+            HorizontalLayout {
+                vertical-stretch: 1;
+                // The places.
+                Rectangle {
+                    width: Math.max(260 * Look.px, card.width * 0.24);
+                    places := Flickable {
+                        width: parent.width;
+                        height: parent.height;
+                        viewport-height: place-list.preferred-height;
+                        animate viewport-y { duration: Tokens.motion-normal; easing: ease-out-quad; }
+                        place-list := VerticalLayout {
+                            padding: 12 * Look.px;
+                            spacing: 4 * Look.px;
+                            for place[i] in Vm.backup.browser.places : VerticalLayout {
+                                // RECENT over the first recent folder.
+                                if place.kind == "recent" && (i == 0 || Vm.backup.browser.places[i - 1].kind != "recent") : Text {
+                                    text: "RECENT";
+                                    height: 32 * Look.px;
+                                    vertical-alignment: bottom;
+                                    font-size: 13 * Look.tpx;
+                                    font-weight: 600;
+                                    letter-spacing: 2 * Look.px;
+                                    color: Look.text3;
+                                    horizontal-alignment: Look.rtl ? right : left;
+                                }
+                                BrowserRow {
+                                    icon: Browser.place-icon(place.kind);
+                                    name: place.name;
+                                    detail: place.kind == "drive" ? place.detail : "";
+                                    lit: Browser.pane == 0 && Browser.at-place == i;
+                                    marked: Browser.pane != 0 && place.path == root.here;
+                                    accessible-role: list-item;
+                                    accessible-label: "browser-place";
+                                    accessible-value: place.name;
+                                    accessible-item-selected: Browser.pane == 0 && Browser.at-place == i;
+                                    accessible-action-default => { Browser.go(i); }
+                                    picked => { Browser.clicked(i, -1); }
+                                }
+                            }
+                        }
+                    }
+                }
+                Rectangle { width: 1px; background: Look.line; }
+
+                // The folder's folders and backups.
+                Rectangle {
+                    horizontal-stretch: 1;
+                    files := Flickable {
+                        width: parent.width;
+                        height: parent.height;
+                        viewport-height: file-list.preferred-height;
+                        animate viewport-y { duration: Tokens.motion-normal; easing: ease-out-quad; }
+                        file-list := VerticalLayout {
+                            padding: 12 * Look.px;
+                            spacing: 4 * Look.px;
+                            for entry[i] in Vm.backup.browser.entries : BrowserRow {
+                                icon: entry.folder ? "folder" : "archive";
+                                name: entry.folder ? entry.name : entry.date;
+                                detail: entry.folder ? entry.detail : entry.newer ? "Newer Nexus" : entry.size;
+                                dim: entry.newer;
+                                lit: Browser.pane == 1 && Browser.at-entry == i;
+                                marked: Browser.pane != 1 && Browser.at-entry == i;
+                                accessible-role: list-item;
+                                accessible-label: entry.folder ? "browser-folder" : "browser-backup";
+                                accessible-value: entry.name;
+                                accessible-description: entry.folder ? entry.detail : entry.newer ? "newer" : "";
+                                accessible-item-selected: Browser.pane == 1 && Browser.at-entry == i;
+                                accessible-action-default => { Browser.open-entry(i); }
+                                picked => { Browser.clicked(-1, i); }
+                            }
+                        }
+                    }
+                    if Browser.entries == 0 : Text {
+                        width: parent.width;
+                        height: parent.height;
+                        text: Vm.backup.browser.filter != "" ? "Nothing here holds “" + Vm.backup.browser.filter + "”"
+                            : "No backups here";
+                        font-size: 19 * Look.tpx;
+                        color: Look.text3;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        accessible-role: text;
+                        accessible-label: "browser-empty";
+                    }
+                }
+                Rectangle { width: 1px; background: Look.line; }
+
+                // What the focused row is.
+                Rectangle {
+                    width: Math.max(300 * Look.px, card.width * 0.26);
+                    VerticalLayout {
+                        width: parent.width;
+                        height: parent.height;
+                        padding: 24 * Look.px;
+                        spacing: 16 * Look.px;
+                        if Browser.pane == 0 && Browser.places > 0 : VerticalLayout {
+                            spacing: 16 * Look.px;
+                            Fact { name: "Place"; value: Vm.backup.browser.places[Browser.at-place].name; }
+                            Fact { name: "Folder"; value: Vm.backup.browser.places[Browser.at-place].path; }
+                            if Vm.backup.browser.places[Browser.at-place].detail != "" : Fact {
+                                name: Vm.backup.browser.places[Browser.at-place].kind == "drive" ? "Size" : "Shown as";
+                                value: Vm.backup.browser.places[Browser.at-place].detail;
+                            }
+                        }
+                        if Browser.pane == 1 && Browser.entries > 0 && root.entry.folder : VerticalLayout {
+                            spacing: 16 * Look.px;
+                            Fact { name: "Folder"; value: root.entry.name; }
+                            if root.entry.detail != "" : Fact { name: "Holds"; value: root.entry.detail; }
+                        }
+                        if Browser.pane == 1 && Browser.entries > 0 && !root.entry.folder : VerticalLayout {
+                            spacing: 16 * Look.px;
+                            Fact { name: "Made"; value: root.entry.date; }
+                            Fact { name: "From"; value: root.entry.computer != "" ? root.entry.computer : "Not known"; }
+                            Fact { name: "Size"; value: root.entry.size; }
+                            Fact { name: "Holds"; value: root.entry.items; }
+                            Fact { name: "File"; value: root.entry.name; }
+                            if root.entry.newer : Text {
+                                text: "A newer Nexus made this backup. Update Nexus to restore it.";
+                                font-size: 17 * Look.tpx;
+                                color: Tokens.color-caution;
+                                wrap: word-wrap;
+                            }
+                            if !root.entry.newer : SheetButton {
+                                text: "Restore";
+                                name: "browser-restore";
+                                clicked => { Browser.ask(Browser.at-entry); }
+                            }
+                        }
+                        // The rest of the height: the details stay at the top, and set no
+                        // height for the panes.
+                        Rectangle { vertical-stretch: 1; }
+                    }
+                }
+            }
+            Rectangle { height: 1px; background: Look.line; }
+
+            // The keys, and the last job's error.
+            HorizontalLayout {
+                vertical-stretch: 0;
+                padding: 16 * Look.px;
+                padding-left: 24 * Look.px;
+                padding-right: 24 * Look.px;
+                spacing: 24 * Look.px;
+                if Vm.backup.failed && Vm.backup.status != "" : Text {
+                    text: Vm.backup.status;
+                    font-size: 16 * Look.tpx;
+                    color: Tokens.color-danger;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+                // ✕ does nothing in an empty folder: no hint for it there.
+                if Browser.pane == 0 || Browser.entries > 0 : KeyHint {
+                    pad: "✕";
+                    key: "Enter";
+                    label: Browser.pane == 0 ? "Go" : root.entry.folder ? "Open" : root.entry.newer ? "Can't restore" : "Restore";
+                }
+                KeyHint { pad: "○"; key: "Esc"; label: Browser.typed != "" ? "Clear" : Browser.pane == 0 || Vm.backup.browser.parent == "" ? "Close" : "Up a folder"; }
+                KeyHint { pad: "L1  R1"; key: "← →"; label: "Places / Files"; }
+                KeyHint { pad: "□"; key: "Ctrl+H"; label: Vm.backup.browser.hidden ? "Hide hidden" : "Show hidden"; }
+                Rectangle { horizontal-stretch: 1; }
+                if Vm.input-mode != "gamepad" : Text {
+                    text: "Type to find";
+                    font-size: 16 * Look.tpx;
+                    color: Look.text3;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+
+    // The dialog before a restore.
+    if Browser.confirm >= 0 && Browser.confirm < Browser.entries : dialog := Rectangle {
+        background: Tokens.color-overlay.with-alpha(0.6);
+        TouchArea { clicked => { Browser.answer(false); } }
+        property <BrowseEntry> asked: Vm.backup.browser.entries[Browser.confirm];
+        Rectangle {
+            width: Math.min(root.width - 96 * Look.px, 640 * Look.px);
+            height: ask.preferred-height;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            border-radius: 22 * Look.px;
+            background: Tokens.color-surface;
+            border-width: 1px;
+            border-color: Look.line;
+            drop-shadow-blur: 40 * Look.px;
+            drop-shadow-color: Tokens.color-shade.with-alpha(0.6);
+            accessible-role: groupbox;
+            accessible-label: "browser-confirm";
+            accessible-value: dialog.asked.name;
+            TouchArea {}
+            ask := VerticalLayout {
+                padding: 28 * Look.px;
+                spacing: 22 * Look.px;
+                Text {
+                    text: "Restore the backup of " + dialog.asked.date
+                        + (dialog.asked.computer != "" ? " from " + dialog.asked.computer : "") + "?";
+                    font-size: 22 * Look.tpx;
+                    font-weight: 600;
+                    color: Tokens.color-text;
+                    wrap: word-wrap;
+                }
+                Text {
+                    text: "What's here now is backed up first. Then restart Nexus to finish.";
+                    font-size: 17 * Look.tpx;
+                    color: Tokens.color-text-muted;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    spacing: 12 * Look.px;
+                    alignment: end;
+                    SheetButton {
+                        text: "Restore";
+                        name: "browser-confirm-restore";
+                        lit: Browser.choice == 0;
+                        clicked => { Browser.answer(true); }
+                    }
+                    SheetButton {
+                        text: "Cancel";
+                        name: "browser-confirm-cancel";
+                        lit: Browser.choice == 1;
+                        clicked => { Browser.answer(false); }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,6 +1,6 @@
-//! Renders a stub library on every Classic theme screen, and in a child theme, to PNG files, with
-//! Slint's software renderer and no window. Its own test binary: it installs its own Slint
-//! platform.
+//! Renders a stub library on every Classic theme screen, and in another theme, to PNG files, with
+//! Slint's software renderer and no window. Each test installs its own Slint
+//! platform, on its own thread.
 
 use std::path::Path;
 use std::rc::Rc;
@@ -146,7 +146,7 @@ fn shoot_classic(host: &mut Composed, window: &MinimalSoftwareWindow, out: &Path
             // Up to the tabs, then along them, as a pad does.
             let (along, tabs) = (
                 if prefix.contains("rtl") { Key::LeftArrow } else { Key::RightArrow },
-                ["games", "updates", "downloads", "this-pc", "power"],
+                ["games", "updates", "downloads", "this-pc", "backup", "power"],
             );
             key(host, Key::UpArrow);
             for tab in tabs {
@@ -989,7 +989,62 @@ macro_rules! shots {
     )*};
 }
 
+/// Settings → Backup with a backup and its menu open, as `classic-backup-menu.png`; and the
+/// browser of "Restore from another folder" in each built-in theme: a folder, a backup in it, and
+/// the dialog before a restore, as `<theme>-backup-browser[-backup|-confirm].png`. Over the
+/// library the other screens show: the real KytyPS5 plugin names its saves; the home folder is a
+/// temporary one.
+fn shoot_backup(window: &MinimalSoftwareWindow, out: &Path) {
+    use slint::platform::Key;
+    window.set_size(slint::PhysicalSize::new(WIDTH, HEIGHT));
+    let home = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(home.path().join("Downloads/old-pc")).unwrap();
+    let mut host = library(home.path());
+    host.load_images();
+    host.dispatch(Command::Backup(nexus_core::BackupCmd::BackUp { large: false }));
+    host.dispatch(Command::Navigate(Route::Settings));
+    // Up to the tabs, and along them to Backup, which asks for the list as it opens.
+    key(&mut host, Key::UpArrow);
+    for _ in 0..5 {
+        key(&mut host, Key::RightArrow);
+    }
+    host.pump();
+    // Down to the backup, and Return opens its menu.
+    for _ in 0..4 {
+        key(&mut host, Key::DownArrow);
+    }
+    key(&mut host, Key::Return);
+    shoot(window, &out.join("classic-backup-menu.png"));
+    key(&mut host, Key::Escape);
+    // A backup on another computer's folder, and folders beside it.
+    let downloads = home.path().join("Downloads");
+    let made = std::fs::read_dir(home.path().join("Nexus Backups")).unwrap().next().unwrap().unwrap().path();
+    std::fs::copy(&made, downloads.join("old-pc").join(made.file_name().unwrap())).unwrap();
+    for folder in ["photos", "Switch saves"] {
+        std::fs::create_dir_all(downloads.join(folder)).unwrap();
+    }
+    for theme in [theme_classic::ID, theme_default::ID] {
+        host.ui.switch(&id(theme)).unwrap();
+        host.dispatch(Command::Backup(nexus_core::BackupCmd::Browse(Some(downloads.clone()))));
+        follow(&mut host);
+        shoot(window, &out.join(format!("{theme}-backup-browser.png")));
+        key(&mut host, Key::Return);
+        follow(&mut host);
+        shoot(window, &out.join(format!("{theme}-backup-browser-backup.png")));
+        // △ on a pad.
+        let triangle: slint::SharedString = "/".into();
+        host.instance().window().dispatch_event(slint::platform::WindowEvent::KeyPressed { text: triangle.clone() });
+        host.instance().window().dispatch_event(slint::platform::WindowEvent::KeyReleased { text: triangle });
+        follow(&mut host);
+        shoot(window, &out.join(format!("{theme}-backup-browser-confirm.png")));
+        key(&mut host, Key::Escape);
+        host.dispatch(Command::Backup(nexus_core::BackupCmd::CloseBrowser));
+    }
+    not_blank(out, &["classic-backup-browser-confirm", "default-backup-browser-confirm"]);
+}
+
 shots! {
+    the_backup_tab => shoot_backup,
     this_pc_screens => shoot_this_pc,
     the_releases => shoot_releases,
     a_ps4_cover => shoot_ps4_cover,
@@ -1009,6 +1064,7 @@ fn library(home: &Path) -> Composed {
     let mut host = composed_on_current_platform(|h| {
         h.home(home)
             .hardware(this_pc((1, 3)))
+            .computer("gaming-pc")
             .discover(&fixture_themes())
             .plugin(
                 FakeCatalog::new("emu-a")
@@ -1099,7 +1155,7 @@ fn the_classic_screens_render_right_to_left() {
 }
 
 #[test]
-fn a_child_theme_renders_the_same_library() {
+fn another_theme_renders_the_same_library() {
     let (window, out) = offscreen();
     let home = tempfile::tempdir().unwrap();
     let mut host = library(home.path());

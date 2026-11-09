@@ -35,6 +35,9 @@ pub(crate) struct Snapshot<'a> {
     pub prefs: PreferencesSnapshot,
     pub notices: Arc<Vec<Notice>>,
     pub launcher_update: LauncherUpdateSnapshot,
+    pub backup: crate::backup::BackupSnapshot,
+    /// Settings → Backup's folder; `None` with no home folder and none chosen.
+    pub backup_folder: Option<std::path::PathBuf>,
     pub vpn: VpnSnapshot,
     /// The emulator downloads.
     pub downloads: Vec<Job>,

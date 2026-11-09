@@ -42,7 +42,7 @@ pub use network::FakeNetwork;
 pub use platform::{FakePlatform, PlatformCall};
 pub use spans::SpanRecorder;
 pub use storage::MemStorage;
-pub use stub::StubPlugin;
+pub use stub::{FakeBackup, StubPlugin};
 pub use system::{FakeMachine, FakeSystem};
 pub use torrents::FakeTorrents;
 

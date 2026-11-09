@@ -234,11 +234,12 @@ export struct GameDetail {
     age-rating: string,
     screenshots: [image],
     store-url: string,
-    // For a Windows game packed with Wine that the catalog found on Steam: ProtonDB's tier
-    // (platinum, gold, silver, bronze, borked, native or pending) and its ProtonDB page.
-    // Empty for none.
-    protondb: string,
-    protondb-url: string,
+    // How the game runs through a compatibility layer: who rates it (ProtonDB), the rating's
+    // word (for ProtonDB: platinum, gold, silver, bronze, borked, native or pending), and the
+    // game's page there. Empty for none.
+    layer-source: string,
+    layer-rating: string,
+    layer-url: string,
     // How the game runs on this PC, from its emulator's needs. `has-this-pc` is false before
     // the check, and when the system can't say. A game a catalog offers that doesn't fit in
     // the download folder has level "no", headline "Not enough space" and why "10.0 GB free".
@@ -369,6 +370,35 @@ export struct VpnItem { name: string, kind: string, connected: bool, switchable:
 // why the last connect, disconnect or import failed.
 export struct VpnSettings { problem: string, only: bool, finds: bool, can-import: bool, chosen: string, route: string, vpns: [VpnItem], error: string }
 
+// One backup in the backup folder. file: what the command Backup Restore takes. date: when it
+// was made, "Nov 9, 2026, 14:30 UTC". items: what it holds, such as "Saves, Keys and firmware".
+// before-restore: the backup a restore made of what was there before.
+export struct BackupFile { file: string, date: string, size: string, items: string, before-restore: bool }
+
+// Settings → Backup. folder: the backup folder, with the home folder as `~`. running: a backup
+// or a restore runs (restoring: a restore), `progress` from 0 to 1. status: what the last one
+// did, or why it failed (failed). restart: a restore finished, and Nexus starts again to finish
+// it. backups: newest first.
+// "Restore from another folder", a sheet over everything while open. shown: the folder, with
+// the home folder as `~`. parent: its parent's full path, empty at the top. crumbs: the folder's
+// path, one part each, from `~` or the top (the last is the folder). places: where it goes, each
+// with a full path for the command Backup Browse; kind: home | downloads | desktop | documents |
+// backups | drive | recent; detail: a drive's size, a recent folder's path. entries: the folders
+// with backups, the other folders, then the backups newest first, each with a full path for
+// Backup Browse or Backup RestoreFile; only those whose name holds `filter`. A folder's detail:
+// "2 backups", "empty", "can't be read", or empty. A backup's computer: the computer that made
+// it, empty when it doesn't say; newer: a newer Nexus made it and this one doesn't restore it.
+// hidden: hidden folders are listed. place: the index in places of the folder shown, -1 when
+// it is no place.
+export struct BrowseCrumb { name: string, path: string }
+export struct BrowsePlace { name: string, path: string, kind: string, detail: string }
+export struct BrowseEntry { name: string, path: string, folder: bool, detail: string, date: string, size: string, items: string, computer: string, newer: bool }
+export struct BackupBrowser { open: bool, shown: string, parent: string, crumbs: [BrowseCrumb], places: [BrowsePlace], place: int, entries: [BrowseEntry], hidden: bool, filter: string }
+
+// holds: what a backup holds on this computer now. large: the large items a backup takes only
+// when asked, empty when no plugin has one. default-folder: the folder when none is chosen.
+export struct Backup { folder: string, running: bool, restoring: bool, progress: float, status: string, failed: bool, restart: bool, backups: [BackupFile], holds: string, large: string, default-folder: string, browser: BackupBrowser }
+
 // The launcher's own update. state: off | idle | checking | current | available |
 // downloading | ready | failed. text: what to tell the player.
 export struct LauncherUpdate { state: string, current: string, version: string, text: string, method: string }
@@ -447,6 +477,8 @@ export global Vm {
     in-out property <int> torrents-sharing;
     // "Download only through a VPN", and the VPNs.
     in-out property <VpnSettings> vpn;
+    // Settings → Backup.
+    in-out property <Backup> backup;
     in-out property <[SettingsPanel]> settings;
     in-out property <[Field]> theme-options;
     in-out property <[ThemeChoice]> themes;

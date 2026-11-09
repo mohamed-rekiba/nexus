@@ -10,9 +10,6 @@ type = "data"
 
 [theme]
 ui_api = "^0.2"
-extends = "default"
-screens = ["home"]
-components = ["card"]
 input = ["pointer"]
 navigation = "pointer"
 

@@ -1,6 +1,6 @@
 [package]
 name = "nexus-ui-host"
-description = "Renders themes with Slint: theme loading, inheritance, assets, switching with rollback, and binding view models."
+description = "Renders themes with Slint: theme loading with the kit beneath each theme, assets, switching with rollback, and binding view models."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

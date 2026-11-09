@@ -37,6 +37,8 @@ const CONSOLE: &str = "SWITCH";
 pub const FOLDER: &str = "Switch";
 /// Lichii's settings folder, where its window saves `qt-config.ini`.
 pub const CONFIG: &str = "eden-config";
+/// Eden's data folder, which every Lichii build shares: keys, firmware, saves and mods.
+pub const DATA: &str = "eden-data";
 /// The exit code eden-cli asks to be started again with (`kRestartExitCode` in Lichii).
 const RESTART_CODE: i32 = 75;
 /// The settings file games start with, in the plugin's folder (see [`controls`]).
@@ -220,6 +222,7 @@ impl CodePlugin for LichiiPlugin {
             launcher: Some(lichii.clone()),
             game_installer: Some(lichii),
             slots: Some(emu),
+            backup: Some(backup_items()),
             assets: Some(nexus_api::system_art!()),
             ..Provided::default()
         })
@@ -227,6 +230,24 @@ impl CodePlugin for LichiiPlugin {
 }
 
 inventory::submit! { PluginFactory::code(|| Box::new(LichiiPlugin)) }
+
+/// What a backup holds of Lichii: from Eden's data folder, the keys, the NAND (firmware and
+/// saves), the SD card, amiibo and mods; and the settings its window saves.
+fn backup_items() -> std::sync::Arc<dyn Backup> {
+    let data = |path: &str| BackupPlace::Folder(HostPath::new(DATA, 0, RelPath::new(path).expect("a plain path")));
+    emulator_kit::backup::Items::provided(vec![
+        BackupItem::new("keys", "Switch keys", data("keys")),
+        BackupItem::new("nand", "Switch firmware and saves", data("nand")),
+        BackupItem::new("sdmc", "Switch SD card", data("sdmc")),
+        BackupItem::new("amiibo", "amiibo", data("amiibo")),
+        BackupItem::new("load", "Switch mods", data("load")),
+        BackupItem::new(
+            "settings",
+            "Lichii settings",
+            BackupPlace::Folder(HostPath::new(CONFIG, 0, RelPath::new("qt-config.ini").expect("a plain path"))),
+        ),
+    ])
+}
 
 struct Lichii {
     emu: Arc<ConsoleEmulator<LichiiFlavor>>,

@@ -152,7 +152,10 @@ fn run(args: args::Args) -> Result<(), String> {
     }
     #[cfg(target_os = "macos")]
     shell.ui.set_fullscreen_with(Box::new(platform::simple_fullscreen));
-    shell.ui.start_with(args.theme.clone()).map_err(|e| format!("the default theme failed to start: {e}"))?;
+    shell
+        .ui
+        .start_with(args.theme.clone())
+        .map_err(|e| format!("no theme started, not even the fallback theme: {e}"))?;
     handle.spawn_blocking(move || nexus_ui_host::sweep_thumbs(&thumbs));
     APP.with(|app| *app.borrow_mut() = Some(App { shell }));
 

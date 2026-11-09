@@ -243,10 +243,10 @@ fn with_a_password_field() -> (tempfile::TempDir, Composed) {
     write_theme(
         dir.path(),
         "secrets",
-        "extends = \"default\"\nscreens = [\"emulators\"]",
+        "",
         &[(
             "screens/emulators.slint",
-            r#"import { TextField } from "../components/keyboard.slint";
+            r#"import { TextField } from "../kit/keyboard.slint";
 export component EmulatorsScreen inherits Rectangle {
     in property <bool> open;
     in property <bool> pushed;
@@ -325,7 +325,7 @@ fn a_settings_text_box_opened_with_the_controller_types_on_the_keyboard_too() {
 
 /// The lit tab of Settings.
 fn lit_settings_tab(host: &Composed) -> String {
-    ["Launcher", "Games", "Updates", "Downloads", "This PC", "System", "Power"]
+    ["Launcher", "Games", "Updates", "Downloads", "This PC", "System", "Backup", "Power"]
         .into_iter()
         .find(|name| {
             i_slint_backend_testing::ElementHandle::find_by_accessible_label(
@@ -349,13 +349,13 @@ fn l1_and_r1_go_round_every_tab_of_settings() {
     host.settle();
     assert_eq!(host.core().view().screen, nexus_ui_api::ScreenId::Settings);
     let mut back = vec![lit_settings_tab(&host)];
-    for _ in 0..6 {
+    for _ in 0..7 {
         host.pad(PadButton::LeftShoulder);
         back.push(lit_settings_tab(&host));
     }
     assert_eq!(
         back,
-        ["Launcher", "Power", "This PC", "Downloads", "Updates", "Games", "Launcher"],
+        ["Launcher", "Power", "Backup", "This PC", "Downloads", "Updates", "Games", "Launcher"],
         "L1 reaches every tab and wraps"
     );
     assert_eq!(host.core().view().screen, nexus_ui_api::ScreenId::Settings, "and stays in Settings");

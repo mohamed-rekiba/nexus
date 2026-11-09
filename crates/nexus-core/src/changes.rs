@@ -37,6 +37,8 @@ pub enum Area {
     Hardware,
     /// The launcher's own update.
     LauncherUpdate,
+    /// Settings → Backup: the backups and the job in progress.
+    Backup,
 }
 
 /// The core's state in `area` changed.

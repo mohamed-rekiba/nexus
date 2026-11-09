@@ -1,35 +1,38 @@
 import { Vm, Host } from "types.slint";
-import { Commands } from "commands.slint";
+import { Commands } from "kit/commands.slint";
 import { Tokens } from "tokens.slint";
-import { Look } from "components/look.slint";
+import { Look } from "kit/look.slint";
 import { Nav } from "components/nav.slint";
 import { Backdrop } from "components/backdrop.slint";
-import { Button } from "components/button.slint";
+import { Button } from "kit/button.slint";
 import { TopBar, Hints } from "components/top-bar.slint";
 import { HomeScreen } from "screens/home.slint";
-import { GameDetailScreen, Hub } from "screens/game-detail.slint";
+import { GameDetailScreen } from "screens/game-detail.slint";
+import { Hub } from "kit/game-detail.slint";
 import { CatalogScreen } from "screens/catalog.slint";
-import { DownloadsScreen, Dl } from "screens/downloads.slint";
+import { DownloadsScreen } from "screens/downloads.slint";
+import { Dl } from "kit/downloads.slint";
 import { SettingsScreen } from "screens/settings.slint";
-import { Prefs } from "components/settings-rows.slint";
+import { Prefs } from "kit/settings-rows.slint";
 import { EmulatorsScreen } from "screens/emulators.slint";
 import { ThemesScreen } from "screens/themes.slint";
-import { PluginList } from "components/plugin-list.slint";
+import { PluginList } from "kit/plugin-list.slint";
 import { PluginScreen } from "screens/plugin.slint";
 import { GameSettingsScreen } from "screens/game-settings.slint";
 import { RunningScreen, Splash } from "screens/running.slint";
-import { InstallPrompt, Prompt } from "components/install-prompt.slint";
+import { InstallPrompt, Prompt } from "kit/install-prompt.slint";
 import { BootScreen } from "components/boot.slint";
-import { ResultPrompt, Ask } from "components/result-prompt.slint";
-import { Lingering } from "components/lingering.slint";
-import { GameMenu, GameMenuSheet } from "components/game-menu.slint";
-import { PowerMenu, PowerMenuSheet } from "components/power-menu.slint";
-import { Viewer, ShotViewer } from "components/shot-viewer.slint";
-import { Trailers, TrailerPlayer } from "components/trailer-player.slint";
-import { Notices, NoticeStack } from "components/notices.slint";
-import { Osk, OnScreenKeyboard } from "components/keyboard.slint";
-import { Sys, SystemSheet } from "components/system-panel.slint";
-import { Setup, InstallOs } from "components/install-os.slint";
+import { ResultPrompt, Ask } from "kit/result-prompt.slint";
+import { Lingering } from "kit/lingering.slint";
+import { GameMenu, GameMenuSheet } from "kit/game-menu.slint";
+import { PowerMenu, PowerMenuSheet } from "kit/power-menu.slint";
+import { Browser, BackupBrowser } from "kit/backup-browser.slint";
+import { Viewer, ShotViewer } from "kit/shot-viewer.slint";
+import { Trailers, TrailerPlayer } from "kit/trailer-player.slint";
+import { Notices, NoticeStack } from "kit/notices.slint";
+import { Osk, OnScreenKeyboard } from "kit/keyboard.slint";
+import { Sys, SystemSheet } from "kit/system-panel.slint";
+import { Setup, InstallOs } from "kit/install-os.slint";
 
 // The Classic theme: the old launcher's look. One backdrop of game art behind every screen, the top bar
 // over the main screens, and the keys that do something in a pill at the bottom. A gamepad's
@@ -107,6 +110,9 @@ export component Shell inherits Window {
         if (Vm.screen == "catalog") { Nav.zone = "grid"; Nav.typing = false; }
         keys.focus();
     }
+    // The backup browser opened: its keys come here, whatever had the focus.
+    property <bool> browsing: Browser.open;
+    changed browsing => { if (root.browsing) { keys.focus(); } }
     // A text box closed: the keys come back here.
     property <bool> editing: Prefs.editing;
     changed editing => { if (!root.editing) { keys.focus(); } }
@@ -145,6 +151,11 @@ export component Shell inherits Window {
         // takes the controller's while it is open, and ✕ on a text field opens it again.
         capture-key-pressed(event) => {
             Osk.pad = Vm.pad-key;
+            // "Restore from another folder": a sheet over everything, with keys of its own,
+            // whichever screen behind has the focus. The power menu still opens over it.
+            if (Browser.open && !PowerMenu.open && !(event.modifiers.control && (event.text == "p" || event.text == "P"))) {
+                return Browser.key(event.text, event.repeat, event.modifiers.control) ? accept : reject;
+            }
             if (Osk.open) {
                 return Osk.key(event.text, event.repeat, event.modifiers.control) ? accept : reject;
             }
@@ -291,6 +302,7 @@ export component Shell inherits Window {
         if Vm.has-trailer : TrailerPlayer { width: parent.width; height: parent.height; }
         if GameMenu.open : GameMenuSheet { width: parent.width; height: parent.height; }
         if Vm.has-result-prompt : ResultPrompt { width: parent.width; height: parent.height; }
+        if Browser.open : BackupBrowser { width: parent.width; height: parent.height; }
         if Setup.shown : InstallOs { width: parent.width; height: parent.height; }
         if PowerMenu.open : PowerMenuSheet { width: parent.width; height: parent.height; }
     }
@@ -312,6 +324,8 @@ export component Shell inherits Window {
         && (Nav.zone == "bar" || Nav.zone == "filters" || Nav.zone == "genres") && !Nav.typing;
     if (root.overlay || root.grid-header || !((root.home && Nav.library) || Vm.screen == "catalog"))
         && !(Vm.has-trailer && Vm.trailer.playing && !Trailers.controls)
+        // The backup browser shows its own keys.
+        && !Browser.open
         // Over the launch splash's keys, the keys are the game's.
         && !Splash.keys : Hints {
         // In Settings the sheet is on the far side, so the hints go on the near one.
