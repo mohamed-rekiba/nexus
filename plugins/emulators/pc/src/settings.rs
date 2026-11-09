@@ -1,5 +1,6 @@
 //! A game's settings, in its Game Hub: Starts, the file Play starts, and on Linux a Resolution,
-//! which runs the game inside gamescope at a size of its own.
+//! which runs the game inside gamescope at a size of its own. On Linux a Windows game also has
+//! Sandbox, on by default, which keeps it away from the player's files.
 
 use nexus_api::serde_json::{self, Value};
 use nexus_api::*;
@@ -12,6 +13,9 @@ pub const STARTS: &str = "starts";
 
 /// The setting of the resolution a game runs at: `screen`, or `<width>x<height>`.
 pub const RESOLUTION: &str = "resolution";
+
+/// The setting that runs a Windows game on Linux in a sandbox: `true` (the default) or `false`.
+pub const SANDBOX: &str = "sandbox";
 
 /// The resolutions a game can run at, inside gamescope.
 pub mod resolution {
@@ -79,6 +83,18 @@ impl Configurator for Pc {
                     "type": "string",
                     "oneOf": choices,
                     "default": "screen",
+                }),
+            );
+        }
+        // Only a Windows game runs in a sandbox: Proton keeps its saves in its own Wine prefix.
+        if self.platform == Platform::Linux && start.kind.needs_runner(self.platform) {
+            properties.insert(
+                SANDBOX.into(),
+                serde_json::json!({
+                    "title": "Sandbox",
+                    "description": "The game sees only its own folder and its Wine prefix, not your other files. Turn it off only for a game that doesn't run in it.",
+                    "type": "boolean",
+                    "default": true,
                 }),
             );
         }

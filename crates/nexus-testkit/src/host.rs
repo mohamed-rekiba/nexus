@@ -61,6 +61,8 @@ impl FakeHost {
         host.install = nexus_core::launcher_update::Install::Folder;
         // A desktop, not Nexus OS, whatever the computer running the tests is.
         host.place = nexus_core::system::Place::default();
+        // No display or sound of the computer running the tests in a sandboxed game.
+        host.desktop = nexus_core::sandbox::Desktop::default();
         host.call_timeout = Duration::from_millis(500);
         host.shutdown_timeout = Duration::from_millis(200);
         host.stop_grace = Duration::from_millis(200);

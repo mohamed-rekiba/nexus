@@ -259,10 +259,26 @@ Some emulator notes:
 - **Lichii**: you give your own keys and firmware in `~/.local/share/eden`. Nexus does not
   provide them.
 - **PC**: a Windows game runs through umu-launcher (Proton) or Wine. The PC page has **Install
-  umu-launcher**, and then **Update umu-launcher**.
+  umu-launcher**, and then **Update umu-launcher**. On Linux a Windows game runs in a sandbox:
+  see [PC games and your files](#pc-games-and-your-files).
 - **Steam**: Nexus reads Steam's folder and every library Steam lists. Set **Steam libraries**
   only to read other folders. In the Catalog, the Steam system lists the games in your Steam
   collections. Install and Uninstall ask Steam, in Steam's own dialogs.
+
+### PC games and your files
+
+A game from a download can hold malware. On Linux, Nexus runs each Windows game in a sandbox
+made with bubblewrap. The game sees its own folder and its Wine prefix. It doesn't see your
+home folder, your other games or your other files. Sound, the display, controllers and the
+network work as usual.
+
+- The **Sandbox** setting in the game's Game settings is on by default. Turn it off only for a
+  game that doesn't run in the sandbox. It then runs with your access to every file.
+- The first Windows game you play in the sandbox downloads Proton into Nexus's own folder.
+  That takes a few minutes, once.
+- A game in the sandbox runs without GameMode.
+- Linux games, scripts and AppImages don't run in the sandbox: they keep their saves in your
+  home folder. Install only releases you trust.
 
 ### Adding a PC game by hand
 
@@ -478,7 +494,8 @@ terminal to see why: the log goes to the terminal. Set `RUST_LOG` to change how 
 `/usr/share/nexus/session.conf` to `/etc/nexus/session.conf`.
 
 **A Windows game doesn't start.** Install umu-launcher from the PC page (Emulators → PC), or
-install Wine.
+install Wine. If the message says to install bubblewrap, install the `bubblewrap` package. If
+the game starts but fails in the sandbox, turn off **Sandbox** in its Game settings.
 
 **An old PC game shows in a corner of the screen** (Linux). Set its **Resolution** in its Game
 settings. It then runs inside gamescope, which needs to be installed.

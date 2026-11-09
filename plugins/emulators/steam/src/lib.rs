@@ -391,6 +391,7 @@ impl Launcher for Steam {
             // install scripts Steam runs first have a reaper of the same game, with `Install=1`.
             game_process: Some(format!("SteamLaunch AppId={} -- ", game.id)),
             relaunch: None,
+            sandbox: None,
         })
     }
 }

@@ -188,6 +188,25 @@ pub struct LaunchSpec {
     /// launcher. `None`: every exit ends the game.
     #[serde(default)]
     pub relaunch: Option<Relaunch>,
+    /// Runs the game in a sandbox that sees none of the player's files but these folders. On
+    /// Linux the host runs it through bubblewrap, and refuses to start it without bubblewrap.
+    /// Elsewhere the host has no sandbox, and a plugin asks for none. `None`: the game runs with
+    /// the player's access to every file.
+    #[serde(default)]
+    pub sandbox: Option<Sandbox>,
+}
+
+/// What a sandboxed game sees of the player's files: the folders it reads and the folders it
+/// reads and writes. Each folder is in the plugin's data folder or in a host folder the
+/// manifest asks for, so a plugin can't open more to the game than it has itself. The host
+/// makes the folders it writes before the game starts. The system's own files (programs,
+/// libraries, settings in `/etc`), the devices, the display and the sound are always there.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Sandbox {
+    #[serde(default)]
+    pub read: Vec<Location>,
+    #[serde(default)]
+    pub write: Vec<Location>,
 }
 
 /// Where a program or folder is. As JSON, a bare string is a path in the data folder, and
@@ -347,6 +366,7 @@ mod location_tests {
             cwd: Some(Location::Folder(game.clone())),
             game_process: None,
             relaunch: None,
+            sandbox: None,
         };
         let json = serde_json::to_value(&spec).unwrap();
         assert_eq!(json["program"], serde_json::json!({"system": "wine"}));

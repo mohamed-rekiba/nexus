@@ -625,6 +625,7 @@ impl Launcher for Kyty {
             cwd: run.cwd,
             game_process: None,
             relaunch: None,
+            sandbox: None,
         })
     }
 }

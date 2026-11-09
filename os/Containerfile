@@ -41,6 +41,8 @@ RUN set -eux; \
         xdotool xprop \
         # GameMode: Nexus runs PC games through gamemoderun (the player is in its group).
         gamemode \
+        # bubblewrap: the sandbox a Windows game runs in.
+        bubblewrap \
         # Not in Fedora's minimal set, but used: tar (the emulators' updates), lspci (Settings →
         # This PC names the graphics card), rpm-ostree (Settings → System's update status),
         # chrony (the clock: HTTPS needs the right time), mokutil (Universal Blue's key for NVIDIA).
