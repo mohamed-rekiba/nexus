@@ -196,7 +196,7 @@ impl ThemeHost {
     /// Swaps to `id`. On any failure the current theme stays, and the error says why.
     pub fn switch(&mut self, id: &PluginId) -> Result<(), ThemeError> {
         if self.safe_mode && id != &self.themes.fallback()? {
-            return Err(ThemeError::Platform("safe mode shows the default theme only".into()));
+            return Err(ThemeError::Platform("safe mode shows the fallback theme only".into()));
         }
         self.load(id, true)?;
         self.render()

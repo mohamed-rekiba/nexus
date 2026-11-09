@@ -1,6 +1,6 @@
 //! Seam 3: the Default theme, driven through its accessible labels and keys. Its Home is the
-//! list of systems; the screens it takes from the Classic theme have the Classic theme's
-//! tests.
+//! list of systems. What every theme does the same way is tested in both themes, in
+//! `every_theme.rs`.
 
 mod home;
 mod library;

@@ -60,8 +60,8 @@ esac
 cp "${CARGO_TARGET_DIR:-target}/release/$exe" "$bin/"
 licences="$resources/licenses"
 mkdir -p "$licences"
-# The fonts the default theme carries in the binary.
-cp plugins/themes/classic/theme/fonts/OFL-*.txt "$licences/"
+# The fonts the built-in themes carry in the binary: Default and Classic carry the same ones.
+cp plugins/themes/default/theme/fonts/OFL-*.txt "$licences/"
 # The Rust crates' licences (about.toml). CI must have cargo-about; a local package may go
 # without, with a warning.
 if command -v cargo-about > /dev/null; then

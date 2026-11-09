@@ -1,6 +1,7 @@
 //! The UI host: shows themes with Slint.
 //!
-//! - [`ThemeSet`] finds the installed themes and resolves inheritance, with no toolkit code.
+//! - [`ThemeSet`] finds the installed themes, the fallback theme among them, and serves each with the kit
+//!   beneath its files, with no toolkit code.
 //! - [`ThemeHost`] compiles a theme, binds the core's view models to it, and swaps themes
 //!   atomically: validate, load assets, build the new view tree, swap, release the old one.
 //!   On any failure the old theme stays.
