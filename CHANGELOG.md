@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.14.0](https://github.com/mohamed-rekiba/nexus/compare/v0.13.0...v0.14.0) (2026-11-09)
+
+
+### Features
+
+* **pc:** a Windows game on Linux runs in a sandbox that sees only its own folders ([cf011c8](https://github.com/mohamed-rekiba/nexus/commit/cf011c80bde42d60942abb15ff3ff9d4d0f63b37))
+
+
+### Bug Fixes
+
+* **steam:** Nexus follows the game, not the install scripts Steam runs before it ([04dc030](https://github.com/mohamed-rekiba/nexus/commit/04dc0309d56fbf412c596fd5fc8a64fee350c6fc))
+
 ## [0.13.0](https://github.com/mohamed-rekiba/nexus/compare/v0.12.0...v0.13.0) (2026-11-09)
 
 
