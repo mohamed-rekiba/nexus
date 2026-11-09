@@ -526,19 +526,15 @@ export component SystemSection inherits VerticalLayout {
 // Settings → Backup: one file with the settings and what each emulator names (its keys,
 // firmware and saves), in the backup folder, and each backup there. A backup's row is a menu:
 // Left and Right choose Restore, Delete or Cancel, and Restore and Delete ask again. "Restore
-// from another folder" turns the tab into a browser of folders and backups; Back closes it.
+// from another folder" opens the backup browser, a sheet over everything (backup-browser.slint).
 export component BackupSection inherits VerticalLayout {
     callback reveal(length, length);
     // "Include large items" holds for the next backup only: it is no setting.
     property <bool> large;
     // The list, and what a backup holds here, may have changed: plugins turned on or off.
     init => { Commands.refresh-backups(); }
-    property <bool> browsing: BackupRows.browsing;
-    changed browsing => { Prefs.row = self.browsing ? 1 : BackupRows.other; }
-    property <string> shown: Vm.backup.browser.shown;
-    changed shown => { if (self.browsing) { Prefs.row = BackupRows.count > BackupRows.first-entry ? BackupRows.first-entry : 1; } }
 
-    if !root.browsing : Row {
+    Row {
         label: "Back up now";
         hint: Vm.backup.status != "" ? Vm.backup.status
             : Vm.backup.holds + " · keep the file private: it can hold your console keys";
@@ -562,7 +558,7 @@ export component BackupSection inherits VerticalLayout {
             tone: Vm.backup.running ? 0 : 3;
         }
     }
-    if !root.browsing && BackupRows.large >= 0 : Row {
+    if BackupRows.large >= 0 : Row {
         label: "Include large items";
         hint: Vm.backup.large + " · can take many GB";
         focused: Prefs.is(Prefs.backup-section, BackupRows.large);
@@ -579,7 +575,7 @@ export component BackupSection inherits VerticalLayout {
         }
         Value { kind: "toggle"; on: root.large; }
     }
-    if !root.browsing : folder := Row {
+    folder := Row {
         property <bool> typing: Prefs.editing && self.focused;
         label: "Backup folder";
         detail: Vm.backup.folder;
@@ -600,7 +596,7 @@ export component BackupSection inherits VerticalLayout {
         if !folder.typing : Value { kind: "action"; text: "Change"; tone: 3; }
         if folder.typing : Editor { horizontal-stretch: 2; done(text) => { Commands.set-backup-folder(text); } }
     }
-    if !root.browsing : Row {
+    Row {
         label: "Restore from another folder";
         hint: "Choose a backup on a USB stick, another drive or another folder";
         focused: Prefs.is(Prefs.backup-section, BackupRows.other);
@@ -614,7 +610,7 @@ export component BackupSection inherits VerticalLayout {
         changed seen => { if (self.focused && Prefs.pending == 0) { Commands.browse-backups(""); } }
         Value { kind: "action"; text: "Choose"; tone: 3; }
     }
-    if !root.browsing && BackupRows.restart >= 0 : Row {
+    if BackupRows.restart >= 0 : Row {
         label: "Restart Nexus";
         hint: "Finishes the restore: the settings go back as Nexus starts";
         hint-kind: 1;
@@ -631,7 +627,7 @@ export component BackupSection inherits VerticalLayout {
     }
     // A backup: Return opens its menu, Left and Right choose, Return again acts. Restore and
     // Delete ask a second time.
-    for backup[i] in root.browsing ? [] : Vm.backup.backups : Row {
+    for backup[i] in Vm.backup.backups : Row {
         // -1: the menu is closed; 0 Restore, 1 Delete, 2 Cancel.
         property <int> choice: -1;
         property <bool> armed;
@@ -669,95 +665,6 @@ export component BackupSection inherits VerticalLayout {
             focused: parent.focused;
             text: parent.armed ? (parent.choice == 0 ? "Press again to restore: it replaces these files here" : "Press again to delete it")
                 : parent.choice < 0 ? "Options" : parent.names[parent.choice];
-            tone: parent.armed ? 2 : 3;
-        }
-    }
-
-    // The browser.
-    if root.browsing : Row {
-        label: "Restore from another folder";
-        detail: Vm.backup.browser.shown;
-        hint: Vm.backup.status != "" && Vm.backup.failed ? Vm.backup.status : "Back closes it";
-        hint-kind: Vm.backup.failed ? 2 : 0;
-        focused: Prefs.is(Prefs.backup-section, 0);
-        first: true;
-        accessible-role: button;
-        accessible-label: "browser-close";
-        accessible-value: Vm.backup.browser.shown;
-        accessible-action-default => { Commands.close-backup-browser(); }
-        reveal(y, h) => { root.reveal(y, h); }
-        clicked => { Commands.close-backup-browser(); }
-        property <int> seen: Prefs.serial;
-        changed seen => { if (self.focused && Prefs.pending == 0) { Commands.close-backup-browser(); } }
-        Value { kind: "action"; text: "Close"; tone: 3; }
-    }
-    // The places: Left and Right choose one, Return goes there.
-    if root.browsing : Row {
-        property <int> at;
-        label: "Go to";
-        hint: Vm.backup.browser.places.length > 0 ? Vm.backup.browser.places[self.at].path : "";
-        focused: Prefs.is(Prefs.backup-section, 1);
-        accessible-role: button;
-        accessible-label: "browser-place";
-        accessible-value: Vm.backup.browser.places.length > 0 ? Vm.backup.browser.places[self.at].name : "";
-        accessible-action-default => { self.act(0); }
-        reveal(y, h) => { root.reveal(y, h); }
-        clicked => { Prefs.section = Prefs.backup-section; Prefs.row = 1; self.act(0); }
-        property <int> seen: Prefs.serial;
-        changed seen => { if (self.focused) { self.act(Prefs.pending); } }
-        function act(key: int) {
-            let n = Vm.backup.browser.places.length;
-            if (n == 0) { return; }
-            if (key != 0) { self.at = Math.mod(self.at + key + n, n); return; }
-            Commands.browse-backups(Vm.backup.browser.places[self.at].path);
-        }
-        Value {
-            kind: "choice";
-            focused: parent.focused;
-            text: Vm.backup.browser.places.length > 0 ? Vm.backup.browser.places[parent.at].name : "";
-        }
-    }
-    if root.browsing && BackupRows.up >= 0 : Row {
-        label: "Up a folder";
-        focused: Prefs.is(Prefs.backup-section, BackupRows.up);
-        last: Vm.backup.browser.entries.length == 0;
-        accessible-role: button;
-        accessible-label: "browser-up";
-        accessible-action-default => { Commands.browse-backups(Vm.backup.browser.parent); }
-        reveal(y, h) => { root.reveal(y, h); }
-        clicked => { Prefs.section = Prefs.backup-section; Prefs.row = BackupRows.up; Commands.browse-backups(Vm.backup.browser.parent); }
-        property <int> seen: Prefs.serial;
-        changed seen => { if (self.focused && Prefs.pending == 0) { Commands.browse-backups(Vm.backup.browser.parent); } }
-        Value { kind: "action"; text: "Open"; tone: 3; }
-    }
-    // A folder opens; a backup asks again, then restores.
-    for entry[i] in root.browsing ? Vm.backup.browser.entries : [] : Row {
-        property <bool> armed;
-        label: entry.folder ? entry.name : entry.date;
-        hint: entry.folder ? "Folder" : entry.items + " · " + entry.size + " · " + entry.name;
-        focused: Prefs.is(Prefs.backup-section, BackupRows.first-entry + i);
-        last: i == Vm.backup.browser.entries.length - 1;
-        danger: self.armed;
-        accessible-role: button;
-        accessible-label: entry.folder ? "browser-folder" : "browser-backup";
-        accessible-value: entry.name;
-        accessible-description: self.armed ? "armed" : "";
-        accessible-action-default => { self.act(); }
-        changed focused => { if (!self.focused) { self.armed = false; } }
-        reveal(y, h) => { root.reveal(y, h + (self.last ? 180 * Look.px : 0)); }
-        clicked => { Prefs.section = Prefs.backup-section; Prefs.row = BackupRows.first-entry + i; self.act(); }
-        property <int> seen: Prefs.serial;
-        changed seen => { if (self.focused && Prefs.pending == 0) { self.act(); } }
-        function act() {
-            if (entry.folder) { Commands.browse-backups(entry.path); return; }
-            if (Vm.backup.running) { return; }
-            if (!self.armed) { self.armed = true; return; }
-            self.armed = false;
-            Commands.restore-backup-file(entry.path);
-        }
-        Value {
-            kind: parent.armed ? "text" : "action";
-            text: entry.folder ? "Open" : parent.armed ? "Press again to restore: it replaces these files here" : "Restore";
             tone: parent.armed ? 2 : 3;
         }
     }
