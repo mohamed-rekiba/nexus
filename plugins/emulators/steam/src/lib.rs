@@ -9,7 +9,8 @@
 //!   game in the Flatpak's folder, or any game when only a Flatpak Steam is there, starts with
 //!   `flatpak run com.valvesoftware.Steam …`. Steam starts it under
 //!   `reaper SteamLaunch AppId=<id> -- …`, and the host follows that process
-//!   (`LaunchSpec::game_process`).
+//!   (`LaunchSpec::game_process`). At a game's first start Steam runs its install scripts first,
+//!   each under `reaper SteamLaunch AppId=<id> Install=1 -- …`: those aren't the game.
 
 mod appinfo;
 mod owned;
@@ -386,8 +387,9 @@ impl Launcher for Steam {
             args,
             env: Default::default(),
             cwd: Some(Location::Folder(game.dir)),
-            // Steam's reaper runs the game, and ends with it.
-            game_process: Some(format!("SteamLaunch AppId={} ", game.id)),
+            // Steam's reaper runs the game, and ends with it. ` --` right after the id: the
+            // install scripts Steam runs first have a reaper of the same game, with `Install=1`.
+            game_process: Some(format!("SteamLaunch AppId={} -- ", game.id)),
             relaunch: None,
         })
     }
