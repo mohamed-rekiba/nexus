@@ -381,6 +381,7 @@ fn full_view() -> AppView {
             backup: BackupVm {
                 backups: vec![BackupFileVm::default()],
                 browser: BackupBrowserVm {
+                    crumbs: vec![BrowseCrumbVm::default()],
                     places: vec![BrowsePlaceVm::default()],
                     entries: vec![BrowseEntryVm::default()],
                     ..BackupBrowserVm::default()

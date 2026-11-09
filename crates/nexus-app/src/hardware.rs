@@ -32,6 +32,14 @@ impl Hardware for SystemHardware {
         crate::disk::free_bytes(path)
     }
 
+    fn computer_name(&self) -> String {
+        crate::disk::computer_name()
+    }
+
+    fn disk_bytes(&self, path: &std::path::Path) -> Option<u64> {
+        crate::disk::disk_bytes(path)
+    }
+
     fn controllers(&self) -> Vec<nexus_api::Controller> {
         let mut probe = std::process::Command::new(match std::env::current_exe() {
             Ok(exe) => exe,

@@ -394,6 +394,16 @@ pub trait Hardware: Send + Sync {
     fn controllers(&self) -> Vec<nexus_api::Controller> {
         Vec::new()
     }
+    /// The computer's name on the network, such as "gaming-pc"; empty when the system doesn't
+    /// say. Quick. A backup keeps it, so a restore can say which computer made it.
+    fn computer_name(&self) -> String {
+        String::new()
+    }
+    /// The size in bytes of the disk that holds `path`, which must exist; `None` when the
+    /// system doesn't say. Quick: one system call.
+    fn disk_bytes(&self, _path: &std::path::Path) -> Option<u64> {
+        None
+    }
 }
 
 /// A computer the launcher can't look at. The default until the app plugs in a real one.

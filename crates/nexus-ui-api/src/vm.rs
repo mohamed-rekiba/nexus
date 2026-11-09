@@ -776,16 +776,36 @@ pub struct BackupBrowserVm {
     pub shown: String,
     /// Its parent, a full path for Backup Browse. Empty at the top.
     pub parent: String,
+    /// The folder's path, one part each from `~` or the top; the last is the folder.
+    pub crumbs: Vec<BrowseCrumbVm>,
     pub places: Vec<BrowsePlaceVm>,
+    /// The folders with backups, the other folders, then the backups newest first: those whose
+    /// name holds `filter`.
     pub entries: Vec<BrowseEntryVm>,
+    /// Hidden folders are listed (Backup ShowHidden).
+    pub hidden: bool,
+    /// The text that filters the entries (Backup Filter). Empty for all.
+    pub filter: String,
 }
 
-/// A place the browser goes to: Home, the backup folder, a drive.
+/// One part of the browser's path: `~`, `Downloads`, `old-pc`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct BrowseCrumbVm {
+    pub name: String,
+    /// A full path, for Backup Browse.
+    pub path: String,
+}
+
+/// A place the browser goes to: Home, the backup folder, a drive, a recent folder.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct BrowsePlaceVm {
     pub name: String,
     /// A full path, for Backup Browse.
     pub path: String,
+    /// home | downloads | desktop | documents | backups | drive | recent.
+    pub kind: String,
+    /// A drive's size, such as "32.0 GB"; a recent folder's path. Empty for the others.
+    pub detail: String,
 }
 
 /// A folder, or a backup, in the browser's folder.
@@ -796,10 +816,16 @@ pub struct BrowseEntryVm {
     /// A full path: for Backup Browse (a folder) or Backup RestoreFile (a backup).
     pub path: String,
     pub folder: bool,
+    /// A folder's: "2 backups", "empty", "can't be read", or empty. Empty for a backup.
+    pub detail: String,
     /// A backup's: as in [`BackupFileVm`]. Empty for a folder.
     pub date: String,
     pub size: String,
     pub items: String,
+    /// The computer that made the backup; empty when it doesn't say.
+    pub computer: String,
+    /// A newer Nexus made the backup: this one doesn't restore it.
+    pub newer: bool,
 }
 
 /// One backup in the backup folder.

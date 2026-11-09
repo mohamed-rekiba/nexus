@@ -11,11 +11,13 @@ use std::path::PathBuf;
 use nexus_api::{BackupItem, BackupPlace, Capability, PluginId};
 use serde::{Deserialize, Serialize};
 
-use crate::backup::{BrowsePlace, ItemKey, RestorePlan, Source};
+use crate::backup::{BrowsePlace, ItemKey, PlaceKind, RestorePlan, Source};
 use crate::{Core, CoreError, CoreResult, DirStorage, Pref};
 
 /// The backup folder when the player chose none, in the home folder.
 pub const DEFAULT_FOLDER: &str = "Nexus Backups";
+/// How many folders a restore came from the browser keeps as Recent places.
+pub const RECENT: usize = 5;
 
 /// Settings → Backup.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -32,9 +34,15 @@ pub enum BackupCmd {
     RestoreFile(PathBuf),
     /// Deletes the backup with this file name from the backup folder.
     Delete(String),
-    /// Opens the browser at this folder, or at the backup folder; or moves it there.
+    /// Opens the browser at this folder, or moves it there. With none, it opens at the last
+    /// folder a restore came from, else at the backup folder.
     Browse(Option<PathBuf>),
     CloseBrowser,
+    /// Lists the browser's hidden folders, or not.
+    ShowHidden(bool),
+    /// Shows only the browser's entries whose name holds this text, in any case; all for empty
+    /// text.
+    Filter(String),
 }
 
 pub(crate) async fn handle(core: &Core, command: BackupCmd) -> CoreResult<()> {
@@ -60,7 +68,8 @@ pub(crate) async fn handle(core: &Core, command: BackupCmd) -> CoreResult<()> {
         BackupCmd::BackUp { large } => {
             ready(core)?;
             let sources = items(core, large).await.into_iter().map(|i| i.source).collect();
-            core.backup().back_up(&folder(core)?, crate::sessions::now_secs(), sources).await.map(|_| ())
+            let computer = core.ports().hardware.computer_name();
+            core.backup().back_up(&folder(core)?, crate::sessions::now_secs(), &computer, sources).await.map(|_| ())
         }
         BackupCmd::Restore(file) => {
             ready(core)?;
@@ -71,7 +80,17 @@ pub(crate) async fn handle(core: &Core, command: BackupCmd) -> CoreResult<()> {
             if !path.is_absolute() || named.is_none() || !path.is_file() {
                 return Err(CoreError::Invalid(format!("{} isn't a backup", path.display())));
             }
-            restore(core, path).await
+            // Refused before the job starts, and the browser stays open.
+            let read = path.clone();
+            tokio::task::spawn_blocking(move || crate::backup::archive::read_manifest(&read))
+                .await
+                .map_err(|e| CoreError::Invalid(e.to_string()))?
+                .map_err(|e| CoreError::Invalid(format!("{}: {e}", path.display())))?;
+            restore(core, path.clone()).await?;
+            if let Some(from) = path.parent() {
+                remember(core, from);
+            }
+            Ok(())
         }
         BackupCmd::Delete(file) => {
             let file = in_folder(&file)?;
@@ -81,9 +100,10 @@ pub(crate) async fn handle(core: &Core, command: BackupCmd) -> CoreResult<()> {
             let places = places(core);
             let at = match at {
                 Some(at) => at,
-                None => folder(core)
-                    .ok()
-                    .filter(|f| f.is_dir())
+                None => recent(core)
+                    .into_iter()
+                    .next()
+                    .or_else(|| folder(core).ok().filter(|f| f.is_dir()))
                     .or_else(|| places.first().map(|p| p.path.clone()))
                     .ok_or_else(|| CoreError::Invalid("no folder to start from".into()))?,
             };
@@ -96,6 +116,35 @@ pub(crate) async fn handle(core: &Core, command: BackupCmd) -> CoreResult<()> {
             core.backup().close_browser();
             Ok(())
         }
+        BackupCmd::ShowHidden(hidden) => core.backup().show_hidden(hidden).await,
+        BackupCmd::Filter(text) => core.backup().filter(text),
+    }
+}
+
+/// The folders restores came from that are still there, newest first.
+fn recent(core: &Core) -> Vec<PathBuf> {
+    let saved = core.preferences().get(Pref::BackupRecent);
+    let paths = saved.as_array().into_iter().flatten().filter_map(serde_json::Value::as_str);
+    paths.map(PathBuf::from).filter(|p| p.is_absolute() && p.is_dir()).collect()
+}
+
+/// Keeps `from` first among the folders restores came from, at most [`RECENT`] of them.
+fn remember(core: &Core, from: &std::path::Path) {
+    let saved = core.preferences().get(Pref::BackupRecent);
+    let from = from.display().to_string();
+    let mut paths = vec![from.clone()];
+    paths.extend(
+        saved
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(serde_json::Value::as_str)
+            .filter(|p| *p != from)
+            .map(str::to_owned),
+    );
+    paths.truncate(RECENT);
+    if let Err(e) = core.preferences().save(Pref::BackupRecent, serde_json::json!(paths)) {
+        tracing::warn!(error = %e, "the folder the restore came from isn't kept as a recent place");
     }
 }
 
@@ -124,27 +173,52 @@ async fn restore(core: &Core, path: PathBuf) -> CoreResult<()> {
         targets,
         current: found.into_iter().map(|i| i.source).collect(),
         now: crate::sessions::now_secs(),
+        computer: hardware.computer_name(),
         free: std::sync::Arc::new(move |at: &std::path::Path| crate::release_downloads::free_at(hardware.as_ref(), at)),
     };
     core.backup().restore(&path, &folder(core)?, plan).await
 }
 
-/// Where the browser can go: Home, the backup folder, then each drive that is there.
+/// Where the browser can go: Home, the Downloads, Desktop and Documents folders that are there,
+/// the backup folder, each drive that is there, then the folders restores came from that no
+/// other place is.
 fn places(core: &Core) -> Vec<BrowsePlace> {
     let mut out = Vec::new();
+    let mut add = |name: String, path: PathBuf, kind: PlaceKind, detail: String| {
+        out.push(BrowsePlace { name, path, kind, detail });
+    };
     let home = core.kernel().host().home.clone();
     if let Some(home) = &home {
-        out.push(BrowsePlace { name: "Home".into(), path: home.clone() });
+        add("Home".into(), home.clone(), PlaceKind::Home, String::new());
+        for (name, kind) in
+            [("Downloads", PlaceKind::Downloads), ("Desktop", PlaceKind::Desktop), ("Documents", PlaceKind::Documents)]
+        {
+            let path = home.join(name);
+            if path.is_dir() {
+                add(name.into(), path, kind, String::new());
+            }
+        }
     }
     if let Ok(folder) = folder(core)
         && folder.is_dir()
     {
-        out.push(BrowsePlace { name: "Backup folder".into(), path: folder });
+        add("Backup folder".into(), folder, PlaceKind::Backups, String::new());
     }
+    let hardware = core.ports().hardware.clone();
     for drive in drives(home.as_deref()) {
         let name =
             drive.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| drive.display().to_string());
-        out.push(BrowsePlace { name, path: drive });
+        let size = hardware.disk_bytes(&drive).map(crate::display::size_text).unwrap_or_default();
+        add(name, drive, PlaceKind::Drive, size);
+    }
+    for path in recent(core) {
+        if out.iter().any(|p| p.path == path) {
+            continue;
+        }
+        let name =
+            path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.display().to_string());
+        let shown = crate::display::short_home(&path.display().to_string(), home.as_deref().and_then(|h| h.to_str()));
+        out.push(BrowsePlace { name, path, kind: PlaceKind::Recent, detail: shown });
     }
     out
 }
