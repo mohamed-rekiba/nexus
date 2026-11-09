@@ -779,6 +779,8 @@ pub struct BackupBrowserVm {
     /// The folder's path, one part each from `~` or the top; the last is the folder.
     pub crumbs: Vec<BrowseCrumbVm>,
     pub places: Vec<BrowsePlaceVm>,
+    /// The index in `places` of the place that is the folder shown; -1 when none is.
+    pub place: i32,
     /// The folders with backups, the other folders, then the backups newest first: those whose
     /// name holds `filter`.
     pub entries: Vec<BrowseEntryVm>,

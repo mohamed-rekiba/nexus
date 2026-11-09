@@ -35,14 +35,16 @@ export global Browser {
     out property <int> places: Vm.backup.browser.places.length;
     out property <int> entries: Vm.backup.browser.entries.length;
 
-    // The browser opened, or its folder changed: the focus goes to the files' first row. The
-    // places keep theirs.
+    // The browser opened, or its folder changed: the focus goes to the files' first row, and
+    // in the places to the folder's place when it is one.
     public function arrived() {
         root.pane = 1;
         root.at-entry = 0;
         root.confirm = -1;
         root.typed = "";
-        root.at-place = Math.min(root.at-place, Math.max(root.places - 1, 0));
+        // The place the folder is, else the one the focus was on.
+        root.at-place = Vm.backup.browser.place >= 0 ? Vm.backup.browser.place
+            : Math.min(root.at-place, Math.max(root.places - 1, 0));
     }
     public function close() {
         root.confirm = -1;
@@ -580,7 +582,12 @@ export component BackupBrowser inherits Rectangle {
                     overflow: elide;
                     horizontal-stretch: 1;
                 }
-                KeyHint { pad: "✕"; key: "Enter"; label: Browser.pane == 0 ? "Go" : root.entry.folder ? "Open" : "Restore"; }
+                // ✕ does nothing in an empty folder: no hint for it there.
+                if Browser.pane == 0 || Browser.entries > 0 : KeyHint {
+                    pad: "✕";
+                    key: "Enter";
+                    label: Browser.pane == 0 ? "Go" : root.entry.folder ? "Open" : root.entry.newer ? "Can't restore" : "Restore";
+                }
                 KeyHint { pad: "○"; key: "Esc"; label: Browser.typed != "" ? "Clear" : Browser.pane == 0 || Vm.backup.browser.parent == "" ? "Close" : "Up a folder"; }
                 KeyHint { pad: "L1  R1"; key: "← →"; label: "Places / Files"; }
                 KeyHint { pad: "□"; key: "Ctrl+H"; label: Vm.backup.browser.hidden ? "Hide hidden" : "Show hidden"; }

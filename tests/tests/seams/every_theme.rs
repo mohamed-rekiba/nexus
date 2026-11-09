@@ -164,7 +164,7 @@ fn the_backup_browser_s_keys_move_open_and_go_up_in_every_theme() {
 
         // The places: Left goes there, Enter goes to one, ○ there closes.
         host.navigate(Key::LeftArrow);
-        assert_eq!(host.focused("browser-place").len(), 1, "{theme}: the places have the focus");
+        assert_eq!(host.focused("browser-place"), ["Backup folder"], "{theme}: at the place the folder is");
         assert!(host.focused("browser-folder").is_empty(), "{theme}");
         host.navigate(Key::RightArrow);
         assert_eq!(host.focused("browser-folder").len(), 1, "{theme}: back in the files");
