@@ -154,7 +154,7 @@ export component Shell inherits Window {
             // "Restore from another folder": a sheet over everything, with keys of its own,
             // whichever screen behind has the focus. The power menu still opens over it.
             if (Browser.open && !PowerMenu.open && !(event.modifiers.control && (event.text == "p" || event.text == "P"))) {
-                return Browser.key(event.text, event.modifiers.control) ? accept : reject;
+                return Browser.key(event.text, event.repeat, event.modifiers.control) ? accept : reject;
             }
             if (Osk.open) {
                 return Osk.key(event.text, event.repeat, event.modifiers.control) ? accept : reject;

@@ -229,7 +229,7 @@ fn a_restore_from_the_backup_browser_asks_once_then_restores_in_every_theme() {
 }
 
 #[test]
-fn the_mouse_focuses_with_a_click_and_opens_with_the_default_action_in_every_theme() {
+fn the_mouse_focuses_with_a_click_and_opens_with_a_double_click_in_every_theme() {
     for theme in THEMES {
         let backups = tempfile::tempdir().unwrap();
         let mut host = browsing(theme, backups.path());
@@ -239,9 +239,45 @@ fn the_mouse_focuses_with_a_click_and_opens_with_the_default_action_in_every_the
             host.value("backup-browser").ends_with(&*backups.path().display().to_string()),
             "{theme}: and opens nothing"
         );
-        host.press("browser-folder", "photos");
-        assert!(host.value("backup-browser").ends_with("photos"), "{theme}");
+        // A double click opens: the first folder, old-pc. The driver's click waits after
+        // each, too long for a double click: here the two come at once.
+        host.click("browser-folder");
+        assert!(!host.value("backup-browser").ends_with("old-pc"), "{theme}: one click opens nothing");
+        let target = host.first("browser-folder");
+        let (at, size) = (target.absolute_position(), target.size());
+        let position = slint::LogicalPosition::new(at.x + size.width / 2.0, at.y + size.height / 2.0);
+        let button = slint::platform::PointerEventButton::Left;
+        let window = host.instance().window();
+        for _ in 0..2 {
+            window.dispatch_event(slint::platform::WindowEvent::PointerPressed { position, button });
+            window.dispatch_event(slint::platform::WindowEvent::PointerReleased { position, button });
+        }
+        host.pump();
+        host.settle();
+        assert!(host.value("backup-browser").ends_with("old-pc"), "{theme}: a double click opens");
         host.press_first("browser-close");
         assert_eq!(host.count("backup-browser"), 0, "{theme}");
+    }
+}
+
+#[test]
+fn a_held_enter_on_a_backup_asks_and_does_not_restore_in_every_theme() {
+    use slint::platform::WindowEvent;
+    for theme in THEMES {
+        let backups = tempfile::tempdir().unwrap();
+        let mut host = browsing(theme, backups.path());
+        host.navigate(Key::Return);
+        assert_eq!(host.focused("browser-backup").len(), 1, "{theme}");
+        let enter: slint::SharedString = Key::Return.into();
+        let window = host.instance().window();
+        window.dispatch_event(WindowEvent::KeyPressed { text: enter.clone() });
+        for _ in 0..3 {
+            window.dispatch_event(WindowEvent::KeyPressRepeated { text: enter.clone() });
+        }
+        window.dispatch_event(WindowEvent::KeyReleased { text: enter });
+        host.pump();
+        host.settle();
+        assert_eq!(host.count("browser-confirm"), 1, "{theme}: the dialog still asks");
+        assert!(!host.core().view().settings.backup.restart, "{theme}: nothing restored");
     }
 }
