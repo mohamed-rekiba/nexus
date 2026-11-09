@@ -1,6 +1,6 @@
 //! Renders a stub library on every Classic theme screen, and in another theme, to PNG files, with
-//! Slint's software renderer and no window. Its own test binary: it installs its own Slint
-//! platform.
+//! Slint's software renderer and no window. Each test installs its own Slint
+//! platform, on its own thread.
 
 use std::path::Path;
 use std::rc::Rc;
