@@ -108,8 +108,13 @@ export global Browser {
         Host.play-sound("move");
     }
     // A key while the browser is open: true when it took it. It takes every key but the
-    // Control ones it has no use for, so nothing behind it moves.
-    public function key(text: string, control: bool) -> bool {
+    // Control ones it has no use for, so nothing behind it moves. A held key repeats only the
+    // moves and Backspace: a held ✕ must not answer the dialog it opened.
+    public function key(text: string, repeat: bool, control: bool) -> bool {
+        if (repeat && !control && text != Key.UpArrow && text != Key.DownArrow && text != Key.PageUp
+            && text != Key.PageDown && text != Key.Backspace) {
+            return true;
+        }
         if (root.confirm >= 0) {
             if (text == Key.Return) {
                 root.answer(root.choice == 0);
@@ -126,8 +131,9 @@ export global Browser {
             if (text == "h" || text == "H") { root.toggle-hidden(); return true; }
             return false;
         }
-        let toward-places = Look.rtl ? Key.RightArrow : Key.LeftArrow;
-        let toward-files = Look.rtl ? Key.LeftArrow : Key.RightArrow;
+        // The panes don't swap sides right to left: the keys go where the panes are.
+        let toward-places = Key.LeftArrow;
+        let toward-files = Key.RightArrow;
         if (text == Key.UpArrow || text == Key.DownArrow) {
             root.step(text == Key.DownArrow ? 1 : -1);
         } else if (text == Key.PageUp || text == Key.PageDown) {
