@@ -593,14 +593,14 @@ async fn a_zip_with_a_folder_or_another_file_is_refused_and_the_old_firmware_sta
 }
 
 #[tokio::test]
-async fn a_download_that_doesn_t_match_github_s_checksum_leaves_the_old_firmware() {
+async fn a_download_that_doesn_t_match_github_s_sha_256_leaves_the_old_firmware() {
     let (test, _games, eden) = with_eden(&["old.nca"]).await;
     let wrong = "0".repeat(64);
     serve_firmware(&test.http, FIRMWARE, stored_zip(&[("1b.nca", b"nca")]), Some(&wrong));
 
     let badge = update_firmware(&test).await;
 
-    assert!(badge.starts_with("The firmware update failed") && badge.contains("checksum"), "{badge}");
+    assert!(badge.starts_with("The firmware update failed") && badge.contains("SHA-256"), "{badge}");
     assert_eq!(files_in(&eden.path().join("nand/system/Contents/registered")), ["old.nca"]);
     assert_eq!(files_in(&eden.path().join("nand/system")), ["Contents"]);
 }
@@ -624,4 +624,33 @@ async fn nexus_checks_for_firmware_on_its_own_only_once_the_player_turns_it_on()
 
     assert_eq!(firmware_settles(&test).await, "Firmware 23.5.0");
     assert_eq!(files_in(&eden.path().join("nand/system/Contents/registered")), ["1b.nca"]);
+}
+
+#[tokio::test]
+async fn a_server_that_sends_the_whole_zip_for_a_piece_fails_the_update_and_the_old_firmware_stays() {
+    let (test, _games, eden) = with_eden(&["old.nca"]).await;
+    serve_firmware(&test.http, FIRMWARE, stored_zip(&[("1b.nca", b"nca")]), None);
+    test.http.ignore_ranges();
+
+    let badge = update_firmware(&test).await;
+
+    assert!(badge.starts_with("The firmware update failed") && badge.contains("in pieces"), "{badge}");
+    assert_eq!(files_in(&eden.path().join("nand/system/Contents/registered")), ["old.nca"]);
+    assert_eq!(files_in(&eden.path().join("nand/system")), ["Contents"]);
+}
+
+#[tokio::test]
+async fn the_old_firmware_of_an_update_that_stopped_between_its_renames_goes_back_first() {
+    let (test, _games, eden) = with_eden(&[]).await;
+    let system = eden.path().join("nand/system");
+    std::fs::remove_dir(system.join("Contents/registered")).unwrap();
+    std::fs::create_dir_all(system.join("registered.old")).unwrap();
+    std::fs::write(system.join("registered.old/old.nca"), b"old firmware").unwrap();
+    let wrong = "0".repeat(64);
+    serve_firmware(&test.http, FIRMWARE, stored_zip(&[("1b.nca", b"nca")]), Some(&wrong));
+
+    update_firmware(&test).await;
+
+    assert_eq!(files_in(&system.join("Contents/registered")), ["old.nca"]);
+    assert_eq!(files_in(&system), ["Contents"]);
 }

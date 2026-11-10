@@ -149,7 +149,7 @@ impl Firmware {
         items
     }
 
-    /// Whether Eden's folder has firmware that Nexus didn't put there.
+    /// Whether Eden's folder has firmware: for the badge when Nexus didn't install one.
     async fn has_firmware(&self) -> bool {
         match self.place(CONTENTS).await {
             Ok(dir) => self.host.folders.list(&dir).await.is_ok_and(|e| !e.is_empty()),
@@ -210,7 +210,7 @@ impl Firmware {
         let sha256 = asset
             .sha256
             .clone()
-            .ok_or_else(|| PluginError::Precondition(format!("GitHub has no checksum for {}", asset.name)))?;
+            .ok_or_else(|| PluginError::Precondition(format!("GitHub gives no SHA-256 for {}", asset.name)))?;
         self.set_phase(Phase::Updating(release.tag.clone()));
 
         let unpacked = async {
@@ -218,21 +218,34 @@ impl Firmware {
             unpack(folders, &zip, &part).await
         }
         .await;
-        folders.remove(&zip).await?;
+        self.clean(&zip).await;
         if let Err(e) = unpacked {
-            folders.remove(&part).await?;
+            self.clean(&part).await;
             return Err(e);
         }
-        if folders.exists(&contents).await? {
+        let had_old = folders.exists(&contents).await?;
+        if had_old {
             folders.rename(&contents, &old).await?;
         }
         if let Err(e) = folders.rename(&part, &contents).await {
-            folders.rename(&old, &contents).await?;
+            if had_old && let Err(back) = folders.rename(&old, &contents).await {
+                self.host.log.warn(&format!("could not put the old firmware back: {back}"));
+            }
+            self.clean(&part).await;
             return Err(e);
         }
-        folders.remove(&old).await?;
         let marker = serde_json::json!({ "version": release.tag });
-        self.host.storage.write(&RelPath::new(MARKER)?, marker.to_string().as_bytes()).await
+        self.host.storage.write(&RelPath::new(MARKER)?, marker.to_string().as_bytes()).await?;
+        // The new firmware is in place: an old one left behind goes at the next update.
+        self.clean(&old).await;
+        Ok(())
+    }
+
+    /// Removes a leftover of an update. A failure is logged: the next update removes it.
+    async fn clean(&self, path: &HostPath) {
+        if let Err(e) = self.host.folders.remove(path).await {
+            self.host.log.warn(&format!("could not remove {}: {e}", path.path));
+        }
     }
 
     /// Downloads `url` (`size` bytes) into `into`, in pieces, and checks its SHA-256.
@@ -247,23 +260,23 @@ impl Firmware {
             let mut request = HttpRequest::get(url);
             request.headers.push(("Range".into(), format!("bytes={at}-{end}")));
             let response = self.host.http.send(request).await?;
-            let whole = response.status == 200 && at == 0 && response.body.len() as u64 == size;
-            let piece = response.status == 206 && response.body.len() as u64 == end + 1 - at;
-            if !whole && !piece {
+            // Only a piece of the asked size: a whole firmware is too big to hold in memory.
+            if response.status != 206 || response.body.len() as u64 != end + 1 - at {
                 return Err(PluginError::Network(format!(
-                    "the firmware download got {} bytes with status {}",
-                    response.body.len(),
-                    response.status
+                    "the server didn't send the firmware in pieces (status {}, {} bytes)",
+                    response.status,
+                    response.body.len()
                 )));
             }
             hash.update(&response.body);
-            // A piece is at most 16 MiB, so it goes in one write.
             self.host.folders.write_at(into, at, &response.body).await?;
             at += response.body.len() as u64;
         }
         let got = hex(&hash.finalize());
         if got != sha256 {
-            return Err(PluginError::InvalidInput("the firmware download doesn't match GitHub's checksum".into()));
+            return Err(PluginError::InvalidInput(
+                "the firmware download doesn't match the SHA-256 GitHub gives".into(),
+            ));
         }
         Ok(())
     }
@@ -272,6 +285,9 @@ impl Firmware {
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
+
+// The plugin reads the zip itself: the host's download and unpack step (`DownloadPlan`) writes
+// only into the plugin's own folder, and the firmware goes into Eden's.
 
 /// One file of a zip: its name, and where its bytes are.
 #[derive(Debug, PartialEq, Eq)]

@@ -259,8 +259,8 @@ Some emulator notes:
 - **Lichii**: you give your own keys in `~/.local/share/eden`. Nexus does not provide them.
   For the firmware, turn on **Keep the firmware up to date** in Lichii's settings, or press
   **Update the firmware** on its page. Nexus then downloads the newest firmware from
-  [THZoria/NX_Firmware](https://github.com/THZoria/NX_Firmware), checks it against GitHub's
-  checksum, and puts it in place of the firmware in that folder. Lichii uses it from its next
+  [THZoria/NX_Firmware](https://github.com/THZoria/NX_Firmware), checks its SHA-256 against the
+  one GitHub gives, and puts it in place of the firmware in that folder. Lichii uses it from its next
   start. The badge beside the button names the firmware version Nexus installed. This is
   Nintendo's firmware: check that you may use it where you live. If an update fails, the old
   firmware stays.
