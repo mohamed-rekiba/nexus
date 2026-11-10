@@ -127,6 +127,10 @@ _Avoid_: handler, service
 **Forum list**: a forum's list of topics with a torrent, from the tracker's API: the hash, size,
 peers and upload time of each topic, with no titles.
 
+**Game file** (`game_file::GameFile`): `nexus_game.json` in a game's own folder, with its art in
+`nexus_art/`: what Nexus knows about the game, so the Library shows it whole without asking any
+store, and the game takes its card with it to another computer.
+
 **Game install**: a plugin's `GameInstaller` decoding a package or a finished download into a
 game folder, in the background. The game installs subsystem owns the job; the plugin reports
 through an `InstallJob`.

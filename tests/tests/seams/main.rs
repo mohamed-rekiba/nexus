@@ -13,6 +13,7 @@ mod contracts;
 mod default_theme;
 mod every_theme;
 mod folders;
+mod game_files;
 mod game_installs;
 mod gamepad;
 mod groups;

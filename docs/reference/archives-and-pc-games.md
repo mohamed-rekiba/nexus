@@ -335,12 +335,17 @@ a 32-bit one, and then the path decides.
 `rank` leaves out libraries (`.so`, `.dll`) and programs in the folders of bundled runtimes
 (`RUNTIMES`: `lib/`, `wine/bin`, `runtime/`, `jre/` and others), except start scripts.
 
-### The manifest file
+### The game file
 
-The install writes `.nexus-game.json` in the game's folder (`GAME_FILE` in `manifest.rs`). It
-holds the game's name and every file that can start it, best first. It is at most 64 KiB
-(`MAX_GAME_FILE`). Its `version` is 2 (`GameManifest::VERSION`). The plugin still reads
-version 1 and drops any path that is not a safe path inside the folder.
+Every game's folder has one game file, `nexus_game.json` (`GAME_FILE` in `manifest.rs`; see
+[architecture.md](../architecture.md#data-folder)). The PC plugin's part of it is `title` and
+`starts`: every file that can start the game, best first. The rest is the core's: the plugin
+keeps it as it is when it writes. The file is at most 256 KiB (`MAX_GAME_FILE`). The plugin
+drops any path that is not a safe path inside the folder.
+
+A folder may hold the plugin's own `.nexus-game.json` instead (`OLD_GAME_FILE`), with a
+`version` of 1 or 2. The library reads it once, moves its name and its files into
+`nexus_game.json`, and deletes it.
 
 The default start on a system is the first start script that runs there. Else it is the first
 file that runs there. Else it is the first file.

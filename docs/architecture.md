@@ -510,6 +510,24 @@ Everything Nexus keeps lives in one data folder: `$XDG_DATA_HOME/nexus` (else
 | `extensions/` | Third-party themes, unless `--extensions` names another folder. |
 | `restored-settings.json` | The settings of the last restore, until the next start puts them back. |
 
+Each game's own folder holds its game file (`game_file.rs`, `game_files.rs`):
+`nexus_game.json` in the game's root, and its art in `nexus_art/` (`cover.jpg`,
+`background.jpg`, `logo.png`, `screenshot_1.jpg` to `screenshot_6.jpg`). Every name is
+lowercase snake_case. The file holds what the stores and the catalogs said about the game and,
+for a game Nexus downloaded, the offer and the release it came from. It fits every kind of
+game: a plugin may keep its own keys in it, such as the PC plugin's `starts` (the files that
+start the game). The core keeps every key it doesn't own when it writes, and so does the
+plugin.
+
+- The library reads a game's file before it asks any store, as the first metadata layer. A
+  game with a file is never sent to a store. The records keep each game's folder
+  (`app.game_folders`), so the files are read at the next start before any details are.
+- Once every game's details are read, each game whose folder its plugin may write, and that
+  has no file, gets one. An install ends with a refresh, so it gets one too. A file on disk is
+  never written over.
+- Nexus never renames or deletes the player's own files. Uninstalling a game deletes its
+  folder, with the file in it.
+
 Downloaded games aren't in the data folder. They go to the player's `packages` folders and are
 installed into the `games` folders. Backups go to the backup folder, outside the data folder.
 

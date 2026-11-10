@@ -1,6 +1,11 @@
-//! The manifest file an install leaves in a game's folder: the game's name and every file in it
-//! that can start it, best first. It holds what the install found, and doesn't change after;
-//! what Play starts is the player's Starts setting (see [`GameManifest::start`]).
+//! The PC plugin's part of the game file in a game's folder (`nexus_game.json`, which every
+//! game of every console has): the game's title and every file in it that can start it, best
+//! first (`starts`). The rest of the file is the core's: the plugin keeps it as it is when it
+//! writes. What the install found doesn't change after; what Play starts is the player's
+//! Starts setting (see [`GameManifest::start`]).
+//!
+//! A folder may hold the plugin's own `.nexus-game.json` instead (`version` 1 or 2): the
+//! library reads it once, moves it into the game file, and deletes it.
 
 use nexus_api::Platform;
 use nexus_api::serde::{Deserialize, Serialize};
@@ -8,10 +13,14 @@ use nexus_api::serde_json::{self, Value};
 
 use crate::probe::{self, Kind};
 
-/// The manifest file in an installed game's folder.
-pub const GAME_FILE: &str = ".nexus-game.json";
-/// The most a manifest file may be.
-pub const MAX_GAME_FILE: u64 = 64 * 1024;
+/// The game file in an installed game's folder.
+pub const GAME_FILE: &str = "nexus_game.json";
+/// The plugin's own file, `version` 1 or 2, that the game file takes the place of.
+pub const OLD_GAME_FILE: &str = ".nexus-game.json";
+/// The most a game file may be.
+pub const MAX_GAME_FILE: u64 = 256 * 1024;
+/// The game file's format, when the plugin writes the file alone.
+const FILE_FORMAT: u64 = 1;
 
 /// A file that can start the game: its path from the game's folder, and what it is.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -49,17 +58,27 @@ struct V1Start {
 }
 
 impl GameManifest {
-    pub const VERSION: u32 = 2;
+    /// Read from the game file. 1 and 2 are the plugin's own files.
+    pub const VERSION: u32 = 3;
 
     pub fn new(name: String, starts: Vec<Start>) -> Self {
         GameManifest { version: Self::VERSION, name, starts }
     }
 
-    /// The manifest in `bytes`: this version, or the first one read as a list of its files (its
-    /// `version` stays 1). `None` when it isn't one, or nothing in it is a safe path in the
-    /// game's folder.
+    /// The plugin's part in `bytes`: a game file's `title` and `starts`, else the plugin's own
+    /// file, `version` 2, or 1 read as a list of its files. Its `version` says which. `None`
+    /// when it is none of these, or nothing in it is a safe path in the game's folder: a game
+    /// file the core wrote alone has no `starts`.
     pub fn read(bytes: &[u8]) -> Option<Self> {
         let value: Value = serde_json::from_slice(bytes).ok()?;
+        // The plugin's own files have a `version`; the game file has none.
+        if let Some(starts) = value.get("starts").filter(|_| value.get("version").is_none()) {
+            let title = value.get("title").and_then(Value::as_str).unwrap_or_default().to_owned();
+            let starts: Vec<Start> = serde_json::from_value(starts.clone()).ok()?;
+            let mut manifest = GameManifest { version: Self::VERSION, name: title, starts };
+            manifest.starts.retain(|s| safe_relative(&s.path));
+            return (!manifest.starts.is_empty()).then_some(manifest);
+        }
         let mut manifest = match value.get("version").and_then(Value::as_u64)? {
             1 => {
                 let v1: V1 = serde_json::from_value(value).ok()?;
@@ -72,6 +91,25 @@ impl GameManifest {
         };
         manifest.starts.retain(|s| safe_relative(&s.path));
         (!manifest.starts.is_empty()).then_some(manifest)
+    }
+
+    /// The game file with the plugin's part: `existing`, the file in the folder, with every key
+    /// it has kept, its `starts` set, and a `title` and a `format` when it has none. A file that
+    /// doesn't read is written anew.
+    pub fn game_file(&self, existing: Option<&[u8]>) -> Vec<u8> {
+        let mut file = existing
+            .and_then(|bytes| serde_json::from_slice::<Value>(bytes).ok())
+            .and_then(|v| v.as_object().cloned())
+            .unwrap_or_default();
+        file.entry("format").or_insert(Value::from(FILE_FORMAT));
+        let titled = file.get("title").and_then(Value::as_str).is_some_and(|t| !t.is_empty());
+        if !titled {
+            file.insert("title".into(), Value::from(self.name.clone()));
+        }
+        file.insert("starts".into(), serde_json::to_value(&self.starts).unwrap_or_default());
+        let mut bytes = serde_json::to_vec_pretty(&Value::Object(file)).unwrap_or_default();
+        bytes.push(b'\n');
+        bytes
     }
 
     /// What Play starts on `platform` without a Starts setting: the first start script by its
@@ -124,6 +162,43 @@ mod tests {
     }
 
     #[test]
+    fn the_game_file_gives_its_title_and_its_starts() {
+        let file = br#"{ "format": 1, "title": "Cuphead", "description": "Run and gun.",
+            "starts": [{ "kind": "native", "path": "Cuphead.x86_64" }, { "kind": "script", "path": "../x" }] }"#;
+        let read = GameManifest::read(file).unwrap();
+        assert_eq!(read.name, "Cuphead");
+        assert_eq!(read.starts, starts(&[("Cuphead.x86_64", Kind::Native)]).starts, "an unsafe path goes");
+        assert_eq!(GameManifest::read(br#"{ "format": 1, "title": "A PS5 game" }"#), None, "no starts: no PC game");
+    }
+
+    #[test]
+    fn writing_the_game_file_keeps_what_the_rest_of_nexus_wrote_in_it() {
+        let core = br#"{ "format": 1, "title": "Cuphead (Store)", "description": "Run and gun.",
+            "art": { "cover": "nexus_art/cover.jpg" }, "starts": [{ "kind": "windows", "path": "old.exe" }] }"#;
+        let ours = starts(&[("Cuphead.x86_64", Kind::Native)]);
+
+        let written: Value = serde_json::from_slice(&ours.game_file(Some(core))).unwrap();
+
+        assert_eq!(written["starts"], serde_json::json!([{ "kind": "native", "path": "Cuphead.x86_64" }]));
+        assert_eq!(written["title"], "Cuphead (Store)", "a title already there stays");
+        assert_eq!(written["description"], "Run and gun.");
+        assert_eq!(written["art"]["cover"], "nexus_art/cover.jpg");
+        assert_eq!(written["format"], 1);
+
+        let alone: Value = serde_json::from_slice(&ours.game_file(None)).unwrap();
+        assert_eq!(
+            alone,
+            serde_json::json!({
+                "format": 1,
+                "title": "Game",
+                "starts": [{ "kind": "native", "path": "Cuphead.x86_64" }]
+            })
+        );
+        let broken: Value = serde_json::from_slice(&ours.game_file(Some(b"{not json"))).unwrap();
+        assert_eq!(broken["title"], "Game", "a file that doesn't read is written anew");
+    }
+
+    #[test]
     fn the_first_manifest_reads_as_its_files_in_order_and_unsafe_paths_go() {
         let v1 = br#"{ "version": 1, "name": "Game", "launch": "Game.exe", "kind": "windows",
             "alternatives": [{ "launch": "start.sh", "kind": "script" }, { "launch": "../x", "kind": "native" }] }"#;
@@ -131,9 +206,10 @@ mod tests {
         assert_eq!(read.version, 1);
         assert_eq!(read.starts, starts(&[("Game.exe", Kind::Windows), ("start.sh", Kind::Script)]).starts);
         let now = starts(&[("start.sh", Kind::Script)]);
-        let written = serde_json::to_vec(&now).unwrap();
-        assert_eq!(GameManifest::read(&written), Some(now), "this version reads back");
-        assert_eq!(GameManifest::read(br#"{ "version": 3, "name": "Game", "starts": [] }"#), None);
+        assert_eq!(GameManifest::read(&now.game_file(None)), Some(now), "the game file reads back");
+        let v2 = br#"{ "version": 2, "name": "Game", "starts": [{ "kind": "script", "path": "start.sh" }] }"#;
+        assert_eq!(GameManifest::read(v2).map(|m| (m.version, m.name)), Some((2, "Game".to_owned())));
+        assert_eq!(GameManifest::read(br#"{ "version": 9, "name": "Game", "starts": [] }"#), None);
         assert_eq!(GameManifest::read(br#"{ "version": 2, "name": "Game", "starts": [] }"#), None, "nothing starts");
     }
 }

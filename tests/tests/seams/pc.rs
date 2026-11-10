@@ -86,7 +86,7 @@ impl Pc {
 
     fn manifest(&self, folder: &str) -> GameManifest {
         let bytes = std::fs::read(self.games.path().join("PC").join(folder).join(GAME_FILE)).unwrap();
-        serde_json::from_slice(&bytes).unwrap()
+        GameManifest::read(&bytes).expect("the game file has the plugin's part")
     }
 
     /// The files the manifest of the game in `folder` lists, best first.
@@ -136,7 +136,7 @@ async fn a_release_installs_from_its_download_with_its_start_script_and_shows_in
     let game = p.games.path().join("PC/Celeste");
     assert_eq!(std::fs::read(game.join("game/Content/levels.pak")).unwrap(), b"levels");
     let manifest = p.manifest("Celeste");
-    assert_eq!((manifest.version, manifest.name.as_str()), (2, "Celeste"));
+    assert_eq!((manifest.version, manifest.name.as_str()), (GameManifest::VERSION, "Celeste"), "the game file");
     assert_eq!(
         p.starts("Celeste"),
         ["start.sh", "game/Celeste.x86_64", "game/Celeste.exe"],
@@ -199,7 +199,7 @@ async fn a_game_an_older_nexus_installed_starts_its_start_script_by_default() {
     let manifest = serde_json::json!({ "version": 1, "name": "Game", "launch": "ENG/game.exe", "kind": "windows",
         "alternatives": [{ "launch": "ENG/start.sh", "kind": "script" }, { "launch": "RUS/start.sh", "kind": "script" },
             { "launch": "RUS/game.exe", "kind": "windows" }] });
-    std::fs::write(game.join(GAME_FILE), manifest.to_string()).unwrap();
+    std::fs::write(game.join(".nexus-game.json"), manifest.to_string()).unwrap();
     p.test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
 
     let key: nexus_api::GameKey = "emu-pc:Game".parse().unwrap();
@@ -406,6 +406,7 @@ async fn a_game_a_catalog_download_installed_has_the_offer_s_art_and_the_repack_
     let catalog = serde_json::json!({ "complete": true, "translation": { "language": "en" }, "topic_count": 1,
         "topics": topics });
     t.http.serve("https://xyz.dev/c/pc.json", catalog.to_string());
+    t.http.serve(&format!("{ART}/portrait.jpg"), JPG);
     // A portable Wine repack: its folder is "Pocket Tanks", its game_info.txt names the game.
     let info = b"Pocket Tanks\n1.6\npockettanks.exe\n\n\nPocket Tanks Deluxe\n";
     t.torrents.has(
@@ -455,15 +456,31 @@ async fn a_game_a_catalog_download_installed_has_the_offer_s_art_and_the_repack_
         .unwrap();
     t.until(Area::Installs, |_| row(t).is_some_and(|r| r.install == "done")).await;
     assert_eq!(p.titles(), [("Pocket Tanks Deluxe".to_owned(), "PC".to_owned())], "the repack's name for it");
-    let portrait = nexus_ui_api::ImageRef::Url {
-        plugin: PluginId::new("release-catalog").unwrap(),
-        url: format!("{ART}/portrait.jpg"),
-    };
+
+    // The install's refresh gives the game its file: the plugin's part and the core's, with the
+    // offer it came from and the offer's art, in the game's folder.
+    let pc = p.games.path().join("PC");
+    let folder = std::fs::read_dir(&pc).unwrap().map(|e| e.unwrap().path()).find(|d| d.is_dir()).unwrap();
+    let file =
+        || -> serde_json::Value { serde_json::from_slice(&std::fs::read(folder.join(GAME_FILE)).unwrap()).unwrap() };
+    t.until(Area::Library, |_| file().get("source").is_some_and(|s| !s.is_null())).await;
+    let file = file();
+    assert_eq!(file["source"]["release"], HASH, "{file}");
+    assert!(file["source"]["offer"].as_str().is_some_and(|o| o.starts_with("release-catalog:")), "{file}");
+    assert_eq!(file["art"]["cover"], "nexus_art/cover.jpg");
+    assert_eq!(std::fs::read(folder.join("nexus_art/cover.jpg")).unwrap(), JPG);
+    assert!(file["starts"].as_array().is_some_and(|s| !s.is_empty()), "the plugin's part stays: {file}");
+
+    // The card and the Game Hub show the offer's art from the game's folder.
+    let saved = |image: &Option<nexus_ui_api::ImageRef>| matches!(image, Some(nexus_ui_api::ImageRef::Folder { path, .. }) if path.path.as_str().ends_with("/nexus_art/cover.jpg"));
     let card = t.core.view().home.games.first().cloned().unwrap();
-    assert_eq!(card.cover, Some(portrait.clone()), "the offer's art");
+    assert!(saved(&card.cover), "{:?}", card.cover);
     t.core.dispatch(Command::OpenGame(card.key.parse().unwrap())).await.unwrap();
-    assert_eq!(t.core.view().detail.unwrap().cover, Some(portrait));
+    assert!(saved(&t.core.view().detail.unwrap().cover));
 }
+
+/// A JPEG's first bytes, as the offer's art.
+const JPG: &[u8] = &[0xFF, 0xD8, 0xFF, 0xE0, 3, 3];
 
 /// The first bytes of a 32-bit Linux program.
 fn elf32() -> Vec<u8> {
@@ -702,7 +719,7 @@ async fn a_start_script_beside_thousands_of_files_is_still_found_and_can_run() {
 }
 
 #[tokio::test]
-async fn a_gog_game_installed_before_shows_the_name_gog_gives_it() {
+async fn a_game_s_old_file_moves_into_its_game_file_with_the_name_gog_gives_it() {
     let p = boot(Platform::Linux).await;
     let game = p.games.path().join("PC/world-of-goo-2-1-0-13120-81588");
     std::fs::create_dir_all(game.join("data/noarch")).unwrap();
@@ -710,9 +727,15 @@ async fn a_gog_game_installed_before_shows_the_name_gog_gives_it() {
     std::fs::write(game.join("data/noarch/gameinfo"), b"World of Goo 2\n1.0.13120\n81588\n").unwrap();
     let manifest = serde_json::json!({ "version": 1, "name": "world of goo 2 1 0 13120 81588",
         "launch": "data/noarch/start.sh", "kind": "script" });
-    std::fs::write(game.join(GAME_FILE), manifest.to_string()).unwrap();
+    std::fs::write(game.join(".nexus-game.json"), manifest.to_string()).unwrap();
     p.test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
     assert_eq!(p.titles(), [("World of Goo 2".to_owned(), "PC".to_owned())]);
+
+    assert!(!game.join(".nexus-game.json").exists(), "the old file is gone");
+    let file: serde_json::Value = serde_json::from_slice(&std::fs::read(game.join(GAME_FILE)).unwrap()).unwrap();
+    assert_eq!(file["title"], "World of Goo 2");
+    assert_eq!(file["starts"], serde_json::json!([{ "kind": "script", "path": "data/noarch/start.sh" }]));
+    assert_eq!(p.starts("world-of-goo-2-1-0-13120-81588"), ["data/noarch/start.sh"], "the game file reads back");
 }
 
 #[tokio::test]

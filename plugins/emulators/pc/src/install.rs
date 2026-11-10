@@ -7,7 +7,6 @@ use std::sync::Arc;
 
 use emulator_kit::archive_sets::{UNPACKED, set_name};
 use emulator_kit::installs::{self, Download, DownloadFile, HostTree, Tree};
-use nexus_api::serde_json;
 use nexus_api::*;
 
 use crate::manifest::{GAME_FILE, GameManifest, Start};
@@ -268,9 +267,8 @@ impl GameInstaller for Pc {
                     io(Box::pin(writer.folders.set_executable(&file)))?;
                 }
             }
-            let bytes = serde_json::to_vec_pretty(&manifest).map_err(|e| Error::msg(e.to_string()))?;
             let file = into.join(GAME_FILE).map_err(|e| Error::msg(e.to_string()))?;
-            io(Box::pin(writer.folders.write(&file, &bytes)))?;
+            io(Box::pin(writer.folders.write(&file, &manifest.game_file(None))))?;
             writer.rename(&into, &dest)?;
             Ok((dest, manifest.name))
         });

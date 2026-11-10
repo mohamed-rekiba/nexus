@@ -11,7 +11,7 @@ use nexus_api::*;
 
 use emulator_kit::installs::Download;
 
-use crate::manifest::{self, GAME_FILE, GameManifest, Start};
+use crate::manifest::{self, GAME_FILE, GameManifest, OLD_GAME_FILE, Start};
 use crate::runner::Runner;
 use crate::{CONSOLE_FOLDER, GAMES, GOG_INFO, Pc, WRAPPER_INFO, WRAPPER_NAME_LINE, install, probe, settings};
 
@@ -58,21 +58,46 @@ impl Pc {
         roots.into_iter().map(|root| Ok(HostPath::new(GAMES, root.root, RelPath::new(CONSOLE_FOLDER)?))).collect()
     }
 
-    /// The game in the folder `dir` named `id`, when it has a manifest file.
+    /// The game in the folder `dir` named `id`, when its game file has the plugin's part, or
+    /// its old file does: that one is moved into the game file, and deleted.
     async fn read_game(&self, dir: &HostPath, id: &str) -> Option<Game> {
+        let folders = self.ctx.folders();
         let game_dir = dir.join(id).ok()?;
         let file = game_dir.join(GAME_FILE).ok()?;
-        let bytes = self.ctx.folders().read_range(&file, 0, manifest::MAX_GAME_FILE).await.ok()?;
+        let current = folders.read_range(&file, 0, manifest::MAX_GAME_FILE).await.ok();
+        let manifest = match current.as_deref().and_then(GameManifest::read) {
+            Some(manifest) => manifest,
+            None => self.move_old_file(&game_dir, id, current.as_deref()).await?,
+        };
+        let cover = self.own_cover(&game_dir).await;
+        Some(Game { id: id.to_owned(), dir: game_dir, manifest, cover })
+    }
+
+    /// The plugin's old file in `game_dir`, `version` 1 or 2: written into the game file,
+    /// whose other keys (`current`) stay, then deleted. When the game file can't be written,
+    /// the old file stays for the next run.
+    async fn move_old_file(&self, game_dir: &HostPath, id: &str, current: Option<&[u8]>) -> Option<GameManifest> {
+        let folders = self.ctx.folders();
+        let old = game_dir.join(OLD_GAME_FILE).ok()?;
+        let bytes = folders.read_range(&old, 0, manifest::MAX_GAME_FILE).await.ok()?;
         let mut manifest = GameManifest::read(&bytes)?;
         // Installed before its name came from GOG's or the wrapper's file: named after the
-        // installer or the release's folder. A newer install has the name already.
+        // installer or the release's folder.
         if manifest.version == 1
-            && let Some(name) = self.old_install_name(&game_dir, &manifest).await
+            && let Some(name) = self.old_install_name(game_dir, &manifest).await
         {
             manifest.name = name;
         }
-        let cover = self.own_cover(&game_dir).await;
-        Some(Game { id: id.to_owned(), dir: game_dir, manifest, cover })
+        let file = game_dir.join(GAME_FILE).ok()?;
+        match folders.write(&file, &manifest.game_file(current)).await {
+            Ok(()) => {
+                if let Err(e) = folders.remove(&old).await {
+                    self.ctx.log().warn(&format!("{OLD_GAME_FILE} in {id} couldn't be deleted: {e}"));
+                }
+            }
+            Err(e) => self.ctx.log().warn(&format!("{OLD_GAME_FILE} in {id} couldn't be moved: {e}")),
+        }
+        Some(manifest)
     }
 
     /// The first of [`COVERS`] in the folder `dir`.
@@ -114,10 +139,9 @@ impl Pc {
                 }
             }
         }
-        let written = match serde_json::to_vec_pretty(&manifest) {
-            Ok(bytes) => folders.write(&game_dir.join(GAME_FILE).ok()?, &bytes).await,
-            Err(e) => Err(PluginError::Other(e.to_string())),
-        };
+        let file = game_dir.join(GAME_FILE).ok()?;
+        let current = folders.read_range(&file, 0, manifest::MAX_GAME_FILE).await.ok();
+        let written = folders.write(&file, &manifest.game_file(current.as_deref())).await;
         if let Err(e) = written {
             self.ctx.log().warn(&format!("{id} couldn't be added: {e}"));
             return None;

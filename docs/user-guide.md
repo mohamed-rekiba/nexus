@@ -289,8 +289,9 @@ A PC game that is already unpacked needs no install:
 2. Optional: put a cover in the game's folder, named `cover.jpg`, `cover.png` or `cover.webp`.
 3. In Settings → Games, choose **Rescan game folders**.
 
-Nexus looks through the folder once and writes `.nexus-game.json` in it. That file holds the
-game's name and the files that can start it. A folder whose name starts with `.` or ends with
+Nexus looks through the folder once and writes `nexus_game.json` in it. That file holds the
+game's name, the files that can start it, and later what the stores say about the game, with
+its art in `nexus_art/`. A folder whose name starts with `.` or ends with
 `.part` is never read. The full rules are in
 [reference/archives-and-pc-games.md](reference/archives-and-pc-games.md).
 

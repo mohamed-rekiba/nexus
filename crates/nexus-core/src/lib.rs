@@ -21,6 +21,8 @@ mod emulator_builds;
 mod error;
 mod facades;
 mod folders;
+mod game_file;
+mod game_files;
 mod game_installs;
 mod game_words;
 mod grid_query;

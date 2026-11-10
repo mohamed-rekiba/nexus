@@ -1,12 +1,13 @@
 //! The library's saved records: the games the player hid from the Catalog
 //! (`app.hidden_games`), the offers' covers kept for installed games (`app.game_art`), and the
 //! player's own results (`app.results`, with `app.result_builds` and `app.result_skipped`, the
-//! builds each answer was for).
+//! builds each answer was for), and each game's folder (`app.game_folders`), where its game
+//! file is.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use nexus_api::{CompatLevel, GameKey, ImageSource, PluginId};
+use nexus_api::{CompatLevel, GameKey, HostPath, ImageSource, PluginId};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -14,6 +15,7 @@ use crate::config::ConfigService;
 
 const HIDDEN_GAMES: [&str; 2] = ["app", "hidden_games"];
 const GAME_ART: [&str; 2] = ["app", "game_art"];
+const GAME_FOLDERS: [&str; 2] = ["app", "game_folders"];
 const RESULTS: &str = "results";
 const RESULT_BUILDS: &str = "result_builds";
 const RESULT_SKIPPED: &str = "result_skipped";
@@ -74,6 +76,27 @@ impl Records {
             .collect();
         if let Err(e) = self.config.set(&GAME_ART, Value::Object(kept)) {
             tracing::warn!(error = %e, "could not keep the installed games' art");
+        }
+    }
+
+    /// Each game's folder, by its key. One that doesn't read is left out.
+    pub fn game_folders(&self) -> HashMap<GameKey, HostPath> {
+        let kept = self.config.get(&GAME_FOLDERS);
+        let Some(kept) = kept.as_object() else { return HashMap::new() };
+        kept.iter()
+            .filter_map(|(game, folder)| Some((game.parse().ok()?, serde_json::from_value(folder.clone()).ok()?)))
+            .collect()
+    }
+
+    /// Keeps `folder` as the folder of `game`. Nothing is written when it is kept already.
+    pub fn keep_folder(&self, game: &GameKey, folder: &HostPath) {
+        let path = ["app", "game_folders", &game.to_string()];
+        let value = serde_json::json!(folder);
+        if self.config.get(&path) == value {
+            return;
+        }
+        if let Err(e) = self.config.set(&path, value) {
+            tracing::warn!(error = %e, "could not keep a game's folder");
         }
     }
 

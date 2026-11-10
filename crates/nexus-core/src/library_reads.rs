@@ -80,6 +80,8 @@ pub(crate) async fn refresh_library(core: &Core) -> CoreResult<()> {
     let installed = installed_offers(core, &library, &core.library().snapshot().offers);
     core.library().set_library(library, badges, installed);
     kernel.events().publish(Event::LibraryChanged);
+    // The games' own files first: a game with one needs no store.
+    crate::game_files::read_files(core).await;
     core.changed(Area::Library);
     if let Some(game) = first
         && core.library().snapshot().detail(&game).is_none()
@@ -96,6 +98,7 @@ pub(crate) async fn refresh_library(core: &Core) -> CoreResult<()> {
         tokio::spawn(async move {
             describe_library(&core).await;
             read_all_details(&core).await;
+            crate::game_files::write_missing(&core).await;
         });
         return Ok(());
     }
@@ -116,6 +119,7 @@ pub(crate) async fn refresh_library(core: &Core) -> CoreResult<()> {
             crate::catalog_reads::refresh_releases(&core).await;
         }
         read_all_details(&core).await;
+        crate::game_files::write_missing(&core).await;
     });
     Ok(())
 }
@@ -246,7 +250,11 @@ pub(crate) async fn load_detail(core: &Core, game: &GameKey) -> CoreResult<()> {
     }
     detail.settings = game_settings(core, &plugin, &provided, game).await;
     crate::emulator_builds::refresh_emulator(core, &plugin).await;
+    let folder = detail.details.folder.clone();
     core.library().set_detail(game, detail, badges);
+    if let Some(folder) = folder {
+        crate::game_files::found_folder(core, game, &folder).await;
+    }
     Ok(())
 }
 

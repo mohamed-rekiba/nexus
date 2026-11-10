@@ -22,7 +22,9 @@ mod records;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use nexus_api::{CompatInfo, CompatLevel, GameDetails, GameKey, GameMetadata, GameSummary, PluginId, SlotItem};
+use nexus_api::{
+    CompatInfo, CompatLevel, GameDetails, GameKey, GameMetadata, GameSummary, HostPath, PluginId, SlotItem,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -84,6 +86,8 @@ pub(crate) struct GameRecord {
     pub detail: DetailState,
     /// What a store's catalog says about it, and the plugin that said it.
     pub meta: Option<(PluginId, GameMetadata)>,
+    /// What the game file in its folder says (`game_file.rs`), as its own plugin's layer.
+    pub file: Option<(PluginId, GameMetadata)>,
     /// The stores were asked about it this run, so none is asked twice.
     pub asked: bool,
     /// For an installed game, the offer it is: its Game Hub has the store data of the offer's releases.
@@ -191,20 +195,34 @@ impl LibrarySnapshot {
         self.games.get(key).map_or(&[], |r| &r.badges)
     }
 
-    /// What a store's catalog says about `key`.
+    /// What a store's catalog says about `key`, else its game file.
     pub fn meta(&self, key: &GameKey) -> Option<&(PluginId, GameMetadata)> {
-        self.games.get(key)?.meta.as_ref()
+        let record = self.games.get(key)?;
+        record.meta.as_ref().or(record.file.as_ref())
     }
 
-    /// What the stores and the catalogs say about `key`, first layer first: a store's catalog,
-    /// then a release's store data (an offer's own, or for an installed game, the offer's it
-    /// is). A field a layer leaves empty comes from the next.
+    /// The Catalog's offer that the installed game `key` is, if the library linked one.
+    pub fn offer_of(&self, key: &GameKey) -> Option<&GameKey> {
+        self.games.get(key)?.offer.as_ref()
+    }
+
+    /// What the game file in `key`'s folder says, if it has one.
+    pub fn game_file(&self, key: &GameKey) -> Option<&(PluginId, GameMetadata)> {
+        self.games.get(key)?.file.as_ref()
+    }
+
+    /// What the game file, the stores and the catalogs say about `key`, first layer first: the
+    /// game file, then a store's catalog, then a release's store data (an offer's own, or for an
+    /// installed game, the offer's it is). A field a layer leaves empty comes from the next.
     pub fn metadata(&self, key: &GameKey) -> Vec<(PluginId, GameMetadata)> {
-        let offer_key = self.games.get(key).and_then(|r| r.offer.as_ref()).unwrap_or(key);
+        let record = self.games.get(key);
+        let offer_key = record.and_then(|r| r.offer.as_ref()).unwrap_or(key);
         let release = self
             .offer(offer_key)
             .and_then(|offer| crate::releases::metadata_of(offer).map(|m| (offer.entry.key.plugin.clone(), m.clone())));
-        self.meta(key).cloned().into_iter().chain(release).collect()
+        let file = record.and_then(|r| r.file.clone());
+        let store = record.and_then(|r| r.meta.clone());
+        file.into_iter().chain(store).chain(release).collect()
     }
 
     /// A game's cover, background, logo and screenshots: from the layers of [`Self::metadata`],
@@ -232,11 +250,13 @@ impl LibrarySnapshot {
         }
     }
 
-    /// The square art of a game's card: the store's tile when a catalog describes it, else its
-    /// own cover, else the cover of the offer it is. `entry` is a Library game or an offer.
+    /// The art of a game's card: the cover its game file names, else the store's tile when a
+    /// catalog describes it, else its own cover, else the cover of the offer it is. `entry` is a
+    /// Library game or an offer.
     pub fn tile(&self, entry: &Entry) -> Option<PluginImage> {
-        let store = self.meta(&entry.key).and_then(|(plugin, m)| Some((plugin.clone(), m.icon.clone()?)));
-        store
+        let file = self.game_file(&entry.key).and_then(|(plugin, m)| Some((plugin.clone(), m.cover.clone()?)));
+        let store = || self.meta(&entry.key).and_then(|(plugin, m)| Some((plugin.clone(), m.icon.clone()?)));
+        file.or_else(store)
             .or_else(|| entry.summary.cover.clone().map(|c| (entry.key.plugin.clone(), c)))
             .or_else(|| self.offer_art(&entry.key))
     }
@@ -486,7 +506,7 @@ impl LibrarySubsystem {
         let mut state = self.state();
         let todo: Vec<GameKey> = keys
             .iter()
-            .filter(|key| state.games.get(*key).is_none_or(|r| r.meta.is_none() && !r.asked))
+            .filter(|key| state.games.get(*key).is_none_or(|r| r.meta.is_none() && r.file.is_none() && !r.asked))
             .cloned()
             .collect();
         for key in &todo {
@@ -503,6 +523,22 @@ impl LibrarySubsystem {
             None if failed => s.game(key).asked = false,
             None => {}
         });
+    }
+
+    /// The game file in `key`'s folder said this, or there is none.
+    pub fn set_game_file(&self, key: &GameKey, file: Option<(PluginId, GameMetadata)>) {
+        self.change(Area::Library, |s| s.game(key).file = file);
+    }
+
+    /// The folders of the games, as the records keep them from each game's details: where
+    /// their game files are, before any details are read.
+    pub fn game_folders(&self) -> HashMap<GameKey, HostPath> {
+        self.inner.records.game_folders()
+    }
+
+    /// Keeps `folder` as the folder of `key`, unless it is kept already.
+    pub fn keep_folder(&self, key: &GameKey, folder: &HostPath) {
+        self.inner.records.keep_folder(key, folder);
     }
 
     /// The boot's count of the store's descriptions, or `None` for none.

@@ -47,6 +47,7 @@ pub struct FakeCatalog {
     build: Build,
     packages: bool,
     waiting_installer: bool,
+    in_folders: bool,
     keymap: Vec<(String, String)>,
     requires: Option<String>,
     /// Its system's art, in its assets: `system/icon.png` and `system/cover.png`.
@@ -73,6 +74,7 @@ impl FakeCatalog {
             build: Build::None,
             packages: false,
             waiting_installer: false,
+            in_folders: false,
             keymap: Vec::new(),
             requires: None,
             icon: None,
@@ -191,6 +193,13 @@ impl FakeCatalog {
         self
     }
 
+    /// Each game is a folder in the `games` folder, named as its title, and the plugin may
+    /// write there: where a game file goes.
+    pub fn in_folders(mut self) -> Self {
+        self.in_folders = true;
+        self
+    }
+
     /// It may read the packages folder, where a catalog's downloads go.
     pub fn reads_packages(mut self) -> Self {
         self.packages = true;
@@ -256,7 +265,7 @@ impl FakeCatalog {
         if self.packages {
             toml += "[[permissions.filesystem]]\nfolder = \"packages\"\n";
         }
-        if self.waiting_installer {
+        if self.waiting_installer || self.in_folders {
             toml += "[[permissions.filesystem]]\nfolder = \"games\"\nwrite = true\n";
         }
         for (button, keys) in &self.keymap {
@@ -277,6 +286,7 @@ impl FakeCatalog {
                 platform: self.platform.clone(),
                 details_fail: self.details_fail,
                 quiet: self.quiet,
+                in_folders: self.in_folders,
             });
             let mut provided = Provided { catalog: Some(games.clone()), ..Provided::default() };
             if self.slots {
@@ -320,6 +330,8 @@ struct Games {
     details_fail: bool,
     /// The details have no description.
     quiet: bool,
+    /// Each game's folder is `<title>` in the `games` folder.
+    in_folders: bool,
 }
 
 #[async_trait]
@@ -351,8 +363,11 @@ impl Catalog for Games {
         }
         let summary = self.list(PageRequest::ALL).await?.items.into_iter().find(|g| g.id == game);
         let summary = summary.ok_or_else(|| PluginError::NotFound(game.into()))?;
+        let folder = self.in_folders.then(|| {
+            nexus_api::HostPath::new("games", 0, nexus_api::RelPath::new(summary.title.clone()).expect("a plain title"))
+        });
         Ok(GameDetails {
-            folder: None,
+            folder,
             also: Vec::new(),
             uninstall_link: None,
             description: if self.quiet { String::new() } else { format!("About {}", summary.title) },
