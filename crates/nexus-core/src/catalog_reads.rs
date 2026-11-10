@@ -27,7 +27,8 @@ fn consoles(kernel: &crate::Kernel) -> Vec<(PluginId, Console)> {
 }
 
 /// Reads the catalogs again each time a catalog plugin says they changed
-/// ([`nexus_api::RELEASES_CHANGED`]), for example after a refresh in the background.
+/// ([`nexus_api::RELEASES_CHANGED`]), and a plugin's emulator panel each time it says that
+/// changed ([`nexus_api::SLOTS_CHANGED`]): for example after work in the background.
 pub(crate) fn watch_catalogs(core: &Core) {
     use futures::StreamExt;
     let weak = std::sync::Arc::downgrade(&core.inner);
@@ -35,11 +36,18 @@ pub(crate) fn watch_catalogs(core: &Core) {
     tokio::spawn(async move {
         while let Some(event) = events.next().await {
             let nexus_api::Event::Custom { plugin, topic, .. } = event else { continue };
-            if topic != nexus_api::RELEASES_CHANGED {
+            if topic != nexus_api::RELEASES_CHANGED && topic != nexus_api::SLOTS_CHANGED {
                 continue;
             }
             let Some(inner) = weak.upgrade() else { return };
             let core = Core { inner };
+            if topic == nexus_api::SLOTS_CHANGED {
+                tokio::spawn(async move {
+                    crate::emulator_builds::refresh_emulator(&core, &plugin).await;
+                    core.changed(Area::Plugins);
+                });
+                continue;
+            }
             let lists = core.kernel().manifest(&plugin).is_ok_and(|m| m.capabilities.contains(&Capability::Releases));
             if lists {
                 // Not in this loop: the reads publish events of their own.

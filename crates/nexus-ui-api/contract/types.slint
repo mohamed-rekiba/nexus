@@ -6,10 +6,14 @@
 // the names kebab-cased. Text fields that hold JSON (`args`, `scope`) go back to the core
 // unchanged, inside a command's args.
 
-export struct Row { label: string, value: string }
+// A row of a section or a block. A section's rows have a label and a value only. A block's row
+// can have a hint under its label, a tone, a bar (progress from 0 to 1, -1 for none), and an
+// action that makes it a button; switch is "on" or "off" for a button drawn as a switch.
+// at: the button's place among the page's block buttons, -1 for a row that only shows.
+export struct Row { label: string, value: string, hint: string, tone: string, progress: float, action: string, args: string, switch: string, at: int }
 
 // A plugin's slot item. Render it with `accessible-role: text; accessible-label: label;`.
-// kind: badge | action | section | settings_panel
+// kind: badge | action | section | block | settings_panel
 // tone: neutral | info | success | warning | danger
 // style: primary | secondary
 export struct Slot {
@@ -338,7 +342,7 @@ export struct PluginRow { id: string, name: string, kind: string, version: strin
 // in the `emulator.panel` slot, for an emulator and for a service. actions: the action slots
 // of `sections`, for one row each. current: a theme that is the one shown (its options are
 // `Vm.theme-options`). A plugin that is turned off has only `plugin`.
-export struct PluginPage { plugin: PluginRow, has-emulator: bool, emulator: Emulator, sections: [Slot], actions: [Slot], settings: [SettingsPanel], folders: [Folder], folders-after: int, current: bool }
+export struct PluginPage { plugin: PluginRow, has-emulator: bool, emulator: Emulator, sections: [Slot], actions: [Slot], blocks: [Slot], block-buttons: int, settings: [SettingsPanel], folders: [Folder], folders-after: int, current: bool }
 
 // One of the emulator's keyboard keys: the console's button and its keys.
 export struct KeyBinding { button: string, keys: string }

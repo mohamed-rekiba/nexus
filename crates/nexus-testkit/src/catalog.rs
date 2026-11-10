@@ -625,12 +625,14 @@ pub struct FakeService {
     id: String,
     name: String,
     items: Vec<(SlotId, SlotItem)>,
+    /// The actions its slots ran, in order.
+    ran: Arc<std::sync::Mutex<Vec<String>>>,
 }
 
 impl FakeService {
     /// A service with the id `id` and the name `name`, with no slot items.
     pub fn new(id: &str, name: &str) -> Self {
-        Self { id: id.into(), name: name.into(), items: Vec::new() }
+        Self { id: id.into(), name: name.into(), items: Vec::new(), ran: Arc::default() }
     }
 
     /// A section in `slot`: its id, its title and its rows as (label, value).
@@ -639,6 +641,18 @@ impl FakeService {
         let content = SlotContent::Section { title: title.into(), rows: rows.collect() };
         self.items.push((slot, SlotItem { id: id.into(), order: Order::default(), content }));
         self
+    }
+
+    /// A block in `slot`: its id, its title and its rows.
+    pub fn block(mut self, slot: SlotId, id: &str, title: &str, rows: Vec<BlockRow>) -> Self {
+        let content = SlotContent::Block { title: title.into(), rows };
+        self.items.push((slot, SlotItem { id: id.into(), order: Order::default(), content }));
+        self
+    }
+
+    /// The actions its slots ran so far, in order. It shares them with its clones.
+    pub fn ran(&self) -> Vec<String> {
+        self.ran.lock().unwrap().clone()
     }
 
     /// The plugin.
@@ -657,7 +671,8 @@ impl Slots for FakeService {
     async fn items(&self, request: &SlotRequest) -> PluginResult<Vec<SlotItem>> {
         Ok(self.items.iter().filter(|(slot, _)| *slot == request.slot).map(|(_, item)| item.clone()).collect())
     }
-    async fn run_action(&self, _: &str, _: Option<&str>, _: &serde_json::Value) -> PluginResult<()> {
+    async fn run_action(&self, action: &str, _: Option<&str>, _: &serde_json::Value) -> PluginResult<()> {
+        self.ran.lock().unwrap().push(action.into());
         Ok(())
     }
 }

@@ -16,7 +16,7 @@ Each source of games is a plugin built into Nexus.
 | --- | --- | --- |
 | PS5 | PS5 games, with [KytyPS5](https://github.com/KytyPS5/KytyPS5) | Linux, macOS, Windows |
 | PS4 | PS4 games, with [shadPS4](https://github.com/shadps4-emu/shadPS4) | Linux, macOS, Windows |
-| Switch | Switch games, with [Lichii](https://github.com/zortos293/Lichii). You give your own keys and firmware. | Linux |
+| Switch | Switch games, with [Lichii](https://github.com/zortos293/Lichii). Downloads firmware and the selected keys version when enabled. | Linux |
 | PC | PC games: native games, and Windows games through umu-launcher (Proton) or Wine | Linux, macOS, Windows |
 | Steam | The games Steam installed, started through Steam | Linux |
 

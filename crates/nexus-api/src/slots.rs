@@ -30,6 +30,11 @@ pub enum SlotId {
     CatalogAction,
 }
 
+/// The topic of the [`crate::Event::Custom`] a plugin publishes when its emulator panel
+/// (`emulator.panel`) changed between the core's asks, for example when work in the background
+/// ends. The core then asks for the panel again.
+pub const SLOTS_CHANGED: &str = "slots.changed";
+
 /// A slot action the host runs itself: opens the Settings screen, for example from a button
 /// that says to turn a setting on.
 pub const HOST_OPEN_SETTINGS: &str = "host:open-settings";
@@ -93,6 +98,32 @@ pub enum ActionStyle {
     Secondary,
 }
 
+/// A row of a [`SlotContent::Block`]. A row with an `action` is a button: picking it runs the
+/// action, as [`SlotContent::Action`] does.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct BlockRow {
+    pub label: String,
+    /// On the right of the label, or the state of a switch in words.
+    #[serde(default)]
+    pub value: String,
+    /// A line under the label.
+    #[serde(default)]
+    pub hint: String,
+    #[serde(default)]
+    pub tone: Tone,
+    /// From 0 to 1: a bar under the label, for work that runs.
+    #[serde(default)]
+    pub progress: Option<f32>,
+    /// Passed back to [`Slots::run_action`] when the player picks the row.
+    #[serde(default)]
+    pub action: Option<String>,
+    #[serde(default)]
+    pub args: serde_json::Value,
+    /// An action row drawn as a switch, on or off.
+    #[serde(default)]
+    pub switch: Option<bool>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SectionRow {
     pub label: String,
@@ -126,6 +157,12 @@ pub enum SlotContent {
     Section {
         title: String,
         rows: Vec<SectionRow>,
+    },
+    /// A block on the plugin's page, after its build: rows of facts, progress bars, buttons
+    /// and switches, under a title. Other places don't show it.
+    Block {
+        title: String,
+        rows: Vec<BlockRow>,
     },
     /// A settings form. The theme draws it from the plugin's [`crate::Configurator`] schema.
     SettingsPanel {

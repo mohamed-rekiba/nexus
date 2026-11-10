@@ -256,8 +256,19 @@ Some emulator notes:
 - **KytyPS5**: a build that knows the `--data-folder` option keeps its saves in one folder that
   every such build shares: "KytyPS5 saves" on its page, `~/.local/share/KytyPS5` until you
   change it.
-- **Lichii**: you give your own keys and firmware in `~/.local/share/eden`. Nexus does not
-  provide them.
+- **Lichii**: for firmware and the selected keys version in `~/.local/share/eden`, use the
+  **Firmware** block on Lichii's page. It shows the firmware installed and the update that runs,
+  with a bar while it downloads. Turn on **Automatic updates** there (the same setting as **Keep
+  the firmware up to date** in its settings), or press **Update now**. Nexus then downloads the newest firmware from
+  [THZoria/NX_Firmware](https://github.com/THZoria/NX_Firmware), checks its SHA-256 against the
+  one GitHub gives, and puts it in place of the firmware in that folder. Lichii uses it from its next
+  start. `prod.keys` and any `title.keys` from the versioned archive at
+  `https://files.prodkeys.net/ProdKeys.NET-v<keys_version>.zip` go into the `keys` folder.
+  **Keys version** in Lichii's settings defaults to `22.5.0` and can be changed independently
+  of the firmware version. Press **Update the firmware** to download the selected keys.
+  The badge beside the button names the firmware version Nexus installed. This is
+  Nintendo's firmware: check that you may use it where you live. If an update fails, the old
+  firmware stays.
 - **PC**: a Windows game runs through umu-launcher (Proton) or Wine. The PC page has **Install
   umu-launcher**, and then **Update umu-launcher**. On Linux a Windows game runs in a sandbox:
   see [PC games and your files](#pc-games-and-your-files).

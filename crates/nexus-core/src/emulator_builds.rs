@@ -32,6 +32,7 @@ struct InstallRecord {
 
 /// Installed and available versions, and panels, for one emulator.
 pub(crate) async fn refresh_emulator(core: &Core, plugin: &PluginId) {
+    let _reading = core.inner.reading_emulators.lock().await;
     let kernel = core.kernel();
     let Ok(provided) = kernel.provided(plugin).await else { return };
     let mut emu = core.state().emulators.get(plugin).cloned().unwrap_or_default();

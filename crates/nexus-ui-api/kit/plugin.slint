@@ -158,7 +158,7 @@ export component PluginPage inherits SheetFrame {
                 hint: Vm.plugin-page.emulator.status;
                 focused: Prefs.is(1, 0);
                 first: true;
-                last: Prefs.rows(1) == 1;
+                last: Prefs.builds + Prefs.actions == 1;
                 accessible-role: button;
                 accessible-label: "build";
                 accessible-action-default => { self.run(); }
@@ -214,6 +214,44 @@ export component PluginPage inherits SheetFrame {
                 changed seen => { if (self.focused && Prefs.pending == 0) { self.run(); } }
                 function run() { Commands.run-action(action.plugin, action.action, "", action.args); }
                 Value { text: "›"; }
+            }
+
+            // ---------------------------------------------------------------- BLOCKS
+            // The plugin's blocks: facts, bars, buttons and switches under a title. Their
+            // buttons take the focus after the build and the actions.
+            for block in (root.on && !root.theme ? Vm.plugin-page.blocks : []) : VerticalLayout {
+                accessible-role: groupbox;
+                accessible-label: block.label;
+                Header { text: block.text.to-uppercase(); }
+                for row[i] in block.rows : Row {
+                    property <int> place: Prefs.builds + Prefs.actions + row.at;
+                    label: row.label;
+                    hint: row.hint;
+                    hint-kind: row.tone == "success" ? 1 : row.tone == "danger" ? 2 : 0;
+                    progress: row.progress;
+                    inert: row.action == "";
+                    focused: row.at >= 0 && Prefs.is(1, self.place);
+                    first: i == 0;
+                    last: i == block.rows.length - 1;
+                    accessible-role: button;
+                    accessible-label: "block-row:" + row.label;
+                    accessible-value: row.switch != "" ? row.switch : row.value;
+                    accessible-action-default => { self.run(); }
+                    reveal(y, h) => { root.reveal(y, h); }
+                    clicked => { if (row.at >= 0) { Prefs.section = 1; Prefs.row = self.place; self.run(); } }
+                    property <int> seen: Prefs.serial;
+                    // Return runs it; left and right turn a switch off and on.
+                    changed seen => {
+                        if (self.focused && (Prefs.pending == 0 || (row.switch != "" && (Prefs.pending > 0) != (row.switch == "on")))) { self.run(); }
+                    }
+                    function run() { if (row.action != "") { Commands.run-action(block.plugin, row.action, "", row.args); } }
+                    Value {
+                        kind: row.switch != "" ? "toggle" : "text";
+                        on: row.switch == "on";
+                        text: row.action != "" && row.switch == "" ? (row.value != "" ? row.value + "  ›" : "›") : row.value;
+                        tone: row.tone == "success" ? 1 : row.tone == "danger" ? 2 : row.tone == "warning" ? 4 : 0;
+                    }
+                }
             }
 
             }

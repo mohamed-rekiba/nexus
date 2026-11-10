@@ -10,8 +10,12 @@ license.workspace = true
 [dependencies]
 aes.workspace = true
 emulator-kit.workspace = true
+flate2.workspace = true
 nexus-api.workspace = true
+sha2.workspace = true
+tokio.workspace = true
 zstd.workspace = true
+zip.workspace = true
 
 [lints]
 workspace = true

@@ -235,6 +235,10 @@ pub(crate) struct Inner {
     pub backup: crate::backup::BackupSubsystem,
     /// Held while the catalogs are read: see [`crate::catalog_reads::refresh_releases`].
     pub reading_catalogs: tokio::sync::Mutex<()>,
+    /// One read of an emulator's builds and panel at a time. Two at once could end in the
+    /// wrong order: a read that began before the plugin changed would put the old panel over
+    /// the new one.
+    pub reading_emulators: tokio::sync::Mutex<()>,
 }
 
 /// The app. Cheap to clone; every clone is the same app.
@@ -367,6 +371,7 @@ impl Core {
                 launcher_update,
                 vpn,
                 reading_catalogs: tokio::sync::Mutex::new(()),
+                reading_emulators: tokio::sync::Mutex::new(()),
             }
         });
         let core = Core { inner };

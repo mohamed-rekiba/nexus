@@ -405,3 +405,41 @@ fn right_to_left_the_install_prompt_has_install_and_play_on_the_right_and_the_ke
     let asked = key_asks(&mut host, Key::Return);
     assert!(asked.iter().any(|c| matches!(c, Command::ConfirmInstall)), "Right stays on it: {asked:?}");
 }
+
+#[test]
+fn a_block_on_a_plugin_s_page_shows_its_bar_and_its_buttons_take_the_keys_after_the_build() {
+    use nexus_api::BlockRow;
+    use slint::platform::Key;
+    let rows = vec![
+        BlockRow { label: "Installed".into(), value: "23.5.0".into(), ..BlockRow::default() },
+        BlockRow { label: "Downloading".into(), value: "50%".into(), progress: Some(0.5), ..BlockRow::default() },
+        BlockRow {
+            label: "Automatic updates".into(),
+            action: Some("auto".into()),
+            switch: Some(false),
+            ..BlockRow::default()
+        },
+        BlockRow { label: "Update now".into(), action: Some("now".into()), ..BlockRow::default() },
+    ];
+    let service =
+        FakeService::new("firm", "Firm").block(nexus_api::SlotId::EmulatorPanel, "firmware", "Firmware", rows);
+    let mut host = composed(|h| h.plugin(service.clone().build()));
+    host.ui.start().unwrap();
+    host.dispatch(Command::Navigate(nexus_core::Route::Emulators));
+    host.dispatch(Command::Navigate(nexus_core::Route::Plugin(id("firm"))));
+    host.settle();
+
+    for label in ["Installed", "Downloading", "Automatic updates", "Update now"] {
+        assert_eq!(host.count(&format!("block-row:{label}")), 1, "{label}");
+    }
+    assert_eq!(host.value("row-progress"), "50%");
+    assert_eq!(host.value("block-row:Automatic updates"), "off");
+
+    // Down from Turned on: the rows that only show are passed over.
+    host.navigate(Key::DownArrow);
+    host.navigate(Key::Return);
+    host.navigate(Key::DownArrow);
+    host.navigate(Key::Return);
+    host.settle();
+    assert_eq!(service.ran(), ["auto", "now"]);
+}
