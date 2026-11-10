@@ -612,7 +612,7 @@ component DownloadSheet inherits Rectangle {
     }
 }
 
-// The old launcher's Game Hub: the 2:3 cover on one side; the title, facts, buttons and the
+// The Game Hub: the 2:3 cover on one side; the title, facts, buttons and the
 // plugins' sections in a column that scrolls on the other.
 export component GameDetailPage inherits Rectangle {
     property <bool> entered;
@@ -643,7 +643,7 @@ export component GameDetailPage inherits Rectangle {
         Origin.from = "";
     }
     property <bool> grows: root.from != "";
-    // "PS5 · KONAMI · 2024 · Europe", as the old Game Hub's line over the title.
+    // "PS5 · KONAMI · 2024 · Europe": the line over the title.
     property <string> meta: Vm.detail.platform
         + (Vm.detail.developer != "" ? " · " + Vm.detail.developer.to-uppercase() : "")
         + (Vm.detail.year != "" ? " · " + Vm.detail.year : "")
@@ -655,8 +655,7 @@ export component GameDetailPage inherits Rectangle {
     property <length> read-y;
     property <int> reading: Hub.reading;
     changed reading => { root.read(); }
-    // A step of reading: about 360 px further down the page from where the reading starts,
-    // as the old launcher.
+    // A step of reading: about 360 px further down the page from where the reading starts.
     function read() {
         if (Hub.reading < 0) { return; }
         let end = flick.viewport-height - flick.height;
@@ -665,7 +664,7 @@ export component GameDetailPage inherits Rectangle {
         flick.viewport-y = -Math.max(0, Math.min(want, end));
     }
     property <TextHorizontalAlignment> align: Look.rtl ? right : left;
-    // The player's own result when there is one, as the old Game Hub's YOUR RESULT.
+    // The player's own result when there is one, as YOUR RESULT.
     property <bool> mine: Vm.detail.your-result != "";
     property <string> compat: root.mine ? Look.result-label(Vm.detail.your-result) : Vm.detail.has-compat ? Vm.detail.compat.label : "Not tested";
     property <color> compat-tint: root.mine ? Look.result-color(Vm.detail.your-result) : Vm.detail.has-compat ? Look.compat-color(Vm.detail.compat.level) : Tokens.color-text;
@@ -772,8 +771,8 @@ export component GameDetailPage inherits Rectangle {
             HorizontalLayout {
                 spacing: 10 * Look.px;
                 alignment: Look.rtl ? end : start;
-                // The old Game Hub's chips: the plugin's badges, the rating, the age rating, the
-                // genres. Its size is a fact card below.
+                // The chips: the plugin's badges, the rating, the age rating, the genres. Its size
+                // is a fact card below.
                 for badge in Vm.detail.badges : Chip {
                     text: badge.text;
                     dot: badge.tone == "neutral" ? transparent : Look.tone(badge.tone);
@@ -890,7 +889,7 @@ export component GameDetailPage inherits Rectangle {
                 }
             }
             Rectangle { height: 22 * Look.px; }
-            // The old launcher's fact cards: how it runs, how it runs on this PC, how long you
+            // The fact cards: how it runs, how it runs on this PC, how long you
             // played, how big it is, how it runs through a compatibility layer (ProtonDB's tier), and
             // for a game a catalog offers, how easy its best release is to download. Three to a
             // row; right to left mirrors each row.
@@ -967,8 +966,7 @@ export component GameDetailPage inherits Rectangle {
                     }
                 }
             }
-            // Technical details, as the old launcher's "+ Technical details": every fact the
-            // plugin gives, opened with Down.
+            // "+ Technical details": every fact the plugin gives, opened with Down.
             Rectangle {
                 height: 56 * Look.px;
                 border-radius: 14 * Look.px;
@@ -1045,7 +1043,7 @@ export component GameDetailPage inherits Rectangle {
                 wrap: word-wrap;
                 horizontal-alignment: root.align;
             }
-            // The store's screenshots, in a row, as the old Game Hub.
+            // The store's screenshots, in a row.
             if Vm.detail.screenshots.length > 0 : VerticalLayout {
                 padding-top: 30 * Look.px;
                 spacing: 16 * Look.px;

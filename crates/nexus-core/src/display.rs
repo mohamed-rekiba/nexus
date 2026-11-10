@@ -139,7 +139,7 @@ fn days_text(days: Option<u64>) -> String {
     }
 }
 
-/// `2024-03-12` as `Mar 12, 2024`, as the old launcher showed dates; empty stays empty.
+/// `2024-03-12` as `Mar 12, 2024`; empty stays empty.
 fn date_text(date: &str) -> String {
     const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     let day = date.get(8..10).and_then(|d| d.parse::<u32>().ok());

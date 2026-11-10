@@ -109,7 +109,7 @@ component HeroView inherits Rectangle {
             alignment: Look.rtl ? end : start;
             opacity: root.front ? 1 : 0;
             animate opacity { duration: Tokens.motion-normal; delay: root.beat(2); easing: ease-out-quad; }
-            // The player's own result first, as the old launcher; then the plugin's badges.
+            // The player's own result first; then the plugin's badges.
             if root.data.result != "" : Chip {
                 text: Look.result-label(root.data.result) + " · your result";
                 dot: Look.result-color(root.data.result);
@@ -152,7 +152,7 @@ component HeroView inherits Rectangle {
             opacity: root.front ? 1 : 0;
             animate opacity { duration: Tokens.motion-normal; delay: root.beat(4); easing: ease-out-quad; }
             property <bool> on-actions: root.front && Nav.zone == "actions";
-            // While the game runs: Resume, Stop and Game Hub, as the old launcher had them.
+            // While the game runs: Resume, Stop and Game Hub.
             if root.data.playing : Pill {
                 text: "Resume";
                 icon: "play";
@@ -188,7 +188,7 @@ component HeroView inherits Rectangle {
                 dim: parent.on-actions && Nav.action != Nav.hub-action;
                 clicked => { Nav.action = Nav.hub-action; Nav.activate(); }
             }
-            // The store page, as the old launcher's round link button.
+            // The store page, as a round link button.
             if root.data.game && root.data.store != "" : Pill {
                 text: "Store";
                 icon: "web";
@@ -225,7 +225,7 @@ component HeroView inherits Rectangle {
     }
 }
 
-// The old launcher's home: a row of tiles, the selected one larger with its name beside it,
+// Home: a row of tiles, the selected one larger with its name beside it,
 // and the game's hero over its art.
 component HomeView inherits Rectangle {
     property <length> big: 172 * Look.px;
@@ -247,7 +247,7 @@ component HomeView inherits Rectangle {
     } : {
         key: Nav.games[Nav.shown].key,
         title: Nav.games[Nav.shown].title,
-        // As the old launcher: when it last ran, from the first frame.
+        // When it last ran, from the first frame.
         sub: Nav.playing ? "Playing now"
             : Nav.games[Nav.shown].last-played != "" ? "Last played " + Nav.games[Nav.shown].last-played.to-lowercase()
             : "Not played yet",
@@ -321,8 +321,8 @@ component HomeView inherits Rectangle {
     Rectangle {
         y: 128 * Look.px;
         height: 210 * Look.px;
-        // The mouse wheel moves along the row, a game a notch, as the old launcher. Under the
-        // tiles, so their clicks stay theirs.
+        // The mouse wheel moves along the row, a game a notch. Under the tiles, so their clicks
+        // stay theirs.
         TouchArea {
             scroll-event(event) => {
                 let delta = (event.delta-y + event.delta-x) / 1px;

@@ -47,7 +47,7 @@ component NoticeSign inherits Rectangle {
     if root.notice.art.width > 0 : Image { source: root.notice.art; width: parent.width; height: parent.height; image-fit: cover; }
 }
 
-// One notice, as the old launcher's notification card: the game's art or the kind's sign, the
+// One notice, as a notification card: the game's art or the kind's sign, the
 // text, and what it opens. It slides in from the side and stays long enough to read: 4 s, or
 // 10 s for one with something to open. Then it slides out, and the core closes it.
 component NoticeCard inherits Rectangle {

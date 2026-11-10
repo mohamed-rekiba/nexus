@@ -34,8 +34,9 @@ import { Osk, OnScreenKeyboard } from "kit/keyboard.slint";
 import { Sys, SystemSheet } from "kit/system-panel.slint";
 import { Setup, InstallOs } from "kit/install-os.slint";
 
-// The Classic theme: the old launcher's look. One backdrop of game art behind every screen, the top bar
-// over the main screens, and the keys that do something in a pill at the bottom. A gamepad's
+// The Classic theme: a hero and a row of game tiles on Home. One backdrop of game art behind
+// every screen, the top bar over the main screens, and the keys that do something in a pill at
+// the bottom. A gamepad's
 // d-pad and buttons arrive as arrow, Return, Escape and Tab keys.
 export component Shell inherits Window {
     title: "Nexus";
@@ -317,7 +318,7 @@ export component Shell inherits Window {
     // The PS or Xbox button, held: the host counts it up.
     property <int> power-asks: Vm.power-menu;
     changed power-asks => { PowerMenu.show(); }
-    // No pill over the Library's and the Catalog's cards, as the old launcher: it would cover
+    // No pill over the Library's and the Catalog's cards: it would cover
     // their titles. Over their header rows (search, filters, genres) it says how the keys move.
     // Over a trailer, the hints hide with its controls.
     property <bool> grid-header: ((root.home && Nav.library) || Vm.screen == "catalog")
@@ -429,14 +430,14 @@ export component Shell inherits Window {
             ];
     }
 
-    // The notices, as the old launcher's notification cards, on the far side.
+    // The notices, as notification cards, on the far side.
     NoticeStack {
         x: Look.rtl ? 40 * Look.px : root.width - self.width - 40 * Look.px;
         y: 120 * Look.px;
         width: 480 * Look.px;
     }
 
-    // Work in the background, as the old launcher's status pill at the bottom corner.
+    // Work in the background, as a status pill at the bottom corner.
     if Vm.task != "" && root.home && !root.sheet : Rectangle {
         property <bool> shown;
         // After the first frame, so the entry animates from its start.

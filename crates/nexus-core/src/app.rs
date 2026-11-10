@@ -719,8 +719,7 @@ impl Core {
                     .map_err(|error| CoreError::Plugin { plugin: plugin.clone(), error })
             }
             nexus_ui_api::ImageRef::Url { plugin, url } => {
-                // Kept as it came, as the old launcher's image cache: a warm start doesn't
-                // touch the network.
+                // Kept as it came, in the image cache: a warm start doesn't touch the network.
                 use sha2::Digest;
                 let cached = kernel.host().data_dir.join("cache/net").join(hex::encode(sha2::Sha256::digest(url)));
                 if let Ok(bytes) = tokio::fs::read(&cached).await {

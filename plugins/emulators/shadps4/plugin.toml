@@ -54,7 +54,8 @@ button = "Touchpad"
 keys = "Space"
 
 # What PS4 games need from the computer: Vulkan 1.3 and AVX2 to start (shadPS4 is built for
-# x86-64-v3), and to run well the old launcher's README numbers.
+# x86-64-v3). To run well, they need 8 CPU threads, 7 GB of memory and a discrete GPU with
+# 3.5 GB of memory.
 [requires]
 vulkan = "1.3"
 avx2 = true

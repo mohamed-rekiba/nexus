@@ -147,6 +147,11 @@ For contributors:
 | [docs/third-party-notices.md](docs/third-party-notices.md) | Code and libraries from other projects, and their licences |
 | [GLOSSARY.md](GLOSSARY.md) | The words the code and the docs use |
 
+## Thanks
+
+Nexus is inspired by [Azrak Launcher](https://github.com/AzrakHQ/azrak-launcher) and
+[AzrakOS](https://github.com/AzrakHQ/azrak-os).
+
 ## Licence
 
 Nexus is under the GNU General Public License, version 2 or later ([LICENSE](LICENSE)). The

@@ -96,7 +96,7 @@ and its `bootc-generic-iso` type by default: the live container becomes the squa
 menu comes from `iso.yaml`, and `--bootc-installer-payload-ref` copies the minimal image into it.
 
 If image-builder can't make a stick that starts live (or isn't available), `METHOD=xorriso`
-makes the same ISO by hand, as azrak-os did: the live container's files in a squashfs, the
+makes the same ISO by hand: the live container's files in a squashfs, the
 minimal image pushed into its `/var/lib/containers/storage`, Fedora's shim and GRUB on an EFI
 partition, and xorriso. Its GRUB menu is made from the same `iso.yaml`, hidden unless Esc or
 Shift is held. Both make one ISO with the same entries.

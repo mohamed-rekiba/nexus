@@ -1,5 +1,5 @@
-//! The built-in Classic theme, the old launcher's look: a hero and a row of games on Home. It
-//! stands alone and draws its other screens with the kit. It is compiled into the binary.
+//! The built-in Classic theme: a hero and a row of game tiles on Home. It stands alone and draws
+//! its other screens with the kit. It is compiled into the binary.
 
 use std::sync::Arc;
 

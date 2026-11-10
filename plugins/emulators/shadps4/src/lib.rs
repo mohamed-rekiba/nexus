@@ -114,7 +114,7 @@ fn program(tag: &str, platform: Option<Platform>) -> PluginResult<RelPath> {
     }
 }
 
-// shadPS4's default key layout, as the old app's keyboard screen listed it. shadPS4 keeps the
+// shadPS4's default key layout, for the keyboard screen. shadPS4 keeps the
 // layout in its own settings file, so the player's may differ.
 pub const KEYS: &[(&str, &str)] = &[
     ("Cross", "N (or keypad 2)"),

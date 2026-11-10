@@ -293,7 +293,7 @@ fn settings_have_no_emulator_settings() {
 #[test]
 fn the_window_is_full_screen_by_default_and_settings_turn_it_off() {
     let mut host = classic_theme();
-    assert!(host.instance().window().is_fullscreen(), "full screen by default, as in the old launcher");
+    assert!(host.instance().window().is_fullscreen(), "full screen by default");
     host.dispatch(Command::Navigate(nexus_core::Route::Settings));
     host.settle();
     host.settings_tab("Launcher");

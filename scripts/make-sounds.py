@@ -2,8 +2,8 @@
 """Writes the default theme's select, back, error and start sounds as WAV files.
 
 Each sound is one or two synthesized tones: a pitch glide with an 8 ms attack and an
-exponential decay to -80 dB, as the old launcher made them. The files are mono, 16 bit,
-22050 Hz, as move.wav. Python 3 standard library only.
+exponential decay to -80 dB. The files are mono, 16 bit, 22050 Hz, as move.wav. Python 3
+standard library only.
 
 Usage: scripts/make-sounds.py [folder]   (default: plugins/themes/default/theme/sounds)
 """

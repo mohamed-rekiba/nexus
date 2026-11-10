@@ -50,8 +50,8 @@ Two themes are compiled into the binary. Each crate's `build.rs` embeds every fi
   system's games (`LibrarySystem`). Menu opens the emulator's plugin page. The Library shows
   the systems as chips in the top bar (`components/chip-row.slint`). Default sets no tokens:
   the defaults are its look.
-- **Classic** (`classic`, `plugins/themes/classic/theme/`): the old launcher's look, with a
-  row of game tiles and a hero on Home. It sets every token, each to its default value.
+- **Classic** (`classic`, `plugins/themes/classic/theme/`): a hero and a row of game tiles on
+  Home. It sets every token, each to its default value.
 
 The two share most files. Only `theme.toml`, `shell.slint` (one comment), `screens/home.slint`,
 `components/nav.slint`, `components/top-bar.slint` and `components/library-view.slint` differ.
@@ -181,7 +181,7 @@ doesn't know.
 | `options` | table | none | Settings the player changes, which set tokens. See [Options](#options). |
 | `systems` | table | none | A system's own icon and cover, by system id. See [System art](#images-fonts-sounds-and-system-art). |
 
-The host refuses three keys of the old inheritance model, each with what to do instead
+A theme manifest may not use three keys. The host refuses each one with what to do instead
 (`ThemeManifest::from_plugin`):
 
 | Key | Message |

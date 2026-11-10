@@ -49,8 +49,8 @@ pub(crate) fn words(details: &GameDetails, metas: &[(PluginId, GameMetadata)]) -
     GameWords { description, developer, genres }
 }
 
-/// Home's line for a game, as the old launcher said it: the store's tagline, else the game's own
-/// description, else its facts on one line (when there are at least two), else where it runs.
+/// Home's line for a game: the store's tagline, else the game's own description, else its facts
+/// on one line (when there are at least two), else where it runs.
 pub(crate) fn home_line(
     details: &GameDetails,
     metas: &[(PluginId, GameMetadata)],

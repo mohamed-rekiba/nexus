@@ -137,7 +137,7 @@ fn without_japanese_text(m: &mut GameMetadata) {
     }
 }
 
-/// One concept of the catalog's answer, as the old launcher read it.
+/// One concept of the catalog's answer, read as the game's metadata.
 pub fn read_concept(c: &Value, language: &str) -> GameMetadata {
     let mut images: HashMap<&str, &str> = HashMap::new();
     let mut shots = Vec::new();

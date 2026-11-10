@@ -6,8 +6,8 @@ host_api = "^0.2"
 capabilities = ["theme"]
 activation = "eager"
 
-# The built-in Classic theme: the old launcher's own look (its ui/*.slint), ported to the theme
-# contract. Every value is laid out on a 1920×1080 canvas and scaled to the window.
+# The built-in Classic theme: a hero and a row of game tiles on Home, on the theme contract.
+# Every value is laid out on a 1920×1080 canvas and scaled to the window.
 [theme]
 ui_api = "^0.2.0"
 input = ["gamepad", "pointer"]
@@ -43,7 +43,7 @@ error = "sounds/error.wav"
 start = "sounds/start.wav"
 
 [theme.tokens]
-# The old launcher's Theme global (ui/theme.slint).
+# Every token, each set to its default value.
 color-bg = "#05070f"
 color-surface = "#121a31"
 color-surface-raised = "#1a2440"
