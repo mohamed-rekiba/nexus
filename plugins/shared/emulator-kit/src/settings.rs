@@ -78,11 +78,16 @@ impl<S: Settings> SettingsStore<S> {
     }
 
     pub async fn set_own_build(&self, on: bool) -> PluginResult<()> {
+        self.set(OWN_BUILD, Value::Bool(on)).await
+    }
+
+    /// Stores one setting, `key`, as `value`. The others stay as they are.
+    pub async fn set(&self, key: &str, value: Value) -> PluginResult<()> {
         let mut stored = self.stored().await;
         if !stored.is_object() {
             stored = serde_json::to_value(self.defaults())?;
         }
-        stored[OWN_BUILD] = Value::Bool(on);
+        stored[key] = value;
         self.config.set(&ConfigScope::Emulator, stored).await
     }
 

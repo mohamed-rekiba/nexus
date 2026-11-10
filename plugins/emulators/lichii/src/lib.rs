@@ -293,16 +293,22 @@ impl Slots for Lichii {
             if settings.firmware_updates {
                 self.firmware.start_auto(settings.keys_version).await;
             }
-            items.extend(self.firmware.panel().await);
+            items.extend(self.firmware.panel(settings.firmware_updates).await);
         }
         Ok(items)
     }
 
     async fn run_action(&self, action: &str, game: Option<&str>, args: &Value) -> PluginResult<()> {
         match action {
-            "update-firmware" => {
+            firmware::UPDATE_NOW => {
                 self.firmware.start(true, self.emu.builds().settings().load().await.keys_version);
                 Ok(())
+            }
+            // The core reads the panel again after the action: turned on, a check starts then.
+            firmware::TOGGLE_AUTO => {
+                let settings = self.emu.builds().settings();
+                let on = settings.load().await.firmware_updates;
+                settings.set("firmware_updates", Value::Bool(!on)).await
             }
             _ => self.emu.run_action(action, game, args).await,
         }

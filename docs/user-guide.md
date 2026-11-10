@@ -256,8 +256,10 @@ Some emulator notes:
 - **KytyPS5**: a build that knows the `--data-folder` option keeps its saves in one folder that
   every such build shares: "KytyPS5 saves" on its page, `~/.local/share/KytyPS5` until you
   change it.
-- **Lichii**: for firmware and the selected keys version in `~/.local/share/eden`, turn on **Keep the firmware up to date** in Lichii's settings, or press
-  **Update the firmware** on its page. Nexus then downloads the newest firmware from
+- **Lichii**: for firmware and the selected keys version in `~/.local/share/eden`, use the
+  **Firmware** block on Lichii's page. It shows the firmware installed and the update that runs,
+  with a bar while it downloads. Turn on **Automatic updates** there (the same setting as **Keep
+  the firmware up to date** in its settings), or press **Update now**. Nexus then downloads the newest firmware from
   [THZoria/NX_Firmware](https://github.com/THZoria/NX_Firmware), checks its SHA-256 against the
   one GitHub gives, and puts it in place of the firmware in that folder. Lichii uses it from its next
   start. `prod.keys` and any `title.keys` from the versioned archive at

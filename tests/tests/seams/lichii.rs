@@ -522,20 +522,35 @@ async fn with_eden(old: &[&str]) -> (TestCore, tempfile::TempDir, tempfile::Temp
     (test, games, eden)
 }
 
-/// The firmware badge on Lichii's panel.
-fn firmware_badge(test: &TestCore) -> Option<String> {
-    let view = test.core.view();
+/// The rows of the Firmware block on Lichii's panel.
+fn firmware_rows(core: &nexus_core::Core) -> Option<Vec<nexus_ui_api::RowVm>> {
+    let view = core.view();
     let emu = view.emulators.emulators.iter().find(|e| e.plugin == lichii())?.clone();
-    emu.panels.into_iter().find(|p| p.id == "firmware").map(|p| p.text)
+    emu.panels.into_iter().find(|p| p.id == "firmware").map(|p| p.rows)
 }
 
-/// Waits until the firmware badge says something other than that an update is running.
+fn row<'a>(rows: &'a [nexus_ui_api::RowVm], label: &str) -> Option<&'a nexus_ui_api::RowVm> {
+    rows.iter().find(|r| r.label == label)
+}
+
+/// The Firmware block in a few words: "Firmware 23.5.0", "No firmware", or why the last update
+/// failed.
+fn firmware_badge(test: &TestCore) -> Option<String> {
+    let rows = firmware_rows(&test.core)?;
+    if let Some(failed) = row(&rows, "The last update failed") {
+        return Some(format!("The firmware update failed: {}", failed.hint));
+    }
+    Some(match row(&rows, "Installed")?.value.as_str() {
+        "None" => "No firmware".into(),
+        "Not from Nexus" => "Firmware: not from Nexus".into(),
+        version => format!("Firmware {version}"),
+    })
+}
+
+/// Waits until no update runs: Update now is back.
 async fn firmware_settles(test: &TestCore) -> String {
     test.until(nexus_core::Area::Plugins, |core| {
-        let view = core.view();
-        let emu = view.emulators.emulators.iter().find(|e| e.plugin == lichii()).cloned();
-        let text = emu.and_then(|e| e.panels.into_iter().find(|p| p.id == "firmware")).map(|p| p.text);
-        text.is_some_and(|t| !t.starts_with("Updating"))
+        firmware_rows(core).is_some_and(|rows| row(&rows, "Update now").is_some())
     })
     .await;
     firmware_badge(test).unwrap()
@@ -741,21 +756,13 @@ async fn the_keys_version_can_be_changed_in_settings_without_changing_firmware()
     assert!(!test.http.sent()[downloads..].iter().any(|u| u.ends_with(".zip")));
 }
 
+/// What the Firmware block says of the update: the step that runs, or the last check's result.
 fn firmware_status(test: &TestCore) -> String {
-    test.core
-        .view()
-        .emulators
-        .emulators
-        .iter()
-        .find(|e| e.plugin == lichii())
-        .unwrap()
-        .panels
-        .iter()
-        .find(|p| p.id == "firmware-status")
-        .unwrap()
-        .rows[0]
-        .value
-        .clone()
+    let rows = firmware_rows(&test.core).unwrap();
+    match row(&rows, "Last check") {
+        Some(last) => last.hint.clone(),
+        None => rows[1].label.clone(),
+    }
 }
 
 #[tokio::test]
@@ -817,4 +824,50 @@ async fn deleted_or_empty_firmware_bypasses_the_automatic_check_interval() {
         firmware_settles(&test).await;
         assert_eq!(std::fs::read(folder.join("1b.nca")).unwrap(), b"nca");
     }
+}
+
+#[tokio::test]
+async fn the_firmware_block_s_switch_turns_automatic_updates_on_and_a_check_runs() {
+    let (test, _games, eden) = with_eden(&[]).await;
+    serve_firmware(&test.http, FIRMWARE, stored_zip(&[("1b.nca", b"nca")]), None);
+    test.core.dispatch(Command::Navigate(nexus_core::Route::Emulators)).await.unwrap();
+    let rows = firmware_rows(&test.core).unwrap();
+    let switch = row(&rows, "Automatic updates").unwrap();
+    assert_eq!(switch.switch, "off", "off by default");
+
+    let flip =
+        Command::RunAction { plugin: lichii(), action: switch.action.clone(), game: None, args: switch.args.clone() };
+    test.core.dispatch(flip).await.unwrap();
+
+    assert_eq!(firmware_settles(&test).await, "Firmware 23.5.0");
+    assert_eq!(row(&firmware_rows(&test.core).unwrap(), "Automatic updates").unwrap().switch, "on");
+    assert_eq!(files_in(&eden.path().join("nand/system/Contents/registered")), ["1b.nca"]);
+}
+
+#[tokio::test]
+async fn the_firmware_block_shows_the_download_as_a_bar_without_update_now() {
+    let (test, _games, _eden) = with_eden(&[]).await;
+    serve_firmware(&test.http, FIRMWARE, stored_zip(&[("1b.nca", b"nca")]), None);
+    let cdn = format!("https://release-assets.githubusercontent.com/nx/{FIRMWARE}/Firmware.{FIRMWARE}.zip");
+    let gate = test.http.hold_next(&cdn);
+    test.core.dispatch(Command::Navigate(nexus_core::Route::Emulators)).await.unwrap();
+    let action = "update-firmware".to_owned();
+    test.core
+        .dispatch(Command::RunAction { plugin: lichii(), action, game: None, args: serde_json::Value::Null })
+        .await
+        .unwrap();
+
+    test.until(nexus_core::Area::Plugins, |core| {
+        firmware_rows(core).is_some_and(|rows| row(&rows, "Downloading the firmware").is_some())
+    })
+    .await;
+    let rows = firmware_rows(&test.core).unwrap();
+    let download = row(&rows, "Downloading the firmware").unwrap();
+    assert_eq!(download.progress, 0.0);
+    assert_eq!(download.value, "0%");
+    assert!(download.hint.starts_with("0.0 MB of "), "{}", download.hint);
+    assert!(row(&rows, "Update now").is_none(), "no second update while one runs");
+
+    gate.release();
+    assert_eq!(firmware_settles(&test).await, "Firmware 23.5.0");
 }

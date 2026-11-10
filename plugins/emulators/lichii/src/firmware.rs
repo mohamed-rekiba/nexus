@@ -25,6 +25,9 @@ use sha2::{Digest, Sha256};
 
 use crate::DATA;
 
+/// The actions of the Firmware block's rows: Update now, and the automatic updates' switch.
+pub const UPDATE_NOW: &str = "update-firmware";
+pub const TOGGLE_AUTO: &str = "toggle-firmware-updates";
 /// The newest firmware release.
 pub const FIRMWARE_RELEASE: &str = "https://api.github.com/repos/THZoria/NX_Firmware/releases/latest";
 /// The release, kept for hours: GitHub allows 60 requests an hour without a token.
@@ -45,12 +48,38 @@ const PIECE: u64 = 8 * 1024 * 1024;
 const MAX_FILES: usize = 4096;
 
 /// What the update is doing.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 enum Phase {
     Idle,
     Complete(String),
-    Updating(String),
+    Updating(Step),
     Failed(String),
+}
+
+/// A step of an update that runs: what it does, and for a download how far it is.
+#[derive(Clone, Debug, PartialEq)]
+struct Step {
+    what: String,
+    /// From 0 to 1.
+    progress: Option<f32>,
+    /// A line under `what`, such as the megabytes downloaded.
+    detail: String,
+}
+
+impl Step {
+    fn new(what: impl Into<String>) -> Self {
+        Self { what: what.into(), progress: None, detail: String::new() }
+    }
+
+    /// The download's step, at `at` of `size` bytes.
+    fn download(at: u64, size: u64) -> Self {
+        let mb = |b: u64| format!("{:.1} MB", b as f64 / 1_000_000.0);
+        Self {
+            what: "Downloading the firmware".into(),
+            progress: Some(at as f32 / size.max(1) as f32),
+            detail: format!("{} of {}", mb(at), mb(size)),
+        }
+    }
 }
 
 pub struct Firmware {
@@ -108,7 +137,7 @@ impl Firmware {
             match &*phase {
                 Phase::Updating(_) => return,
                 Phase::Failed(_) if !asked => return,
-                _ => *phase = Phase::Updating("Checking for firmware updates…".into()),
+                _ => *phase = Phase::Updating(Step::new("Checking for firmware updates…")),
             }
         }
         if let Err(e) = self.events.publish(SLOTS_CHANGED, Value::Null) {
@@ -127,56 +156,63 @@ impl Firmware {
         });
     }
 
-    /// The panel's status and action. While busy, the action shows progress; starting again is a no-op.
-    pub async fn panel(&self) -> Vec<SlotItem> {
-        let item = |id: &str, content| SlotItem { id: id.into(), order: Order::default(), content };
-        let badge = |label: String, tone| SlotContent::Badge { label, short: String::new(), tone, icon: None };
+    /// The Firmware block on Lichii's page: the firmware in Eden's folder, the update that
+    /// runs or the last one's result, the automatic updates' switch (`auto`), and Update now.
+    pub async fn panel(&self, auto: bool) -> Vec<SlotItem> {
         let phase = self.phase();
-        let content = match &phase {
-            Phase::Updating(v) => badge(format!("Updating: {v}"), Tone::Info),
-            Phase::Failed(e) => badge(format!("The firmware update failed: {e}"), Tone::Danger),
-            Phase::Idle | Phase::Complete(_) => match self.installed().await {
-                Some(v) if self.has_firmware().await => badge(format!("Firmware {v}"), Tone::Neutral),
-                Some(_) => badge("No firmware".into(), Tone::Warning),
-                None if self.has_firmware().await => badge("Firmware: not from Nexus".into(), Tone::Neutral),
-                None => badge("No firmware".into(), Tone::Warning),
-            },
+        let row = |label: &str, value: String, hint: String, tone| BlockRow {
+            label: label.into(),
+            value,
+            hint,
+            tone,
+            ..BlockRow::default()
         };
-        let status = match &phase {
-            Phase::Updating(message) => message.clone(),
-            Phase::Complete(message) => message.clone(),
-            Phase::Failed(error) => format!("The firmware update failed: {error}"),
-            Phase::Idle => match self.installed().await {
-                Some(version) => {
-                    format!("Installed firmware: {version}. Check for updates to see if a newer version is available.")
-                }
-                None => "Check for updates to download firmware and the selected keys version.".into(),
-            },
-        };
-        let mut items = vec![
-            item("firmware", content),
-            item(
-                "firmware-status",
-                SlotContent::Section {
-                    title: "Firmware and keys".into(),
-                    rows: vec![SectionRow { label: "Status".into(), value: status }],
-                },
+        let installed = match (self.installed().await, self.has_firmware().await) {
+            (Some(version), true) => row("Installed", version, "Nexus installed it".into(), Tone::Neutral),
+            (None, true) => row(
+                "Installed",
+                "Not from Nexus".into(),
+                "Update now puts the newest firmware in its place".into(),
+                Tone::Neutral,
             ),
-        ];
-        items.push(item(
-            "update-firmware",
-            SlotContent::Action {
-                label: match &phase {
-                    Phase::Updating(message) => message.clone(),
-                    _ => "Update the firmware".into(),
-                },
-                action: "update-firmware".into(),
-                args: Value::Null,
-                style: ActionStyle::Secondary,
-                icon: None,
-            },
-        ));
-        items
+            (_, false) => row("Installed", "None".into(), "Some games need the firmware".into(), Tone::Warning),
+        };
+        let mut rows = vec![installed];
+        match &phase {
+            Phase::Updating(step) => rows.push(BlockRow {
+                progress: step.progress,
+                value: step.progress.map(|p| format!("{}%", (p * 100.0) as u32)).unwrap_or_default(),
+                ..row(&step.what, String::new(), step.detail.clone(), Tone::Info)
+            }),
+            Phase::Failed(error) => {
+                rows.push(row("The last update failed", String::new(), error.clone(), Tone::Danger))
+            }
+            Phase::Complete(message) => rows.push(row("Last check", String::new(), message.clone(), Tone::Neutral)),
+            Phase::Idle => {}
+        }
+        rows.push(BlockRow {
+            action: Some(TOGGLE_AUTO.into()),
+            switch: Some(auto),
+            ..row(
+                "Automatic updates",
+                String::new(),
+                "Nexus looks for a new firmware every 6 hours".into(),
+                Tone::Neutral,
+            )
+        });
+        if !matches!(phase, Phase::Updating(_)) {
+            rows.push(BlockRow {
+                action: Some(UPDATE_NOW.into()),
+                ..row(
+                    "Update now",
+                    String::new(),
+                    "Looks for a new firmware now, and installs it".into(),
+                    Tone::Neutral,
+                )
+            });
+        }
+        let block = SlotContent::Block { title: "Firmware".into(), rows };
+        vec![SlotItem { id: "firmware".into(), order: Order::default(), content: block }]
     }
 
     /// Whether Eden's folder has firmware: for the badge when Nexus didn't install one.
@@ -246,11 +282,11 @@ impl Firmware {
                 release.tag
             ));
         }
-        self.set_phase(Phase::Updating(format!(
+        self.set_phase(Phase::Updating(Step::new(format!(
             "Firmware {} is {}. Downloading keys {keys_version}…",
             release.tag,
             if current { "up to date" } else { "available" }
-        )));
+        ))));
         let keys = self.download_keys(keys_version).await?;
         if current {
             self.install_keys(keys).await?;
@@ -274,7 +310,7 @@ impl Firmware {
             .ok_or_else(|| PluginError::Precondition(format!("GitHub gives no SHA-256 for {}", asset.name)))?;
         let unpacked = async {
             self.download(&asset.url, asset.size, &sha256, &zip).await?;
-            self.set_phase(Phase::Updating(format!("Unpacking firmware {}…", release.tag)));
+            self.set_phase(Phase::Updating(Step::new(format!("Unpacking firmware {}…", release.tag))));
             unpack(folders, &zip, &part).await
         }
         .await;
@@ -283,7 +319,10 @@ impl Firmware {
             self.clean(&part).await;
             return Err(e);
         }
-        self.set_phase(Phase::Updating(format!("Installing firmware {} and keys {keys_version}…", release.tag)));
+        self.set_phase(Phase::Updating(Step::new(format!(
+            "Installing firmware {} and keys {keys_version}…",
+            release.tag
+        ))));
         let had_old = folders.exists(&contents).await?;
         if had_old {
             folders.rename(&contents, &old).await?;
@@ -399,7 +438,7 @@ impl Firmware {
         if size == 0 {
             return Err(PluginError::InvalidInput("the firmware's size isn't known".into()));
         }
-        self.set_phase(Phase::Updating("Downloading firmware: 0%…".into()));
+        self.set_phase(Phase::Updating(Step::download(0, size)));
         let mut hash = Sha256::new();
         let mut at = 0;
         while at < size {
@@ -418,7 +457,7 @@ impl Firmware {
             hash.update(&response.body);
             self.host.folders.write_at(into, at, &response.body).await?;
             at += response.body.len() as u64;
-            self.set_phase(Phase::Updating(progress(at, size)));
+            self.set_phase(Phase::Updating(Step::download(at, size)));
         }
         let got = hex(&hash.finalize());
         if got != sha256 {
@@ -428,13 +467,6 @@ impl Firmware {
         }
         Ok(())
     }
-}
-
-/// The download's progress for the badge, in the words of the Downloads screen:
-/// `Downloading firmware: 46% (159.4 MB of 340.5 MB)`.
-fn progress(at: u64, size: u64) -> String {
-    let mb = |b: u64| format!("{:.1} MB", b as f64 / 1_000_000.0);
-    format!("Downloading firmware: {}% ({} of {})", at * 100 / size.max(1), mb(at), mb(size))
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -550,8 +582,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_download_s_progress_reads_in_megabytes() {
-        assert_eq!(progress(159_383_552, 340_474_472), "Downloading firmware: 46% (159.4 MB of 340.5 MB)");
-        assert_eq!(progress(0, 340_474_472), "Downloading firmware: 0% (0.0 MB of 340.5 MB)");
+    fn the_download_s_step_has_its_share_and_its_megabytes() {
+        let step = Step::download(159_383_552, 340_474_472);
+        assert_eq!(step.detail, "159.4 MB of 340.5 MB");
+        assert_eq!((step.progress.unwrap() * 100.0) as u32, 46);
+        assert_eq!(Step::download(0, 340_474_472).progress, Some(0.0));
     }
 }

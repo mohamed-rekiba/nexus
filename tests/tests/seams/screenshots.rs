@@ -1167,6 +1167,35 @@ fn another_theme_renders_the_same_library() {
 
 /// The Default theme's Home, left to right and right to left, on the five built-in emulators
 /// with their own icons and covers, as `default-all-games.png` (All games focused),
+/// A service with a Firmware block as Lichii's looks while it downloads.
+fn downloading_block() -> FakeService {
+    use nexus_api::{BlockRow, Tone};
+    let rows = vec![
+        BlockRow {
+            label: "Installed".into(),
+            value: "Not from Nexus".into(),
+            hint: "Update now puts the newest firmware in its place".into(),
+            ..BlockRow::default()
+        },
+        BlockRow {
+            label: "Downloading the firmware".into(),
+            value: "46%".into(),
+            hint: "159.4 MB of 340.5 MB".into(),
+            tone: Tone::Info,
+            progress: Some(0.46),
+            ..BlockRow::default()
+        },
+        BlockRow {
+            label: "Automatic updates".into(),
+            hint: "Nexus looks for a new firmware every 6 hours".into(),
+            action: Some("auto".into()),
+            switch: Some(true),
+            ..BlockRow::default()
+        },
+    ];
+    FakeService::new("firm", "Firm").block(nexus_api::SlotId::EmulatorPanel, "firmware", "Firmware", rows)
+}
+
 /// `default-home.png` and `default-rtl-home.png`.
 #[test]
 fn the_default_theme_renders_its_list_both_ways() {
@@ -1180,6 +1209,7 @@ fn the_default_theme_renders_its_list_both_ways() {
             .built_in(PluginBox::code(emu_lichii::LichiiPlugin))
             .built_in(PluginBox::code(emu_pc::PcPlugin))
             .built_in(PluginBox::code(emu_steam::SteamPlugin))
+            .plugin(downloading_block().build())
     });
     host.ui.start().unwrap();
     host.ui.switch(&id(theme_default::ID)).unwrap();
@@ -1196,8 +1226,29 @@ fn the_default_theme_renders_its_list_both_ways() {
     host.dispatch(Command::SetThemeOption { key: "direction".into(), value: "rtl".into() });
     host.load_images();
     shoot(&window, &out.join("default-rtl-home.png"));
+    // Lichii's page: its build, its firmware and its settings.
+    host.dispatch(Command::SetThemeOption { key: "direction".into(), value: "ltr".into() });
+    host.dispatch(Command::Navigate(Route::Plugin("emu-lichii".parse().unwrap())));
+    follow(&mut host);
+    shoot(&window, &out.join("default-lichii.png"));
+    host.first("settings-tab:Settings").invoke_accessible_default_action();
+    follow(&mut host);
+    shoot(&window, &out.join("default-lichii-settings.png"));
+    host.dispatch(Command::Navigate(Route::Plugin("firm".parse().unwrap())));
+    follow(&mut host);
+    shoot(&window, &out.join("default-block-downloading.png"));
     println!("screenshots in {}", out.display());
-    not_blank(&out, &["default-all-games", "default-home", "default-rtl-home"]);
+    not_blank(
+        &out,
+        &[
+            "default-all-games",
+            "default-home",
+            "default-rtl-home",
+            "default-lichii",
+            "default-lichii-settings",
+            "default-block-downloading",
+        ],
+    );
 }
 
 /// The Default theme's Library on All games and on PS5, with its list of sorts, the Catalog,
