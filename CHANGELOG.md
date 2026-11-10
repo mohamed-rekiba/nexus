@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/mohamed-rekiba/nexus/compare/v0.15.1...v0.16.0) (2026-11-10)
+
+
+### Features
+
+* lichii firmware ([#59](https://github.com/mohamed-rekiba/nexus/issues/59)) ([2aa7ea0](https://github.com/mohamed-rekiba/nexus/commit/2aa7ea02c0a6994f511b510a3696d55a080c5a20))
+
 ## [0.15.1](https://github.com/mohamed-rekiba/nexus/compare/v0.15.0...v0.15.1) (2026-11-10)
 
 
