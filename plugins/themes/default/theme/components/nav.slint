@@ -147,6 +147,34 @@ export global Nav {
         root.zone = "row";
         root.extra = true;
     }
+    // Where a game started: the system whose games showed ("" for all), or no Library at all.
+    // The player comes back there when the game ends.
+    in-out property <bool> played-in-library;
+    in-out property <string> played-system;
+    in-out property <string> played-key;
+    // A game starts: the list shows it, with the keys on its Resume button.
+    public function leave-for-game(key: string) {
+        root.played-in-library = root.view == "library";
+        root.played-system = root.lib-system;
+        root.played-key = key;
+        root.select-now(key);
+        root.go-home();
+        root.zone = "actions";
+        root.action = 0;
+    }
+    // The game ended: back to the system's games it started from, on the game. A player who
+    // went elsewhere while it ran stays there.
+    public function back-from-game() {
+        if (root.played-in-library && root.view == "home" && root.zone == "actions") {
+            root.filter-library(root.played-system);
+            root.sort-open = false;
+            root.view = "library";
+            root.zone = "grid";
+            root.extra = false;
+            root.select-now(root.played-key);
+        }
+        root.played-in-library = false;
+    }
     // The focused entry's emulator page: its builds and settings. All games has none.
     public function open-entry-plugin() {
         if (root.entry == 0) { Host.play-sound("error"); return; }

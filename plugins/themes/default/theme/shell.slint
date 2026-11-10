@@ -66,15 +66,14 @@ export component Shell inherits Window {
     changed height => { Look.window-height = root.height; }
 
     // A game that starts is the one Home shows, with the keys on its Resume button, so Cross
-    // brings it back.
+    // brings it back. When it ends, the player is back where they started it.
     property <bool> has-running: Vm.has-running;
     changed has-running => {
         if (root.has-running) {
             Host.play-sound("start");
-            Nav.select-now(Vm.running.key);
-            Nav.go-home();
-            Nav.zone = "actions";
-            Nav.action = 0;
+            Nav.leave-for-game(Vm.running.key);
+        } else {
+            Nav.back-from-game();
         }
     }
     // A move in the Home row or a grid goes to the core once the moves stop: each move

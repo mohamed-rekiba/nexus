@@ -7,8 +7,8 @@ import { Origin } from "../kit/origin.slint";
 // Origin is the kit's; the theme's files read it from here too.
 export { Origin } from "../kit/origin.slint";
 
-// Where the player is on the home screen, and what each key does there. As in the PS5
-// Launcher, the keys act on one zone at a time: the top bar (`tabs`), the tile row (`row`),
+// Where the player is on the home screen, and what each key does there. The keys act on one
+// zone at a time: the top bar (`tabs`), the tile row (`row`),
 // the buttons under the game (`actions`), and in the Library its bar (`bar`: search, sort,
 // Comfortable, Compact, and in the Catalog the catalog plugin's button), its systems
 // (`filters`), its genres (`genres`) and its grid (`grid`).
@@ -124,6 +124,32 @@ export global Nav {
         root.view = "home";
         root.zone = "row";
         root.tab = 0;
+    }
+    // Where a game started: the Library, or Home. The player comes back there when the game
+    // ends; the Library's filters stay in the core meanwhile.
+    in-out property <bool> played-in-library;
+    in-out property <string> played-key;
+    // A game starts: Home shows it, with the keys on its Resume button.
+    public function leave-for-game(key: string) {
+        root.played-in-library = root.view == "library";
+        root.played-key = key;
+        root.select-now(key);
+        root.go-home();
+        root.zone = "actions";
+        root.action = 0;
+    }
+    // The game ended: back to the Library it started from, on the game. A player who went
+    // elsewhere while it ran stays there.
+    public function back-from-game() {
+        if (root.played-in-library && root.view == "home" && root.zone == "actions") {
+            root.sort-open = false;
+            root.view = "library";
+            root.zone = "grid";
+            root.extra = false;
+            root.tab = 1;
+            root.select-now(root.played-key);
+        }
+        root.played-in-library = false;
     }
     // The tabs, then the screen buttons (Search, Downloads, Emulators, Themes), the machine's
     // icons when Nexus is the whole screen, and Settings last.

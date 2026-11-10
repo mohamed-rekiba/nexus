@@ -102,3 +102,62 @@ fn the_hero_and_the_game_hub_show_the_time_played() {
     host.settle();
     assert_eq!(host.values("played"), ["4 hr 6 min · Today"], "one card: how long, and when last");
 }
+
+/// The Classic theme on two playable systems: PS4 with Alpha and Beta, PS5 with Gamma.
+fn playable_classic() -> Composed {
+    let mut host = composed(|h| {
+        h.plugin(FakeCatalog::new("emu-a").playable().system("PS4").games(["Alpha", "Beta"]).build())
+            .plugin(FakeCatalog::new("emu-b").playable().system("PS5").games(["Gamma"]).build())
+    });
+    host.ui.start().unwrap();
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
+    host.resize(1600.0, 900.0);
+    host.settle();
+    host
+}
+
+/// Starts `game`, as Play does, and ends it once the theme has shown it running.
+fn play_and_end(host: &mut Composed, game: &str, while_running: impl FnOnce(&mut Composed)) {
+    host.dispatch(Command::Session(SessionCmd::Launch(game.parse().unwrap())));
+    host.until(Area::Sessions, |core| core.game_running());
+    shown(host);
+    while_running(host);
+    let process = host.test.spawner.spawned()[0].clone();
+    process.exit(0);
+    host.until(Area::Sessions, |core| !core.game_running());
+    shown(host);
+}
+
+/// The theme sees the change and the core carries out what the theme asked for.
+fn shown(host: &mut Composed) {
+    host.settle();
+    host.pump();
+    host.settle();
+}
+
+#[test]
+fn a_game_played_from_the_library_comes_back_to_it_when_it_ends() {
+    let mut host = playable_classic();
+    host.press("default-system", "Library");
+    host.press_first("filter:PS4");
+
+    play_and_end(&mut host, "emu-a:G1", |host| {
+        assert_eq!(host.values("default-tile").len(), 3, "while it runs, Home shows it with Resume");
+    });
+
+    assert!(host.values("default-tile").is_empty(), "back in the Library");
+    assert_eq!(host.values("default-count"), ["2 games"], "still on the PS4 games");
+    let library = host.core().view().home.library;
+    let selected = library.selected.map(|i| library.games[i].title.clone());
+    assert_eq!(selected.as_deref(), Some("Beta"), "on the game that was played");
+}
+
+#[test]
+fn a_player_who_moves_on_home_while_the_game_runs_stays_there() {
+    let mut host = playable_classic();
+    host.press("default-system", "Library");
+
+    play_and_end(&mut host, "emu-a:G1", |host| host.press("default-system", "Home"));
+
+    assert_eq!(host.values("default-tile").len(), 3, "still on Home, where they went");
+}

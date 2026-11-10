@@ -260,3 +260,59 @@ fn the_mouse_wheel_moves_along_the_list_down_and_up() {
     host.settle();
     assert_eq!(host.focused("systems-tile"), [shown[0].clone()], "wheel up: back");
 }
+
+/// Starts `game`, as Play does, and ends it once the theme has shown it running.
+fn play_and_end(host: &mut Composed, game: &str, while_running: impl FnOnce(&mut Composed)) {
+    host.dispatch(Command::Session(nexus_core::SessionCmd::Launch(game.parse().unwrap())));
+    host.until(Area::Sessions, |core| core.game_running());
+    shown(host);
+    while_running(host);
+    let process = host.test.spawner.spawned()[0].clone();
+    process.exit(0);
+    host.until(Area::Sessions, |core| !core.game_running());
+    shown(host);
+}
+
+/// The theme sees the change and the core carries out what the theme asked for.
+fn shown(host: &mut Composed) {
+    host.settle();
+    host.pump();
+    host.settle();
+}
+
+/// The title of the Library's selected game, as the core has it.
+fn selected_title(host: &Composed) -> Option<String> {
+    let library = host.core().view().home.library;
+    library.selected.map(|i| library.games[i].title.clone())
+}
+
+#[test]
+fn a_game_played_from_a_system_s_games_comes_back_to_them_when_it_ends() {
+    let mut host = default_theme();
+    focus_on(&mut host, "PlayStation 4");
+    host.navigate(Key::Return);
+    host.settle();
+
+    play_and_end(&mut host, "emu-a:G1", |host| {
+        assert_eq!(host.count("systems-back"), 0, "while it runs, the list shows it with Resume");
+    });
+
+    assert_eq!(host.count("systems-back"), 1, "back in the system's games");
+    assert_eq!(library_titles(&host), ["Alpha", "Beta"], "the system's filter is back");
+    assert_eq!(selected_title(&host).as_deref(), Some("Beta"), "on the game that was played");
+}
+
+#[test]
+fn a_player_who_moves_while_the_game_runs_stays_where_they_went() {
+    let mut host = default_theme();
+    focus_on(&mut host, "PlayStation 4");
+    host.navigate(Key::Return);
+    host.settle();
+
+    play_and_end(&mut host, "emu-a:G1", |host| {
+        host.press("systems-tile", "PlayStation 5");
+        host.settle();
+    });
+
+    assert_eq!(library_titles(&host), ["Gamma"], "still in the games they opened");
+}
