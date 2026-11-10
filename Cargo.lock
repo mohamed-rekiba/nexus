@@ -1572,9 +1572,11 @@ version = "0.15.0"
 dependencies = [
  "aes",
  "emulator-kit",
+ "flate2",
  "nexus-api",
  "sha2",
  "tokio",
+ "zip",
  "zstd",
 ]
 

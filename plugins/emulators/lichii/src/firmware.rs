@@ -1,5 +1,5 @@
 //! The Switch firmware in Eden's folder, kept up to date from the releases of
-//! THZoria/NX_Firmware.
+//! THZoria/NX_Firmware, with configured keys from files.prodkeys.net.
 //!
 //! - The player turns it on (`firmware_updates`), or presses Update the firmware on Lichii's
 //!   panel. With it on, a check starts when the core reads the panel (at the start and at each
@@ -13,6 +13,7 @@
 //!   renames is put back first, at the next update.
 //! - The version Nexus installed last is kept in the plugin's storage ([`MARKER`]).
 
+use std::io::{Cursor, Read};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -47,6 +48,7 @@ const MAX_FILES: usize = 4096;
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Phase {
     Idle,
+    Complete(String),
     Updating(String),
     Failed(String),
 }
@@ -65,7 +67,7 @@ impl Firmware {
     }
 
     /// Starts a check on its own, unless one started less than [`RELEASE_TTL`] ago.
-    pub fn start_auto(self: &Arc<Self>) {
+    pub fn start_auto(self: &Arc<Self>, keys_version: String) {
         {
             let mut last = self.last_auto.lock().unwrap_or_else(|p| p.into_inner());
             if last.is_some_and(|t| t.elapsed() < RELEASE_TTL) {
@@ -73,7 +75,7 @@ impl Firmware {
             }
             *last = Some(Instant::now());
         }
-        self.start(false);
+        self.start(false, keys_version);
     }
 
     fn phase(&self) -> Phase {
@@ -96,19 +98,22 @@ impl Firmware {
 
     /// Starts an update in the background, unless one is running. `asked`: the player pressed
     /// the button, so the release is asked for again, and an update that failed runs again.
-    pub fn start(self: &Arc<Self>, asked: bool) {
+    pub fn start(self: &Arc<Self>, asked: bool, keys_version: String) {
         {
             let mut phase = self.phase.lock().unwrap_or_else(|p| p.into_inner());
             match &*phase {
                 Phase::Updating(_) => return,
                 Phase::Failed(_) if !asked => return,
-                _ => *phase = Phase::Updating(String::new()),
+                _ => *phase = Phase::Updating("Checking for firmware updates…".into()),
             }
+        }
+        if let Err(e) = self.events.publish(SLOTS_CHANGED, Value::Null) {
+            self.host.log.warn(&format!("could not tell the core the firmware check started: {e}"));
         }
         let this = self.clone();
         tokio::spawn(async move {
-            let phase = match this.update(asked).await {
-                Ok(()) => Phase::Idle,
+            let phase = match this.update(asked, &keys_version).await {
+                Ok(message) => Phase::Complete(message),
                 Err(e) => {
                     this.host.log.warn(&format!("the firmware update failed: {e}"));
                     Phase::Failed(e.to_string())
@@ -118,34 +123,54 @@ impl Firmware {
         });
     }
 
-    /// The panel's firmware badge, and its button while no update runs.
+    /// The panel's status and action. While busy, the action shows progress; starting again is a no-op.
     pub async fn panel(&self) -> Vec<SlotItem> {
         let item = |id: &str, content| SlotItem { id: id.into(), order: Order::default(), content };
         let badge = |label: String, tone| SlotContent::Badge { label, short: String::new(), tone, icon: None };
         let phase = self.phase();
         let content = match &phase {
-            Phase::Updating(v) if v.is_empty() => badge("Updating the firmware…".into(), Tone::Info),
-            Phase::Updating(v) => badge(format!("Updating the firmware to {v}…"), Tone::Info),
+            Phase::Updating(v) => badge(format!("Updating: {v}"), Tone::Info),
             Phase::Failed(e) => badge(format!("The firmware update failed: {e}"), Tone::Danger),
-            Phase::Idle => match self.installed().await {
+            Phase::Idle | Phase::Complete(_) => match self.installed().await {
                 Some(v) => badge(format!("Firmware {v}"), Tone::Neutral),
                 None if self.has_firmware().await => badge("Firmware: not from Nexus".into(), Tone::Neutral),
                 None => badge("No firmware".into(), Tone::Warning),
             },
         };
-        let mut items = vec![item("firmware", content)];
-        if !matches!(phase, Phase::Updating(_)) {
-            items.push(item(
-                "update-firmware",
-                SlotContent::Action {
-                    label: "Update the firmware".into(),
-                    action: "update-firmware".into(),
-                    args: Value::Null,
-                    style: ActionStyle::Secondary,
-                    icon: None,
+        let status = match &phase {
+            Phase::Updating(message) => message.clone(),
+            Phase::Complete(message) => message.clone(),
+            Phase::Failed(error) => format!("The firmware update failed: {error}"),
+            Phase::Idle => match self.installed().await {
+                Some(version) => {
+                    format!("Installed firmware: {version}. Check for updates to see if a newer version is available.")
+                }
+                None => "Check for updates to download firmware and the selected keys version.".into(),
+            },
+        };
+        let mut items = vec![
+            item("firmware", content),
+            item(
+                "firmware-status",
+                SlotContent::Section {
+                    title: "Firmware and keys".into(),
+                    rows: vec![SectionRow { label: "Status".into(), value: status }],
                 },
-            ));
-        }
+            ),
+        ];
+        items.push(item(
+            "update-firmware",
+            SlotContent::Action {
+                label: match &phase {
+                    Phase::Updating(message) => message.clone(),
+                    _ => "Update the firmware".into(),
+                },
+                action: "update-firmware".into(),
+                args: Value::Null,
+                style: ActionStyle::Secondary,
+                icon: None,
+            },
+        ));
         items
     }
 
@@ -166,7 +191,7 @@ impl Firmware {
         Ok(HostPath::new(DATA, root, RelPath::new(path)?))
     }
 
-    async fn update(&self, asked: bool) -> PluginResult<()> {
+    async fn update(&self, asked: bool, keys_version: &str) -> PluginResult<String> {
         let folders = self.host.folders.as_ref();
         let (contents, part, old, zip) =
             (self.place(CONTENTS).await?, self.place(PART).await?, self.place(OLD).await?, self.place(ZIP).await?);
@@ -199,8 +224,39 @@ impl Firmware {
             .into_iter()
             .next()
             .ok_or_else(|| PluginError::NotFound("no firmware release".into()))?;
-        if self.installed().await.as_deref() == Some(release.tag.as_str()) {
-            return Ok(());
+        let current = self.installed().await.as_deref() == Some(release.tag.as_str());
+        let keys_marker = RelPath::new("keys-version.json")?;
+        let keys_current = self
+            .host
+            .storage
+            .read(&keys_marker)
+            .await
+            .ok()
+            .and_then(|b| serde_json::from_slice::<String>(&b).ok())
+            .is_some_and(|v| v == keys_version);
+        let keys_exist = self.host.folders.exists(&self.place("keys/prod.keys").await?).await?;
+        if current && keys_current && keys_exist {
+            return Ok(format!(
+                "Firmware {} is up to date. Keys {keys_version} are installed. No updates needed.",
+                release.tag
+            ));
+        }
+        self.set_phase(Phase::Updating(format!(
+            "Firmware {} is {}. Downloading keys {keys_version}…",
+            release.tag,
+            if current { "up to date" } else { "available" }
+        )));
+        let keys = self.download_keys(keys_version).await?;
+        if current {
+            self.install_keys(keys).await?;
+            self.host
+                .storage
+                .write(
+                    &keys_marker,
+                    &serde_json::to_vec(keys_version).map_err(|e| PluginError::InvalidInput(e.to_string()))?,
+                )
+                .await?;
+            return Ok(format!("Firmware {} is up to date. Installed keys {keys_version}.", release.tag));
         }
         let asset = release
             .assets
@@ -211,10 +267,9 @@ impl Firmware {
             .sha256
             .clone()
             .ok_or_else(|| PluginError::Precondition(format!("GitHub gives no SHA-256 for {}", asset.name)))?;
-        self.set_phase(Phase::Updating(release.tag.clone()));
-
         let unpacked = async {
             self.download(&asset.url, asset.size, &sha256, &zip).await?;
+            self.set_phase(Phase::Updating(format!("Unpacking firmware {}…", release.tag)));
             unpack(folders, &zip, &part).await
         }
         .await;
@@ -223,6 +278,7 @@ impl Firmware {
             self.clean(&part).await;
             return Err(e);
         }
+        self.set_phase(Phase::Updating(format!("Installing firmware {} and keys {keys_version}…", release.tag)));
         let had_old = folders.exists(&contents).await?;
         if had_old {
             folders.rename(&contents, &old).await?;
@@ -234,10 +290,95 @@ impl Firmware {
             self.clean(&part).await;
             return Err(e);
         }
+        if let Err(e) = self.install_keys(keys).await {
+            // Keep the previous firmware usable if the keys could not be installed.
+            folders.remove(&contents).await?;
+            if had_old {
+                folders.rename(&old, &contents).await?;
+            }
+            return Err(e);
+        }
+        self.host
+            .storage
+            .write(
+                &keys_marker,
+                &serde_json::to_vec(keys_version).map_err(|e| PluginError::InvalidInput(e.to_string()))?,
+            )
+            .await?;
         let marker = serde_json::json!({ "version": release.tag });
         self.host.storage.write(&RelPath::new(MARKER)?, marker.to_string().as_bytes()).await?;
         // The new firmware is in place: an old one left behind goes at the next update.
         self.clean(&old).await;
+        Ok(format!("Updated firmware to {}. Installed keys {keys_version}.", release.tag))
+    }
+
+    /// Reads only known key files, without trusting paths supplied by the archive.
+    async fn download_keys(&self, version: &str) -> PluginResult<Vec<(String, Vec<u8>)>> {
+        let version = version.strip_prefix('v').unwrap_or(version);
+        if version.is_empty() || !version.bytes().all(|b| b.is_ascii_digit() || b == b'.') {
+            return Err(PluginError::InvalidInput("invalid keys version".into()));
+        }
+        let url = format!("https://files.prodkeys.net/ProdKeys.NET-v{version}.zip");
+        let response = self.host.http.send(HttpRequest::get(&url)).await?;
+        if response.status == 404 {
+            return Err(PluginError::NotFound(format!(
+                "keys archive version {version} is unavailable: {url} (HTTP 404); the firmware was not changed"
+            )));
+        }
+        if response.status != 200 {
+            return Err(PluginError::Network(format!("keys download from {url} returned status {}", response.status)));
+        }
+        let invalid = |e| PluginError::InvalidInput(format!("invalid keys zip: {e}"));
+        let mut archive = zip::ZipArchive::new(Cursor::new(response.body)).map_err(|e| invalid(e.to_string()))?;
+        let mut keys = Vec::new();
+        for i in 0..archive.len() {
+            let mut file = archive.by_index(i).map_err(|e| invalid(e.to_string()))?;
+            let name = file.name().map_err(|e| invalid(e.to_string()))?.rsplit('/').next().unwrap_or("").to_owned();
+            if !matches!(name.as_str(), "prod.keys" | "title.keys") {
+                continue;
+            }
+            if keys.iter().any(|(n, _)| n == &name) {
+                return Err(invalid(format!("duplicate {name}")));
+            }
+            let mut bytes = Vec::new();
+            file.by_ref().take(1024 * 1024 + 1).read_to_end(&mut bytes).map_err(|e| invalid(e.to_string()))?;
+            if bytes.is_empty() || bytes.len() > 1024 * 1024 {
+                return Err(invalid(format!("invalid size for {name}")));
+            }
+            keys.push((name, bytes));
+        }
+        if !keys.iter().any(|(n, _)| n == "prod.keys") {
+            return Err(invalid("missing prod.keys".into()));
+        }
+        Ok(keys)
+    }
+
+    async fn install_keys(&self, keys: Vec<(String, Vec<u8>)>) -> PluginResult<()> {
+        for (name, bytes) in keys {
+            let destination = self.place(&format!("keys/{name}")).await?;
+            let staged = self.place(&format!("keys/{name}.part")).await?;
+            let backup = self.place(&format!("keys/{name}.old")).await?;
+            let folders = self.host.folders.as_ref();
+            if folders.exists(&backup).await? {
+                if folders.exists(&destination).await? {
+                    folders.remove(&backup).await?;
+                } else {
+                    folders.rename(&backup, &destination).await?;
+                }
+            }
+            folders.write(&staged, &bytes).await?;
+            let had_old = folders.exists(&destination).await?;
+            if had_old {
+                folders.rename(&destination, &backup).await?;
+            }
+            if let Err(e) = folders.rename(&staged, &destination).await {
+                if had_old && let Err(back) = folders.rename(&backup, &destination).await {
+                    self.host.log.warn(&format!("could not restore {name}: {back}"));
+                }
+                return Err(e);
+            }
+            self.clean(&backup).await;
+        }
         Ok(())
     }
 
@@ -253,6 +394,7 @@ impl Firmware {
         if size == 0 {
             return Err(PluginError::InvalidInput("the firmware's size isn't known".into()));
         }
+        self.set_phase(Phase::Updating("Downloading firmware: 0%…".into()));
         let mut hash = Sha256::new();
         let mut at = 0;
         while at < size {
@@ -271,6 +413,10 @@ impl Firmware {
             hash.update(&response.body);
             self.host.folders.write_at(into, at, &response.body).await?;
             at += response.body.len() as u64;
+            self.set_phase(Phase::Updating(format!(
+                "Downloading firmware: {}% ({at} / {size} bytes)",
+                at * 100 / size
+            )));
         }
         let got = hex(&hash.finalize());
         if got != sha256 {

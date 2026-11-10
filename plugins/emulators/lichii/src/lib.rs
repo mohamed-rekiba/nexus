@@ -8,8 +8,8 @@
 //! - Games: Switch game files (`.nsp`, `.nsz`, `.xci`, `.xcz`, `.nup`) in the player's game
 //!   folders, named by their file names (see [`emulator_kit::games::switch_file`]).
 //! - Lichii keeps keys, firmware, saves and settings in Eden's folder (`~/.local/share/eden`),
-//!   which every build shares. The player puts their own keys there. Nexus keeps the firmware
-//!   up to date when the player asks, in [`firmware`]; else the player puts it there too.
+//!   which every build shares. Nexus updates firmware and configured keys when the player
+//!   asks, in [`firmware`]; they can also be installed by hand.
 //! - Installs: Switch game files from a download, in [`install`].
 //! - No compatibility list: Lichii's community reports have no list to download.
 
@@ -51,7 +51,7 @@ const GAME_SETTINGS: &str = "eden-cli/config.ini";
 /// Lichii settings. Its other settings live in its own config file.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(crate = "nexus_api::serde", deny_unknown_fields)]
-#[schemars(crate = "nexus_api::schemars", extend("x-order" = ["own_build", "fullscreen", "gpu_split", "firmware_updates"]))]
+#[schemars(crate = "nexus_api::schemars", extend("x-order" = ["own_build", "fullscreen", "gpu_split", "firmware_updates", "keys_version"]))]
 pub struct Settings {
     #[serde(default = "yes")]
     #[schemars(title = "Full screen")]
@@ -68,11 +68,20 @@ pub struct Settings {
     #[schemars(title = "Use your own build")]
     pub own_build: bool,
     /// Downloads the newest Switch firmware from github.com/THZoria/NX_Firmware into Lichii's
-    /// data folder, in place of the firmware there. Nintendo's firmware: check that you may use
-    /// it where you live. Your keys stay yours to add.
+    /// data folder, in place of the firmware there, and the selected keys version from files.prodkeys.net.
+    /// Nintendo's firmware: check that you may use it where you live.
     #[serde(default)]
     #[schemars(title = "Keep the firmware up to date")]
     pub firmware_updates: bool,
+    /// Version of the keys archive from files.prodkeys.net, independent of the firmware version.
+    /// Downloaded when firmware updates run or you press Update the firmware.
+    #[serde(default = "default_keys_version")]
+    #[schemars(title = "Keys version")]
+    pub keys_version: String,
+}
+
+fn default_keys_version() -> String {
+    "22.5.0".into()
 }
 
 fn yes() -> bool {
@@ -81,7 +90,13 @@ fn yes() -> bool {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { fullscreen: true, gpu_split: GpuSplit::default(), own_build: false, firmware_updates: false }
+        Self {
+            fullscreen: true,
+            gpu_split: GpuSplit::default(),
+            own_build: false,
+            firmware_updates: false,
+            keys_version: default_keys_version(),
+        }
     }
 }
 
@@ -274,8 +289,9 @@ impl Slots for Lichii {
     async fn items(&self, request: &SlotRequest) -> PluginResult<Vec<SlotItem>> {
         let mut items = self.emu.items(request).await?;
         if request.slot == SlotId::EmulatorPanel && request.game.is_none() {
-            if self.emu.builds().settings().load().await.firmware_updates {
-                self.firmware.start_auto();
+            let settings = self.emu.builds().settings().load().await;
+            if settings.firmware_updates {
+                self.firmware.start_auto(settings.keys_version);
             }
             items.extend(self.firmware.panel().await);
         }
@@ -285,7 +301,7 @@ impl Slots for Lichii {
     async fn run_action(&self, action: &str, game: Option<&str>, args: &Value) -> PluginResult<()> {
         match action {
             "update-firmware" => {
-                self.firmware.start(true);
+                self.firmware.start(true, self.emu.builds().settings().load().await.keys_version);
                 Ok(())
             }
             _ => self.emu.run_action(action, game, args).await,

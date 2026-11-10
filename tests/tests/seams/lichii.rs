@@ -436,6 +436,7 @@ async fn after_stop_a_game_asking_to_start_again_is_not_started() {
 use emu_lichii::FIRMWARE_RELEASE;
 
 const FIRMWARE: &str = "23.5.0";
+const KEYS_VERSION: &str = "22.5.0";
 
 /// A zip that stores `files` as they are (no compression), as the firmware releases do.
 fn stored_zip(files: &[(&str, &[u8])]) -> Vec<u8> {
@@ -482,6 +483,16 @@ fn stored_zip(files: &[(&str, &[u8])]) -> Vec<u8> {
 /// Serves the firmware release `tag` with `zip` as its asset, whose download redirects to
 /// GitHub's CDN. `digest` is the SHA-256 GitHub gives; `None` for the zip's own.
 fn serve_firmware(http: &FakeHttp, tag: &str, zip: Vec<u8>, digest: Option<&str>) {
+    use std::io::Write;
+    let mut keys = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    for (name, bytes) in [("ProdKeys.NET/prod.keys", "test production keys"), ("title.keys", "test title keys")] {
+        keys.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+        keys.write_all(bytes.as_bytes()).unwrap();
+    }
+    http.serve(
+        &format!("https://files.prodkeys.net/ProdKeys.NET-v{KEYS_VERSION}.zip"),
+        keys.finish().unwrap().into_inner(),
+    );
     let name = format!("Firmware.{tag}.zip");
     let download = format!("https://github.com/THZoria/NX_Firmware/releases/download/{tag}/{name}");
     let cdn = format!("https://release-assets.githubusercontent.com/nx/{tag}/{name}");
@@ -556,6 +567,8 @@ async fn a_newer_firmware_replaces_the_one_in_eden_s_folder_and_the_panel_names_
 
     assert_eq!(update_firmware(&test).await, "Firmware 23.5.0");
 
+    assert_eq!(std::fs::read(eden.path().join("keys/prod.keys")).unwrap(), b"test production keys");
+    assert_eq!(std::fs::read(eden.path().join("keys/title.keys")).unwrap(), b"test title keys");
     let system = eden.path().join("nand/system");
     assert_eq!(files_in(&system.join("Contents/registered")), ["0a.cnmt.nca", "1b.nca"]);
     assert_eq!(std::fs::read(system.join("Contents/registered/1b.nca")).unwrap(), vec![7u8; 5000]);
@@ -653,4 +666,117 @@ async fn the_old_firmware_of_an_update_that_stopped_between_its_renames_goes_bac
 
     assert_eq!(files_in(&system.join("Contents/registered")), ["old.nca"]);
     assert_eq!(files_in(&system), ["Contents"]);
+}
+
+#[tokio::test]
+async fn missing_keys_are_downloaded_again_for_the_installed_firmware() {
+    let (test, _games, eden) = with_eden(&[]).await;
+    serve_firmware(&test.http, FIRMWARE, stored_zip(&[("1b.nca", b"nca")]), None);
+    assert_eq!(update_firmware(&test).await, "Firmware 23.5.0");
+    std::fs::remove_file(eden.path().join("keys/prod.keys")).unwrap();
+    let before = test.http.sent().iter().filter(|u| u.contains("/nx/")).count();
+    assert_eq!(update_firmware(&test).await, "Firmware 23.5.0");
+    assert_eq!(std::fs::read(eden.path().join("keys/prod.keys")).unwrap(), b"test production keys");
+    assert_eq!(test.http.sent().iter().filter(|u| u.contains("/nx/")).count(), before);
+}
+
+#[tokio::test]
+async fn invalid_keys_leave_the_old_firmware_and_keys_in_place() {
+    let (test, _games, eden) = with_eden(&["old.nca"]).await;
+    std::fs::create_dir_all(eden.path().join("keys")).unwrap();
+    std::fs::write(eden.path().join("keys/prod.keys"), b"old keys").unwrap();
+    serve_firmware(&test.http, FIRMWARE, stored_zip(&[("1b.nca", b"nca")]), None);
+    test.http.serve(&format!("https://files.prodkeys.net/ProdKeys.NET-v{KEYS_VERSION}.zip"), b"invalid zip".to_vec());
+    assert!(update_firmware(&test).await.contains("invalid keys zip"));
+    assert_eq!(files_in(&eden.path().join("nand/system/Contents/registered")), ["old.nca"]);
+    assert_eq!(std::fs::read(eden.path().join("keys/prod.keys")).unwrap(), b"old keys");
+}
+
+#[tokio::test]
+async fn a_keys_write_failure_restores_the_previous_firmware() {
+    let (test, _games, eden) = with_eden(&["old.nca"]).await;
+    std::fs::create_dir_all(eden.path().join("keys/prod.keys.part")).unwrap();
+    serve_firmware(&test.http, FIRMWARE, stored_zip(&[("1b.nca", b"nca")]), None);
+    assert!(update_firmware(&test).await.starts_with("The firmware update failed"));
+    assert_eq!(files_in(&eden.path().join("nand/system/Contents/registered")), ["old.nca"]);
+}
+
+#[tokio::test]
+async fn unavailable_matching_keys_name_the_version_and_preserve_existing_files() {
+    let (test, _games, eden) = with_eden(&["old.nca"]).await;
+    std::fs::create_dir_all(eden.path().join("keys")).unwrap();
+    std::fs::write(eden.path().join("keys/prod.keys"), b"old keys").unwrap();
+    serve_firmware(&test.http, FIRMWARE, stored_zip(&[("1b.nca", b"nca")]), None);
+    let url = format!("https://files.prodkeys.net/ProdKeys.NET-v{KEYS_VERSION}.zip");
+    test.http.redirect(&url, "https://files.prodkeys.net/unavailable.zip");
+    let badge = update_firmware(&test).await;
+    assert!(badge.contains("keys archive version") && badge.contains(KEYS_VERSION) && badge.contains(&url), "{badge}");
+    assert_eq!(files_in(&eden.path().join("nand/system/Contents/registered")), ["old.nca"]);
+    assert_eq!(std::fs::read(eden.path().join("keys/prod.keys")).unwrap(), b"old keys");
+    assert!(!test.http.sent().iter().any(|u| u.contains("/nx/")), "no firmware download without matching keys");
+}
+
+#[tokio::test]
+async fn the_keys_version_can_be_changed_in_settings_without_changing_firmware() {
+    let (test, _games, _eden) = with_eden(&[]).await;
+    serve_firmware(&test.http, FIRMWARE, stored_zip(&[("1b.nca", b"nca")]), None);
+    assert_eq!(update_firmware(&test).await, "Firmware 23.5.0");
+    let firmware_downloads = test.http.sent().iter().filter(|u| u.contains("/nx/")).count();
+    let custom_url = "https://files.prodkeys.net/ProdKeys.NET-v22.1.0.zip";
+    test.http.redirect(custom_url, &format!("https://files.prodkeys.net/ProdKeys.NET-v{KEYS_VERSION}.zip"));
+    test.core
+        .dispatch(Command::SetConfigField {
+            plugin: lichii(),
+            scope: ConfigScope::Emulator,
+            key: "keys_version".into(),
+            value: "22.1.0".into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(update_firmware(&test).await, "Firmware 23.5.0");
+    assert!(test.http.sent().iter().any(|u| u == custom_url));
+    assert_eq!(test.http.sent().iter().filter(|u| u.contains("/nx/")).count(), firmware_downloads);
+    let downloads = test.http.sent().len();
+    assert_eq!(update_firmware(&test).await, "Firmware 23.5.0");
+    assert!(!test.http.sent()[downloads..].iter().any(|u| u.ends_with(".zip")));
+}
+
+fn firmware_status(test: &TestCore) -> String {
+    test.core
+        .view()
+        .emulators
+        .emulators
+        .iter()
+        .find(|e| e.plugin == lichii())
+        .unwrap()
+        .panels
+        .iter()
+        .find(|p| p.id == "firmware-status")
+        .unwrap()
+        .rows[0]
+        .value
+        .clone()
+}
+
+#[tokio::test]
+async fn a_firmware_check_shows_progress_then_reports_updated_or_up_to_date() {
+    let (test, _games, _eden) = with_eden(&[]).await;
+    serve_firmware(&test.http, FIRMWARE, stored_zip(&[("1b.nca", b"nca")]), None);
+    let gate = test.http.hold_next(FIRMWARE_RELEASE);
+    test.core.dispatch(Command::Navigate(nexus_core::Route::Emulators)).await.unwrap();
+    test.core
+        .dispatch(Command::RunAction {
+            plugin: lichii(),
+            action: "update-firmware".into(),
+            game: None,
+            args: serde_json::Value::Null,
+        })
+        .await
+        .unwrap();
+    assert_eq!(firmware_status(&test), "Checking for firmware updates…");
+    gate.release();
+    firmware_settles(&test).await;
+    assert_eq!(firmware_status(&test), "Updated firmware to 23.5.0. Installed keys 22.5.0.");
+    update_firmware(&test).await;
+    assert_eq!(firmware_status(&test), "Firmware 23.5.0 is up to date. Keys 22.5.0 are installed. No updates needed.");
 }
