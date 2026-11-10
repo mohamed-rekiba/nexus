@@ -139,9 +139,25 @@ impl HttpTransport for FakeHttp {
             let headers = vec![("Location".to_owned(), to.clone())];
             return Ok(HttpResponse { status: 302, headers, body: Vec::new() });
         }
-        match state.files.get(&request.url) {
-            Some(body) => Ok(HttpResponse { status: 200, headers: Vec::new(), body: body.clone() }),
-            None => Ok(HttpResponse { status: 404, headers: Vec::new(), body: Vec::new() }),
+        let Some(body) = state.files.get(&request.url) else {
+            return Ok(HttpResponse { status: 404, headers: Vec::new(), body: Vec::new() });
+        };
+        // `Range: bytes=a-b` gets a 206 with those bytes, unless ranges are ignored.
+        let range = request
+            .headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("range"))
+            .and_then(|(_, v)| v.strip_prefix("bytes="))
+            .and_then(|v| v.split_once('-'))
+            .and_then(|(a, b)| Some((a.parse::<usize>().ok()?, b.parse::<usize>().ok()?)))
+            .filter(|_| !state.no_range);
+        match range {
+            Some((from, to)) if from < body.len() => {
+                let piece = body[from..=to.min(body.len() - 1)].to_vec();
+                Ok(HttpResponse { status: 206, headers: Vec::new(), body: piece })
+            }
+            Some(_) => Ok(HttpResponse { status: 416, headers: Vec::new(), body: Vec::new() }),
+            None => Ok(HttpResponse { status: 200, headers: Vec::new(), body: body.clone() }),
         }
     }
 

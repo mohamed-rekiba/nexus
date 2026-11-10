@@ -92,7 +92,9 @@ pub(crate) async fn run_action(
     if provided.releases.is_some() {
         crate::catalog_reads::refresh_releases(core).await;
     }
-    if core.state().stack.route() == &Route::Plugin(plugin.clone()) {
+    // Its panel shows on its page and in the Emulators screen.
+    let route = core.state().stack.route().clone();
+    if route == Route::Plugin(plugin.clone()) || route == Route::Emulators {
         crate::emulator_builds::refresh_emulator(core, plugin).await;
     }
     if let Some(game) = game.filter(|g| &g.plugin == plugin)

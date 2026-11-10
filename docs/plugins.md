@@ -366,6 +366,11 @@ theme events.
 A `releases` plugin publishes the topic `RELEASES_CHANGED` (`"releases.changed"`) when its
 catalogs change between the host's asks. The host then asks for the catalogs again.
 
+A plugin with `slots` publishes the topic `SLOTS_CHANGED` (`"slots.changed"`) when its
+emulator panel (`emulator.panel`) changes between the host's asks, for example when work in
+the background ends. The host then asks for the panel again. A slot action has the plugin's
+call time limit, so long work runs in the background and its panel says how it goes.
+
 ### Services
 
 `ServiceRegistry::get::<T>()` returns a host service. The host puts three in the registry of

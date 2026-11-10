@@ -30,6 +30,11 @@ pub enum SlotId {
     CatalogAction,
 }
 
+/// The topic of the [`crate::Event::Custom`] a plugin publishes when its emulator panel
+/// (`emulator.panel`) changed between the core's asks, for example when work in the background
+/// ends. The core then asks for the panel again.
+pub const SLOTS_CHANGED: &str = "slots.changed";
+
 /// A slot action the host runs itself: opens the Settings screen, for example from a button
 /// that says to turn a setting on.
 pub const HOST_OPEN_SETTINGS: &str = "host:open-settings";
