@@ -126,13 +126,38 @@ pub enum SlotKind {
     Badge,
     Action,
     Section,
+    /// Only the plugin's page shows it, after the build: [`PluginPageVm::blocks`].
+    Block,
     SettingsPanel,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// A row of a section or a block. A section's rows have a label and a value only.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct RowVm {
     pub label: String,
     pub value: String,
+    /// A line under the label.
+    pub hint: String,
+    pub tone: Tone,
+    /// From 0 to 1, or -1 for no bar.
+    pub progress: f32,
+    /// A button: what the UI sends back when the player picks it. "" for a row that only shows.
+    pub action: String,
+    /// As JSON text, "" for none: the theme passes it back unchanged.
+    #[serde(serialize_with = "mark::json_text")]
+    pub args: serde_json::Value,
+    /// "on" or "off" for a switch, "" for none.
+    pub switch: String,
+    /// A button's place among the buttons of the page's blocks, from 0; -1 for a row that only
+    /// shows. The page's focus moves through them after its build.
+    pub at: i32,
+}
+
+impl RowVm {
+    /// A row that only shows: no bar, no button.
+    pub fn plain() -> Self {
+        Self { progress: -1.0, at: -1, ..Self::default() }
+    }
 }
 
 /// A game's system, as the plugin of that system describes it (`[system]` in its manifest).
@@ -974,6 +999,10 @@ pub struct PluginPageVm {
     pub sections: Vec<SlotVm>,
     /// The actions of `sections`, for one row each.
     pub actions: Vec<SlotVm>,
+    /// The blocks of `sections`, after the build and the actions.
+    pub blocks: Vec<SlotVm>,
+    /// The buttons in `blocks`, counted.
+    pub block_buttons: i32,
     /// The folders it asks for, but not the game folders: those are in Settings.
     pub folders: Vec<FolderVm>,
     /// With settings, `folders` are rows in the first panel, right after the field at this

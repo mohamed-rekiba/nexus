@@ -590,7 +590,14 @@ The three `game.*` slots are per game. The host asks only the plugin that owns t
 `SlotRequest.game` set.
 
 A `SlotItem` has an `id` (unique in the plugin), an `Order` (`priority`, `before`, `after`) and
-`SlotContent`: `Badge`, `Action`, `Section` or `SettingsPanel`.
+`SlotContent`: `Badge`, `Action`, `Section`, `Block` or `SettingsPanel`.
+
+A `Block` is a titled list of `BlockRow`s, on the plugin page only, after the build. A row has a
+label, a value and a hint under the label, in a `Tone`. `progress` (0 to 1) adds a bar under it.
+A row with an `action` is a button: picking it calls `run_action`, as an `Action` does. With
+`switch` set, the button shows a switch, on or off, and left and right turn it off and on. The
+controller moves through a page's block buttons after its build and its actions, and passes over
+the rows that only show. Lichii's Firmware block is an example.
 
 Three action names make the host do the work itself instead of calling `run_action`:
 

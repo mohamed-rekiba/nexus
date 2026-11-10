@@ -66,7 +66,25 @@ fn slot_vm(plugin: &PluginId, slot: SlotId, item: SlotItem) -> SlotVm {
         SlotContent::Section { title, rows } => {
             vm.kind = SlotKind::Section;
             vm.text = title;
-            vm.rows = rows.into_iter().map(|r| RowVm { label: r.label, value: r.value }).collect();
+            vm.rows = rows.into_iter().map(|r| RowVm { label: r.label, value: r.value, ..RowVm::plain() }).collect();
+        }
+        SlotContent::Block { title, rows } => {
+            vm.kind = SlotKind::Block;
+            vm.text = title;
+            vm.rows = rows
+                .into_iter()
+                .map(|r| RowVm {
+                    label: r.label,
+                    value: r.value,
+                    hint: r.hint,
+                    tone: r.tone,
+                    progress: r.progress.map_or(-1.0, |p| p.clamp(0.0, 1.0)),
+                    action: r.action.unwrap_or_default(),
+                    args: r.args,
+                    switch: r.switch.map(|on| if on { "on" } else { "off" }.to_owned()).unwrap_or_default(),
+                    at: -1,
+                })
+                .collect();
         }
         SlotContent::SettingsPanel { title, scope } => {
             vm.kind = SlotKind::SettingsPanel;
@@ -1393,6 +1411,14 @@ fn plugin_lists(view: &mut AppView, registry: &Plugins) {
     view.emulators.theme_plugins.sort_by_key(|p| !fallback(&p.id));
     if let Some(page) = &mut view.plugin_page {
         page.actions = page.sections.iter().filter(|s| s.kind == SlotKind::Action).cloned().collect();
+        page.blocks = page.sections.iter().filter(|s| s.kind == SlotKind::Block).cloned().collect();
+        // The blocks' buttons take the page's focus in order, after its build and actions.
+        let mut at = 0;
+        for row in page.blocks.iter_mut().flat_map(|b| b.rows.iter_mut()).filter(|r| !r.action.is_empty()) {
+            row.at = at;
+            at += 1;
+        }
+        page.block_buttons = at;
         page.current = shown.as_ref() == Some(&page.plugin.id);
     }
 }
@@ -1423,6 +1449,8 @@ fn plugin_page_vm(s: &Snapshot, plugin: &PluginId) -> Option<PluginPageVm> {
             panels: Vec::new(),
             sections: Vec::new(),
             actions: Vec::new(),
+            blocks: Vec::new(),
+            block_buttons: 0,
             folders: Vec::new(),
             folders_after: 0,
             current: false,
@@ -1455,6 +1483,8 @@ fn plugin_page_vm(s: &Snapshot, plugin: &PluginId) -> Option<PluginPageVm> {
             .filter(|f| nexus_api::shared_folder(&f.name).is_none() && asks.contains(&f.name.as_str()))
             .collect(),
         actions: Vec::new(),
+        blocks: Vec::new(),
+        block_buttons: 0,
         folders_after,
         current: false,
         plugin: row,
