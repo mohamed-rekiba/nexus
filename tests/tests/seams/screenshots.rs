@@ -1229,13 +1229,31 @@ fn the_default_theme_renders_its_library() {
     host.load_images();
     follow(&mut host);
     shoot(&window, &out.join("default-catalog.png"));
-    host.dispatch(Command::Navigate(Route::Home));
+    // The Catalog's genres, with a count each, in both directions.
+    host.first("library-genre").invoke_accessible_default_action();
+    follow(&mut host);
+    shoot(&window, &out.join("default-catalog-genres.png"));
+    key(&mut host, Key::Escape);
     host.dispatch(Command::SetThemeOption { key: "direction".into(), value: "rtl".into() });
+    follow(&mut host);
+    host.first("library-genre").invoke_accessible_default_action();
+    follow(&mut host);
+    shoot(&window, &out.join("default-catalog-genres-rtl.png"));
+    key(&mut host, Key::Escape);
+    host.dispatch(Command::Navigate(Route::Home));
     follow(&mut host);
     shoot(&window, &out.join("default-library-rtl.png"));
     println!("screenshots in {}", out.display());
     not_blank(
         &out,
-        &["default-library", "default-library-ps5", "default-library-sort", "default-catalog", "default-library-rtl"],
+        &[
+            "default-library",
+            "default-library-ps5",
+            "default-library-sort",
+            "default-catalog",
+            "default-catalog-genres",
+            "default-catalog-genres-rtl",
+            "default-library-rtl",
+        ],
     );
 }

@@ -28,22 +28,35 @@ component Option inherits Rectangle {
     accessible-value: root.value;
     accessible-item-selected: root.focused;
     accessible-action-default => { root.picked(); }
+    // The count and the check have columns of their own, so they line up from row to row:
+    // the caption takes the rest of the width.
     HorizontalLayout {
         padding-left: 14 * Look.px;
         padding-right: 14 * Look.px;
         spacing: 10 * Look.px;
-        if Look.rtl && root.current : Icon {
+        if Look.rtl : Rectangle {
             width: 20 * Look.px;
-            height: 20 * Look.px;
-            y: (parent.height - self.height) / 2;
-            name: "check";
-            color: Tokens.color-success;
-            accessible-role: text;
-            accessible-label: root.current-label;
-            accessible-value: root.value;
+            if root.current : Icon {
+                width: parent.width;
+                height: parent.width;
+                y: (parent.height - self.height) / 2;
+                name: "check";
+                color: Tokens.color-success;
+                accessible-role: text;
+                accessible-label: root.current-label;
+                accessible-value: root.value;
+            }
         }
-        if Look.rtl && root.count >= 0 : Text { text: root.count; font-size: 16 * Look.px; color: root.focused ? #ffffffb3 : Look.text3; vertical-alignment: center; }
+        if Look.rtl && root.count >= 0 : Text {
+            width: 44 * Look.px;
+            text: root.count;
+            font-size: 16 * Look.px;
+            color: root.focused ? #ffffffb3 : Look.text3;
+            horizontal-alignment: left;
+            vertical-alignment: center;
+        }
         Text {
+            horizontal-stretch: 1;
             text: root.caption;
             font-size: 19 * Look.px;
             color: root.focused ? Tokens.color-text : Tokens.color-text-muted;
@@ -51,16 +64,26 @@ component Option inherits Rectangle {
             vertical-alignment: center;
             overflow: elide;
         }
-        if !Look.rtl && root.count >= 0 : Text { text: root.count; font-size: 16 * Look.px; color: root.focused ? #ffffffb3 : Look.text3; vertical-alignment: center; }
-        if !Look.rtl && root.current : Icon {
+        if !Look.rtl && root.count >= 0 : Text {
+            width: 44 * Look.px;
+            text: root.count;
+            font-size: 16 * Look.px;
+            color: root.focused ? #ffffffb3 : Look.text3;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+        }
+        if !Look.rtl : Rectangle {
             width: 20 * Look.px;
-            height: 20 * Look.px;
-            y: (parent.height - self.height) / 2;
-            name: "check";
-            color: Tokens.color-success;
-            accessible-role: text;
-            accessible-label: root.current-label;
-            accessible-value: root.value;
+            if root.current : Icon {
+                width: parent.width;
+                height: parent.width;
+                y: (parent.height - self.height) / 2;
+                name: "check";
+                color: Tokens.color-success;
+                accessible-role: text;
+                accessible-label: root.current-label;
+                accessible-value: root.value;
+            }
         }
     }
     ta := TouchArea { mouse-cursor: pointer; clicked => { root.picked(); } }
