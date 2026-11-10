@@ -8,7 +8,8 @@
 //! - Games: Switch game files (`.nsp`, `.nsz`, `.xci`, `.xcz`, `.nup`) in the player's game
 //!   folders, named by their file names (see [`emulator_kit::games::switch_file`]).
 //! - Lichii keeps keys, firmware, saves and settings in Eden's folder (`~/.local/share/eden`),
-//!   which every build shares. The player puts their own keys and firmware there.
+//!   which every build shares. The player puts their own keys there. Nexus keeps the firmware
+//!   up to date when the player asks, in [`firmware`]; else the player puts it there too.
 //! - Installs: Switch game files from a download, in [`install`].
 //! - No compatibility list: Lichii's community reports have no list to download.
 
@@ -25,8 +26,11 @@ use nexus_api::serde_json::Value;
 use nexus_api::*;
 
 mod controls;
+mod firmware;
 mod install;
 mod nsz;
+
+pub use firmware::FIRMWARE_RELEASE;
 
 const MANIFEST: &str = include_str!("../plugin.toml");
 /// Every release is a pre-release; a build comes out several times a day.
@@ -47,7 +51,7 @@ const GAME_SETTINGS: &str = "eden-cli/config.ini";
 /// Lichii settings. Its other settings live in its own config file.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(crate = "nexus_api::serde", deny_unknown_fields)]
-#[schemars(crate = "nexus_api::schemars", extend("x-order" = ["own_build", "fullscreen", "gpu_split"]))]
+#[schemars(crate = "nexus_api::schemars", extend("x-order" = ["own_build", "fullscreen", "gpu_split", "firmware_updates"]))]
 pub struct Settings {
     #[serde(default = "yes")]
     #[schemars(title = "Full screen")]
@@ -63,6 +67,12 @@ pub struct Settings {
     #[serde(default)]
     #[schemars(title = "Use your own build")]
     pub own_build: bool,
+    /// Downloads the newest Switch firmware from github.com/THZoria/NX_Firmware into Lichii's
+    /// data folder, in place of the firmware there. Nintendo's firmware: check that you may use
+    /// it where you live. Your keys stay yours to add.
+    #[serde(default)]
+    #[schemars(title = "Keep the firmware up to date")]
+    pub firmware_updates: bool,
 }
 
 fn yes() -> bool {
@@ -71,7 +81,7 @@ fn yes() -> bool {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { fullscreen: true, gpu_split: GpuSplit::default(), own_build: false }
+        Self { fullscreen: true, gpu_split: GpuSplit::default(), own_build: false, firmware_updates: false }
     }
 }
 
@@ -213,15 +223,16 @@ impl CodePlugin for LichiiPlugin {
         };
         let emu = Arc::new(ConsoleEmulator::start(LichiiFlavor { platform: host.platform }, spec, host).await?);
         let controllers = ctx.services().get::<Controllers>().map(|c| (*c).clone());
-        let lichii = Arc::new(Lichii { emu: emu.clone(), controllers });
+        let firmware = Arc::new(firmware::Firmware::new(emu.host().clone(), ctx.events().clone()));
+        let lichii = Arc::new(Lichii { emu: emu.clone(), controllers, firmware });
         Ok(Provided {
             catalog: Some(emu.clone()),
             downloader: Some(emu.builds().clone()),
             installer: Some(emu.builds().clone()),
             configurator: Some(emu.clone()),
             launcher: Some(lichii.clone()),
-            game_installer: Some(lichii),
-            slots: Some(emu),
+            game_installer: Some(lichii.clone()),
+            slots: Some(lichii.clone()),
             backup: Some(backup_items()),
             assets: Some(nexus_api::system_art!()),
             ..Provided::default()
@@ -253,6 +264,33 @@ struct Lichii {
     emu: Arc<ConsoleEmulator<LichiiFlavor>>,
     /// The host's controllers; `None` on a host without them.
     controllers: Option<Controllers>,
+    firmware: Arc<firmware::Firmware>,
+}
+
+/// The console emulator's slots, and the firmware's badge and button on Lichii's panel. With
+/// firmware updates on, a read of the panel starts a check, at most every few hours.
+#[async_trait]
+impl Slots for Lichii {
+    async fn items(&self, request: &SlotRequest) -> PluginResult<Vec<SlotItem>> {
+        let mut items = self.emu.items(request).await?;
+        if request.slot == SlotId::EmulatorPanel && request.game.is_none() {
+            if self.emu.builds().settings().load().await.firmware_updates {
+                self.firmware.start_auto();
+            }
+            items.extend(self.firmware.panel().await);
+        }
+        Ok(items)
+    }
+
+    async fn run_action(&self, action: &str, game: Option<&str>, args: &Value) -> PluginResult<()> {
+        match action {
+            "update-firmware" => {
+                self.firmware.start(true);
+                Ok(())
+            }
+            _ => self.emu.run_action(action, game, args).await,
+        }
+    }
 }
 
 impl Lichii {

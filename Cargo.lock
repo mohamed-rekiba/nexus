@@ -1573,6 +1573,8 @@ dependencies = [
  "aes",
  "emulator-kit",
  "nexus-api",
+ "sha2",
+ "tokio",
  "zstd",
 ]
 
