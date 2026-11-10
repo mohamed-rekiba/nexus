@@ -780,3 +780,41 @@ async fn a_firmware_check_shows_progress_then_reports_updated_or_up_to_date() {
     update_firmware(&test).await;
     assert_eq!(firmware_status(&test), "Firmware 23.5.0 is up to date. Keys 22.5.0 are installed. No updates needed.");
 }
+
+#[tokio::test]
+async fn deleted_firmware_is_restored_by_a_manual_update_despite_the_saved_version() {
+    let (test, _games, eden) = with_eden(&[]).await;
+    serve_firmware(&test.http, FIRMWARE, stored_zip(&[("1b.nca", b"nca")]), None);
+    update_firmware(&test).await;
+    let folder = eden.path().join("nand/system/Contents/registered");
+    std::fs::remove_dir_all(&folder).unwrap();
+    assert_eq!(update_firmware(&test).await, "Firmware 23.5.0");
+    assert_eq!(std::fs::read(folder.join("1b.nca")).unwrap(), b"nca");
+}
+
+#[tokio::test]
+async fn deleted_or_empty_firmware_bypasses_the_automatic_check_interval() {
+    let (test, _games, eden) = with_eden(&[]).await;
+    serve_firmware(&test.http, FIRMWARE, stored_zip(&[("1b.nca", b"nca")]), None);
+    test.core
+        .dispatch(Command::SetConfigField {
+            plugin: lichii(),
+            scope: ConfigScope::Emulator,
+            key: "firmware_updates".into(),
+            value: "true".into(),
+        })
+        .await
+        .unwrap();
+    test.core.dispatch(Command::Navigate(nexus_core::Route::Emulators)).await.unwrap();
+    firmware_settles(&test).await;
+    let folder = eden.path().join("nand/system/Contents/registered");
+    for empty in [false, true] {
+        std::fs::remove_dir_all(&folder).unwrap();
+        if empty {
+            std::fs::create_dir_all(&folder).unwrap();
+        }
+        test.core.dispatch(Command::Navigate(nexus_core::Route::Emulators)).await.unwrap();
+        firmware_settles(&test).await;
+        assert_eq!(std::fs::read(folder.join("1b.nca")).unwrap(), b"nca");
+    }
+}

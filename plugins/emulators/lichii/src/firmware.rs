@@ -66,11 +66,15 @@ impl Firmware {
         Self { host, events, phase: Mutex::new(Phase::Idle), last_auto: Mutex::new(None) }
     }
 
-    /// Starts a check on its own, unless one started less than [`RELEASE_TTL`] ago.
-    pub fn start_auto(self: &Arc<Self>, keys_version: String) {
+    /// Starts a check on its own, bypassing the normal interval when firmware is missing.
+    pub async fn start_auto(self: &Arc<Self>, keys_version: String) {
+        if matches!(self.phase(), Phase::Updating(_)) {
+            return;
+        }
+        let missing = !self.has_firmware().await;
         {
             let mut last = self.last_auto.lock().unwrap_or_else(|p| p.into_inner());
-            if last.is_some_and(|t| t.elapsed() < RELEASE_TTL) {
+            if !missing && last.is_some_and(|t| t.elapsed() < RELEASE_TTL) {
                 return;
             }
             *last = Some(Instant::now());
@@ -132,7 +136,8 @@ impl Firmware {
             Phase::Updating(v) => badge(format!("Updating: {v}"), Tone::Info),
             Phase::Failed(e) => badge(format!("The firmware update failed: {e}"), Tone::Danger),
             Phase::Idle | Phase::Complete(_) => match self.installed().await {
-                Some(v) => badge(format!("Firmware {v}"), Tone::Neutral),
+                Some(v) if self.has_firmware().await => badge(format!("Firmware {v}"), Tone::Neutral),
+                Some(_) => badge("No firmware".into(), Tone::Warning),
                 None if self.has_firmware().await => badge("Firmware: not from Nexus".into(), Tone::Neutral),
                 None => badge("No firmware".into(), Tone::Warning),
             },
@@ -224,7 +229,7 @@ impl Firmware {
             .into_iter()
             .next()
             .ok_or_else(|| PluginError::NotFound("no firmware release".into()))?;
-        let current = self.installed().await.as_deref() == Some(release.tag.as_str());
+        let current = self.installed().await.as_deref() == Some(release.tag.as_str()) && self.has_firmware().await;
         let keys_marker = RelPath::new("keys-version.json")?;
         let keys_current = self
             .host
@@ -413,10 +418,7 @@ impl Firmware {
             hash.update(&response.body);
             self.host.folders.write_at(into, at, &response.body).await?;
             at += response.body.len() as u64;
-            self.set_phase(Phase::Updating(format!(
-                "Downloading firmware: {}% ({at} / {size} bytes)",
-                at * 100 / size
-            )));
+            self.set_phase(Phase::Updating(progress(at, size)));
         }
         let got = hex(&hash.finalize());
         if got != sha256 {
@@ -426,6 +428,13 @@ impl Firmware {
         }
         Ok(())
     }
+}
+
+/// The download's progress for the badge, in the words of the Downloads screen:
+/// `Downloading firmware: 46% (159.4 MB of 340.5 MB)`.
+fn progress(at: u64, size: u64) -> String {
+    let mb = |b: u64| format!("{:.1} MB", b as f64 / 1_000_000.0);
+    format!("Downloading firmware: {}% ({} of {})", at * 100 / size.max(1), mb(at), mb(size))
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -534,4 +543,15 @@ async fn unpack(folders: &dyn Folders, zip: &HostPath, into: &HostPath) -> Plugi
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_download_s_progress_reads_in_megabytes() {
+        assert_eq!(progress(159_383_552, 340_474_472), "Downloading firmware: 46% (159.4 MB of 340.5 MB)");
+        assert_eq!(progress(0, 340_474_472), "Downloading firmware: 0% (0.0 MB of 340.5 MB)");
+    }
 }

@@ -291,7 +291,7 @@ impl Slots for Lichii {
         if request.slot == SlotId::EmulatorPanel && request.game.is_none() {
             let settings = self.emu.builds().settings().load().await;
             if settings.firmware_updates {
-                self.firmware.start_auto(settings.keys_version);
+                self.firmware.start_auto(settings.keys_version).await;
             }
             items.extend(self.firmware.panel().await);
         }
