@@ -935,6 +935,29 @@ async fn two_unpacked_game_folders_at_the_same_depth_are_refused() {
 }
 
 #[tokio::test]
+async fn of_two_folders_of_one_game_at_the_same_depth_the_whole_game_installs_not_its_patch() {
+    let k = boot(&[V1]).await;
+    let dir = packages(&k, &[]).await;
+    let param = r#"{"titleId":"PPSA55555","localizedParameters":{"en-US":{"titleName":"One Game"}}}"#;
+    // A backport: a few files of the game, changed. It sorts first.
+    let patch = dir.path().join("PS5/torrent-abc/[4.xx] Backport/[4.xx] Backport");
+    std::fs::create_dir_all(patch.join("sce_sys")).unwrap();
+    std::fs::write(patch.join("sce_sys/param.json"), param).unwrap();
+    std::fs::write(patch.join("eboot.bin"), b"the patched game").unwrap();
+    let game = dir.path().join("PS5/torrent-abc/PPSA55555/PPSA55555");
+    std::fs::create_dir_all(game.join("sce_sys")).unwrap();
+    std::fs::create_dir_all(game.join("Data")).unwrap();
+    std::fs::write(game.join("sce_sys/param.json"), param).unwrap();
+    std::fs::write(game.join("eboot.bin"), b"the game").unwrap();
+    std::fs::write(game.join("Data/level.bin"), vec![7u8; 4096]).unwrap();
+
+    assert_eq!(install_download(&k).await.trim(), "done");
+    let installed = k.games.path().join("PS5/PPSA55555-app0");
+    assert_eq!(std::fs::read(installed.join("eboot.bin")).unwrap(), b"the game");
+    assert!(installed.join("Data/level.bin").is_file());
+}
+
+#[tokio::test]
 async fn a_package_the_host_unpacked_from_an_archive_installs() {
     use emulator_kit::pkg5::build;
     let k = boot(&[V1]).await;

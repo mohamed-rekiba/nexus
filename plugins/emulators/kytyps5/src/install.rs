@@ -68,6 +68,33 @@ async fn game_package(folders: &Arc<dyn Folders>, download: &installs::Download)
     Ok(Source::File(reader, format))
 }
 
+/// The unpacked game folder in `download` that holds the game: the one nearest the top. Folders
+/// at that depth with one title id are one game, and the largest is the whole game: the others
+/// are patches of it, such as a backport for a console. Folders of different games are never
+/// guessed, as for packages. `None` when it has no game folder.
+async fn game_folder(folders: &dyn Folders, download: &installs::Download) -> PluginResult<Option<String>> {
+    let found = download.game_folders("param.json");
+    let depth = |p: &String| p.matches('/').count();
+    let Some(top) = found.first().map(depth) else { return Ok(None) };
+    let level: Vec<&String> = found.iter().filter(|p| depth(p) == top).collect();
+    if let [only] = level.as_slice() {
+        return Ok(Some((*only).clone()));
+    }
+    let mut ids = Vec::new();
+    for prefix in &level {
+        let param = download.read(folders, &format!("{prefix}sce_sys/param.json"), 1 << 20).await?;
+        ids.push(games::ps5_param(&param).map(|(id, _)| id));
+    }
+    if ids[0].is_none() || ids.iter().any(|id| *id != ids[0]) {
+        return Err(PluginError::InvalidInput(format!(
+            "Several folders hold a game ({}, {}); choose a single release folder",
+            level[0], level[1]
+        )));
+    }
+    let size = |prefix: &str| download.files.iter().filter(|f| f.rel.starts_with(prefix)).map(|f| f.size).sum::<u64>();
+    Ok(level.iter().max_by_key(|p| size(p)).map(|p| (*p).clone()))
+}
+
 #[async_trait]
 impl GameInstaller for Kyty {
     async fn candidates(&self) -> PluginResult<Vec<Installable>> {
@@ -94,22 +121,10 @@ impl GameInstaller for Kyty {
                     }
                 }
             }
-            Some(download) => {
-                let found = download.game_folders("param.json");
-                let depth = |p: &String| p.matches('/').count();
-                // Two at the same depth are never guessed, as for packages.
-                if let [first, second, ..] = found.as_slice()
-                    && depth(first) == depth(second)
-                {
-                    return Err(PluginError::InvalidInput(format!(
-                        "Several folders hold a game ({first}, {second}); choose a single release folder"
-                    )));
-                }
-                match found.first() {
-                    Some(prefix) => Source::Folder(download.tree(folders.clone(), prefix), prefix.clone()),
-                    None => game_package(&folders, &download).await?,
-                }
-            }
+            Some(download) => match game_folder(folders.as_ref(), &download).await? {
+                Some(prefix) => Source::Folder(download.tree(folders.clone(), &prefix), prefix),
+                None => game_package(&folders, &download).await?,
+            },
         };
         let stem = match &from {
             Source::File(file, _) => {
