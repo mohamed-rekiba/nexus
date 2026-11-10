@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.1](https://github.com/mohamed-rekiba/nexus/compare/v0.14.0...v0.14.1) (2026-11-10)
+
+
+### Bug Fixes
+
+* **themes:** a game that ends brings the player back to the games it started from ([f83b6d3](https://github.com/mohamed-rekiba/nexus/commit/f83b6d30cc6652b91a551a83d2f55140631add19))
+
 ## [0.14.0](https://github.com/mohamed-rekiba/nexus/compare/v0.13.0...v0.14.0) (2026-11-09)
 
 
