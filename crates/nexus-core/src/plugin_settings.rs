@@ -92,11 +92,11 @@ pub(crate) async fn run_action(
     if provided.releases.is_some() {
         crate::catalog_reads::refresh_releases(core).await;
     }
-    if core.state().nav.last() == Some(&Route::Plugin(plugin.clone())) {
+    if core.state().stack.route() == &Route::Plugin(plugin.clone()) {
         crate::emulator_builds::refresh_emulator(core, plugin).await;
     }
     if let Some(game) = game.filter(|g| &g.plugin == plugin)
-        && core.state().nav.last() == Some(&Route::GameDetail(game.clone()))
+        && core.state().stack.route() == &Route::GameDetail(game.clone())
     {
         crate::navigation::open_game(core, game).await?;
     }
@@ -153,11 +153,7 @@ pub(crate) async fn set_plugin_enabled(core: &Core, plugin: &PluginId, enabled: 
     if !crate::navigation::catalog_available(kernel) {
         core.library().clear_catalogs();
         let mut state = core.state();
-        state.nav.retain(|r| *r != Route::Catalog);
-        state.nav.dedup();
-        if state.nav.is_empty() {
-            state.nav.push(Route::Home);
-        }
+        state.stack.close(&Route::Catalog);
         state.catalog_grid.clear();
     }
     if enabled && kernel.of_kind(PluginKind::Emulator).contains(plugin) {

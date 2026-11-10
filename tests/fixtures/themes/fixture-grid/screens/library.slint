@@ -1,0 +1,30 @@
+import { Vm, Host, Json } from "../types.slint";
+import { Tokens } from "../tokens.slint";
+import { Card } from "../components/card.slint";
+
+// The Library's games, as the core searches, filters and sorts them, in a grid.
+export component LibraryScreen inherits Rectangle {
+    property <length> gap: Tokens.space-m;
+    property <length> cell: 168px;
+    property <length> row-height: 268px;
+    property <int> columns: Math.max(2, Math.floor((self.width - 2 * Tokens.space-l + root.gap) / (root.cell + root.gap)));
+
+    VerticalLayout {
+        padding: Tokens.space-l;
+        spacing: Tokens.space-m;
+        Text {
+            text: Vm.home.library.total + " games";
+            color: Tokens.color-text-muted;
+        }
+        Flickable {
+            viewport-height: Math.ceil(Vm.home.library.games.length / root.columns) * (root.row-height + root.gap);
+            for game[i] in Vm.home.library.games : Card {
+                x: Math.mod(i, root.columns) * (root.cell + root.gap);
+                y: Math.floor(i / root.columns) * (root.row-height + root.gap);
+                width: root.cell;
+                game: game;
+                activated => { Host.command("OpenGame", Json.text(game.key)); }
+            }
+        }
+    }
+}

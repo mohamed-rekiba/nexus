@@ -170,3 +170,26 @@ fn up_from_the_grid_goes_to_the_bar_then_the_systems_then_the_top_bar() {
     host.navigate(Key::Return);
     assert_eq!(host.core().view().screen, nexus_ui_api::ScreenId::Downloads);
 }
+
+#[test]
+fn back_from_a_game_opened_while_searching_gives_the_keys_to_the_grid() {
+    let mut host = default_theme();
+    open(&mut host, "All games");
+    host.type_text("/");
+    host.type_text("a");
+    host.wait(std::time::Duration::from_millis(400));
+    host.press("default-game", "Alpha");
+    assert_eq!(host.core().view().screen, nexus_ui_api::ScreenId::GameDetail);
+    host.navigate(Key::Escape);
+    assert_eq!(host.core().view().screen, nexus_ui_api::ScreenId::Library);
+    // The keys are the grid's: the search box closed as the Game Hub opened.
+    host.navigate(Key::RightArrow);
+    rest(&mut host);
+    let library = host.core().view().home.library;
+    assert_eq!(library.selected.map(|i| library.games[i].title.clone()).as_deref(), Some("Beta"));
+    // So the search key opens the box again, on the search in use.
+    host.type_text("/");
+    host.type_text("e");
+    host.wait(std::time::Duration::from_millis(400));
+    assert_eq!(host.core().view().home.library.query, "ae");
+}

@@ -7,24 +7,22 @@ import { Origin } from "../kit/origin.slint";
 // Origin is the kit's; the theme's files read it from here too.
 export { Origin } from "../kit/origin.slint";
 
-// Where the player is on the home screen, and what each key does there. As in the PS5
-// Launcher, the keys act on one zone at a time: the top bar (`tabs`), the tile row (`row`),
+// Where the player is on the home screen, and what each key does there. The keys act on one
+// zone at a time: the top bar (`tabs`), the tile row (`row`),
 // the buttons under the game (`actions`), and in the Library its bar (`bar`: search, sort,
 // Comfortable, Compact, and in the Catalog the catalog plugin's button), its systems
 // (`filters`), its genres (`genres`) and its grid (`grid`).
 //
 // The top bar has two tabs, Home (0) and Library (1), then the five screen buttons (2 to 6),
-// then, when Nexus is the whole screen, the network, sound and Bluetooth icons (7 to 9).
-// Home's row has every game; the Library's games are searched, filtered and sorted by the
-// core (`Vm.home.library`). The Catalog screen is the same view on the catalogs' games
-// (`Vm.catalog`), with the same zones but the top bar's.
+// then, when Nexus is the whole screen, the network, sound and Bluetooth icons (7 to 9). The
+// tabs open the Home screen and the Library screen. Home's row has every game; the Library's
+// games are searched, filtered and sorted by the core (`Vm.home.library`). The Catalog screen
+// is the same view on the catalogs' games (`Vm.catalog`), with the same zones but the top bar's.
 export global Nav {
-    // home | library
-    in-out property <string> view: "home";
     in-out property <string> zone: "row";
     in-out property <int> tab;
     in-out property <int> action;
-    // The focus is on the Library tile at the end of the row.
+    // On Home, the focus is on the Library tile at the end of the row.
     in-out property <bool> extra;
     // The Library grid's columns, set by the grid.
     in-out property <int> columns: 1;
@@ -47,13 +45,16 @@ export global Nav {
     in-out property <length> library-scroll;
     // A card's Download opened the game's Hub: the keys go to its releases there.
     in-out property <bool> to-releases;
+    // The shell's search opened the Library: the keys go to its search box there.
+    in-out property <bool> to-search;
 
     out property <int> tabs: 2;
     // The screen buttons, the network, sound and Bluetooth icons when Nexus is the whole screen
     // (`Sys`), and Settings last.
     out property <int> buttons: 5 + root.statuses;
     out property <int> statuses: Vm.system.whole-screen ? 3 : 0;
-    out property <bool> library: root.view == "library";
+    // The Library screen is open: the keys are on its view.
+    out property <bool> library: Vm.screen == "library";
     // The Catalog screen is open: the keys are on its view.
     out property <bool> catalog: Vm.screen == "catalog";
     // The Library's view, or the Catalog's.
@@ -110,27 +111,30 @@ export global Nav {
         entry < 0 || entry >= Vm.home.groups.length ? Vm.home.games.length : Vm.home.groups[entry].games.length
     }
 
-    // Opens the Library.
+    // Opens the Library screen, as it was left: its filters stay in the core.
     public function open-library() {
-        root.sort-open = false;
-        root.view = "library";
-        root.zone = "grid";
-        root.extra = false;
-        root.tab = 1;
         Host.play-sound("select");
+        Commands.navigate("library");
     }
-    public function go-home() {
-        root.sort-open = false;
-        root.view = "home";
-        root.zone = "row";
-        root.tab = 0;
+    // The shell's search: the Library, with the keys in its search box. From another screen,
+    // the box takes them once the Library shows (`to-search`).
+    public function search-library() {
+        if (root.library) {
+            root.zone = "bar";
+            root.bar = 0;
+            root.typing = true;
+        } else {
+            root.to-search = true;
+            Commands.navigate("library");
+        }
     }
     // The tabs, then the screen buttons (Search, Downloads, Emulators, Themes), the machine's
-    // icons when Nexus is the whole screen, and Settings last.
+    // icons when Nexus is the whole screen, and Settings last. Home goes back to the bottom of
+    // the stack: nothing is left to go back to.
     public function activate-tab(index: int) {
         let button = index - root.tabs;
         if (index == 0) {
-            root.go-home();
+            Commands.navigate("home");
         } else if (index == 1) {
             root.open-library();
         } else if (button >= 4 && button < 4 + root.statuses) {
@@ -314,7 +318,7 @@ export global Nav {
         if (root.zone == "tabs") {
             if (text == Key.DownArrow) { root.go(root.library ? "bar" : "row"); return true; }
             if (text == Key.Return) { root.activate-tab(root.tab); return true; }
-            if (text == Key.Escape || text == Key.Backspace) { root.go(root.view == "library" ? "grid" : "row"); return true; }
+            if (text == Key.Escape || text == Key.Backspace) { root.go(root.library ? "grid" : "row"); return true; }
         } else if (root.zone == "row") {
             if (text == Key.UpArrow) { root.go("tabs"); root.tab = 0; return true; }
             if (text == Key.DownArrow && !root.extra && root.has-game) { root.go("actions"); root.action = 0; return true; }
@@ -386,10 +390,10 @@ export global Nav {
         }
         false
     }
-    // Back from the Library to Home's row, with the back sound.
+    // Back from the Library to the screen under it, with the back sound.
     function leave() {
-        root.go-home();
         Host.play-sound("back");
+        Commands.back();
     }
     // Moves the keys to another zone, with the move sound.
     function go(zone: string) {

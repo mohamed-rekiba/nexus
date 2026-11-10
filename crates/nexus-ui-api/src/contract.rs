@@ -88,6 +88,7 @@ impl ScreenId {
     pub fn component(self) -> &'static str {
         match self {
             Self::Home => "HomeScreen",
+            Self::Library => "LibraryScreen",
             Self::GameDetail => "GameDetailScreen",
             Self::Catalog => "CatalogScreen",
             Self::Downloads => "DownloadsScreen",
@@ -96,7 +97,6 @@ impl ScreenId {
             Self::Themes => "ThemesScreen",
             Self::Plugin => "PluginScreen",
             Self::GameSettings => "GameSettingsScreen",
-            Self::Running => "RunningScreen",
         }
     }
 }

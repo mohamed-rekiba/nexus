@@ -592,7 +592,7 @@ mod tests {
         optional = true
 
         [theme]
-        ui_api = "^0.2"
+        ui_api = "^0.3"
     "#;
 
     #[test]

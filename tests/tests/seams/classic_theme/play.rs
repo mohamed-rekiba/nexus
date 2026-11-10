@@ -52,11 +52,11 @@ fn the_launch_splash_shows_the_emulator_s_keys_and_takes_every_key_but_back_and_
     host.settle();
     assert_eq!(host.core().view().screen, screen, "nothing opened or closed");
 
-    // Escape goes on, as on the splash without the keys: the second one is Back, to the Game
-    // Hub.
+    // A game is no screen: the Game Hub is under the splash. Escape goes on, as on the splash
+    // without the keys: it is the Game Hub's Back.
+    assert_eq!(screen, nexus_ui_api::ScreenId::GameDetail);
     host.navigate(Key::Escape);
-    host.navigate(Key::Escape);
-    assert_eq!(host.core().view().screen, nexus_ui_api::ScreenId::GameDetail);
+    assert_eq!(host.core().view().screen, nexus_ui_api::ScreenId::Home);
 
     // Ctrl+Q quits.
     let ctrl: slint::SharedString = Key::Control.into();
@@ -101,4 +101,120 @@ fn the_hero_and_the_game_hub_show_the_time_played() {
     host.dispatch(Command::OpenGame("emu-a:G0".parse().unwrap()));
     host.settle();
     assert_eq!(host.values("played"), ["4 hr 6 min · Today"], "one card: how long, and when last");
+}
+
+/// The Classic theme on two playable systems: PS4 with Alpha and Beta, PS5 with Gamma.
+fn playable_classic() -> Composed {
+    let mut host = composed(|h| {
+        h.plugin(FakeCatalog::new("emu-a").playable().system("PS4").games(["Alpha", "Beta"]).build())
+            .plugin(FakeCatalog::new("emu-b").playable().system("PS5").games(["Gamma"]).build())
+    });
+    host.ui.start().unwrap();
+    host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
+    host.resize(1600.0, 900.0);
+    host.settle();
+    host
+}
+
+/// Starts `game`, as Play does, and ends it once the theme has shown it running.
+fn play_and_end(host: &mut Composed, game: &str, while_running: impl FnOnce(&mut Composed)) {
+    host.dispatch(Command::Session(SessionCmd::Launch(game.parse().unwrap())));
+    host.until(Area::Sessions, |core| core.game_running());
+    shown(host);
+    while_running(host);
+    let process = host.test.spawner.spawned()[0].clone();
+    process.exit(0);
+    host.until(Area::Sessions, |core| !core.game_running());
+    shown(host);
+}
+
+/// The theme sees the change and the core carries out what the theme asked for.
+fn shown(host: &mut Composed) {
+    host.settle();
+    host.pump();
+    host.settle();
+}
+
+/// The title of the Library's selected game, as the core has it.
+fn selected_title(host: &Composed) -> Option<String> {
+    let library = host.core().view().home.library;
+    library.selected.map(|i| library.games[i].title.clone())
+}
+
+#[test]
+fn a_game_played_from_the_library_leaves_it_on_screen_on_the_game() {
+    let mut host = playable_classic();
+    host.press("default-system", "Library");
+    host.press_first("filter:PS4");
+    host.dispatch(Command::Select("emu-a:G1".parse().unwrap()));
+
+    play_and_end(&mut host, "emu-a:G1", |host| {
+        assert!(host.values("default-tile").is_empty(), "while it runs, the Library stays");
+    });
+
+    assert_eq!(host.core().view().screen, nexus_ui_api::ScreenId::Library);
+    assert!(host.values("default-tile").is_empty(), "still the Library");
+    assert_eq!(host.values("default-count"), ["2 games"], "still on the PS4 games");
+    assert_eq!(selected_title(&host).as_deref(), Some("Beta"), "on the game that was played");
+}
+
+#[test]
+fn a_game_played_from_its_game_hub_in_the_library_comes_back_to_it_on_the_game() {
+    use nexus_ui_api::ScreenId;
+    use slint::platform::Key;
+    let mut host = playable_classic();
+    host.press("default-system", "Library");
+    host.press_first("filter:PS4");
+    host.press("default-game", "Beta");
+    assert_eq!(host.core().view().screen, ScreenId::GameDetail);
+
+    play_and_end(&mut host, "emu-a:G1", |host| {
+        assert_eq!(host.core().view().screen, ScreenId::GameDetail, "a game is no screen");
+    });
+
+    assert_eq!(host.core().view().screen, ScreenId::GameDetail, "the game ended where it started");
+    // Escape answers "How far did it get?" with Not now; the next is Back.
+    assert!(host.core().view().result_prompt.is_some());
+    host.navigate(Key::Escape);
+    host.navigate(Key::Escape);
+    assert_eq!(host.core().view().screen, ScreenId::Library);
+    assert!(host.values("default-tile").is_empty(), "the Library");
+    assert_eq!(host.values("default-count"), ["2 games"], "on the PS4 games");
+    assert_eq!(selected_title(&host).as_deref(), Some("Beta"), "on the game that was played");
+}
+
+#[test]
+fn home_from_a_game_hub_opened_in_the_library_leaves_nothing_to_go_back_to() {
+    use nexus_ui_api::ScreenId;
+    use slint::platform::Key;
+    let mut host = playable_classic();
+    host.press("default-system", "Library");
+    host.press("default-game", "Beta");
+    assert_eq!(host.core().view().screen, ScreenId::GameDetail);
+    // The top bar isn't over the Game Hub: R1 (Tab) there is the way Home.
+    host.navigate(Key::Tab);
+    assert_eq!(host.core().view().screen, ScreenId::Home);
+    assert!(!host.core().view().can_go_back);
+    assert_eq!(host.values("default-tile").len(), 3, "Home's row");
+}
+
+#[test]
+fn the_home_tab_from_the_library_leaves_nothing_to_go_back_to() {
+    use nexus_ui_api::ScreenId;
+    let mut host = playable_classic();
+    host.press("default-system", "Library");
+    assert_eq!(host.core().view().screen, ScreenId::Library);
+    host.press("default-system", "Home");
+    assert_eq!(host.core().view().screen, ScreenId::Home);
+    assert!(!host.core().view().can_go_back);
+}
+
+#[test]
+fn a_player_who_moves_on_home_while_the_game_runs_stays_there() {
+    let mut host = playable_classic();
+    host.press("default-system", "Library");
+
+    play_and_end(&mut host, "emu-a:G1", |host| host.press("default-system", "Home"));
+
+    assert_eq!(host.values("default-tile").len(), 3, "still on Home, where they went");
 }

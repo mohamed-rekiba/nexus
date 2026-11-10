@@ -3,6 +3,7 @@ import { Tokens } from "tokens.slint";
 import { Button } from "kit/button.slint";
 import { ListItem } from "kit/list-item.slint";
 import { HomeScreen } from "screens/home.slint";
+import { LibraryScreen } from "screens/library.slint";
 import { GameDetailScreen } from "screens/game-detail.slint";
 import { CatalogScreen } from "screens/catalog.slint";
 import { DownloadsScreen } from "screens/downloads.slint";
@@ -58,7 +59,8 @@ export component Shell inherits Window {
 
         Rectangle {
             horizontal-stretch: 1;
-            if Vm.screen == "home" || Vm.screen == "running" : HomeScreen { width: parent.width; height: parent.height; }
+            if Vm.screen == "home" : HomeScreen { width: parent.width; height: parent.height; }
+            if Vm.screen == "library" : LibraryScreen { width: parent.width; height: parent.height; }
             if Vm.screen == "game-detail" : GameDetailScreen { width: parent.width; height: parent.height; }
             if Vm.screen == "catalog" : CatalogScreen { width: parent.width; height: parent.height; }
             if Vm.screen == "downloads" : DownloadsScreen { width: parent.width; height: parent.height; }
@@ -66,7 +68,7 @@ export component Shell inherits Window {
             if Vm.screen == "emulators" : EmulatorsScreen { width: parent.width; height: parent.height; }
             if Vm.screen == "themes" : ThemesScreen { width: parent.width; height: parent.height; }
             if Vm.screen == "plugin" : PluginScreen { width: parent.width; height: parent.height; }
-            if Vm.screen == "running" : RunningScreen { width: parent.width; height: parent.height; }
+            if Vm.has-running : RunningScreen { width: parent.width; height: parent.height; }
 
             if Vm.notices.length > 0 : Rectangle {
                 x: parent.width - self.width - Tokens.space-m;

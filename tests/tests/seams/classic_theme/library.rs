@@ -371,3 +371,19 @@ fn a_move_in_the_library_grid_shows_at_once() {
     rest(&mut host);
     assert_eq!(host.core().view().home.library.selected, Some(first + 1));
 }
+
+#[test]
+fn search_opens_the_library_with_the_keys_in_its_search_box() {
+    use slint::platform::Key;
+    let mut host = classic_theme();
+    host.type_text("/");
+    assert_eq!(host.core().view().screen, nexus_ui_api::ScreenId::Library);
+    // The keys are in the search box: Escape closes the box, not the Library.
+    host.navigate(Key::Escape);
+    assert_eq!(host.core().view().screen, nexus_ui_api::ScreenId::Library);
+    // In the Library, the search key opens the box again: a letter searches.
+    host.type_text("/");
+    host.type_text("g");
+    host.wait(std::time::Duration::from_millis(400));
+    assert_eq!(host.core().view().home.library.query, "g");
+}

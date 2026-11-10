@@ -4,6 +4,7 @@
 mod downloads;
 mod emulators;
 mod library;
+mod navigation;
 mod results;
 mod sessions;
 mod settings;

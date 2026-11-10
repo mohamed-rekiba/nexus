@@ -1,0 +1,24 @@
+import { Tokens } from "../tokens.slint";
+import { Look } from "../kit/look.slint";
+import { SystemsCover } from "../components/systems-cover.slint";
+import { LibraryView } from "../components/library-view.slint";
+
+// The Library: the games of the system its filter is on, over that system's cover. The systems
+// are in the top bar, with the way back to Home's list. It slides in from the side over Home.
+export component LibraryScreen inherits Rectangle {
+    property <bool> shown;
+    // After the first frame, so the entry animates from its start.
+    Timer { interval: 16ms; running: !root.shown; triggered => { root.shown = true; } }
+    SystemsCover {
+        library: true;
+        opacity: root.shown ? 1 : 0;
+        animate opacity { duration: Look.timed(Tokens.motion-normal); easing: ease-out-quad; }
+    }
+    LibraryView {
+        active: true;
+        opacity: root.shown ? 1 : 0;
+        x: root.shown ? 0 : 40 * Look.px * (Look.rtl ? -1 : 1);
+        animate opacity { duration: Look.timed(Tokens.motion-normal); easing: ease-out-quad; }
+        animate x { duration: Look.timed(Tokens.motion-slow); easing: ease-out-expo; }
+    }
+}

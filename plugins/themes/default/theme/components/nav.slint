@@ -1,7 +1,6 @@
 import { Vm, Host, GameCard, Library } from "../types.slint";
 import { Commands } from "../kit/commands.slint";
 import { Look } from "../kit/look.slint";
-import { GameMenu } from "../kit/game-menu.slint";
 import { Sys } from "../kit/system-panel.slint";
 import { Origin } from "../kit/origin.slint";
 // Origin is the kit's; the theme's files read it from here too.
@@ -14,19 +13,13 @@ export { Origin } from "../kit/origin.slint";
 // plugin's button) and its grid (`grid`). The Library has one card size.
 //
 // The top bar has no tabs: the five screen buttons (0 to 4), then, when Nexus is the whole
-// screen, the network, sound and Bluetooth icons (5 to 7). A system opens the Library on its
-// games (LibrarySystem); whatever brings the list back clears the filter. `extra` is true while
-// the list shows, so the shell's game keys (Menu, T) stay off it. The list has no buttons under
-// a game: the `actions` zone the shell gives a game that starts is the list's. The shell, the
-// card, the top bar and the running screen read the other members.
+// screen, the network, sound and Bluetooth icons (5 to 7). A system opens the Library screen on
+// its games (LibrarySystem, then Navigate); Back from it is the core's. The list shows no game,
+// so the shell's game keys (Menu, T) work only in the Library. The shell, the card, the top bar
+// and the running screen read the other members.
 export global Nav {
-    // home | library
-    in-out property <string> view: "home";
     in-out property <string> zone: "row";
     in-out property <int> tab;
-    in-out property <int> action;
-    // The list shows: no game is on screen.
-    in-out property <bool> extra: true;
     // The list's focused entry: 0 is All games, `i` is `Vm.emulators[i - 1]`. It stays when
     // the Library opens, so Back comes back to it.
     in-out property <int> entry;
@@ -42,10 +35,6 @@ export global Nav {
     // The focused item of the Library's bar and systems.
     in-out property <int> bar;
     in-out property <int> filter;
-    // The system whose games the Library shows: "" for every system. Its cover is behind it.
-    // Only `filter-library` sets it, with the core's filter: the core changes that filter only
-    // when told to.
-    out property <string> lib-system;
     // The search box has the keys, for typing; the shell takes them back when it's false.
     in-out property <bool> typing;
     // A letter typed in the Library grid, for the search box to start with.
@@ -61,13 +50,16 @@ export global Nav {
     in-out property <length> library-scroll;
     // A card's Download opened the game's Hub: the keys go to its releases there.
     in-out property <bool> to-releases;
+    // The shell's search opened the Library: the keys go to its search box there.
+    in-out property <bool> to-search;
 
     out property <int> tabs: 0;
     // The screen buttons, the network, sound and Bluetooth icons when Nexus is the whole screen
     // (`Sys`), and Settings last.
     out property <int> buttons: 5 + root.statuses;
     out property <int> statuses: Vm.system.whole-screen ? 3 : 0;
-    out property <bool> library: root.view == "library";
+    // The Library screen is open: the keys are on its view.
+    out property <bool> library: Vm.screen == "library";
     // The Catalog screen is open: the keys are on its view.
     out property <bool> catalog: Vm.screen == "catalog";
     // The Library's view, or the Catalog's.
@@ -107,15 +99,6 @@ export global Nav {
     out property <bool> has-game: root.games.length > 0;
     // The shown game's details are loaded.
     out property <bool> has-detail: root.has-game && Vm.has-detail && Vm.detail.key == root.games[root.shown].key;
-    // The shown game is the one running.
-    out property <bool> playing: root.has-game && Vm.has-running && Vm.running.key == root.games[root.shown].key;
-    // The buttons under the game: Resume, Stop and Game Hub while it runs; Play (when it can
-    // start) and Game Hub otherwise; then the store page when there is one, and the game's
-    // menu ("⋯") once its details are in.
-    out property <bool> store: root.has-detail && Vm.detail.store-url != "";
-    out property <int> hub-action: root.playing ? 2 : root.has-detail && Vm.detail.can.play ? 1 : 0;
-    out property <int> store-action: root.hub-action + 1;
-    out property <int> actions: root.hub-action + 1 + (root.store ? 1 : 0) + (root.has-detail ? 1 : 0);
 
     public pure function platform(entry: int) -> string {
         entry < 0 || entry >= Vm.home.groups.length ? "" : Vm.home.groups[entry].platform
@@ -124,28 +107,27 @@ export global Nav {
         entry < 0 || entry >= Vm.home.groups.length ? Vm.home.games.length : Vm.home.groups[entry].games.length
     }
 
-    // Opens the Library on every game, as All games does: the shell's search opens it.
-    public function open-library() {
-        root.entry = 0;
-        root.open-entry();
-    }
-    // Opens the Library on the focused entry's games.
+    // Opens the Library screen on the focused entry's games. Opening a system always sets the
+    // filter, so the filter stays when the player leaves the Library.
     public function open-entry() {
-        root.filter-library(root.entry-system);
-        root.sort-open = false;
-        root.view = "library";
-        root.zone = "grid";
-        root.extra = false;
+        Commands.library-system(root.entry-system);
+        Commands.navigate("library");
         Host.play-sound("select");
     }
-    // The list comes back: from the Library, from the shell when a game starts, or before a
-    // search. The Library's filter goes, so every other view of it starts from all the games.
-    public function go-home() {
-        if (root.view == "library") { root.filter-library(""); }
-        root.sort-open = false;
-        root.view = "home";
-        root.zone = "row";
-        root.extra = true;
+    // The shell's search: the Library on every game, as All games opens it, with the keys in
+    // its search box. From another screen, the box takes them once the Library shows
+    // (`to-search`).
+    public function search-library() {
+        root.entry = 0;
+        Commands.library-system("");
+        if (root.library) {
+            root.zone = "bar";
+            root.bar = 0;
+            root.typing = true;
+        } else {
+            root.to-search = true;
+            Commands.navigate("library");
+        }
     }
     // The focused entry's emulator page: its builds and settings. All games has none.
     public function open-entry-plugin() {
@@ -188,12 +170,7 @@ export global Nav {
         if (root.catalog) { Commands.catalog-search(text); } else { Commands.library-search(text); }
     }
     public function system(id: string) {
-        if (root.catalog) { Commands.catalog-system(id); } else { root.filter-library(id); }
-    }
-    // The Library shows the games of system `id` ("" for all), and its cover.
-    function filter-library(id: string) {
-        Commands.library-system(id);
-        root.lib-system = id;
+        if (root.catalog) { Commands.catalog-system(id); } else { Commands.library-system(id); }
     }
     public function genre-filter(id: string) {
         if (root.catalog) { Commands.catalog-genre(id); } else { Commands.library-genre(id); }
@@ -330,35 +307,8 @@ export global Nav {
         root.tab = Math.mod(skipped + count, count);
         Host.play-sound("move");
     }
-    // The button under the game at `action`.
-    public function activate() {
-        if (!root.has-game) { return; }
-        let key = root.games[root.shown].key;
-        if (root.has-detail && root.action == root.actions - 1) {
-            GameMenu.show();
-        } else if (root.store && root.action == root.store-action) {
-            Host.open-url(Vm.detail.store-url);
-        } else if (root.action == root.hub-action) {
-            Host.play-sound("select");
-            Origin.from = "row";
-            Commands.open-game(key);
-        } else if (root.playing) {
-            if (root.action == 0) {
-                Host.play-sound("select");
-                Commands.show-game(Vm.running.session);
-            } else {
-                Host.play-sound("back");
-                Commands.stop(Vm.running.session);
-            }
-        } else if (root.has-detail && Vm.detail.can.play) {
-            Commands.launch(Vm.detail.key);
-        }
-    }
-
     // Handles a key on the home screen. Returns whether it did anything.
     public function key(text: string) -> bool {
-        // A game that starts puts the keys on `actions`, which the list doesn't have.
-        if (root.zone == "actions") { root.zone = "row"; }
         // A key that isn't a move acts on the game on screen: the core hears of it first.
         if (!(text == Key.LeftArrow || text == Key.RightArrow || text == Key.UpArrow || text == Key.DownArrow
             || text == Key.PageUp || text == Key.PageDown)) {
@@ -374,16 +324,13 @@ export global Nav {
         if (root.zone == "tabs") {
             if (text == Key.DownArrow) { root.go(root.library ? "filters" : "row"); return true; }
             if (text == Key.Return) { root.activate-tab(root.tab); return true; }
-            if (text == Key.Escape || text == Key.Backspace) { root.go(root.view == "library" ? "grid" : "row"); return true; }
+            if (text == Key.Escape || text == Key.Backspace) { root.go(root.library ? "grid" : "row"); return true; }
         } else if (root.zone == "row") {
             if (text == Key.UpArrow) { root.step-list(-1); return true; }
             if (text == Key.DownArrow) { root.step-list(1); return true; }
             if (text == Key.Return) { root.open-entry(); return true; }
             // Options on a pad, or the Menu key: the emulator's page.
             if (text == Key.Menu) { root.open-entry-plugin(); return true; }
-        } else if (root.zone == "actions") {
-            if (text == Key.UpArrow || text == Key.Escape || text == Key.Backspace) { root.go("row"); return true; }
-            if (text == Key.Return) { root.activate(); return true; }
         } else if (root.catalog && (text == Key.Escape || text == Key.Backspace)) {
             // The Catalog is a screen of its own: back to where it opened from.
             Host.play-sound("back");
@@ -435,10 +382,11 @@ export global Nav {
         }
         false
     }
-    // Back from the Library to the list, on the entry it opened from, with the back sound.
+    // Back from the Library to the screen under it, with the back sound: the list, on the
+    // entry it opened from.
     public function leave() {
-        root.go-home();
         Host.play-sound("back");
+        Commands.back();
     }
     // Moves the keys to another zone, with the move sound.
     function go(zone: string) {
@@ -449,7 +397,6 @@ export global Nav {
     function horizontal(delta: int) -> bool {
         if (root.zone == "tabs") { root.step-tab(delta); }
         if (root.zone == "row") { root.step-row(delta); }
-        if (root.zone == "actions") { root.action = Math.clamp(root.action + delta, 0, root.actions - 1); Host.play-sound("move"); }
         if (root.zone == "bar") {
             // With no genres, the genres' place is skipped.
             let next = root.bar + delta;

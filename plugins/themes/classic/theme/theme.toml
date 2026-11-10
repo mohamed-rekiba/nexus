@@ -9,7 +9,7 @@ activation = "eager"
 # The built-in Classic theme: a hero and a row of game tiles on Home, on the theme contract.
 # Every value is laid out on a 1920×1080 canvas and scaled to the window.
 [theme]
-ui_api = "^0.2.0"
+ui_api = "^0.3.0"
 input = ["gamepad", "pointer"]
 navigation = "focus"
 

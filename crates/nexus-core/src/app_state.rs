@@ -1,5 +1,5 @@
 //! The state no subsystem owns: where the player is and what they look at (the navigation
-//! stack, the selections, the Library's and the Catalog's grids), the questions the player
+//! stack with each screen's selection, the Library's and the Catalog's grids), the questions the player
 //! answers (the install prompt, "How far did it get?"), each emulator's builds and the Settings
 //! screen's panels as the plugins last gave them, the machine's state, the stores' installs,
 //! and the theme on screen.
@@ -12,8 +12,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use nexus_api::{GameKey, PluginId};
 use serde_json::Value;
 
-use crate::app::{Grid, Route};
+use crate::app::Grid;
 use crate::grid_query::{GridQuery, ShownGrid};
+use crate::stack::Stack;
 
 /// A first play waiting for the player to agree to install its emulator.
 #[derive(Clone, Debug)]
@@ -65,8 +66,8 @@ pub(crate) struct SettingsPanel {
 /// a copy.
 #[derive(Clone)]
 pub(crate) struct AppState {
-    pub nav: Vec<Route>,
-    pub selected: Option<GameKey>,
+    /// The screens the player came through, each with the game selected on it.
+    pub stack: Stack,
     /// Each emulator's builds and blocks, and a service plugin's blocks once its page opens.
     pub emulators: BTreeMap<PluginId, EmulatorState>,
     pub settings: std::sync::Arc<Vec<SettingsPanel>>,
@@ -90,8 +91,6 @@ pub(crate) struct AppState {
     /// Until when the stores' installs are read often: a minute after Nexus asked a store to
     /// install, as the store writes its install down a moment later.
     pub store_watch_until: Option<std::time::Instant>,
-    /// The game selected in the Catalog. Home's selection stays a library game.
-    pub catalog_selected: Option<GameKey>,
     /// The Catalog's grid as last shown.
     pub catalog_grid: ShownGrid,
     /// Each grid's columns.
@@ -104,8 +103,7 @@ impl AppState {
     /// Home, with nothing selected, and `theme` on screen.
     pub fn new(theme: Option<PluginId>) -> Self {
         Self {
-            nav: vec![Route::Home],
-            selected: None,
+            stack: Stack::default(),
             emulators: BTreeMap::new(),
             settings: Default::default(),
             theme,
@@ -118,7 +116,6 @@ impl AppState {
             pending_updates: BTreeSet::new(),
             store_installs: Vec::new(),
             store_watch_until: None,
-            catalog_selected: None,
             catalog_grid: ShownGrid::default(),
             grid_columns: HashMap::new(),
             disks: Default::default(),

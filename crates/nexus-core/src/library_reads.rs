@@ -9,7 +9,7 @@ use nexus_api::{Capability, ConfigScope, Event, GameKey, PageRequest, PluginId, 
 use serde_json::Value;
 
 use crate::CoreResult;
-use crate::app::Core;
+use crate::app::{Core, Route};
 use crate::changes::Area;
 use crate::error::require;
 use crate::library::{Detail, Entry, GameSettings, InstalledOffer};
@@ -67,12 +67,14 @@ pub(crate) async fn refresh_library(core: &Core) -> CoreResult<()> {
     // selection changes before the games do, so a reader that sees the new games sees it.
     let first = {
         let mut state = core.state();
-        let kept = state.selected.as_ref().is_some_and(|s| library.iter().any(|e| &e.key == s));
+        let selected = state.stack.selected_on(&Route::Home);
+        let kept = selected.is_some_and(|s| library.iter().any(|e| &e.key == s));
         if kept {
             None
         } else {
-            state.selected = library.first().map(|e| e.key.clone());
-            state.selected.clone()
+            let first = library.first().map(|e| e.key.clone());
+            state.stack.select_on(&Route::Home, first.clone());
+            first
         }
     };
     let installed = installed_offers(core, &library, &core.library().snapshot().offers);

@@ -12,7 +12,7 @@ use nexus_api::{Capability, GameKey, PluginId, PluginKind, PluginManifest};
 use nexus_ui_api::GameSystemVm;
 use serde_json::Value;
 
-use crate::app::{AppState, Route};
+use crate::app::AppState;
 use crate::folders::Purpose;
 use crate::game_installs::InstallsSnapshot;
 use crate::grid_query::GridData;
@@ -193,19 +193,9 @@ impl<'a> Plugins<'a> {
     }
 }
 
-/// The game whose Game Hub the view shows: the one open, else the one the player last opened
-/// under the overlays, else the selected game (in the Catalog, the Catalog's).
+/// The game whose Game Hub the view shows (see [`crate::stack::Stack::detail_game`]).
 pub(crate) fn detail_game(state: &AppState) -> Option<GameKey> {
-    let route = state.nav.last().cloned().unwrap_or(Route::Home);
-    let open = match &route {
-        Route::GameDetail(g) | Route::GameSettings(g) => Some(g.clone()),
-        _ => None,
-    };
-    open.or_else(|| {
-        state.nav.iter().rev().find_map(|r| if let Route::GameDetail(g) = r { Some(g.clone()) } else { None })
-    })
-    .or_else(|| if route == Route::Catalog { state.catalog_selected.clone() } else { None })
-    .or_else(|| state.selected.clone())
+    state.stack.detail_game().cloned()
 }
 
 /// What the view reads from the disk: the games' folders, the Game Hub game's log, the

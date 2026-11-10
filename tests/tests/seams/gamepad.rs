@@ -82,9 +82,9 @@ fn while_a_game_is_in_front_the_pad_is_the_game_s_and_a_ps_button_tap_too() {
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::Session(SessionCmd::Launch("emu-a:G0".parse().unwrap())));
     watch_until(&mut host, "the game is in front", |core| core.game_in_front());
-    assert_eq!(host.core().view().screen, ScreenId::Running);
+    assert_eq!(host.core().view().screen, ScreenId::Home, "a game is no screen");
     let process = host.test.spawner.spawned()[0].clone();
-    // What the theme asked for as the game started (it selects the running game).
+    // What the theme asked for as the game started: the start sound.
     host.pump();
 
     // Cross in the game is the game's: the launcher behind it does nothing. A tap of the PS

@@ -190,7 +190,7 @@ A subsystem follows these rules:
   plain data.
 
 What no subsystem owns stays in `AppState` (`app_state.rs`), behind one mutex in `Core`: the
-screen stack (`nav`, a list of `Route`), the selection, the grids' queries, each emulator's
+stack of screens (see [Navigation](#navigation)), the grids' queries, each emulator's
 builds, the Settings panels, the install and result prompts, the machine's state, the stores'
 installs and the theme on screen.
 
@@ -201,7 +201,7 @@ routes a command to a flow when no one subsystem owns it.
 
 | Flow | Does |
 | --- | --- |
-| `navigation.rs` | Moves the player between screens, and sets the grids' search, filters, sort and pages. |
+| `navigation.rs` | Opens screens on the stack, goes back, selects games, and sets the grids' search, filters, sort and pages. |
 | `emulator_builds.rs` | Installs, updates and removes emulator builds, and checks for updates. |
 | `plugin_downloads.rs` | Starts and resumes a plugin's download plans. |
 | `plugin_settings.rs` | Sets plugin settings and theme options, runs plugin actions, maps host folders, turns plugins on or off. |
@@ -214,6 +214,28 @@ routes a command to a flow when no one subsystem owns it.
 
 [ADR 0002](adr/0002-game-page-reads-stay-as-flows.md) records why the reads for a game's page
 stay separate flows.
+
+### Navigation
+
+The core owns where the player is: a stack of visits (`stack.rs`). A visit is one screen, a
+`Route`, with the game the player selected on it. Home is at the bottom and never goes.
+
+- `Command::Navigate(route)` opens a screen. Home goes back to the bottom. A screen already on
+  the stack goes back to its visit, as the player left it. A plugin's page takes the place of
+  the plugin's page on top. Any other screen goes on top.
+- Opening a game's Game Hub selects the game on the visit under it too, so Back comes to it.
+- `Command::Back` pops one visit. `Command::Select` selects a game on the visit on top.
+- The view shows the visit on top (`AppView::screen`). Home's games show Home's selection; the
+  Library's grid shows the Library's, or Home's until the Library opens; the Catalog's grid
+  shows the Catalog's.
+- A running game is no screen. Starting or ending a game leaves the stack as it is: a game
+  played from its Game Hub ends on the Hub, and Back from there goes where the Hub was opened
+  from.
+- An uninstalled game closes its screens (`Stack::forget_game`). The Catalog closes when no
+  catalog is left (`Stack::close`).
+
+A theme keeps no screen of its own. It shows the visit on top, keeps only where the keys are
+within that screen, and sends what the player asked for.
 
 ### The launcher's update
 
@@ -408,7 +430,8 @@ a panic. The timeout fires at the plugin's next `.await`.
 
 ## Themes and the UI host
 
-A theme owns presentation: layout, navigation, tokens, assets, motion and sound. Every theme
+A theme owns presentation: layout, how the keys move within a screen, tokens, assets, motion and
+sound. Which screen shows is the core's (see [Navigation](#navigation)). Every theme
 stands alone: no theme inherits from another
 ([ADR 0003](adr/0003-themes-stand-alone-with-a-shared-kit.md)).
 

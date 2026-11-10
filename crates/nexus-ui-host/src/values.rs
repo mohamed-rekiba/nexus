@@ -465,6 +465,8 @@ mod tests {
             session: 1,
             key: "a:b".into(),
             title: "B".into(),
+            cover: None,
+            background: None,
             plugin: nexus_api::PluginId::new("a").unwrap(),
             emulator: String::new(),
             page: String::new(),

@@ -114,7 +114,7 @@ export component TopBar inherits Rectangle {
     // Back to the list of systems while a system's games show, then the Library's systems (or
     // the Catalog's), in one row on the reading side, up to the far side's buttons. Right to
     // left, the way back is on the right.
-    property <bool> back: Vm.screen == "home" && Nav.library;
+    property <bool> back: Nav.library;
     property <bool> chips: root.back || Vm.screen == "catalog";
     HorizontalLayout {
         x: Look.rtl ? side.x + side.width + 24 * Look.px : 96 * Look.px;

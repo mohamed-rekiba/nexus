@@ -26,10 +26,13 @@ pub(crate) use crate::app_state::{AppState, SettingsPanel};
 use crate::{CoreError, CoreResult, Kernel};
 use crate::{emulator_builds, library_reads, navigation, plugin_downloads, plugin_settings, release_downloads};
 
-/// Where the player is. The navigation stack is a list of routes.
+/// A screen the player can go to. The navigation stack ([`crate::stack::Stack`]) holds one
+/// visit for each screen the player came through.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Route {
     Home,
+    /// The Library's grid of the player's games, with its search, filters and sort.
+    Library,
     GameDetail(GameKey),
     Catalog,
     Downloads,
@@ -41,7 +44,16 @@ pub enum Route {
     Plugin(PluginId),
     /// One game's own settings.
     GameSettings(GameKey),
-    Running(SessionId),
+}
+
+impl Route {
+    /// The game the screen is about: a Game Hub's or a game's settings.
+    pub fn game(&self) -> Option<&GameKey> {
+        match self {
+            Route::GameDetail(game) | Route::GameSettings(game) => Some(game),
+            _ => None,
+        }
+    }
 }
 
 /// A grid of game cards that tells the core how many columns it shows.
@@ -507,7 +519,7 @@ impl Core {
     pub fn view(&self) -> AppView {
         let snapshot = self.snapshot();
         let view = view::build(&snapshot);
-        let on_catalog = snapshot.state.nav.last() == Some(&Route::Catalog);
+        let on_catalog = snapshot.state.stack.route() == &Route::Catalog;
         self.state().catalog_grid.keep(on_catalog, &view.catalog.games);
         view
     }

@@ -24,7 +24,8 @@ async fn launching_spawns_the_program_from_the_plugin_folder_and_tracks_the_proc
     assert_eq!(process.command.args, ["G0"]);
     assert_eq!(process.command.env.get("EMU_SCALE").map(String::as_str), Some("2"));
     assert!(matches!(events.next().await, Some(Event::ProcessStarted { game, .. }) if game == key("emu-a:G0")));
-    assert_eq!(t.core.view().screen, ScreenId::Running);
+    assert_eq!(t.core.view().screen, ScreenId::Home, "a game is no screen: Home stays");
+    assert!(t.core.view().running.is_some());
 
     process.exit(0);
     loop {
@@ -34,7 +35,8 @@ async fn launching_spawns_the_program_from_the_plugin_folder_and_tracks_the_proc
         }
     }
     assert_eq!(emu.exits()[0].0, "G0", "the plugin hears about the exit");
-    assert_ne!(t.core.view().screen, ScreenId::Running);
+    assert_eq!(t.core.view().screen, ScreenId::Home);
+    assert!(t.core.view().running.is_none());
 }
 
 #[tokio::test]

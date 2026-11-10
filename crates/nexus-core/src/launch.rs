@@ -176,7 +176,7 @@ pub(crate) async fn launch(core: &Core, game: GameKey) -> CoreResult<()> {
     };
     let started = core.sessions().start(claim, new).await?;
     let session = started.session;
-    crate::navigation::push(core, Route::Running(session));
+    core.changed(Area::Navigation);
 
     let core = core.clone();
     tokio::spawn(async move {
@@ -241,12 +241,11 @@ pub(crate) async fn open_emulator(core: &Core, plugin: &PluginId) -> CoreResult<
     };
     let started = core.sessions().start(claim, new).await?;
     let session = started.session;
-    crate::navigation::push(core, Route::Running(session));
+    core.changed(Area::Navigation);
     let core = core.clone();
     tokio::spawn(async move {
         let ended = started.ended.await;
         tracing::info!(plugin_id = %window.plugin, %session, ?ended, "emulator window closed");
-        core.state().nav.retain(|r| r != &Route::Running(session));
         core.sessions().end(session, None);
         core.changed(Area::Sessions);
     });
@@ -267,7 +266,6 @@ async fn finish(
     let duration_ms = played.as_millis().try_into().unwrap_or(u64::MAX);
     let exit = ExitInfo { code: ended.code, success: ended.success, duration_ms };
     tracing::info!(plugin_id = %game.plugin, %session, ?exit, played_any, "game exited");
-    core.state().nav.retain(|r| r != &Route::Running(session));
     if let Some(ended) = core.sessions().end(session, played_any.then_some(played)) {
         let answered = core.library().answered(game, ended.build.as_deref());
         let hand_over = core.kernel().host().hand_over_timeout;

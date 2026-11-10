@@ -145,12 +145,9 @@ export component TopBar inherits Rectangle {
         for t[i] in ["Home", "Library"] : Tab {
             text: t;
             count: i == 1 ? Vm.home.games.length : 0;
-            active: Vm.screen == "home" && (Nav.view == "library") == (i == 1);
+            active: Vm.screen == (i == 1 ? "library" : "home");
             focused: root.keys && Nav.zone == "tabs" && Nav.tab == i;
-            clicked => {
-                if (Vm.screen != "home") { Commands.navigate("home"); }
-                Nav.activate-tab(i);
-            }
+            clicked => { Nav.activate-tab(i); }
         }
     }
 

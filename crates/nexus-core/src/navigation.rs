@@ -1,6 +1,7 @@
-//! Where the player is and what they look at: the navigation stack, the selections, and the
-//! Library's and the Catalog's grids. The state lives in [`crate::app_state::AppState`]; these
-//! flows change it and load what a screen needs before it opens.
+//! Where the player is and what they look at: the navigation stack with each screen's
+//! selection ([`crate::stack::Stack`]), and the Library's and the Catalog's grids. The state
+//! lives in [`crate::app_state::AppState`]; these flows change it and load what a screen needs
+//! before it opens.
 
 use nexus_api::{Capability, GameKey, PluginKind};
 
@@ -48,7 +49,7 @@ pub(crate) async fn navigate(core: &Core, route: Route) -> CoreResult<()> {
         // Read once; a new catalog address reads them again. The Catalog opens at once and
         // says it is loading until the read ends.
         Route::Catalog if !core.library().has_catalogs() => {
-            push(core, route);
+            open(core, route);
             crate::catalog_reads::refresh_releases(core).await;
             return Ok(());
         }
@@ -57,21 +58,13 @@ pub(crate) async fn navigate(core: &Core, route: Route) -> CoreResult<()> {
         }
         _ => {}
     }
-    push(core, route);
+    open(core, route);
     Ok(())
 }
 
-pub(crate) fn push(core: &Core, route: Route) {
-    {
-        let mut state = core.state();
-        // One plugin's page at a time: opening another replaces it.
-        if matches!(route, Route::Plugin(_)) && matches!(state.nav.last(), Some(Route::Plugin(_))) {
-            state.nav.pop();
-        }
-        if state.nav.last() != Some(&route) {
-            state.nav.push(route);
-        }
-    }
+/// Opens `route` on the stack (see [`crate::stack::Stack::open`]).
+pub(crate) fn open(core: &Core, route: Route) {
+    core.state().stack.open(route);
     core.changed(Area::Navigation);
 }
 
@@ -81,7 +74,7 @@ pub(crate) async fn search(core: &Core, text: String) -> CoreResult<()> {
         crate::catalog_reads::refresh_releases(core).await;
     }
     set_grid(core, Grid::Catalog, |v| v.query = text)?;
-    push(core, Route::Catalog);
+    open(core, Route::Catalog);
     Ok(())
 }
 
@@ -110,45 +103,28 @@ pub(crate) fn more(core: &Core, grid: Grid) -> CoreResult<()> {
     Ok(())
 }
 
-/// Selects a game: a game the catalogs offer in the Catalog, any other on Home.
-fn select(core: &Core, game: &GameKey) {
-    let offered = core.library().snapshot().offer(game).is_some();
-    let mut state = core.state();
-    if offered {
-        state.catalog_selected = Some(game.clone());
-    } else {
-        state.selected = Some(game.clone());
-    }
-}
-
 pub(crate) async fn open_game(core: &Core, game: GameKey) -> CoreResult<()> {
     // A game a catalog offers: its download sheet names the VPN in use.
     if core.vpn().only() && core.library().snapshot().offer(&game).is_some() {
         core.vpn().refresh().await;
     }
     crate::library_reads::load_detail(core, &game).await?;
-    select(core, &game);
     crate::disks::refresh(core);
-    push(core, Route::GameDetail(game));
+    open(core, Route::GameDetail(game));
     Ok(())
 }
 
 /// Back to the screen before, unless this is the first.
 pub(crate) fn back(core: &Core) -> CoreResult<()> {
-    {
-        let mut state = core.state();
-        if state.nav.len() > 1 {
-            state.nav.pop();
-        }
-    }
+    core.state().stack.back();
     core.changed(Area::Navigation);
     Ok(())
 }
 
-/// Selects a game, fetches the art around it, and once the selection rests, loads its
-/// details.
+/// Selects a game on the screen on top, fetches the art around it, and once the selection
+/// rests, loads its details.
 pub(crate) async fn select_game(core: &Core, game: GameKey) -> CoreResult<()> {
-    select(core, &game);
+    core.state().stack.select(game.clone());
     core.changed(Area::Navigation);
     crate::prefetch::prefetch_around(core, &game);
     // Themes show the selected game's details on the home screen, so load them once. Wait
@@ -159,10 +135,7 @@ pub(crate) async fn select_game(core: &Core, game: GameKey) -> CoreResult<()> {
         return Ok(());
     }
     core.ports().clock.sleep(SELECT_SETTLE).await;
-    let still = {
-        let state = core.state();
-        state.selected.as_ref() == Some(&game) || state.catalog_selected.as_ref() == Some(&game)
-    };
+    let still = core.state().stack.selected() == Some(&game);
     if !still {
         return Ok(());
     }

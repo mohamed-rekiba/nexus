@@ -1,0 +1,79 @@
+import { Vm } from "../types.slint";
+import { Tokens } from "../tokens.slint";
+import { Assets } from "../assets.slint";
+import { Look } from "../kit/look.slint";
+
+// One emulator's cover over the whole screen. It fades in and out with `mine`.
+component SystemLayer inherits Image {
+    in property <bool> mine;
+    // The system's name, for tests and screen readers.
+    in property <string> name;
+    in property <bool> labelled;
+    image-fit: cover;
+    opacity: root.mine ? 1 : 0;
+    visible: self.opacity > 0 || root.mine;
+    animate opacity { duration: Look.timed(Tokens.motion-slow); easing: ease-out-quad; }
+    accessible-role: text;
+    accessible-label: root.labelled && root.mine ? "systems-background" : "";
+    accessible-value: root.name;
+}
+
+// A system's cover over the whole screen, over All games' own: a system with no emulator of its
+// own (no cover) shows All games'. On Home it is the cover of `system`, the focused entry's
+// ("" for All games), dark behind the list. With `library`, it is the cover of the system the
+// Library's filter is on (`Vm.home.library.systems`), under a darker wash that keeps the cards
+// readable. `labelled`: the shown cover names its system as `systems-background`.
+export component SystemsCover inherits Rectangle {
+    in property <string> system;
+    in property <bool> library;
+    in property <bool> labelled: true;
+    // All games' cover is the one shown: on Home for entry 0, in the Library while "All" (the
+    // first filter) is on.
+    property <bool> all: root.library
+        ? Vm.home.library.systems.length == 0 || Vm.home.library.systems[0].on
+        : root.system == "";
+    pure function name-of(system-name: string, name: string) -> string {
+        system-name != "" ? system-name : name
+    }
+    background: Tokens.color-bg;
+    Image {
+        width: parent.width;
+        height: parent.height;
+        source: Assets.all-games-cover;
+        image-fit: cover;
+        accessible-role: text;
+        accessible-label: root.labelled && root.all ? "systems-background" : "";
+        accessible-value: "All games";
+    }
+    if !root.library : Rectangle {
+        for e in Vm.emulators : SystemLayer {
+            width: parent.width;
+            height: parent.height;
+            source: e.cover;
+            mine: root.system != "" && root.system == e.system;
+            name: root.name-of(e.system-name, e.name);
+            labelled: root.labelled;
+        }
+    }
+    // The filters and the emulators meet on the system's id.
+    if root.library : Rectangle {
+        for f in Vm.home.library.systems : Rectangle {
+            for e in Vm.emulators : Rectangle {
+                if f.id != "" && f.id == e.system : SystemLayer {
+                    width: parent.width;
+                    height: parent.height;
+                    source: e.cover;
+                    mine: f.on;
+                    name: root.name-of(e.system-name, e.name);
+                    labelled: root.labelled;
+                }
+            }
+        }
+    }
+    // Dark behind the list and under the top bar, so both read on any cover; over the whole
+    // cover under the Library's cards.
+    if !Look.rtl && !root.library : Rectangle { background: @linear-gradient(270deg, #05070ff5 0%, #05070fd8 30%, #05070f70 55%, #05070f00 78%); }
+    if Look.rtl && !root.library : Rectangle { background: @linear-gradient(90deg, #05070ff5 0%, #05070fd8 30%, #05070f70 55%, #05070f00 78%); }
+    Rectangle { background: @linear-gradient(180deg, #05070fcc 0%, #05070f00 18%); }
+    if root.library : Rectangle { background: #05070fc4; }
+}

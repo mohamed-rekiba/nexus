@@ -380,7 +380,7 @@ mod tests {
     fn manifest(id: &str, theme: &str) -> ThemeManifest {
         let text = format!(
             "id = \"{id}\"\nkind = \"theme\"\nname = \"{id}\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
-             capabilities = [\"theme\"]\n[theme]\nui_api = \"^0.2\"\n{theme}"
+             capabilities = [\"theme\"]\n[theme]\nui_api = \"^0.3\"\n{theme}"
         );
         ThemeManifest::from_plugin(&PluginManifest::from_toml(&text).unwrap()).unwrap()
     }
@@ -399,15 +399,15 @@ mod tests {
     }
 
     #[test]
-    fn the_old_inheritance_keys_are_refused_with_what_to_do() {
+    fn keys_a_manifest_may_not_use_are_refused_with_what_to_do() {
         for (key, line) in [
             ("extends", "extends = \"base\""),
             ("screens", "screens = [\"home\"]"),
             ("components", "components = [\"card\"]"),
         ] {
             let text = format!(
-                "id = \"old\"\nkind = \"theme\"\nname = \"old\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
-                 capabilities = [\"theme\"]\n[theme]\nui_api = \"^0.2\"\n{line}"
+                "id = \"refused\"\nkind = \"theme\"\nname = \"refused\"\nversion = \"1.0.0\"\nhost_api = \"^0.2\"\n\
+                 capabilities = [\"theme\"]\n[theme]\nui_api = \"^0.3\"\n{line}"
             );
             let err = ThemeManifest::from_plugin(&PluginManifest::from_toml(&text).unwrap()).unwrap_err();
             assert!(matches!(&err, ThemeError::Manifest { message, .. } if message.contains(key)), "{err}");

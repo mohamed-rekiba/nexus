@@ -102,6 +102,7 @@ fixture-grid/
   theme.toml
   shell.slint
   screens/home.slint
+  screens/library.slint
   screens/game-detail.slint
   screens/catalog.slint
   screens/downloads.slint
@@ -118,13 +119,15 @@ fixture-grid/
 ```
 
 A theme must ship `shell.slint` and the ten screen files. Other `.slint` files (such as
-`components/`) and asset files are the theme's choice. The screen list is `ScreenId::ALL` in
+`components/`, or the fixture's `screens/running.slint`, the overlay of a running game) and asset
+files are the theme's choice. The screen list is `ScreenId::ALL` in
 `crates/nexus-ui-api/src/vm.rs`. Each screen file exports one component, under this name
 (`ScreenId::component` in `crates/nexus-ui-api/src/contract.rs`):
 
 | `Vm.screen` | File | Exported component |
 | --- | --- | --- |
 | `home` | `screens/home.slint` | `HomeScreen` |
+| `library` | `screens/library.slint` | `LibraryScreen` |
 | `game-detail` | `screens/game-detail.slint` | `GameDetailScreen` |
 | `catalog` | `screens/catalog.slint` | `CatalogScreen` |
 | `downloads` | `screens/downloads.slint` | `DownloadsScreen` |
@@ -133,7 +136,6 @@ A theme must ship `shell.slint` and the ten screen files. Other `.slint` files (
 | `themes` | `screens/themes.slint` | `ThemesScreen` |
 | `plugin` | `screens/plugin.slint` | `PluginScreen` |
 | `game-settings` | `screens/game-settings.slint` | `GameSettingsScreen` |
-| `running` | `screens/running.slint` | `RunningScreen` |
 
 `shell.slint` exports `Shell`, which inherits `Window`. The shell decides which screen shows for
 `Vm.screen`, and where. The host checks only that each file exists and exports its name. A screen
@@ -148,6 +150,26 @@ export component DownloadsScreen inherits DownloadsPage {}
 
 A missing file stops the load with `ThemeError::File`, which names the file:
 `screens/downloads.slint: is missing: a theme ships its shell and every screen`.
+
+### Where the player is
+
+The core owns the navigation. It keeps a stack of the screens the player came through, with
+Home at the bottom. `Vm.screen` is the screen on top. A theme keeps no screen of its own: it
+sends `Navigate` or `Back` and shows the screen that comes back.
+
+- `Navigate` to `"Home"` goes back to the bottom of the stack: Back has nowhere to go.
+- `Navigate` to a screen that is already on the stack goes back to that screen, as the player
+  left it. Any other screen goes on top.
+- `Back` closes the screen on top and shows the one under it.
+- Each screen on the stack keeps its own selected game. Home's is `Vm.home.selected`. The
+  Library's is `Vm.home.library.selected`: until the Library opens, it is Home's. The Catalog's
+  is in `Vm.catalog`. `Select` selects a game on the screen on top. `OpenGame` also selects the
+  game on the screen under its Game Hub, so Back comes back to the game.
+- A running game is not a screen. `Vm.has-running` and `Vm.running` describe it, and the shell
+  draws it over the screen, for example as a launch splash. Starting or ending a game doesn't
+  change `Vm.screen`.
+
+Focus inside a screen, such as which button has the keys, is the theme's.
 
 ## theme.toml
 
@@ -171,7 +193,7 @@ doesn't know.
 
 | Key | Type | Default | What it does |
 | --- | --- | --- | --- |
-| `ui_api` | version range | required | The `nexus-ui-api` contract versions the theme works with. The host's is `UI_API_VERSION`, `0.2.0` (`crates/nexus-ui-api/src/lib.rs`). A theme that doesn't match fails with `ThemeError::UiApi`. |
+| `ui_api` | version range | required | The `nexus-ui-api` contract versions the theme works with. The host's is `UI_API_VERSION`, `0.3.0` (`crates/nexus-ui-api/src/lib.rs`). A theme that doesn't match fails with `ThemeError::UiApi`. |
 | `fallback` | bool | `false` | This theme is the one the app starts with, falls back to, and shows in safe mode. Exactly one installed theme sets it. Default does. See [Switching](#switching-the-fallback-theme-and-safe-mode). |
 | `input` | list | `["pointer"]` | The input devices the theme supports, the main one first: `pointer`, `gamepad`, `touch`. The first one is `Vm.input-mode` at start. |
 | `navigation` | `pointer` or `focus` | `pointer` | How the player moves around. No host code reads it yet. |
@@ -268,7 +290,7 @@ A variant with a sub-enum takes that enum, written as JSON the same way.
 
 | Variant | Payload |
 | --- | --- |
-| `Navigate` | A `Route`: `"Home"`, `"Catalog"`, `"Downloads"`, `"Settings"`, `"Emulators"`, `"Themes"`, `{"GameDetail": key}`, `{"Plugin": id}`, `{"GameSettings": key}`, `{"Running": session}`. |
+| `Navigate` | A `Route`: `"Home"`, `"Library"`, `"Catalog"`, `"Downloads"`, `"Settings"`, `"Emulators"`, `"Themes"`, `{"GameDetail": key}`, `{"Plugin": id}`, `{"GameSettings": key}`. See [Where the player is](#where-the-player-is). |
 | `Back` | None. |
 | `Select`, `OpenGame`, `UninstallGame`, `AskResult` | A game key. |
 | `Library` | `"Refresh"`, or `{"Hide": {"game": key, "hidden": bool}}`. |

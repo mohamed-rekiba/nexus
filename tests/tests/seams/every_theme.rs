@@ -42,6 +42,7 @@ fn every_screen_renders_in_every_theme() {
             (Route::Emulators, ScreenId::Emulators),
             (Route::Themes, ScreenId::Themes),
             (Route::Plugin(id("emu-a")), ScreenId::Plugin),
+            (Route::Library, ScreenId::Library),
             (Route::Home, ScreenId::Home),
         ] {
             host.dispatch(Command::Navigate(route));

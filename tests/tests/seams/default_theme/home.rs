@@ -107,16 +107,21 @@ fn all_games_opens_the_library_on_every_game() {
 }
 
 #[test]
-fn back_from_a_system_s_games_comes_back_to_it_and_clears_the_filter() {
+fn back_from_a_system_s_games_comes_back_to_it() {
     let mut host = default_theme();
     focus_on(&mut host, "PlayStation 5");
     host.navigate(Key::Return);
     assert_eq!(library_titles(&host), ["Gamma"]);
     host.navigate(Key::Escape);
     host.settle();
-    assert_eq!(host.focused("systems-tile"), ["PlayStation 5"], "on the system it opened");
-    assert_eq!(library_titles(&host), ["Alpha", "Beta", "Gamma"], "the filter is gone");
     assert_eq!(host.core().view().screen, ScreenId::Home);
+    assert_eq!(host.focused("systems-tile"), ["PlayStation 5"], "on the system it opened");
+    assert_eq!(host.count("systems-back"), 0, "the list, not the system's games");
+    assert_eq!(host.value("systems-background"), "PlayStation 5", "the focused system's cover");
+    // The filter stays in the core: each system the list opens sets its own.
+    focus_on(&mut host, "PlayStation 4");
+    host.navigate(Key::Return);
+    assert_eq!(library_titles(&host), ["Alpha", "Beta"]);
 }
 
 #[test]
@@ -165,6 +170,15 @@ fn search_opens_every_game_with_the_search_box() {
     host.navigate(Key::Escape);
     host.type_text("/");
     assert_eq!(library_titles(&host), ["Alpha", "Beta", "Gamma"]);
+    assert_eq!(host.core().view().screen, ScreenId::Library);
+    // The keys are in the search box: Escape closes the box, not the Library.
+    host.navigate(Key::Escape);
+    assert_eq!(host.core().view().screen, ScreenId::Library);
+    // In the Library, the search key opens the box again: a letter searches.
+    host.type_text("/");
+    host.type_text("g");
+    host.wait(std::time::Duration::from_millis(400));
+    assert_eq!(host.core().view().home.library.query, "g");
 }
 
 #[test]
@@ -213,7 +227,7 @@ fn the_cover_changes_once_the_moves_stop_not_while_a_key_is_held() {
 }
 
 #[test]
-fn after_a_game_starts_the_list_has_the_keys_and_the_library_s_filter_is_gone() {
+fn after_a_game_starts_the_system_s_games_stay_with_the_keys() {
     let mut host = default_theme();
     focus_on(&mut host, "PlayStation 5");
     host.navigate(Key::Return);
@@ -224,10 +238,11 @@ fn after_a_game_starts_the_list_has_the_keys_and_the_library_s_filter_is_gone() 
     host.settle();
     host.pump();
     host.settle();
-    assert_eq!(host.focused("systems-tile"), ["PlayStation 5"]);
-    assert_eq!(library_titles(&host), ["Alpha", "Beta", "Gamma"], "the filter is gone");
-    host.navigate(Key::UpArrow);
-    assert_ne!(host.focused("systems-tile"), ["PlayStation 5"], "Up moves along the list");
+    assert_eq!(host.core().view().screen, ScreenId::Library, "a game is no screen");
+    assert_eq!(host.count("systems-back"), 1, "the system's games stay");
+    assert_eq!(library_titles(&host), ["Gamma"], "with their filter");
+    host.navigate(Key::Escape);
+    assert_eq!(host.focused("systems-tile"), ["PlayStation 5"], "the keys are still the grid's: Back leaves it");
 }
 
 #[test]
@@ -259,4 +274,87 @@ fn the_mouse_wheel_moves_along_the_list_down_and_up() {
     host.instance().window().dispatch_event(WindowEvent::PointerScrolled { position, delta_x: 0.0, delta_y: 120.0 });
     host.settle();
     assert_eq!(host.focused("systems-tile"), [shown[0].clone()], "wheel up: back");
+}
+
+/// Starts `game`, as Play does, and ends it once the theme has shown it running.
+fn play_and_end(host: &mut Composed, game: &str, while_running: impl FnOnce(&mut Composed)) {
+    host.dispatch(Command::Session(nexus_core::SessionCmd::Launch(game.parse().unwrap())));
+    host.until(Area::Sessions, |core| core.game_running());
+    shown(host);
+    while_running(host);
+    let process = host.test.spawner.spawned()[0].clone();
+    process.exit(0);
+    host.until(Area::Sessions, |core| !core.game_running());
+    shown(host);
+}
+
+/// The theme sees the change and the core carries out what the theme asked for.
+fn shown(host: &mut Composed) {
+    host.settle();
+    host.pump();
+    host.settle();
+}
+
+/// The title of the Library's selected game, as the core has it.
+fn selected_title(host: &Composed) -> Option<String> {
+    let library = host.core().view().home.library;
+    library.selected.map(|i| library.games[i].title.clone())
+}
+
+#[test]
+fn a_game_played_from_a_system_s_games_leaves_them_on_screen_on_the_game() {
+    let mut host = default_theme();
+    focus_on(&mut host, "PlayStation 4");
+    host.navigate(Key::Return);
+    host.dispatch(Command::Select("emu-a:G1".parse().unwrap()));
+    host.settle();
+
+    play_and_end(&mut host, "emu-a:G1", |host| {
+        assert_eq!(host.count("systems-back"), 1, "while it runs, the system's games stay");
+    });
+
+    assert_eq!(host.core().view().screen, ScreenId::Library);
+    assert_eq!(host.count("systems-back"), 1, "still the system's games");
+    assert_eq!(library_titles(&host), ["Alpha", "Beta"], "the system's filter is back");
+    assert_eq!(selected_title(&host).as_deref(), Some("Beta"), "on the game that was played");
+}
+
+#[test]
+fn a_player_who_moves_while_the_game_runs_stays_where_they_went() {
+    let mut host = default_theme();
+    focus_on(&mut host, "PlayStation 4");
+    host.navigate(Key::Return);
+    host.settle();
+
+    play_and_end(&mut host, "emu-a:G1", |host| {
+        host.navigate(Key::Escape);
+        host.press("systems-tile", "PlayStation 5");
+        host.settle();
+    });
+
+    assert_eq!(library_titles(&host), ["Gamma"], "still in the games they opened");
+    assert_eq!(host.count("systems-back"), 1);
+}
+
+#[test]
+fn a_game_played_from_its_game_hub_in_a_system_s_games_comes_back_to_them_on_it() {
+    let mut host = default_theme();
+    focus_on(&mut host, "PlayStation 4");
+    host.navigate(Key::Return);
+    host.press("default-game", "Beta");
+    assert_eq!(host.core().view().screen, ScreenId::GameDetail);
+
+    play_and_end(&mut host, "emu-a:G1", |host| {
+        assert_eq!(host.core().view().screen, ScreenId::GameDetail, "a game is no screen");
+    });
+
+    assert_eq!(host.core().view().screen, ScreenId::GameDetail, "the game ended where it started");
+    // Escape answers "How far did it get?" with Not now; the next is Back.
+    assert!(host.core().view().result_prompt.is_some());
+    host.navigate(Key::Escape);
+    host.navigate(Key::Escape);
+    assert_eq!(host.core().view().screen, ScreenId::Library);
+    assert_eq!(host.count("systems-back"), 1, "the system's games");
+    assert_eq!(library_titles(&host), ["Alpha", "Beta"]);
+    assert_eq!(selected_title(&host).as_deref(), Some("Beta"), "on the game that was played");
 }

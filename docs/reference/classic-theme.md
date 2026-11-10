@@ -27,7 +27,8 @@ All paths are under `plugins/themes/classic/theme/`.
 | --- | --- |
 | `theme.toml` | The manifest. |
 | `shell.slint` | `Shell`: the window, the key router, the layers of screens and sheets, the hints, the notices, the task pill. |
-| `screens/home.slint` | `HomeScreen`: the tile row and the hero, and the Library. |
+| `screens/home.slint` | `HomeScreen`: the tile row and the hero. |
+| `screens/library.slint` | `LibraryScreen`: `LibraryView` on the player's games. |
 | `screens/game-detail.slint` | `GameDetailScreen`: the kit's `GameDetailPage`. |
 | `screens/catalog.slint` | `CatalogScreen`: `LibraryView` on the catalogs' games. |
 | `screens/downloads.slint` | `DownloadsScreen`: the kit's `DownloadsPage`. |
@@ -36,7 +37,7 @@ All paths are under `plugins/themes/classic/theme/`.
 | `screens/themes.slint` | `ThemesScreen`: the kit's `PluginListSheet`. |
 | `screens/plugin.slint` | `PluginScreen`: the kit's `PluginPage`. |
 | `screens/game-settings.slint` | `GameSettingsScreen`: a side sheet of one game's settings. |
-| `screens/running.slint` | `RunningScreen` and the `Splash` global: the launch splash. |
+| `screens/running.slint` | `RunningScreen` and the `Splash` global: the launch splash, which the shell draws over the screen. It is not a screen of the contract. |
 | `components/backdrop.slint` | `Backdrop`: the art behind every screen. |
 | `components/boot.slint` | `BootScreen`: the boot screen and Welcome. |
 | `components/card.slint` | `Card`: a Library or Catalog card. |
@@ -48,10 +49,11 @@ All paths are under `plugins/themes/classic/theme/`.
 | `sounds/` | `move.wav`, `select.wav`, `back.wav`, `error.wav`, `start.wav`. |
 
 The Default theme has the same files, except: its own `theme.toml` (its id and name,
-`fallback = true`, no tokens, two more images); `shell.slint` differs in one comment;
-`screens/home.slint`, `components/nav.slint`, `components/top-bar.slint` and
-`components/library-view.slint` are Default's own; Default adds `components/chip-row.slint`
-and two images.
+`fallback = true`, no tokens, two more images); `shell.slint` differs in its first comment and
+in when the game keys work; `screens/home.slint`, `screens/library.slint`,
+`components/nav.slint`, `components/top-bar.slint` and `components/library-view.slint` are
+Default's own; Default adds `components/chip-row.slint`, `components/systems-cover.slint` and
+two images.
 
 ## The manifest
 
@@ -63,7 +65,7 @@ From `theme.toml`:
 | `version` | `0.3.0` |
 | `host_api` | `^0.2` |
 | `activation` | `eager` |
-| `ui_api` | `^0.2.0` |
+| `ui_api` | `^0.3.0` |
 | `input` | `["gamepad", "pointer"]` |
 | `navigation` | `focus` |
 | breakpoints | `compact` (`max_width = 900`), then `regular` |
@@ -132,9 +134,9 @@ From the back to the front:
 
 1. `Backdrop`, with the art of the shown game. It dims (0.84) on every screen but Home, the Game
    Hub and the sheets, which draw their own wash.
-2. `HomeScreen`, always there. It shows on Home and while a game runs. Under a side sheet it
+2. `HomeScreen`, always there. It shows on Home and under the Library. Under a side sheet it
    dims to 0.3; on other screens it hides.
-3. The Game Hub, the Catalog and Downloads, each while it is the screen.
+3. The Library, the Game Hub, the Catalog and Downloads, each while it is the screen.
 4. The side sheets: Emulators, Themes, a plugin's page, Settings, a game's settings. Each is
    kept on screen by a kit `Lingering` while it slides out. A plugin's page opens beside the
    Emulators or Themes list, which stays.
@@ -206,8 +208,6 @@ trailer plays with its controls hidden, over the backup browser, and over the sp
 
 ### Home (`screens/home.slint`)
 
-`HomeScreen` shows Home or the Library (`Nav.view`, `home` or `library`).
-
 Home is a row of tiles, the selected one larger with its name beside it, and a hero over the
 game's art. Past the last game is the Library tile. The tile of the running game has a green
 frame and "● PLAYING".
@@ -225,7 +225,12 @@ waits for the game's details, at most `Look.wait-for-details` (450 ms).
 
 The mouse wheel moves along the row, one game a notch.
 
-The Library is `LibraryView` (see below), made again each time it opens.
+### Library (`screens/library.slint`)
+
+`LibraryScreen` is `LibraryView` (see below) on the player's games, sliding in from the side
+over Home. It is made again each time it opens. The "Library" tab, the Library tile and "Open
+Library" open it. Back, or the "Home" tab, leaves it. Its search, filters and sort stay in the
+core, so it opens again as the player left it.
 
 ### Keys on Home and in the Library (`components/nav.slint`)
 
@@ -236,10 +241,10 @@ The keys act on one zone at a time:
 | `tabs` | The top bar | | Home's row, or the Library's bar | Opens the item | Back to the row or the grid |
 | `row` | Home's tiles | The top bar | The buttons | Opens the Game Hub, or the Library from its tile | |
 | `actions` | The buttons under the game | The row | | Runs the button | The row |
-| `bar` | Search, sort, card sizes, the catalog's button | The top bar (Library only) | The systems | Runs the item | Home |
-| `filters` | The systems | The bar | The genres, or the grid | Filters by the system | Home |
-| `genres` | The genres | The systems | The grid | Filters by the genre | Home |
-| `grid` | The cards | The row above, or from the first row the genres (the systems when there is one genre or none) | The row below | Opens the Game Hub | Home |
+| `bar` | Search, sort, card sizes, the catalog's button | The top bar (Library only) | The systems | Runs the item | Back |
+| `filters` | The systems | The bar | The genres, or the grid | Filters by the system | Back |
+| `genres` | The genres | The systems | The grid | Filters by the genre | Back |
+| `grid` | The cards | The row above, or from the first row the genres (the systems when there is one genre or none) | The row below | Opens the Game Hub | Back |
 
 Left and Right follow the reading direction. In the grid, Page Up and Page Down (L2 and R2) move
 three rows. A letter or a digit typed in the grid starts a search with it. In the Catalog,
@@ -303,8 +308,8 @@ While a game starts: its art dimmed behind its icon, its name, "Starting with <e
 "Starting…") and a turning ring. Under it, "Controller: <name>", or "Keyboard: the keys are on
 the <page> page". Without a controller, it lists the emulator's keyboard keys
 (`Vm.running.keymap`) under "Keyboard", and the shell gives every key but Escape and Ctrl+Q to
-the game (`Splash.keys`). It fades once the game's window shows; Home is under it with Resume
-and Stop.
+the game (`Splash.keys`). It fades once the game's window shows. The screen under it stays as it
+was.
 
 ## Components
 

@@ -3,7 +3,7 @@
 
 use nexus_api::GameKey;
 
-use crate::app::{Core, Route};
+use crate::app::Core;
 use crate::changes::Area;
 use crate::{CoreError, CoreResult};
 
@@ -52,13 +52,7 @@ pub(crate) async fn uninstall_game(core: &Core, game: &GameKey) -> CoreResult<()
         }
     }
     core.library().forget_detail(game);
-    {
-        let mut state = core.state();
-        state.nav.retain(|r| r != &Route::GameDetail(game.clone()));
-        if state.nav.is_empty() {
-            state.nav.push(Route::Home);
-        }
-    }
+    core.state().stack.forget_game(game);
     crate::library_reads::refresh_library(core).await?;
     core.notices().info(format!("Uninstalled {title}"));
     core.changed(Area::Library);

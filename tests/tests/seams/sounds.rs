@@ -99,12 +99,14 @@ fn opening_a_game_selects_and_leaving_the_library_goes_back() {
     host.requests.borrow_mut().clear();
     host.ui.pad(PadButton::South).unwrap();
     assert_eq!(asked_for(&host), ["select"], "the Library opens");
+    host.pump();
     host.settle();
     host.requests.borrow_mut().clear();
     host.ui.pad(PadButton::East).unwrap();
     assert_eq!(asked_for(&host), ["back"], "and closes");
 
     // On Home's row, back goes nowhere: no sound.
+    host.pump();
     host.settle();
     host.requests.borrow_mut().clear();
     host.ui.pad(PadButton::East).unwrap();

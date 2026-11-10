@@ -126,7 +126,8 @@ fn last_played_days(s: &Snapshot, key: &GameKey) -> Option<u64> {
     (stats.count > 0).then(|| crate::sessions::days_between(stats.last, s.now_secs))
 }
 
-fn card(s: &Snapshot, entry: &Entry) -> GameCardVm {
+/// A game's card. `selected`: the game selected on the card's screen.
+fn card(s: &Snapshot, entry: &Entry, selected: Option<&GameKey>) -> GameCardVm {
     let library = &s.library;
     GameCardVm {
         key: entry.key.to_string(),
@@ -134,7 +135,7 @@ fn card(s: &Snapshot, entry: &Entry) -> GameCardVm {
         platform: entry.summary.platform.clone(),
         system: s.plugins.system(&entry.summary.platform),
         cover: cover_of(library, entry),
-        selected: s.state.selected.as_ref() == Some(&entry.key),
+        selected: selected == Some(&entry.key),
         badges: badges_of(library, &entry.key),
         release_year: entry.summary.release_year,
         rating: library.meta(&entry.key).and_then(|(_, m)| m.rating).map(|r| r.score),
@@ -207,7 +208,8 @@ fn game_actions(
     actions
 }
 
-fn grid_vm(s: &Snapshot, data: &GridData, query: &GridQuery) -> LibraryVm {
+/// A grid's cards. `selected`: the game selected on the grid's screen.
+fn grid_vm(s: &Snapshot, data: &GridData, query: &GridQuery, selected: Option<&GameKey>) -> LibraryVm {
     let GridGames { shown, all, systems, genres } = query.games(data);
     let library = data.library;
     let offers: std::collections::HashMap<&GameKey, &crate::releases::Offer> =
@@ -218,9 +220,9 @@ fn grid_vm(s: &Snapshot, data: &GridData, query: &GridQuery) -> LibraryVm {
         .take(query.shown)
         .map(|e| match offers.get(&e.key) {
             Some(offer) if query.grid == Grid::Catalog => {
-                GameCardVm { hidden: library.hidden(&e.key), ..offer_card(s, data.ownership, offer) }
+                GameCardVm { hidden: library.hidden(&e.key), ..offer_card(s, data.ownership, offer, selected) }
             }
-            _ => card(s, e),
+            _ => card(s, e, selected),
         })
         .collect();
     LibraryVm {
@@ -268,9 +270,10 @@ fn notice_vm(s: &Snapshot, notice: &crate::notices::Notice) -> NoticeVm {
 /// The view models for the snapshot `s`.
 pub(crate) fn build(s: &Snapshot) -> AppView {
     let state = &s.state;
-    let route = state.nav.last().cloned().unwrap_or(Route::Home);
+    let route = state.stack.route().clone();
     let (screen, game) = match &route {
         Route::Home => (ScreenId::Home, None),
+        Route::Library => (ScreenId::Library, None),
         Route::GameDetail(g) => (ScreenId::GameDetail, Some(g.clone())),
         Route::Catalog => (ScreenId::Catalog, None),
         Route::Downloads => (ScreenId::Downloads, None),
@@ -279,7 +282,6 @@ pub(crate) fn build(s: &Snapshot) -> AppView {
         Route::Themes => (ScreenId::Themes, None),
         Route::Plugin(_) => (ScreenId::Plugin, None),
         Route::GameSettings(g) => (ScreenId::GameSettings, Some(g.clone())),
-        Route::Running(_) => (ScreenId::Running, None),
     };
     let owned = s.ownership();
     let data = s.grid_data(&owned);
@@ -287,7 +289,7 @@ pub(crate) fn build(s: &Snapshot) -> AppView {
     let mut view = AppView {
         screen,
         game: game.map(|g| g.to_string()),
-        can_go_back: state.nav.len() > 1,
+        can_go_back: state.stack.can_go_back(),
         home: home_vm(s, &data),
         // The detail page of the game the player last opened stays available under overlays.
         // With no detail page open, the selected game's details, once loaded.
@@ -300,7 +302,7 @@ pub(crate) fn build(s: &Snapshot) -> AppView {
             Route::Plugin(plugin) => plugin_page_vm(s, plugin),
             _ => None,
         },
-        running: running_vm(s, &route),
+        running: running_vm(s),
         notices: notices.iter().map(|n| n.message.clone()).collect(),
         notice_cards: notices.iter().map(|n| notice_vm(s, n)).collect(),
         install_prompt: state.install_prompt.as_ref().map(|p| InstallPromptVm {
@@ -335,9 +337,13 @@ fn badge(plugin: &PluginId, id: &str, text: &str, tone: Tone) -> SlotVm {
     )
 }
 
-fn offer_card(s: &Snapshot, owned: &Ownership, offer: &crate::releases::Offer) -> GameCardVm {
-    let mut card = card(s, &offer.entry);
-    card.selected = s.state.catalog_selected.as_ref() == Some(&offer.entry.key);
+fn offer_card(
+    s: &Snapshot,
+    owned: &Ownership,
+    offer: &crate::releases::Offer,
+    selected: Option<&GameKey>,
+) -> GameCardVm {
+    let mut card = card(s, &offer.entry, selected);
     let best = owned.best_release(offer);
     card.size_bytes = best.size_bytes;
     card.availability = crate::releases::availability(best.seeders).into();
@@ -410,7 +416,11 @@ fn catalog_vm(s: &Snapshot, data: &GridData, on_screen: bool) -> CatalogVm {
             .filter_map(|c| crate::releases::days_of(&c.list.updated).map(|_| &c.list.updated[..10]))
             .max()
     };
-    let games = s.state.catalog_grid.get(on_screen).unwrap_or_else(|| grid_vm(s, data, &s.state.catalog_view));
+    let games = s
+        .state
+        .catalog_grid
+        .get(on_screen)
+        .unwrap_or_else(|| grid_vm(s, data, &s.state.catalog_view, s.state.stack.selected_on(&Route::Catalog)));
     let buttons = |kind: SlotKind| -> Vec<SlotVm> {
         let all = library.catalog_buttons.iter();
         all.flat_map(|(plugin, items)| slot_vms(plugin, SlotId::CatalogAction, items.clone()))
@@ -430,8 +440,12 @@ fn catalog_vm(s: &Snapshot, data: &GridData, on_screen: bool) -> CatalogVm {
     }
 }
 
+/// Home's games and the Library's grid. Each shows the game selected on its own screen; the
+/// Library's grid, until the Library opens, Home's.
 fn home_vm(s: &Snapshot, data: &GridData) -> HomeVm {
-    let games: Vec<GameCardVm> = s.library.library().map(|e| card(s, e)).collect();
+    let stack = &s.state.stack;
+    let home = stack.selected_on(&Route::Home);
+    let games: Vec<GameCardVm> = s.library.library().map(|e| card(s, e, home)).collect();
     let selected = games.iter().position(|g| g.selected);
     let mut groups: Vec<GroupVm> = Vec::new();
     for game in &games {
@@ -443,7 +457,7 @@ fn home_vm(s: &Snapshot, data: &GridData) -> HomeVm {
     for group in &mut groups {
         group.selected = group.games.iter().position(|g| g.selected);
     }
-    let grid = grid_vm(s, data, &s.state.library_view);
+    let grid = grid_vm(s, data, &s.state.library_view, stack.selected_on(&Route::Library).or(home));
     HomeVm { games, selected, loading: s.library.loading, groups, library: grid }
 }
 
@@ -1520,19 +1534,19 @@ impl Look {
     }
 }
 
-/// The game on the Running screen, or else the newest one still running.
-fn running_vm(snapshot: &Snapshot, route: &Route) -> Option<RunningVm> {
+/// The newest game still running.
+fn running_vm(snapshot: &Snapshot) -> Option<RunningVm> {
     let sessions = &snapshot.sessions;
-    let session = match route {
-        Route::Running(session) => *session,
-        _ => *sessions.sessions.keys().next_back()?,
-    };
+    let session = *sessions.sessions.keys().next_back()?;
     let s = sessions.sessions.get(&session)?;
     let manifest = snapshot.plugins.manifest(&s.game.plugin);
+    let art = snapshot.library.art(&s.game);
     Some(RunningVm {
         session: session.0,
         key: s.game.to_string(),
         title: s.title.clone(),
+        cover: art.cover.map(plugin_image),
+        background: art.background.map(plugin_image),
         plugin: s.game.plugin.clone(),
         emulator: manifest.as_ref().map(|m| m.emulator_name().to_owned()).unwrap_or_default(),
         page: manifest.as_ref().map(|m| m.name.clone()).unwrap_or_default(),

@@ -142,6 +142,8 @@ fn the_library_grid_tells_the_core_its_columns() {
         host.instance().window().dispatch_event(slint::platform::WindowEvent::KeyPressed { text: text.clone() });
         host.instance().window().dispatch_event(slint::platform::WindowEvent::KeyReleased { text });
     }
+    // The core opens the Library screen; its grid tells the columns as it shows.
+    host.pump();
     host.settle();
     let told =
         host.requests.borrow().iter().any(

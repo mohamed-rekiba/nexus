@@ -50,6 +50,7 @@ pub mod sandbox;
 mod sessions;
 mod settings_schema;
 mod snapshot;
+mod stack;
 mod storage;
 pub mod system;
 mod themes;

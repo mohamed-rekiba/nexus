@@ -6,7 +6,7 @@ import { Host, Json } from "../types.slint";
 export global Commands {
     // A screen id as its route's name: game-detail is GameDetail.
     pure function route(screen: string) -> string {
-        screen == "home" ? "Home" : screen == "catalog" ? "Catalog" : screen == "downloads" ? "Downloads"
+        screen == "home" ? "Home" : screen == "library" ? "Library" : screen == "catalog" ? "Catalog" : screen == "downloads" ? "Downloads"
             : screen == "settings" ? "Settings" : screen == "emulators" ? "Emulators" : screen == "themes" ? "Themes" : screen
     }
     // A download's action as its command's name: stop-seeding is StopSeeding.
@@ -17,8 +17,9 @@ export global Commands {
     }
 
     // Navigation and the games.
-    // A screen id from `Vm.screen` that needs nothing more: home, catalog, downloads,
-    // settings, emulators or themes.
+    // A screen id from `Vm.screen` that needs nothing more: home, library, catalog,
+    // downloads, settings, emulators or themes. Home goes back to the bottom of the stack; a
+    // screen already on the stack goes back to it, as the player left it.
     public function navigate(screen: string) { Host.command("Navigate", Json.text(Commands.route(screen))); }
     public function back() { Host.command("Back", ""); }
     public function open-plugin(id: string) { Host.command("Navigate", "{\"Plugin\":" + Json.text(id) + "}"); }

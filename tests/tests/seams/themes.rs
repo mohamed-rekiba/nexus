@@ -38,6 +38,7 @@ fn every_default_screen_renders() {
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     let routes = [
         (ScreenId::Home, "Home"),
+        (ScreenId::Library, "Library"),
         (ScreenId::Catalog, "Catalog"),
         (ScreenId::Downloads, "Downloads"),
         (ScreenId::Settings, "Settings"),

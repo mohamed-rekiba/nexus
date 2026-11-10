@@ -5,7 +5,6 @@ import { Look } from "../kit/look.slint";
 import { Nav, Origin } from "../components/nav.slint";
 import { Icon } from "../kit/icon.slint";
 import { Card } from "../components/card.slint";
-import { LibraryView } from "../components/library-view.slint";
 import { FocusRing, Chip, Pill, Kicker, Cover } from "../kit/widgets.slint";
 
 // What the hero and the name beside the selected tile show.
@@ -457,22 +456,12 @@ component HomeView inherits Rectangle {
     }
 }
 
+// Home stays drawn under the Library screen: the row slides out as the Library comes in.
 export component HomeScreen inherits Rectangle {
     HomeView {
-        opacity: Nav.view == "home" ? 1 : 0;
+        opacity: Vm.screen != "library" ? 1 : 0;
         visible: self.opacity > 0;
-        x: Nav.view == "home" ? 0 : -40 * Look.px * (Look.rtl ? -1 : 1);
-        animate opacity { duration: Tokens.motion-normal; easing: ease-out-quad; }
-        animate x { duration: Tokens.motion-slow; easing: ease-out-expo; }
-    }
-    // Made each time the Library opens, so its cards come in again.
-    if Nav.view == "library" : LibraryView {
-        active: Vm.screen == "home";
-        property <bool> shown;
-        // After the first frame, so the entry animates from its start.
-        Timer { interval: 16ms; running: !parent.shown; triggered => { parent.shown = true; } }
-        opacity: self.shown ? 1 : 0;
-        x: self.shown ? 0 : 40 * Look.px * (Look.rtl ? -1 : 1);
+        x: Vm.screen != "library" ? 0 : -40 * Look.px * (Look.rtl ? -1 : 1);
         animate opacity { duration: Tokens.motion-normal; easing: ease-out-quad; }
         animate x { duration: Tokens.motion-slow; easing: ease-out-expo; }
     }

@@ -1,7 +1,6 @@
 import { Vm, Host } from "../types.slint";
 import { Tokens } from "../tokens.slint";
 import { Look } from "../kit/look.slint";
-import { Nav } from "../components/nav.slint";
 
 // While a game starts: the game's art dimmed behind its icon, its name, "Starting with
 // KytyPS5…" and a turning ring, until the game's window shows. Then it fades, and the home
@@ -26,7 +25,8 @@ export component RunningScreen inherits Rectangle {
     TouchArea { enabled: root.on; }
 
     Image {
-        source: Vm.detail.background;
+        // The running game's own art, whatever game is selected: its background, else its cover.
+        source: Vm.running.background.width > 0 ? Vm.running.background : Vm.running.cover;
         width: root.width;
         height: root.height;
         image-fit: cover;
@@ -50,7 +50,7 @@ export component RunningScreen inherits Rectangle {
                 animate transform-scale { duration: Look.timed(600ms); easing: ease-out-back; }
                 drop-shadow-blur: 40 * Look.px;
                 drop-shadow-color: #00000099;
-                Image { source: Nav.has-game ? Nav.games[Nav.shown].cover : Vm.detail.cover; width: parent.width; height: parent.height; image-fit: cover; }
+                Image { source: Vm.running.cover; width: parent.width; height: parent.height; image-fit: cover; }
             }
         }
         Rectangle { height: 34 * Look.px; }

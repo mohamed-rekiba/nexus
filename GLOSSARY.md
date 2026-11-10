@@ -278,6 +278,10 @@ Nexus to finish").
 nothing). The core may ask after a game closes, and the library subsystem saves it under
 `app.results`.
 
+**Route** (`Route`): a screen the player can go to: Home, the Library, a game's Game Hub, the
+Catalog, Downloads, Settings, and the rest. A running game is no route.
+_Avoid_: page, view
+
 **Sandbox** (`Sandbox`, nexus-api; `sandbox.rs`, nexus-core): what a game sees of the player's
 files when it runs through bubblewrap on Linux: the system, the display and the sound, an empty
 home folder, and only the folders the plugin names. The PC plugin asks for it for a Windows game.
@@ -304,6 +308,11 @@ core's `Snapshot` (`Core::snapshot()`) holds one read of each subsystem, a copy 
 subsystem owns, and what the view needs from the plugins and the disk. The view builds from it
 alone, with no lock and no I/O.
 
+**Stack** (`stack::Stack`): the screens the player came through, each as a visit, Home at the
+bottom. The core owns it whole; a theme shows the visit on top and sends what the player asked
+for. Back pops one visit.
+_Avoid_: history, nav
+
 **Subsystem**: one area of the core's state with its own lock, saved records and ports. The core
 sends it commands, reads its snapshot and turns its events into work. The torrents, the game
 installs, the library, the preferences, the running games, the notices, the VPN setting and
@@ -329,6 +338,9 @@ share.
 **Torrent stats** (`TorrentStats`): what the BitTorrent engine reports for a torrent: its
 state (checking, live, paused or error), whether every piece is in, bytes, rates, peers and
 the error. Raw numbers, with no decision.
+
+**Visit** (`stack::Visit`): one screen on the stack, with the game the player selected on it.
+Back shows the visit under it as the player left it.
 
 **VPN rule** (`VpnRule`): "Download only through a VPN" as every area reads it: the setting,
 the picked VPN, the VPNs' source and whether a plugin waits for the VPN. Plugins get it as

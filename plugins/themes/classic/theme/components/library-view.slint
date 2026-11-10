@@ -265,10 +265,12 @@ export component LibraryView inherits Rectangle {
             width: root.width - 192 * Look.px;
             height: 62 * Look.px;
             property <bool> on-bar: root.keys && Nav.zone == "bar";
-            // While typing, the box has the keys.
+            // While typing, the box has the keys: from the start when the view opens for a
+            // search.
             property <bool> typing: Nav.typing;
-            changed typing => {
-                if (!self.typing) { return; }
+            init => { if (self.typing) { self.take-keys(); } }
+            changed typing => { if (self.typing) { self.take-keys(); } }
+            function take-keys() {
                 input.focus();
                 // A letter typed in the grid starts the search with it.
                 if (Nav.first-letter != "") {

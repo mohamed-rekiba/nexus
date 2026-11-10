@@ -15,8 +15,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ScreenId {
-    /// Home and Library.
+    /// Home: the player's games and their systems.
     Home,
+    /// The Library's grid of the player's games, with its search, filters and sort.
+    Library,
     GameDetail,
     /// Catalog and Search.
     Catalog,
@@ -30,13 +32,12 @@ pub enum ScreenId {
     Plugin,
     /// One game's own settings, from its emulator.
     GameSettings,
-    /// The Launch / Running overlay.
-    Running,
 }
 
 impl ScreenId {
     pub const ALL: [ScreenId; 10] = [
         Self::Home,
+        Self::Library,
         Self::GameDetail,
         Self::Catalog,
         Self::Downloads,
@@ -45,12 +46,12 @@ impl ScreenId {
         Self::Themes,
         Self::Plugin,
         Self::GameSettings,
-        Self::Running,
     ];
 
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Home => "home",
+            Self::Library => "library",
             Self::GameDetail => "game-detail",
             Self::Catalog => "catalog",
             Self::Downloads => "downloads",
@@ -59,7 +60,6 @@ impl ScreenId {
             Self::Themes => "themes",
             Self::Plugin => "plugin",
             Self::GameSettings => "game-settings",
-            Self::Running => "running",
         }
     }
 
@@ -1001,6 +1001,12 @@ pub struct RunningVm {
     pub session: u64,
     pub key: String,
     pub title: String,
+    /// The game's own cover and background, for the launch splash: whatever game is selected,
+    /// these are the running game's.
+    #[serde(serialize_with = "mark::cover_picture")]
+    pub cover: Option<ImageRef>,
+    #[serde(serialize_with = "mark::picture")]
+    pub background: Option<ImageRef>,
     /// The emulator plugin that runs it, as `Emulator.plugin`.
     pub plugin: PluginId,
     /// The name of the emulator that runs it, for example `KytyPS5`.
