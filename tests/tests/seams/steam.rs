@@ -154,6 +154,39 @@ async fn play_asks_steam_to_start_the_game_and_follows_the_game_steam_started() 
 }
 
 #[tokio::test]
+async fn the_install_scripts_steam_runs_before_a_game_are_not_the_game() {
+    let s = boot().await;
+    s.test.spawner.on_path("steam", Path::new("/usr/bin/steam"));
+    s.test.core.dispatch(Command::Session(SessionCmd::Launch("emu-steam:570".parse().unwrap()))).await.unwrap();
+    s.test.spawner.wait_for(1).await.exit(0);
+
+    // At a first start Steam runs the game's install scripts (DirectX, Visual C++), each step
+    // under a reaper of the same game with `Install=1`, and only then the game.
+    // The steps fit in the test host's `hand_over_timeout` of 500 ms.
+    let reaper = "/home/p/.local/share/Steam/ubuntu12_32/reaper SteamLaunch AppId=570";
+    let script = "-- proton run /home/p/.local/share/Steam/legacycompat/iscriptevaluator.exe";
+    for id in [7001, 7002] {
+        s.test.processes.start(id, &format!("{reaper} Install=1 {script} evaluatorscript_570.vdf"));
+        s.test.clock.advance(Duration::from_millis(100)).await;
+        s.test.processes.exit(id);
+        s.test.clock.advance(Duration::from_millis(100)).await;
+        assert!(s.test.core.view().running.is_some(), "an install script's end isn't the game's");
+    }
+
+    let mut events = s.test.core.events();
+    s.test.processes.start(7003, &format!("{reaper} -- proton waitforexitandrun /games/dota.exe"));
+    s.test.clock.advance(Duration::from_millis(700)).await;
+    assert!(s.test.core.view().running.is_some(), "Dota 2 runs");
+    s.test.processes.exit(7003);
+    let exit = loop {
+        if let Event::ProcessExited { exit, .. } = futures::StreamExt::next(&mut events).await.unwrap() {
+            break exit;
+        }
+    };
+    assert!(exit.success, "{exit:?}");
+}
+
+#[tokio::test]
 async fn without_steam_play_says_to_install_it() {
     let s = boot().await;
     let refused =

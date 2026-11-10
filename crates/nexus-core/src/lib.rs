@@ -46,6 +46,7 @@ mod release_downloads;
 mod releases;
 mod resolve;
 mod running;
+pub mod sandbox;
 mod sessions;
 mod settings_schema;
 mod snapshot;

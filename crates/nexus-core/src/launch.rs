@@ -82,7 +82,38 @@ fn spawn_command(
     };
     let args = spec.args.iter().map(value).collect::<CoreResult<Vec<_>>>()?;
     let env = spec.env.iter().map(|(k, v)| Ok((k.clone(), value(v)?))).collect::<CoreResult<_>>()?;
-    Ok(SpawnCommand { program, args, env, cwd, log: None, keep_running: false })
+    let command = SpawnCommand { program, args, env, cwd, log: None, keep_running: false };
+    let Some(sandbox) = &spec.sandbox else { return Ok(command) };
+    if kernel.host().platform != Some(nexus_api::Platform::Linux) {
+        return Err(CoreError::Invalid(format!("{plugin}: this system has no sandbox for a game")));
+    }
+    let bwrap = kernel.ports().spawner.which("bwrap").ok_or_else(|| {
+        CoreError::Invalid(
+            "This game runs in a sandbox, which keeps it away from your files: install bubblewrap (the bwrap \
+             program) to play it, or turn off Sandbox in its settings"
+                .into(),
+        )
+    })?;
+    let folders = |list: &[Location]| -> CoreResult<Vec<PathBuf>> {
+        list.iter().map(|l| resolve(l).and_then(|p| folder(plugin, l, p))).collect()
+    };
+    let read = folders(&sandbox.read)?;
+    let write = folders(&sandbox.write)?;
+    // bubblewrap can't put a folder that isn't there into the sandbox.
+    for path in &write {
+        std::fs::create_dir_all(path).map_err(|e| CoreError::Invalid(format!("{}: {e}", path.display())))?;
+    }
+    let host = kernel.host();
+    Ok(crate::sandbox::wrap(command, &bwrap, &read, &write, host.home.as_deref(), &host.desktop))
+}
+
+/// `path`, the place `location` resolved to, if it can be a folder of a sandbox: a system
+/// program can't.
+fn folder(plugin: &PluginId, location: &Location, path: PathBuf) -> CoreResult<PathBuf> {
+    match location {
+        Location::System(name) => Err(CoreError::Invalid(format!("{plugin}: a sandbox can't open {name} to a game"))),
+        _ => Ok(path),
+    }
 }
 
 /// Runs a session command: a launch is resolved here, the rest goes to the subsystem.

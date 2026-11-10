@@ -86,33 +86,33 @@ Rust 1.99 or newer and your system's build packages, then run `make run`.
 Nexus OS turns a PC into a console. It starts straight into Nexus, with no desktop.
 
 <!-- x-release-please-start-version -->
-The current version is Nexus OS 0.8.0:
-[its release](https://github.com/mohamed-rekiba/nexus/releases/tag/nexus-os-v0.8.0).
+The current version is Nexus OS 0.9.0:
+[its release](https://github.com/mohamed-rekiba/nexus/releases/tag/nexus-os-v0.9.0).
 Every Nexus OS release is tagged `nexus-os-v…` on the
 [releases page](https://github.com/mohamed-rekiba/nexus/releases?q=nexus-os).
 
-The release has one ISO file for a USB stick, `nexus-os-x86_64-0.8.0.iso`. An ISO over 2 GiB
-comes in parts (`nexus-os-x86_64-0.8.0.iso.part-aa`, `-ab`, …). Download every part, then join
+The release has one ISO file for a USB stick, `nexus-os-x86_64-0.9.0.iso`. An ISO over 2 GiB
+comes in parts (`nexus-os-x86_64-0.9.0.iso.part-aa`, `-ab`, …). Download every part, then join
 them into the ISO:
 
 - Linux and macOS:
 
   ```sh
-  v=0.8.0
+  v=0.9.0
   cat nexus-os-x86_64-$v.iso.part-* > nexus-os-x86_64-$v.iso
   ```
 
 - Windows (Command Prompt). Name every part, in order:
 
   ```bat
-  set v=0.8.0
+  set v=0.9.0
   copy /b nexus-os-x86_64-%v%.iso.part-aa + nexus-os-x86_64-%v%.iso.part-ab nexus-os-x86_64-%v%.iso
   ```
 
-Check the ISO against `nexus-os-x86_64-0.8.0.iso.sha256`. Each part also has its own `.sha256`.
+Check the ISO against `nexus-os-x86_64-0.9.0.iso.sha256`. Each part also has its own `.sha256`.
 
-- Linux: `sha256sum -c nexus-os-x86_64-0.8.0.iso.sha256`
-- macOS: `shasum -a 256 -c nexus-os-x86_64-0.8.0.iso.sha256`
+- Linux: `sha256sum -c nexus-os-x86_64-0.9.0.iso.sha256`
+- macOS: `shasum -a 256 -c nexus-os-x86_64-0.9.0.iso.sha256`
 <!-- x-release-please-end -->
 
 Write the ISO to a USB stick and start the PC from it. Nexus OS starts from the stick. Then

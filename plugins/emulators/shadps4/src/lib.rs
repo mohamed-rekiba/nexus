@@ -264,6 +264,7 @@ impl Launcher for Shad {
             cwd: run.cwd,
             game_process: None,
             relaunch: None,
+            sandbox: None,
         })
     }
 }

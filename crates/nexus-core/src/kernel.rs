@@ -59,6 +59,8 @@ pub struct HostConfig {
     pub max_downloads: usize,
     /// The player's home folder, for folder defaults like `~/Games`.
     pub home: Option<PathBuf>,
+    /// The display and the sound a sandboxed game gets ([`crate::sandbox`]).
+    pub desktop: crate::sandbox::Desktop,
     /// How often a running torrent's state is read.
     pub torrent_poll: Duration,
     /// How often a store's installs (Steam's) are read while one runs, or for a minute after
@@ -87,6 +89,7 @@ impl HostConfig {
             watch_every: Duration::from_secs(1),
             max_downloads: 2,
             home: None,
+            desktop: crate::sandbox::Desktop::detect(),
             torrent_poll: Duration::from_secs(1),
             store_poll: Duration::from_secs(2),
             vpn_poll: Duration::from_secs(2),

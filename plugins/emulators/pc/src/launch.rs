@@ -1,9 +1,10 @@
 //! Play: the file the Starts setting chose, as it is. What the file is decides how it runs, and
 //! nothing else: a script as it is (through `sh` without `#!`), an AppImage without FUSE, a
 //! Linux or Mac program as it is, and a Windows program off Windows through umu-launcher
-//! (Proton) or Wine. With a Resolution of its own, the game runs inside gamescope. On Linux with
-//! GameMode installed, the game runs through `gamemoderun`, which tunes the computer for it while
-//! it runs.
+//! (Proton) or Wine. With a Resolution of its own, the game runs inside gamescope. On Linux a
+//! Windows game runs in a sandbox, which sees only its own folders, unless its Sandbox setting is
+//! off. On Linux with GameMode installed, a game outside a sandbox runs through `gamemoderun`,
+//! which tunes the computer for it while it runs.
 
 use nexus_api::serde_json::Value;
 use nexus_api::*;
@@ -12,7 +13,12 @@ use crate::Pc;
 use crate::library::Game;
 use crate::manifest::Start;
 use crate::probe::Kind;
-use crate::settings::{RESOLUTION, resolution};
+use crate::runner::Runner;
+use crate::settings::{RESOLUTION, SANDBOX, resolution};
+
+/// Where umu-launcher keeps Proton and its runtime for sandboxed games, in this plugin's data
+/// folder (`UMU_FOLDERS_PATH`): the sandbox doesn't show the player's `~/.local/share`.
+const PROTON: &str = "proton";
 
 /// A program as an argument of gamescope: a system program by its name, which gamescope finds
 /// on the PATH, and any other by its path.
@@ -41,6 +47,7 @@ impl Pc {
             cwd: Some(Location::Folder(folder)),
             game_process: None,
             relaunch: None,
+            sandbox: None,
         };
         match start.kind {
             // A script without `#!` (some repacks' `start`) runs with sh.
@@ -56,7 +63,11 @@ impl Pc {
                 spec.env.insert("APPIMAGE_EXTRACT_AND_RUN".into(), "1".into());
             }
             Kind::Windows if start.kind.needs_runner(self.platform) => {
-                self.through_runner(game, file, &mut spec).await?
+                let runner = self.through_runner(game, file, &mut spec).await?;
+                let sandboxed = config.get(SANDBOX).and_then(Value::as_bool).unwrap_or(true);
+                if self.platform == Platform::Linux && sandboxed {
+                    in_sandbox(game, &runner, &mut spec)?;
+                }
             }
             Kind::Native | Kind::MacApp | Kind::Windows => {}
         }
@@ -67,7 +78,8 @@ impl Pc {
         {
             self.inside_gamescope(width, height, &mut spec).await?;
         }
-        if self.platform == Platform::Linux {
+        // GameMode talks to its daemon over the session D-Bus, which a sandbox hides.
+        if self.platform == Platform::Linux && spec.sandbox.is_none() {
             self.through_gamemode(&mut spec).await;
         }
         Ok(spec)
@@ -87,9 +99,9 @@ impl Pc {
 
     /// Runs the Windows program `exe` through umu-launcher or Wine, in the game's own Wine
     /// prefix.
-    async fn through_runner(&self, game: &Game, exe: HostPath, spec: &mut LaunchSpec) -> PluginResult<()> {
+    async fn through_runner(&self, game: &Game, exe: HostPath, spec: &mut LaunchSpec) -> PluginResult<Runner> {
         let runner = self.runner().await.ok_or_else(|| PluginError::Precondition(self.runner_hint().into()))?;
-        spec.program = runner.program;
+        spec.program = runner.program.clone();
         spec.args = vec![LaunchArg::path(exe)];
         // Each game in its own Wine prefix, in this plugin's data folder.
         spec.env.insert("WINEPREFIX".into(), LaunchArg::path(RelPath::new(format!("prefixes/{}", game.id))?));
@@ -103,7 +115,7 @@ impl Pc {
                 spec.env.insert("PROTON_USE_WOW64".into(), "1".into());
             }
         }
-        Ok(())
+        Ok(runner)
     }
 
     /// Runs `spec` inside gamescope at `width`×`height`, which scales it up to fill the screen.
@@ -120,6 +132,28 @@ impl Pc {
         spec.args = size.into_iter().chain([as_arg(program)]).chain(std::mem::take(&mut spec.args)).collect();
         Ok(())
     }
+}
+
+/// Runs the Windows game `game` in a sandbox: it reads and writes its own folder and its Wine
+/// prefix, and nothing else of the player's files. umu-launcher keeps Proton in this plugin's
+/// data folder, where the sandbox shows it, and the umu-launcher this plugin installed is read
+/// from there too.
+fn in_sandbox(game: &Game, runner: &Runner, spec: &mut LaunchSpec) -> PluginResult<()> {
+    let mut sandbox = Sandbox {
+        read: Vec::new(),
+        write: vec![Location::Folder(game.dir.clone()), Location::Data(RelPath::new(format!("prefixes/{}", game.id))?)],
+    };
+    if runner.umu {
+        sandbox.write.push(Location::Data(RelPath::new(PROTON)?));
+        spec.env.insert("UMU_FOLDERS_PATH".into(), LaunchArg::path(RelPath::new(PROTON)?));
+    }
+    if let Location::Data(program) = &runner.program
+        && let Some((folder, _)) = program.as_str().rsplit_once('/')
+    {
+        sandbox.read.push(Location::Data(RelPath::new(folder)?));
+    }
+    spec.sandbox = Some(sandbox);
+    Ok(())
 }
 
 #[async_trait]

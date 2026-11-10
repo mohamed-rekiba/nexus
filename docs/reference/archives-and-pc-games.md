@@ -370,6 +370,8 @@ A game has these settings in its Game Hub (`settings.rs`):
 - **Starts.** The file Play starts. It must be one of the manifest's files.
 - **Resolution.** On Linux only. The choices (`resolution::CHOICES`) are `screen` and sizes from
   640 × 480 to 1920 × 1080. Anything but `screen` runs the game inside gamescope.
+- **Sandbox.** On Linux, for a Windows game only. On by default. Off, the game runs with the
+  player's access to every file. See [The sandbox](#the-sandbox).
 
 ### Play
 
@@ -392,7 +394,44 @@ On Linux, two more wrappers can apply:
 - With a Resolution other than `screen`, the game runs inside `gamescope -f -w <width> -h
   <height> --`. If gamescope is not installed, Play fails and says to install it or reset the
   Resolution.
-- If `gamemoderun` is installed, the game runs through it.
+- If `gamemoderun` is installed, the game runs through it, unless it runs in the sandbox.
+
+### The sandbox
+
+On Linux a Windows game runs in a sandbox, unless its Sandbox setting is off. The plugin asks
+for it in the launch (`in_sandbox` in `launch.rs`, the `sandbox` field of `LaunchSpec`), and
+the host runs the whole command through bubblewrap (`bwrap`). The host builds the sandbox in
+`crates/nexus-core/src/sandbox.rs`.
+
+The game sees:
+
+- the system's programs, libraries and settings (`/usr`, `/etc`, `/opt`), read only;
+- `/sys`, `/proc` and every device: the GPU, controllers, `ntsync`. `/dev/shm` is empty, so
+  other programs' shared memory stays out;
+- the X11 sockets, and the Wayland, PipeWire and PulseAudio sockets of the player's runtime
+  folder;
+- an empty home folder and an empty `/tmp`, which go when the game ends;
+- its own folder and its Wine prefix (`prefixes/<game id>`), read and write;
+- with umu-launcher, the plugin's `proton/` folder, read and write. The plugin sets
+  `UMU_FOLDERS_PATH` to it, so umu-launcher downloads Proton and its runtime there once. A
+  sandboxed game doesn't use the Proton in `~/.local/share`.
+- with the umu-launcher this plugin installed, its `umu/` folder, read only.
+
+The game doesn't see the rest of the home folder, other games, the other folders of the
+plugin, or the session D-Bus. The host makes the folders the game writes before it starts.
+
+The game's `DBUS_SESSION_BUS_ADDRESS` points to `/run/nexus-sandbox/no-session-bus`, which is
+`/dev/null` in the sandbox (`NO_BUS` in `sandbox.rs`). Each try to reach the bus fails at once.
+The variable is not left unset: without it libdbus starts a new `dbus-launch` at each try, and
+Proton keeps trying until the process table is full. The path exists because Proton's own
+container binds the bus's socket into itself.
+
+The game keeps the system's process ids, so Nexus finds its windows and follows its processes
+as before. bubblewrap runs the game in a user namespace of its own, and that blocks it from
+reading other programs' files, memory and environment through `/proc`.
+
+If `bwrap` is not installed, Play fails and says to install bubblewrap or turn off Sandbox.
+The Linux packages recommend bubblewrap, and Nexus OS has it.
 
 ### Windows games off Windows
 
@@ -431,7 +470,8 @@ process = ["folder:games", "umu/umu-run", "system:umu-run", "system:wine", "syst
 network = ["api.github.com", "github.com", "*.githubusercontent.com"]
 ```
 
-A PC game runs with the player's access to their files. Install only releases you trust.
+A Windows game on Linux runs in the sandbox. Every other PC game runs with the player's
+access to their files. Install only releases you trust.
 
 ## Limitations
 
@@ -454,6 +494,20 @@ A PC game runs with the player's access to their files. Install only releases yo
   `cover.jpg`, `cover.png` or `cover.webp` in the game's folder. Other art comes from the
   catalog.
 - **Resolution needs gamescope and works on Linux only.**
+- **Only Windows games on Linux run in the sandbox.** Linux games, scripts and AppImages run
+  with the player's access: they save in the home folder, which the sandbox hides. macOS and
+  Windows have no sandbox.
+- **The sandbox keeps the network open.** A game may need it, and umu-launcher downloads
+  Proton through it.
+- **A sandboxed game runs without GameMode.** GameMode talks to its daemon over the session
+  D-Bus, which the sandbox hides, so the plugin doesn't run the game through `gamemoderun`.
+- **A sandboxed game can still type into other X11 windows** on a desktop where they share one
+  X server. In the Nexus session, gamescope gives games an X server of their own.
+- **The first sandboxed play downloads Proton again**, into the plugin's `proton/` folder.
+  That is several hundred MB, once.
+- **No test runs a real game in the sandbox.** `bubblewrap_shows_the_game_its_folders_and_hides_the_rest`
+  runs a shell through the real bubblewrap (with `NEXUS_SANDBOX_TESTS=1`, in the weekly
+  workflow).
 - **No test here runs a real game.** The seam tests in `tests/tests/seams/pc.rs` run the plugin
   against a fake host for each system. The Windows and macOS paths are not tried on those
   systems by these tests.

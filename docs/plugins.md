@@ -538,6 +538,12 @@ settings: the emulator's, then the game's. The host starts the process only if
   follows that process.
 - `relaunch`: an exit `code` and an `env`. When the program exits with that code, the host
   starts it again in the same session, with `env` added.
+- `sandbox`: a `Sandbox`, with the `Location`s the game may `read` and the ones it may
+  `write`. On Linux the host runs the whole command through bubblewrap, and the game sees only
+  the system, the display, the sound, an empty home folder and those folders. Each folder goes
+  through the same permission rules as a path argument. The host makes the `write` folders
+  first. Without `bwrap` the launch fails. Ask for a sandbox on Linux only: elsewhere the
+  launch fails.
 
 `open_emulator(config)` returns the emulator's own window without a game, or `None` (the
 default). `on_exit(game, &ExitInfo)` runs after the game ends.

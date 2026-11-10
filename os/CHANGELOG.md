@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.0](https://github.com/mohamed-rekiba/nexus/compare/nexus-os-v0.8.0...nexus-os-v0.9.0) (2026-11-10)
+
+
+### Features
+
+* **os:** bundle Nexus v0.13.0 ([0deebf2](https://github.com/mohamed-rekiba/nexus/commit/0deebf28017183856d450b5ae91663bc652af018))
+* **pc:** a Windows game on Linux runs in a sandbox that sees only its own folders ([cf011c8](https://github.com/mohamed-rekiba/nexus/commit/cf011c80bde42d60942abb15ff3ff9d4d0f63b37))
+
 ## [0.8.0](https://github.com/mohamed-rekiba/nexus/compare/nexus-os-v0.7.0...nexus-os-v0.8.0) (2026-11-08)
 
 

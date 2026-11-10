@@ -319,7 +319,7 @@ impl Launcher for Lichii {
         }
         args.extend(["-g".into(), LaunchArg::path(found.file.unwrap_or(found.dir))]);
         let env = [("EDEN_NX2_SPLIT".to_owned(), settings.gpu_split.value().into())].into();
-        Ok(LaunchSpec { program, args, env, cwd: run.cwd, game_process: None, relaunch })
+        Ok(LaunchSpec { program, args, env, cwd: run.cwd, game_process: None, relaunch, sandbox: None })
     }
 
     /// Lichii's window: its controls, keys, firmware and graphics settings. A game started from
@@ -336,6 +336,7 @@ impl Launcher for Lichii {
             cwd: run.cwd,
             game_process: None,
             relaunch: None,
+            sandbox: None,
         }))
     }
 }
