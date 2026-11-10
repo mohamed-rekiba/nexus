@@ -6,7 +6,7 @@ import { Nav } from "nav.slint";
 import { Icon } from "../kit/icon.slint";
 import { NetIcon, SoundIcon, BluetoothIcon, BatteryIcon, Sys } from "../kit/system-panel.slint";
 
-// One system in the top bar, as the old launcher's "Home" and "Library" tabs: white when
+// One system in the top bar, as a tab ("Home", "Library"): white when
 // shown, with a short bar under it; a white outline when the keys are on it.
 component Tab inherits Rectangle {
     in property <string> text;
@@ -127,7 +127,7 @@ component PillButton inherits Rectangle {
     ta := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
 }
 
-// The old launcher's top bar: Home and Library on the reading side; a running game, the
+// The top bar: Home and Library on the reading side; a running game, the
 // active download, the screen buttons and the clock on the other.
 export component TopBar inherits Rectangle {
     // The keys are on the top bar (home only).
@@ -163,8 +163,7 @@ export component TopBar inherits Rectangle {
         padding-bottom: 26 * Look.px;
         spacing: 22 * Look.px;
         alignment: center;
-        // The running game, as the old launcher showed it: its name, the time played, and
-        // Resume and Stop.
+        // The running game: its name, the time played, and Resume and Stop.
         if Vm.has-running : Rectangle {
             property <bool> shown;
             // After the first frame, so the entry animates from its start.

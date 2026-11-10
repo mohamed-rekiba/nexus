@@ -1,5 +1,5 @@
-//! Renders the fallback theme's screens (Default: no theme is saved) on a real library, to
-//! compare them with the old launcher's. Opt in: `NEXUS_COMPARE_OUT=<folder for the PNGs>`,
+//! Renders the fallback theme's screens (Default: no theme is saved) on a real library, as PNGs
+//! to compare by eye. Opt in: `NEXUS_COMPARE_OUT=<folder for the PNGs>`,
 //! with the real KytyPS5 plugin on `NEXUS_COMPARE_GAMES` (default `~/Games`) and, to play, the
 //! builds in `NEXUS_COMPARE_BUILDS` (an `emu-kyty` plugin folder, cloned). Each test installs
 //! its own Slint platform, on its own thread.
@@ -114,7 +114,7 @@ fn the_default_theme_on_a_real_library() {
     shoot(&mut host, &window, &out.join("new-welcome.png"));
     key(&mut host, Key::Return);
     let first = host.core().view().home.games.first().map(|g| g.key.clone()).expect("a game in the folder");
-    // The old screens show this play time.
+    // A play time for Home and the Game Hub to show: 4 hr 6 min.
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
     let stats = serde_json::json!({ "secs": 4 * 3600 + 6 * 60, "count": 2, "last": now });
     host.core().kernel().config().set(&["app", "playtime", &first], stats).unwrap();

@@ -229,8 +229,8 @@ pub(crate) fn plain(title: &str) -> String {
     title.chars().filter(char::is_ascii_alphanumeric).map(|c| c.to_ascii_lowercase()).collect()
 }
 
-/// The words before `edition` that name an edition of the same game, as the old launcher's
-/// grouping has them. `digital` may come before each.
+/// The words before `edition` that name an edition of the same game. `digital` may come before
+/// each.
 const EDITIONS: [&[&str]; 10] = [
     &["deluxe"],
     &["ultimate"],

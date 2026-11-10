@@ -154,7 +154,7 @@ pub(crate) struct LibrarySnapshot {
     pub describing: Option<(usize, usize)>,
     /// The store has been asked about every game of the library.
     pub described: bool,
-    /// Work in the background, as the old launcher's status pill: "Downloading game art 3/40".
+    /// Work in the background, for the status pill: "Downloading game art 3/40".
     pub task: Option<String>,
     /// The games the player hid from the Catalog, by their key as text.
     pub hidden: HashSet<String>,

@@ -1,6 +1,6 @@
 //! The image loader: images load off the UI thread, a few at a time, from a disk cache when
-//! it can, as the old launcher's image pool did. Big art is made smaller once, and the smaller
-//! copy kept in `cache/thumbs`, so a warm start decodes small JPEGs instead of 4K PNGs.
+//! it can. Big art is made smaller once, and the smaller copy kept in `cache/thumbs`, so a warm
+//! start decodes small JPEGs instead of 4K PNGs.
 
 use std::future::Future;
 use std::path::{Path, PathBuf};

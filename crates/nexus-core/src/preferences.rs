@@ -38,8 +38,7 @@ pub enum Pref {
     /// The launcher's window full screen, or a normal window. On by default, as in the old
     /// launcher.
     Fullscreen,
-    /// Whether the launcher comes back to the front when a game closes. On by default, as in
-    /// the old launcher.
+    /// Whether the launcher comes back to the front when a game closes. On by default.
     ReturnOnExit,
     /// The size of everything the theme draws, from [`MIN_SCALE`] to [`MAX_SCALE`] (1 is the
     /// theme's own size). A value outside that range goes to its nearest end.

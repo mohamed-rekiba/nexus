@@ -2,7 +2,7 @@ import { Tokens } from "../tokens.slint";
 import { Look } from "look.slint";
 import { Icon } from "icon.slint";
 
-// The old launcher's widgets (ui/widgets.slint), at the 1080p sizes, scaled by `Look.k`.
+// The kit's widgets, at the 1080p sizes, scaled by `Look.k`.
 
 // White focus ring with a soft blue halo, drawn around its parent.
 export component FocusRing inherits Rectangle {
@@ -84,7 +84,7 @@ export component BackButton inherits Rectangle {
 }
 
 // A pill with an optional dot or icon: a fact about a game ("● In-game", "Adventure").
-// Five stars, the last ones filled in part: `score` out of 5, as the old launcher drew them.
+// Five stars, the last ones filled in part: `score` out of 5.
 export component Stars inherits HorizontalLayout {
     in property <float> score;
     in property <length> size: 17 * Look.px;
@@ -146,7 +146,7 @@ export component Chip inherits Rectangle {
     }
 }
 
-// The old launcher's big round button. The focused one turns white, grows and glows; a round
+// The big round button. The focused one turns white, grows and glows; a round
 // button shows only its icon until it is focused or hovered.
 export component Pill inherits Rectangle {
     in property <string> text;
@@ -299,7 +299,7 @@ export component Cover inherits Rectangle {
     // The game's system color (`GameCard.system-color`): the art shown before the cover.
     in property <color> system-color;
     in property <length> name-size: 20 * Look.px;
-    // The corners' radius. The art is clipped to it, as in the old theme's tiles.
+    // The corners' radius. The art is clipped to it.
     in property <length> radius;
     property <bool> loaded: root.source.width > 0;
     property <bool> loading: !root.loaded && root.state == "loading";

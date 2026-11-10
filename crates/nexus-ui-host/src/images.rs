@@ -82,8 +82,8 @@ fn scale(size: ImageSize, width: u32, height: u32) -> f64 {
 }
 
 /// Decodes PNG or JPEG, makes it no bigger than `size` needs ([`scale`]) and cuts `crop` off. Slow
-/// for big art: call it on a worker thread, as the old launcher's image pool did. The copy
-/// to keep is already cut: load it again with [`Crop::None`].
+/// for big art: call it on a worker thread. The copy to keep is already cut: load it again with
+/// [`Crop::None`].
 pub fn prepare(bytes: &[u8], size: ImageSize, crop: Crop) -> Result<Prepared, String> {
     let mut decoded = image::load_from_memory(bytes).map_err(|e| e.to_string())?;
     let (width, height) = (decoded.width(), decoded.height());

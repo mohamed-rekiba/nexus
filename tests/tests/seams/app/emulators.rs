@@ -104,7 +104,7 @@ async fn an_update_waits_until_the_emulator_s_game_closes() {
 async fn automatic_updates_can_be_turned_off() {
     let (t, emu) = core_with(FakeEmulator::new(vec!["A"])).await;
     install(&t.core).await;
-    assert!(t.core.view().settings.auto_update, "on by default, as in the old launcher");
+    assert!(t.core.view().settings.auto_update, "on by default");
     t.core.dispatch(Command::Pref(Pref::AutoUpdate, false.into())).await.unwrap();
     emu.release("2.0");
 

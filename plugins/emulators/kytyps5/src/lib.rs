@@ -78,7 +78,7 @@ pub enum VideoOut {
     Uhd,
 }
 
-/// KytyPS5's window size, as the old launcher offered it.
+/// KytyPS5's window size.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(crate = "nexus_api::serde")]
 #[schemars(crate = "nexus_api::schemars")]
@@ -393,7 +393,7 @@ pub fn banner_version(banner: &str) -> Option<String> {
     }
 }
 
-// The old app's keyboard screen, for KytyPS5's default layout.
+// KytyPS5's default key layout, for the keyboard screen.
 pub const KEYS: &[(&str, &str)] = &[
     ("Cross", "J"),
     ("Circle", "L"),

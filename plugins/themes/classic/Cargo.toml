@@ -1,6 +1,6 @@
 [package]
 name = "theme-classic"
-description = "The built-in Classic theme, the old launcher's look. It stands alone: its shell, every screen, and its tokens."
+description = "The built-in Classic theme: a hero and a row of game tiles on Home. It stands alone: its shell, every screen, and its tokens."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

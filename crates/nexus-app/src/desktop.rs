@@ -1,4 +1,4 @@
-//! The desktop's windows, through the system's own tools, as the old launcher did it.
+//! The desktop's windows, through the system's own tools.
 //!
 //! - macOS: `osascript` drives System Events. macOS asks once for the Accessibility
 //!   permission; without it every call fails, the launcher can't see which window is in front,

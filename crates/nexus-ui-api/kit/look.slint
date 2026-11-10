@@ -1,8 +1,9 @@
 import { Vm } from "../types.slint";
 import { Tokens } from "../tokens.slint";
 
-// Values the kit's widgets and every theme's screens share. The old launcher lays everything out on a 1920×1080 canvas;
-// `k` maps that canvas to the window, so a size here is `N * Look.k` for N px at 1080p.
+// Values the kit's widgets and every theme's screens share. The kit lays everything out on a
+// 1920×1080 canvas; `k` maps that canvas to the window, so a size here is `N * Look.k` for N px
+// at 1080p.
 export global Look {
     out property <bool> rtl: Tokens.layout-direction == "rtl";
     // The window's own height, which the shell sets as soon as the window has one: the host's
@@ -123,7 +124,7 @@ export global Look {
     public pure function result-color(level: string) -> color {
         level == "ingame" ? Tokens.color-success : level == "menus" ? Tokens.color-caution : level == "boots" ? Tokens.color-warning : Tokens.color-danger
     }
-    // "Shooter · Arcade": the first two, as the old launcher's genre chip.
+    // "Shooter · Arcade": the first two, for the genre chip.
     public pure function join(items: [string]) -> string {
         items.length == 0 ? "" : items.length == 1 ? items[0] : items[0] + " · " + items[1]
     }

@@ -18,7 +18,7 @@ const HASH: &str = "c12fe1c06bba254a9dc9f519b335aa7c1367a88a";
 
 const URL: &str = "https://xyz.dev/catalog/ps5.json";
 
-/// A catalog file in the old launcher's format, with these topics.
+/// A catalog file in the published catalog's format, with these topics.
 fn catalog_of(collected_at: &str, topics: serde_json::Value) -> String {
     serde_json::json!({ "source": "test", "complete": true, "collected_at": collected_at,
         "translation": { "language": "en" }, "topic_count": topics.as_array().unwrap().len(), "topics": topics })
@@ -107,7 +107,7 @@ async fn with_offers() -> TestCore {
 
 const STEAM_ART: &str = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/504230";
 
-/// The `steam` object the old launcher's catalog script writes for a game Steam has.
+/// The `steam` object the catalog script (`scripts/catalog/`) writes for a game Steam has.
 fn steam_block() -> serde_json::Value {
     serde_json::json!({ "appid": 504230, "name": "Celeste", "short": "Help Madeline survive.",
         "genres": ["Action", "Indie"], "release": "Jan 25, 2018", "developers": ["Maddy Makes Games"],

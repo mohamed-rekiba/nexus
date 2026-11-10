@@ -1,4 +1,4 @@
-//! The local time for the top bar's clock, as the old launcher showed it: "9:38 PM".
+//! The local time for the top bar's clock: "9:38 PM".
 //!
 //! The standard library has no time zones, so this asks the system: `localtime_r` on Unix,
 //! `GetLocalTime` on Windows.

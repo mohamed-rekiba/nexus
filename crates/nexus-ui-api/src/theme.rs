@@ -191,7 +191,7 @@ impl ThemeManifest {
     pub fn from_plugin(plugin: &PluginManifest) -> Result<Self, ThemeError> {
         let err = |message: String| ThemeError::Manifest { theme: plugin.id.clone(), message };
         let section = plugin.extra.get("theme").ok_or_else(|| err("no [theme] section".into()))?;
-        // Keys of the old inheritance model, refused with what to do instead.
+        // Keys a theme manifest may not use, refused with what to do instead.
         for (key, instead) in [
             ("extends", "a theme stands alone; import the shared parts from kit/ instead of extending a theme"),
             ("screens", "a theme ships every screen, so it doesn't list them; remove `screens`"),

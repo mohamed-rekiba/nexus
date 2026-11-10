@@ -7,15 +7,15 @@ import { Icon } from "../kit/icon.slint";
 import { KeyCap } from "../kit/widgets.slint";
 import { PadGlyph } from "top-bar.slint";
 
-// The boot screen, as the old launcher's (its ui/app.slint, BOOT / WELCOME): a slowly drifting
-// wall of the library's covers behind the Nexus emblem and a progress bar. On the first run it is the
-// Welcome screen: a checklist of what was set up, and Start.
+// The boot screen: a slowly drifting wall of the library's covers behind the Nexus emblem and a
+// progress bar. On the first run it is the Welcome screen: a checklist of what was set up, and
+// Start.
 //
 // It shows from the first frame until the library is in (and, on the first run, until Start),
 // then fades out over Home. Its motion clock runs only while it shows.
 export component BootScreen inherits Rectangle {
     property <bool> welcome: Vm.boot.welcome;
-    // Home's art in too, as the old launcher: Home opens whole.
+    // Home's art in too: Home opens whole.
     property <bool> ready: Vm.boot.ready && Vm.art-ready;
     property <bool> shown: !root.ready || root.welcome;
     property <float> t: root.shown ? animation-tick() / 1ms / 1000 : 0;

@@ -10,8 +10,8 @@ Text in quotes is the text on screen, copied from the `.slint` files.
 
 ## What it is
 
-Classic is the old launcher's look: a hero and a row of game tiles on Home, over the selected
-game's art. It is a theme plugin compiled into the binary (`ClassicTheme` in
+Classic shows a hero and a row of game tiles on Home, over the selected game's art. It is a
+theme plugin compiled into the binary (`ClassicTheme` in
 `plugins/themes/classic/src/lib.rs`). Its `build.rs` embeds every file under
 `plugins/themes/classic/theme/`.
 

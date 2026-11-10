@@ -95,7 +95,7 @@ fn the_hero_and_the_game_hub_show_the_time_played() {
     host.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh));
     host.dispatch(Command::Select("emu-a:G0".parse().unwrap()));
     host.settle();
-    assert_eq!(host.values("default-played"), ["PLAYED 4 HR 6 MIN"], "over the title, as the old launcher");
+    assert_eq!(host.values("default-played"), ["PLAYED 4 HR 6 MIN"], "over the title");
     assert_eq!(host.values("default-sub"), ["Last played today"], "beside the tile");
 
     host.dispatch(Command::OpenGame("emu-a:G0".parse().unwrap()));

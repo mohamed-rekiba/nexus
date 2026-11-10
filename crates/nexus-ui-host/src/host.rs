@@ -348,7 +348,7 @@ impl ThemeHost {
             .bind_view(&live.instance, &live.resolved, &live.art, &view)
             .map_err(|message| ThemeError::Binding { theme: id.clone(), message });
         self.images.end_render();
-        // As the old launcher's boot: Home shows once what it shows is loaded.
+        // The boot ends: Home shows once what it shows is loaded.
         if !self.art_ready && self.core.booted() {
             let since = *self.boot_ready_at.get_or_insert_with(std::time::Instant::now);
             self.art_ready = self.images.settled() || since.elapsed() >= ART_LIMIT;

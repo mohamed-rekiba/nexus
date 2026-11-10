@@ -1,5 +1,5 @@
-//! A small error type for the package readers, with the `ensure!`, `anyhow!` and `.context()`
-//! helpers they were written with (they came from the old app, which used `anyhow`).
+//! A small error type for the package readers, with `ensure!`, `anyhow!` and `.context()`
+//! helpers that work as `anyhow`'s do, without the dependency.
 
 use std::fmt;
 

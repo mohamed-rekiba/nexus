@@ -98,8 +98,8 @@ pub(crate) async fn refresh_library(core: &Core) -> CoreResult<()> {
         return Ok(());
     }
     // The first load of a run is the boot: the emulators' builds for the Welcome
-    // checklist, and the store's art and details, as the old launcher's boot did, so Home
-    // opens whole. A slow network doesn't hold it for more than BOOT_DESCRIBE_LIMIT.
+    // checklist, and the store's art and details, so Home opens whole. A slow network
+    // doesn't hold it for more than BOOT_DESCRIBE_LIMIT.
     crate::emulator_builds::refresh_emulators(core).await;
     if core.ports().clock.timeout(BOOT_DESCRIBE_LIMIT, describe_library(core)).await.is_none() {
         tracing::info!("the store's descriptions are slow: Home opens without the rest");
@@ -161,7 +161,7 @@ async fn describe_with(core: &Core, todo: Vec<(GameKey, nexus_api::GameRef)>, bo
     if providers.is_empty() {
         return false;
     }
-    // Six at a time, as the old launcher's fetch threads.
+    // Six at a time.
     let total = todo.len();
     let done = std::sync::atomic::AtomicUsize::new(0);
     let providers = &providers;
