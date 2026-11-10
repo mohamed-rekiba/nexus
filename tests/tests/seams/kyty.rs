@@ -950,3 +950,18 @@ async fn a_package_the_host_unpacked_from_an_archive_installs() {
     let game = k.games.path().join("PS5/PPSA12345-app0");
     assert_eq!(std::fs::read(game.join("eboot.bin")).unwrap(), b"from the archive");
 }
+
+#[tokio::test]
+async fn a_folder_whose_name_can_t_be_a_path_hides_no_game() {
+    let k = boot(&[V1]).await;
+    // A Wine prefix's backup a PC game made: a colon is in no path a plugin may name.
+    std::fs::create_dir_all(k.games.path().join("PC/Pocket-Tanks/prefix_old_10.11_07:59:21")).unwrap();
+
+    k.test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
+
+    let view = k.test.core.view();
+    let mut titles: Vec<String> = view.home.games.iter().map(|g| g.title.clone()).collect();
+    titles.sort();
+    assert_eq!(titles, ["Astro Bot", "Demon's Souls"]);
+    assert!(view.notices.iter().all(|n| !n.contains("invalid input")), "{:?}", view.notices);
+}

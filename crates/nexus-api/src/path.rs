@@ -5,14 +5,15 @@ use serde::{Deserialize, Serialize};
 
 /// A path inside a folder the host owns (a plugin's data folder, a theme folder).
 ///
-/// It is always relative, uses `/`, and has no `.`, `..` or empty parts, so joining it to a
-/// base folder can never leave that folder. The empty path is the base folder itself.
+/// It is always relative, uses `/`, and has no `.`, `..` or empty parts, and no `:` or `\` (a
+/// drive or another separator on Windows), so joining it to a base folder can never leave that
+/// folder. The empty path is the base folder itself.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct RelPath(String);
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("path {0:?} must be relative, use '/', and have no '.', '..' or empty parts")]
+#[error("path {0:?} must be relative, use '/', and have no '.', '..' or empty parts, and no ':' or '\\'")]
 pub struct InvalidPath(pub String);
 
 impl RelPath {

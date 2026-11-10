@@ -191,7 +191,8 @@ fn switch_games(dir: &HostPath, depth: usize, files: &[DirEntry]) -> PluginResul
     let own_folder = depth >= 2 && games.len() == 1;
     let mut out = Vec::new();
     for (entry, (title, title_id, version)) in games {
-        let file = dir.join(&entry.name)?;
+        // A name that can't be a path is no game this plugin can name.
+        let Ok(file) = dir.join(&entry.name) else { continue };
         out.push(FoundGame {
             id: String::new(),
             title,
@@ -210,7 +211,8 @@ fn switch_games(dir: &HostPath, depth: usize, files: &[DirEntry]) -> PluginResul
 
 /// Every game for `console` in the folder named `folder`, sorted by title. A game folder may
 /// hold games of other consoles too: each console's games are told apart by their files. An
-/// install's work folder (`<name>.part`) is never read.
+/// install's work folder (`<name>.part`) is never read, nor an entry whose name can't be a path
+/// (a `:` in it): the rest of the folder is read as usual.
 pub async fn scan(folders: &dyn Folders, folder: &str, console: Console) -> PluginResult<Vec<FoundGame>> {
     let mut found: Vec<FoundGame> = Vec::new();
     for root in folders.roots(folder).await? {
@@ -231,7 +233,9 @@ pub async fn scan(folders: &dyn Folders, folder: &str, console: Console) -> Plug
                 let entries: Vec<DirEntry> = entries.into_iter().filter(|e| !e.name.starts_with('.')).collect();
                 if depth < SCAN_DEPTH {
                     for child in entries.iter().filter(|e| e.is_dir && !e.name.ends_with(".part")) {
-                        next.push(dir.join(&child.name)?);
+                        if let Ok(child) = dir.join(&child.name) {
+                            next.push(child);
+                        }
                     }
                 }
                 if console == Console::Switch {

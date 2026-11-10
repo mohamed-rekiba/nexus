@@ -172,7 +172,8 @@ impl Download {
                 is_dir = !entries.is_empty();
             }
             for e in entries {
-                let path = dir.join(&e.name)?;
+                // A name that can't be a path is left out.
+                let Ok(path) = dir.join(&e.name) else { continue };
                 let name = format!("{rel}{}", e.name);
                 if e.is_dir {
                     if depth + 1 >= SCAN_DEPTH {

@@ -91,7 +91,8 @@ impl<F: Flavor> ConsoleEmulator<F> {
                 if entry.is_dir {
                     continue;
                 }
-                let file = dir.join(&entry.name)?;
+                // A name that can't be a path is no package this plugin can name.
+                let Ok(file) = dir.join(&entry.name) else { continue };
                 // A Switch game file is known by its name; its contents are encrypted.
                 if self.spec.console == Console::Switch {
                     if games::switch_file(&entry.name).is_some() {
