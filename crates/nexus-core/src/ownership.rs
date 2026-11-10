@@ -3,8 +3,9 @@
 //!
 //! An offer and an installed game are two records with two keys: the catalog plugin's and the
 //! emulator's. [`Ownership`] links them, by the download that installed the game, by title id,
-//! or by name on the same console. The view asks it about every offer, so it builds its maps
-//! once.
+//! by name on the same console, or by a game's whole name that starts the offer's: a game
+//! named from its file, "Mario Strikers Battle League", is the offer "Mario Strikers: Battle
+//! League Football". The view asks it about every offer, so it builds its maps once.
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -28,7 +29,14 @@ pub(crate) struct Ownership<'a> {
     by_id: HashMap<(&'a PluginId, &'a str), &'a Entry>,
     /// By the emulator, and the console and the title as letters and digits (`ps5/astrobot`).
     by_name: HashMap<(&'a PluginId, String), &'a Entry>,
+    /// The games of [`MIN_PREFIX_WORDS`] words or more, with their console and their title's
+    /// words, for a name that starts an offer's.
+    by_words: Vec<(&'a Entry, String, Vec<String>)>,
 }
+
+/// The fewest words a game's name has for it to link to an offer whose name it starts: one
+/// word ("Doom") starts too many names.
+const MIN_PREFIX_WORDS: usize = 2;
 
 impl<'a> Ownership<'a> {
     /// Over the Library's games.
@@ -50,7 +58,12 @@ impl<'a> Ownership<'a> {
         let games: Vec<&Entry> = games.into_iter().collect();
         let mut by_id = HashMap::new();
         let mut by_name = HashMap::new();
+        let mut by_words = Vec::new();
         for e in &games {
+            let title = words(&e.summary.title);
+            if title.len() >= MIN_PREFIX_WORDS {
+                by_words.push((*e, e.summary.platform.to_ascii_lowercase(), title));
+            }
             if let Some(id) = e.summary.title_id.as_deref().filter(|t| !t.is_empty()) {
                 by_id.entry((&e.key.plugin, id)).or_insert(*e);
             }
@@ -58,7 +71,7 @@ impl<'a> Ownership<'a> {
                 by_name.entry((&e.key.plugin, name)).or_insert(*e);
             }
         }
-        Self { library, jobs, installs, games, by_id, by_name }
+        Self { library, jobs, installs, games, by_id, by_name, by_words }
     }
 
     /// The game of the emulator's library that the download `job` installed: the one with the
@@ -74,6 +87,11 @@ impl<'a> Ownership<'a> {
     /// of its releases installed, else the game with one of its title ids, else the game of its
     /// name on the same console. A PS4 and a PS5 game of one name are two games.
     pub fn installed_game(&self, offer: &Offer) -> Option<&'a Entry> {
+        self.linked(offer).or_else(|| self.by_prefix(offer))
+    }
+
+    /// The installed game the offer is, by its download, its title id or its name.
+    fn linked(&self, offer: &Offer) -> Option<&'a Entry> {
         let downloaded = self.jobs.values().filter(|j| j.offer == offer.entry.key).find_map(|j| self.installed_from(j));
         let emulator = &offer.emulator;
         let by_id = || {
@@ -86,6 +104,27 @@ impl<'a> Ownership<'a> {
             names.find_map(|name| self.by_name.get(&(emulator, name)).copied())
         };
         downloaded.or_else(by_id).or_else(by_name)
+    }
+
+    /// The one installed game, of the offer's emulator and console, whose whole name starts the
+    /// name of one of the offer's releases, word by word. `None` when no game or more than one
+    /// fits.
+    fn by_prefix(&self, offer: &Offer) -> Option<&'a Entry> {
+        let console = offer.entry.summary.platform.to_ascii_lowercase();
+        let names: Vec<Vec<String>> = offer.releases.iter().map(|r| words(&r.title)).collect();
+        let mut found: Option<&'a Entry> = None;
+        for (game, on, title) in &self.by_words {
+            if game.key.plugin != offer.emulator || *on != console {
+                continue;
+            }
+            if names.iter().any(|name| name.len() > title.len() && name.starts_with(title)) {
+                match found {
+                    Some(other) if other.key != game.key => return None,
+                    _ => found = Some(game),
+                }
+            }
+        }
+        found
     }
 
     /// The release an offer's card shows: the version the player has, then a release whose
@@ -122,16 +161,39 @@ impl<'a> Ownership<'a> {
     }
 
     /// The offer each installed game is, by the game, with the offer's cover.
+    ///
+    /// A game whose name starts the names of two offers or more is none of them: which one it is
+    /// can't be told.
     pub fn installed_offers(&self, offers: &[Offer]) -> Vec<InstalledOffer> {
-        offers
+        let links: Vec<(&Offer, &Entry, bool)> = offers
             .iter()
-            .filter_map(|offer| {
-                let game = self.installed_game(offer)?;
+            .filter_map(|offer| match self.linked(offer) {
+                Some(game) => Some((offer, game, false)),
+                None => self.by_prefix(offer).map(|game| (offer, game, true)),
+            })
+            .collect();
+        let mut by_prefix: HashMap<&GameKey, usize> = HashMap::new();
+        for (_, game, prefix) in &links {
+            if *prefix {
+                *by_prefix.entry(&game.key).or_default() += 1;
+            }
+        }
+        links
+            .into_iter()
+            .filter(|(_, game, prefix)| !prefix || by_prefix.get(&game.key) == Some(&1))
+            .map(|(offer, game, _)| {
                 let cover = offer.entry.summary.cover.clone().map(|c| (offer.entry.key.plugin.clone(), c));
-                Some((game.key.clone(), offer.entry.key.clone(), cover))
+                (game.key.clone(), offer.entry.key.clone(), cover)
             })
             .collect()
     }
+}
+
+/// A title's words, in lower case: letters and digits. An apostrophe joins its word
+/// ("Assassin's" is "assassins").
+fn words(title: &str) -> Vec<String> {
+    let title = title.to_lowercase().replace(['\'', '\u{2019}'], "");
+    title.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_owned).collect()
 }
 
 /// A game's name to find it by: its console and its title, as letters and digits.
@@ -232,6 +294,60 @@ mod tests {
             assert_eq!(o.installed_game(&library.offers[0]).map(|e| e.key.clone()), Some(key("emu:G1")));
             assert!(o.installed_game(&library.offers[1]).is_none(), "a PS4 game of one name is another game");
         });
+    }
+
+    #[test]
+    fn an_offer_is_the_installed_game_whose_whole_name_starts_its_name() {
+        let library = library(
+            vec![game("emu:G1", "Mario Strikers Battle League", "Switch", None)],
+            Vec::new(),
+            vec![offer("cat:o1", "Switch", vec![release("a", "Mario Strikers: Battle League Football", "", "1.3.2")])],
+        );
+        let found = owned(&library, |o| o.installed_game(&library.offers[0]).map(|e| e.key.clone()));
+        assert_eq!(found, Some(key("emu:G1")), "the EU name says more than the file's");
+        let linked = owned(&library, |o| o.installed_offers(&library.offers));
+        assert_eq!(
+            linked.iter().map(|(g, o, _)| (g.clone(), o.clone())).collect::<Vec<_>>(),
+            [(key("emu:G1"), key("cat:o1"))]
+        );
+    }
+
+    #[test]
+    fn a_name_that_starts_another_links_only_when_it_is_sure() {
+        // One word is too little: "Doom" starts many names.
+        let one_word = library(
+            vec![game("emu:G1", "Doom", "Switch", None)],
+            Vec::new(),
+            vec![offer("cat:o1", "Switch", vec![release("a", "Doom Eternal", "", "1.0")])],
+        );
+        assert!(owned(&one_word, |o| o.installed_game(&one_word.offers[0]).is_none()), "one word");
+
+        // Two games whose names both start the offer's: neither is it.
+        let two_games = library(
+            vec![game("emu:G1", "Mario Kart", "Switch", None), game("emu:G2", "Mario Kart 8", "Switch", None)],
+            Vec::new(),
+            vec![offer("cat:o1", "Switch", vec![release("a", "Mario Kart 8 Deluxe", "", "1.0")])],
+        );
+        assert!(owned(&two_games, |o| o.installed_game(&two_games.offers[0]).is_none()), "two games fit");
+
+        // A game whose name starts two offers' names is neither, for art and game files.
+        let two_offers = library(
+            vec![game("emu:G1", "Mario Kart", "Switch", None)],
+            Vec::new(),
+            vec![
+                offer("cat:o1", "Switch", vec![release("a", "Mario Kart 8 Deluxe", "", "1.0")]),
+                offer("cat:o2", "Switch", vec![release("b", "Mario Kart World", "", "1.0")]),
+            ],
+        );
+        assert!(owned(&two_offers, |o| o.installed_offers(&two_offers.offers)).is_empty(), "two offers fit");
+
+        // Words, not letters: "Mario Strike" doesn't start "Mario Strikers".
+        let half_word = library(
+            vec![game("emu:G1", "Mario Strike", "Switch", None)],
+            Vec::new(),
+            vec![offer("cat:o1", "Switch", vec![release("a", "Mario Strikers Battle League", "", "1.0")])],
+        );
+        assert!(owned(&half_word, |o| o.installed_game(&half_word.offers[0]).is_none()), "half a word");
     }
 
     #[test]
