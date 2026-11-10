@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.15.0](https://github.com/mohamed-rekiba/nexus/compare/v0.14.0...v0.15.0) (2026-11-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* **navigation:** the theme contract is 0.3.0. Themes must ship screens/library.slint exporting LibraryScreen, and no screen is called "running".
+
+### Features
+
+* **emulators:** a folder whose name can't be a path hides no game ([37d209b](https://github.com/mohamed-rekiba/nexus/commit/37d209ba6025b007b1d805b459b14b81da36f68c))
+* **library:** a game named from its file links to the offer whose name it starts ([ed3db8f](https://github.com/mohamed-rekiba/nexus/commit/ed3db8fa76dc656c98a52bf6c6a6e4a98d9f7e5f))
+* **library:** one game file per game, with its details and art in its folder ([a872764](https://github.com/mohamed-rekiba/nexus/commit/a8727643934a808445eb65c819334ba08c1231cb))
+* **navigation:** the core owns where the player is, and the theme contract is 0.3.0 ([2befc62](https://github.com/mohamed-rekiba/nexus/commit/2befc624a25842f5f8f05b4616da1fe25ce10ac8))
+
 ## [0.14.0](https://github.com/mohamed-rekiba/nexus/compare/v0.13.0...v0.14.0) (2026-11-09)
 
 
