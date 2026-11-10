@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.15.1](https://github.com/mohamed-rekiba/nexus/compare/v0.15.0...v0.15.1) (2026-11-10)
+
+
+### Bug Fixes
+
+* **kyty:** a game's patch folder beside it doesn't stop its install ([ab29abc](https://github.com/mohamed-rekiba/nexus/commit/ab29abc31252ebf6b88bbb69f5583e20e2bf4327))
+* **theme-default:** the counts in the genre and sort lists line up ([6ee54e0](https://github.com/mohamed-rekiba/nexus/commit/6ee54e08407142d47589957ed68943a40f839532))
+
 ## [0.15.0](https://github.com/mohamed-rekiba/nexus/compare/v0.14.0...v0.15.0) (2026-11-10)
 
 
