@@ -1,4 +1,4 @@
-//! The Switch firmware in Eden's folder, kept up to date from the releases of
+//! The Switch firmware in Lichii's data folder, kept up to date from the releases of
 //! THZoria/NX_Firmware, with configured keys from files.prodkeys.net.
 //!
 //! - The player turns it on (`firmware_updates`), or presses Update the firmware on Lichii's
@@ -6,7 +6,7 @@
 //!   update check), at most once every [`RELEASE_TTL`]. A failed update isn't tried again on
 //!   its own until Nexus starts again.
 //! - A release is one zip of `.nca` files, stored without compression. The plugin downloads it
-//!   in pieces into Eden's folder, checks its SHA-256 against GitHub's, and unpacks the files
+//!   in pieces into Lichii's data folder, checks its SHA-256 against GitHub's, and unpacks the files
 //!   into a folder beside the firmware. Two renames put it in place of the old firmware:
 //!   [`CONTENTS`], where Lichii reads it at its next start.
 //! - Anything that fails leaves the old firmware as it was. A run that stopped between the two
@@ -35,7 +35,7 @@ const RELEASE_CACHE: &str = "cache/firmware-release.json";
 const RELEASE_TTL: Duration = Duration::from_secs(6 * 60 * 60);
 /// The version Nexus installed last, in the plugin's storage.
 const MARKER: &str = "firmware.json";
-/// Where Lichii reads the firmware, in Eden's folder.
+/// Where Lichii reads the firmware, in Lichii's data folder.
 const CONTENTS: &str = "nand/system/Contents/registered";
 /// The new firmware while it is unpacked, the old one while the new one moves in, and the
 /// download: beside `Contents`, so Lichii never reads them.
@@ -156,7 +156,7 @@ impl Firmware {
         });
     }
 
-    /// The Firmware block on Lichii's page: the firmware in Eden's folder, the update that
+    /// The Firmware block on Lichii's page: the firmware in Lichii's data folder, the update that
     /// runs or the last one's result, the automatic updates' switch (`auto`), and Update now.
     pub async fn panel(&self, auto: bool) -> Vec<SlotItem> {
         let phase = self.phase();
@@ -215,7 +215,7 @@ impl Firmware {
         vec![SlotItem { id: "firmware".into(), order: Order::default(), content: block }]
     }
 
-    /// Whether Eden's folder has firmware: for the badge when Nexus didn't install one.
+    /// Whether Lichii's data folder has firmware: for the badge when Nexus didn't install one.
     async fn has_firmware(&self) -> bool {
         match self.place(CONTENTS).await {
             Ok(dir) => self.host.folders.list(&dir).await.is_ok_and(|e| !e.is_empty()),
@@ -223,7 +223,7 @@ impl Firmware {
         }
     }
 
-    /// `path` in the first of Eden's folders.
+    /// `path` in the first of Lichii's data folders.
     async fn place(&self, path: &str) -> PluginResult<HostPath> {
         let root =
             self.host.folders.roots(DATA).await?.first().map(|r| r.root).ok_or_else(|| {
@@ -474,7 +474,7 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 // The plugin reads the zip itself: the host's download and unpack step (`DownloadPlan`) writes
-// only into the plugin's own folder, and the firmware goes into Eden's.
+// only into the plugin's own folder, and the firmware goes into Lichii's data folder.
 
 /// One file of a zip: its name, and where its bytes are.
 #[derive(Debug, PartialEq, Eq)]

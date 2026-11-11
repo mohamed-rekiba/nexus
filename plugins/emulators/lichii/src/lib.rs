@@ -7,9 +7,10 @@
 //!   A new build gets no test run: Lichii's `--help` opens its window and never ends.
 //! - Games: Switch game files (`.nsp`, `.nsz`, `.xci`, `.xcz`, `.nup`) in the player's game
 //!   folders, named by their file names (see [`emulator_kit::games::switch_file`]).
-//! - Lichii keeps keys, firmware, saves and settings in Eden's folder (`~/.local/share/eden`),
-//!   which every build shares. Nexus updates firmware and configured keys when the player
-//!   asks, in [`firmware`]; they can also be installed by hand.
+//! - Lichii keeps keys, firmware, saves and settings in its own folder (`~/.local/share/lichii`),
+//!   which every build shares. Builds before build-150 used Eden's (`~/.local/share/eden`).
+//!   Nexus updates firmware and configured keys when the player asks, in [`firmware`]; they
+//!   can also be installed by hand.
 //! - Installs: Switch game files from a download, in [`install`].
 //! - No compatibility list: Lichii's community reports have no list to download.
 
@@ -41,7 +42,7 @@ const CONSOLE: &str = "SWITCH";
 pub const FOLDER: &str = "Switch";
 /// Lichii's settings folder, where its window saves `qt-config.ini`.
 pub const CONFIG: &str = "eden-config";
-/// Eden's data folder, which every Lichii build shares: keys, firmware, saves and mods.
+/// Lichii's data folder, which every Lichii build shares: keys, firmware, saves and mods.
 pub const DATA: &str = "eden-data";
 /// The exit code eden-cli asks to be started again with (`kRestartExitCode` in Lichii).
 const RESTART_CODE: i32 = 75;
@@ -63,7 +64,7 @@ pub struct Settings {
     pub gpu_split: GpuSplit,
     /// Runs the Lichii you built or installed: from the folder you map as lichii-build, or
     /// from your PATH. Installing an official build turns this off. Saves are shared: Lichii
-    /// keeps them in Eden's folder.
+    /// keeps them in its data folder.
     #[serde(default)]
     #[schemars(title = "Use your own build")]
     pub own_build: bool,
@@ -169,7 +170,7 @@ pub const OWN_BUILD: &str = "lichii-build";
 /// What your own build's program may be called, in its folder.
 const OWN_PROGRAMS: [&str; 3] = ["lichii", "lichii.AppImage", "build/bin/lichii"];
 
-/// Lichii's builds. Every build shares Eden's folder, so it needs no hooks.
+/// Lichii's builds. Every build shares Lichii's data folder, so it needs no hooks.
 pub struct LichiiFlavor {
     pub platform: Option<Platform>,
 }
@@ -257,7 +258,7 @@ impl CodePlugin for LichiiPlugin {
 
 inventory::submit! { PluginFactory::code(|| Box::new(LichiiPlugin)) }
 
-/// What a backup holds of Lichii: from Eden's data folder, the keys, the NAND (firmware and
+/// What a backup holds of Lichii: from Lichii's data folder, the keys, the NAND (firmware and
 /// saves), the SD card, amiibo and mods; and the settings its window saves.
 fn backup_items() -> std::sync::Arc<dyn Backup> {
     let data = |path: &str| BackupPlace::Folder(HostPath::new(DATA, 0, RelPath::new(path).expect("a plain path")));

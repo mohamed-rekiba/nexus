@@ -256,7 +256,11 @@ Some emulator notes:
 - **KytyPS5**: a build that knows the `--data-folder` option keeps its saves in one folder that
   every such build shares: "KytyPS5 saves" on its page, `~/.local/share/KytyPS5` until you
   change it.
-- **Lichii**: for firmware and the selected keys version in `~/.local/share/eden`, use the
+- **Lichii**: Lichii keeps its data in `~/.local/share/lichii` from build-150 on. If you
+  played with an older build, open Lichii from its page once and import your Eden data
+  (`~/.local/share/eden`): until then, Lichii starts no game. An older build, or your own
+  build from before build-150, still reads `~/.local/share/eden`: set **Lichii data** on
+  Lichii's page to that folder. For firmware and the selected keys version, use the
   **Firmware** block on Lichii's page. It shows the firmware installed and the update that runs,
   with a bar while it downloads. Turn on **Automatic updates** there (the same setting as **Keep
   the firmware up to date** in its settings), or press **Update now**. Nexus then downloads the newest firmware from
