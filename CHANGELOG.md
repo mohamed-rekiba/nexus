@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.3](https://github.com/mohamed-rekiba/nexus/compare/v0.16.2...v0.16.3) (2026-11-11)
+
+
+### Bug Fixes
+
+* **lichii:** install the firmware release that matches the keys ([#68](https://github.com/mohamed-rekiba/nexus/issues/68)) ([dd95f1d](https://github.com/mohamed-rekiba/nexus/commit/dd95f1d714ac66c57b02c5f8be36fcb3eda3e84e))
+
 ## [0.16.2](https://github.com/mohamed-rekiba/nexus/compare/v0.16.1...v0.16.2) (2026-11-11)
 
 
