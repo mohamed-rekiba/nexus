@@ -109,7 +109,7 @@ mod system {
 }
 
 #[cfg(target_os = "linux")]
-mod system {
+pub(crate) mod system {
     use super::*;
 
     /// The launcher's own Gamescope id; games use their process id.
@@ -139,7 +139,7 @@ mod system {
         if gamescope() {
             let focused = run("xprop", &["-root", "GAMESCOPE_FOCUSED_WINDOW"])?;
             let window = focused.rsplit('=').next().map(str::trim).filter(|w| w.parse::<u64>().is_ok())?;
-            return xdotool(&["getwindowpid", window])?.parse().ok();
+            return xdotool(&["getwindowpid", window]).and_then(|p| p.parse().ok()).or_else(|| window_owner(window));
         }
         xdotool(&["getactivewindow", "getwindowpid"])?.parse().ok()
     }
@@ -181,6 +181,25 @@ mod system {
         xprop.split_once('=')?.1.split(',').next()?.trim().parse().ok()
     }
 
+    /// The process of the X client that made window `window`, which the X server knows when
+    /// the client runs on this machine. For the windows that don't name their own process
+    /// with `_NET_WM_PID`: Oil Rush's engine window is one.
+    pub fn window_owner(window: &str) -> Option<u32> {
+        use x11rb::protocol::res::{ClientIdMask, ClientIdSpec, ConnectionExt as _};
+
+        std::env::var_os("DISPLAY")?;
+        let window: u32 = window.parse().ok()?;
+        let spec = ClientIdSpec { client: window, mask: ClientIdMask::LOCAL_CLIENT_PID };
+        let reply = x11rb::connect(None)
+            .map_err(|e| e.to_string())
+            .and_then(|(conn, _)| {
+                conn.res_query_client_ids(&[spec]).map_err(|e| e.to_string())?.reply().map_err(|e| e.to_string())
+            })
+            .inspect_err(|error| tracing::debug!(window, error, "the X server didn't say whose window it is"))
+            .ok()?;
+        reply.ids.iter().find(|id| id.spec.mask == ClientIdMask::LOCAL_CLIENT_PID)?.value.first().copied()
+    }
+
     /// The name of process `pid`, for the log.
     fn process_name(pid: u32) -> String {
         std::fs::read_to_string(format!("/proc/{pid}/comm")).map(|n| n.trim().to_owned()).unwrap_or_default()
@@ -209,7 +228,7 @@ mod system {
         let new: Vec<(&str, Option<u32>)> = visible
             .iter()
             .filter(|w| !seen.contains_key(**w))
-            .map(|w| (*w, xdotool(&["getwindowpid", w]).and_then(|p| p.parse().ok())))
+            .map(|w| (*w, xdotool(&["getwindowpid", w]).and_then(|p| p.parse().ok()).or_else(|| window_owner(w))))
             .collect();
         let game: Vec<&str> =
             new.iter().filter(|(_, pid)| pid.is_some_and(|p| ids.contains(&p))).map(|(w, _)| *w).collect();

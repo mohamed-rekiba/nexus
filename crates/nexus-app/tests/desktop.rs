@@ -136,6 +136,34 @@ fn a_window_that_closed_is_gone_while_its_program_runs(desktop: &SystemDesktop) 
     Outcome::Pass
 }
 
+/// A bare X window names no process (`_NET_WM_PID`), like Oil Rush's engine window; the X
+/// server still knows the process that made it.
+#[cfg(target_os = "linux")]
+fn a_window_that_names_no_process_has_its_owner_found(_: &SystemDesktop) -> Outcome {
+    use x11rb::connection::Connection;
+    use x11rb::protocol::xproto::{ConnectionExt, CreateWindowAux, WindowClass};
+
+    let Ok((conn, screen)) = x11rb::connect(None) else {
+        return Outcome::Skip("no X server".into());
+    };
+    let root = conn.setup().roots[screen].root;
+    let made = (|| {
+        let window = conn.generate_id().ok()?;
+        conn.create_window(0, window, root, 0, 0, 10, 10, 0, WindowClass::INPUT_OUTPUT, 0, &CreateWindowAux::new())
+            .ok()?
+            .check()
+            .ok()?;
+        Some(window)
+    })();
+    let Some(window) = made else {
+        return Outcome::Fail("could not make a window".into());
+    };
+    match desktop::system::window_owner(&window.to_string()) {
+        Some(id) if id == std::process::id() => Outcome::Pass,
+        other => Outcome::Fail(format!("window {window}'s owner is {other:?}, not this test ({})", std::process::id())),
+    }
+}
+
 /// Whether the system's start-at-login entry for the launcher is there.
 #[cfg(target_os = "linux")]
 fn login_entry() -> bool {
@@ -194,9 +222,11 @@ fn main() {
     if let Some(problem) = desktop.windows.problem() {
         println!("the desktop says: {problem}");
     }
-    let tests: [(&str, Test); 3] = [
+    let tests: &[(&str, Test)] = &[
         ("a_window_shown_comes_to_the_front", a_window_shown_comes_to_the_front),
         ("a_window_that_closed_is_gone_while_its_program_runs", a_window_that_closed_is_gone_while_its_program_runs),
+        #[cfg(target_os = "linux")]
+        ("a_window_that_names_no_process_has_its_owner_found", a_window_that_names_no_process_has_its_owner_found),
         (
             "start_at_login_writes_the_system_s_entry_and_takes_it_out",
             start_at_login_writes_the_system_s_entry_and_takes_it_out,
@@ -204,7 +234,7 @@ fn main() {
     ];
     let require = std::env::var_os("NEXUS_DESKTOP_REQUIRE").is_some();
     let mut failed = 0;
-    for (name, test) in tests {
+    for &(name, test) in tests {
         match test(&desktop) {
             Outcome::Pass => println!("test {name} ... ok"),
             Outcome::Skip(why) if require => {
