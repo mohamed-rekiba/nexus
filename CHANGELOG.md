@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.1](https://github.com/mohamed-rekiba/nexus/compare/v0.16.0...v0.16.1) (2026-11-11)
+
+
+### Bug Fixes
+
+* **app:** a game's window that names no process shows in the Nexus session ([#62](https://github.com/mohamed-rekiba/nexus/issues/62)) ([674e353](https://github.com/mohamed-rekiba/nexus/commit/674e353b62d9f4907a2c5dc5dea71be47aab9f35))
+
 ## [0.16.0](https://github.com/mohamed-rekiba/nexus/compare/v0.15.1...v0.16.0) (2026-11-10)
 
 
