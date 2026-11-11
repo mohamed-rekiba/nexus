@@ -122,6 +122,10 @@ pub struct BlockRow {
     /// An action row drawn as a switch, on or off.
     #[serde(default)]
     pub switch: Option<bool>,
+    /// An action row the player types a line into: picking it opens an editor, and the line
+    /// goes back to [`Slots::run_action`] as the action's args (a JSON string).
+    #[serde(default)]
+    pub input: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -1,7 +1,11 @@
-//! The Switch firmware in Lichii's data folder, kept up to date from the releases of
-//! THZoria/NX_Firmware, with configured keys from files.prodkeys.net.
+//! The Switch firmware in Lichii's data folder, from the releases of THZoria/NX_Firmware,
+//! with the keys of the same version from files.prodkeys.net.
 //!
-//! - The player turns it on (`firmware_updates`), or presses Update the firmware on Lichii's
+//! - The firmware is the firmware release the player set, not the newest one,
+//!   and the keys are of the same version. Firmware newer than its keys can't be read: Lichii
+//!   loops on "keys for gen … required".
+//!
+//! - The player turns it on (`firmware_updates`), or presses Update now on Lichii's
 //!   panel. With it on, a check starts when the core reads the panel (at the start and at each
 //!   update check), at most once every [`RELEASE_TTL`]. A failed update isn't tried again on
 //!   its own until Nexus starts again.
@@ -28,10 +32,38 @@ use crate::DATA;
 /// The actions of the Firmware block's rows: Update now, and the automatic updates' switch.
 pub const UPDATE_NOW: &str = "update-firmware";
 pub const TOGGLE_AUTO: &str = "toggle-firmware-updates";
-/// The newest firmware release.
-pub const FIRMWARE_RELEASE: &str = "https://api.github.com/repos/THZoria/NX_Firmware/releases/latest";
-/// The release, kept for hours: GitHub allows 60 requests an hour without a token.
-const RELEASE_CACHE: &str = "cache/firmware-release.json";
+/// The action of the Firmware release row: the typed line is the version to install.
+pub const SET_RELEASE: &str = "set-firmware-release";
+
+/// Checks a typed firmware release before it is saved, and returns it cleaned (no leading "v",
+/// trimmed): it must be a version like 22.5.0.
+pub fn check_version(typed: &str) -> PluginResult<String> {
+    clean_version(typed).map(str::to_owned)
+}
+/// The GitHub API address of THZoria/NX_Firmware's release `version`.
+pub fn release_url(version: &str) -> String {
+    format!("https://api.github.com/repos/THZoria/NX_Firmware/releases/tags/{version}")
+}
+/// The release of a version, kept for hours: GitHub allows 60 requests an hour without a token.
+fn release_cache(version: &str) -> String {
+    format!("cache/firmware-release-{version}.json")
+}
+
+/// The Switch version the player typed, without a leading "v", as it goes into URLs and a file
+/// name. It must be dot-separated groups of digits, like 22.5.0. Anything else is refused, so a
+/// path like "../latest" or ".." can't turn the release address into the list of all releases.
+fn clean_version(typed: &str) -> PluginResult<&str> {
+    let trimmed = typed.trim();
+    let version = trimmed.strip_prefix('v').unwrap_or(trimmed);
+    let is_version = !version.is_empty()
+        && version.split('.').all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()));
+    if !is_version {
+        return Err(PluginError::InvalidInput(format!(
+            "the firmware release \"{typed}\" isn't a version like 22.5.0: change it in Lichii's settings"
+        )));
+    }
+    Ok(version)
+}
 const RELEASE_TTL: Duration = Duration::from_secs(6 * 60 * 60);
 /// The version Nexus installed last, in the plugin's storage.
 const MARKER: &str = "firmware.json";
@@ -96,7 +128,7 @@ impl Firmware {
     }
 
     /// Starts a check on its own, bypassing the normal interval when firmware is missing.
-    pub async fn start_auto(self: &Arc<Self>, keys_version: String) {
+    pub async fn start_auto(self: &Arc<Self>, version: String) {
         if matches!(self.phase(), Phase::Updating(_)) {
             return;
         }
@@ -108,7 +140,7 @@ impl Firmware {
             }
             *last = Some(Instant::now());
         }
-        self.start(false, keys_version);
+        self.start(false, version);
     }
 
     fn phase(&self) -> Phase {
@@ -131,7 +163,7 @@ impl Firmware {
 
     /// Starts an update in the background, unless one is running. `asked`: the player pressed
     /// the button, so the release is asked for again, and an update that failed runs again.
-    pub fn start(self: &Arc<Self>, asked: bool, keys_version: String) {
+    pub fn start(self: &Arc<Self>, asked: bool, version: String) {
         {
             let mut phase = self.phase.lock().unwrap_or_else(|p| p.into_inner());
             match &*phase {
@@ -145,7 +177,7 @@ impl Firmware {
         }
         let this = self.clone();
         tokio::spawn(async move {
-            let phase = match this.update(asked, &keys_version).await {
+            let phase = match this.update(asked, &version).await {
                 Ok(message) => Phase::Complete(message),
                 Err(e) => {
                     this.host.log.warn(&format!("the firmware update failed: {e}"));
@@ -157,8 +189,9 @@ impl Firmware {
     }
 
     /// The Firmware block on Lichii's page: the firmware in Lichii's data folder, the update that
-    /// runs or the last one's result, the automatic updates' switch (`auto`), and Update now.
-    pub async fn panel(&self, auto: bool) -> Vec<SlotItem> {
+    /// runs or the last one's result, the firmware release to install (`release`), the automatic
+    /// updates' switch (`auto`), and Update now.
+    pub async fn panel(&self, auto: bool, release: &str) -> Vec<SlotItem> {
         let phase = self.phase();
         let row = |label: &str, value: String, hint: String, tone| BlockRow {
             label: label.into(),
@@ -172,7 +205,7 @@ impl Firmware {
             (None, true) => row(
                 "Installed",
                 "Not from Nexus".into(),
-                "Update now puts the newest firmware in its place".into(),
+                "Update now puts the set firmware release in its place".into(),
                 Tone::Neutral,
             ),
             (_, false) => row("Installed", "None".into(), "Some games need the firmware".into(), Tone::Warning),
@@ -191,12 +224,22 @@ impl Firmware {
             Phase::Idle => {}
         }
         rows.push(BlockRow {
+            action: Some(SET_RELEASE.into()),
+            input: true,
+            ..row(
+                "Firmware release",
+                release.to_owned(),
+                "The Switch version to install, with its keys. Type one like 22.5.0.".into(),
+                Tone::Neutral,
+            )
+        });
+        rows.push(BlockRow {
             action: Some(TOGGLE_AUTO.into()),
             switch: Some(auto),
             ..row(
                 "Automatic updates",
                 String::new(),
-                "Nexus looks for a new firmware every 6 hours".into(),
+                "Nexus keeps the set release installed, checked every 6 hours".into(),
                 Tone::Neutral,
             )
         });
@@ -206,7 +249,7 @@ impl Firmware {
                 ..row(
                     "Update now",
                     String::new(),
-                    "Looks for a new firmware now, and installs it".into(),
+                    "Installs the set firmware release and its keys".into(),
                     Tone::Neutral,
                 )
             });
@@ -232,7 +275,9 @@ impl Firmware {
         Ok(HostPath::new(DATA, root, RelPath::new(path)?))
     }
 
-    async fn update(&self, asked: bool, keys_version: &str) -> PluginResult<String> {
+    /// Installs the firmware `version` and the keys of the same version.
+    async fn update(&self, asked: bool, version: &str) -> PluginResult<String> {
+        let version = clean_version(version)?;
         let folders = self.host.folders.as_ref();
         let (contents, part, old, zip) =
             (self.place(CONTENTS).await?, self.place(PART).await?, self.place(OLD).await?, self.place(ZIP).await?);
@@ -247,7 +292,7 @@ impl Firmware {
         folders.remove(&part).await?;
         folders.remove(&zip).await?;
 
-        let cache_path = RelPath::new(RELEASE_CACHE)?;
+        let cache_path = RelPath::new(release_cache(version))?;
         if asked {
             cache::forget(self.host.storage.as_ref(), &cache_path).await?;
         }
@@ -256,11 +301,12 @@ impl Firmware {
             storage,
             self.host.http.as_ref(),
             &self.host.log,
-            FIRMWARE_RELEASE,
+            &release_url(version),
             &cache_path,
             RELEASE_TTL,
         )
-        .await?;
+        .await
+        .map_err(|e| PluginError::NotFound(format!("couldn't get firmware {version} from THZoria/NX_Firmware: {e}")))?;
         let release = github::releases(&json, false)
             .into_iter()
             .next()
@@ -274,30 +320,30 @@ impl Firmware {
             .await
             .ok()
             .and_then(|b| serde_json::from_slice::<String>(&b).ok())
-            .is_some_and(|v| v == keys_version);
+            .is_some_and(|v| v == version);
         let keys_exist = self.host.folders.exists(&self.place("keys/prod.keys").await?).await?;
         if current && keys_current && keys_exist {
             return Ok(format!(
-                "Firmware {} is up to date. Keys {keys_version} are installed. No updates needed.",
+                "Firmware {} is up to date. Keys {version} are installed. No updates needed.",
                 release.tag
             ));
         }
         self.set_phase(Phase::Updating(Step::new(format!(
-            "Firmware {} is {}. Downloading keys {keys_version}…",
+            "Firmware {} is {}. Downloading keys {version}…",
             release.tag,
             if current { "up to date" } else { "available" }
         ))));
-        let keys = self.download_keys(keys_version).await?;
+        let keys = self.download_keys(version).await?;
         if current {
             self.install_keys(keys).await?;
             self.host
                 .storage
                 .write(
                     &keys_marker,
-                    &serde_json::to_vec(keys_version).map_err(|e| PluginError::InvalidInput(e.to_string()))?,
+                    &serde_json::to_vec(version).map_err(|e| PluginError::InvalidInput(e.to_string()))?,
                 )
                 .await?;
-            return Ok(format!("Firmware {} is up to date. Installed keys {keys_version}.", release.tag));
+            return Ok(format!("Firmware {} is up to date. Installed keys {version}.", release.tag));
         }
         let asset = release
             .assets
@@ -319,10 +365,7 @@ impl Firmware {
             self.clean(&part).await;
             return Err(e);
         }
-        self.set_phase(Phase::Updating(Step::new(format!(
-            "Installing firmware {} and keys {keys_version}…",
-            release.tag
-        ))));
+        self.set_phase(Phase::Updating(Step::new(format!("Installing firmware {} and keys {version}…", release.tag))));
         let had_old = folders.exists(&contents).await?;
         if had_old {
             folders.rename(&contents, &old).await?;
@@ -344,24 +387,17 @@ impl Firmware {
         }
         self.host
             .storage
-            .write(
-                &keys_marker,
-                &serde_json::to_vec(keys_version).map_err(|e| PluginError::InvalidInput(e.to_string()))?,
-            )
+            .write(&keys_marker, &serde_json::to_vec(version).map_err(|e| PluginError::InvalidInput(e.to_string()))?)
             .await?;
         let marker = serde_json::json!({ "version": release.tag });
         self.host.storage.write(&RelPath::new(MARKER)?, marker.to_string().as_bytes()).await?;
         // The new firmware is in place: an old one left behind goes at the next update.
         self.clean(&old).await;
-        Ok(format!("Updated firmware to {}. Installed keys {keys_version}.", release.tag))
+        Ok(format!("Updated firmware to {}. Installed keys {version}.", release.tag))
     }
 
     /// Reads only known key files, without trusting paths supplied by the archive.
     async fn download_keys(&self, version: &str) -> PluginResult<Vec<(String, Vec<u8>)>> {
-        let version = version.strip_prefix('v').unwrap_or(version);
-        if version.is_empty() || !version.bytes().all(|b| b.is_ascii_digit() || b == b'.') {
-            return Err(PluginError::InvalidInput("invalid keys version".into()));
-        }
         let url = format!("https://files.prodkeys.net/ProdKeys.NET-v{version}.zip");
         let response = self.host.http.send(HttpRequest::get(&url)).await?;
         if response.status == 404 {

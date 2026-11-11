@@ -13,7 +13,7 @@ platforms = ["linux"]
 console = "Switch"
 capabilities = ["catalog", "downloader", "installer", "configurator", "launcher", "slots", "game_installer", "backup"]
 # What the install sheet says this emulator installs from.
-install_note = "Installs a Switch game from its game files (.nsp, .nsz, .xci, .xcz, .nup), with its update and DLC files, into the Switch folder of your game folders. A solid .nsz, which Lichii can't play, becomes the .nsp it was made from. Nexus downloads firmware and the selected keys version into Lichii's data folder once you turn on Keep the firmware up to date in Lichii's settings, or press Update the firmware."
+install_note = "Installs a Switch game from its game files (.nsp, .nsz, .xci, .xcz, .nup), with its update and DLC files, into the Switch folder of your game folders. A solid .nsz, which Lichii can't play, becomes the .nsp it was made from. Nexus downloads the set firmware release and its keys into Lichii's data folder once you turn on Keep the firmware up to date in Lichii's settings, or press Update now."
 
 [permissions]
 # GitHub's API, release downloads and the CDN they redirect to.
@@ -50,8 +50,8 @@ title = "Lichii settings"
 after = "own_build"
 
 # Lichii's data folder: keys, firmware, saves and mods, which every Lichii build shares. The
-# plugin writes firmware (nand/system) and the selected keys version (keys), when firmware updates are on or the player
-# asks. Settings → Backup saves the folder, and a restore writes it, as the host. From
+# plugin writes firmware (nand/system) and the keys of the same version (keys), when firmware
+# updates are on or the player asks. Settings → Backup saves the folder, and a restore writes it, as the host. From
 # build-150 on, Lichii keeps its own folders, in place of Eden's (~/.local/share/eden): its
 # window imports Eden's data once, and eden-cli starts no game until then.
 [[permissions.filesystem]]

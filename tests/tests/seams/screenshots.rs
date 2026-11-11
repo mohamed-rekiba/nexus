@@ -1174,7 +1174,7 @@ fn downloading_block() -> FakeService {
         BlockRow {
             label: "Installed".into(),
             value: "Not from Nexus".into(),
-            hint: "Update now puts the newest firmware in its place".into(),
+            hint: "Update now puts the set firmware release in its place".into(),
             ..BlockRow::default()
         },
         BlockRow {
@@ -1186,8 +1186,16 @@ fn downloading_block() -> FakeService {
             ..BlockRow::default()
         },
         BlockRow {
+            label: "Firmware release".into(),
+            value: "22.5.0".into(),
+            hint: "The Switch version to install, with its keys. Type one like 22.5.0.".into(),
+            action: Some("set-firmware-release".into()),
+            input: true,
+            ..BlockRow::default()
+        },
+        BlockRow {
             label: "Automatic updates".into(),
-            hint: "Nexus looks for a new firmware every 6 hours".into(),
+            hint: "Nexus keeps the set release installed, checked every 6 hours".into(),
             action: Some("auto".into()),
             switch: Some(true),
             ..BlockRow::default()

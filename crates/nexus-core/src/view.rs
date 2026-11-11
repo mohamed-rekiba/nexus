@@ -82,6 +82,7 @@ fn slot_vm(plugin: &PluginId, slot: SlotId, item: SlotItem) -> SlotVm {
                     action: r.action.unwrap_or_default(),
                     args: r.args,
                     switch: r.switch.map(|on| if on { "on" } else { "off" }.to_owned()).unwrap_or_default(),
+                    input: r.input,
                     at: -1,
                 })
                 .collect();

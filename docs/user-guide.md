@@ -260,16 +260,20 @@ Some emulator notes:
   played with an older build, open Lichii from its page once and import your Eden data
   (`~/.local/share/eden`): until then, Lichii starts no game. An older build, or your own
   build from before build-150, still reads `~/.local/share/eden`: set **Lichii data** on
-  Lichii's page to that folder. For firmware and the selected keys version, use the
+  Lichii's page to that folder. For firmware and keys, use the
   **Firmware** block on Lichii's page. It shows the firmware installed and the update that runs,
   with a bar while it downloads. Turn on **Automatic updates** there (the same setting as **Keep
-  the firmware up to date** in its settings), or press **Update now**. Nexus then downloads the newest firmware from
+  the firmware up to date** in its settings), or press **Update now**. Nexus then downloads the
+  **Firmware release** set in Lichii's settings from
   [THZoria/NX_Firmware](https://github.com/THZoria/NX_Firmware), checks its SHA-256 against the
   one GitHub gives, and puts it in place of the firmware in that folder. Lichii uses it from its next
   start. `prod.keys` and any `title.keys` from the versioned archive at
-  `https://files.prodkeys.net/ProdKeys.NET-v<keys_version>.zip` go into the `keys` folder.
-  **Keys version** in Lichii's settings defaults to `22.5.0` and can be changed independently
-  of the firmware version. Press **Update the firmware** to download the selected keys.
+  `https://files.prodkeys.net/ProdKeys.NET-v<firmware_release>.zip` go into the `keys` folder:
+  the keys always match the firmware, because firmware newer than its keys can't be read and
+  Lichii hangs on its start. **Firmware release** defaults to `22.5.0`. To use another one,
+  select the row, press Enter, and type a version that both sites have, like `22.1.0`. Then
+  press **Update now**. Nexus 0.16 and older had a **Keys version** setting in its place: Nexus
+  ignores its value now.
   The badge beside the button names the firmware version Nexus installed. This is
   Nintendo's firmware: check that you may use it where you live. If an update fails, the old
   firmware stays.
