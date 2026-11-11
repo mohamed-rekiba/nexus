@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.2](https://github.com/mohamed-rekiba/nexus/compare/v0.16.1...v0.16.2) (2026-11-11)
+
+
+### Bug Fixes
+
+* **lichii:** firmware, settings and backups use Lichii's own folders from build-150 on ([#65](https://github.com/mohamed-rekiba/nexus/issues/65)) ([05a1848](https://github.com/mohamed-rekiba/nexus/commit/05a18481906924e7f467dc418946736b26211cd2))
+
 ## [0.16.1](https://github.com/mohamed-rekiba/nexus/compare/v0.16.0...v0.16.1) (2026-11-11)
 
 
