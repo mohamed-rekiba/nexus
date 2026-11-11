@@ -79,6 +79,21 @@ async fn boot() -> (TestCore, tempfile::TempDir) {
     (test, games)
 }
 
+/// Lichii keeps its data and settings in its own folders from build-150 on, and eden-cli
+/// refuses every game while Eden's old folder is there without an import. So Nexus writes
+/// firmware, reads settings and backs up there.
+#[tokio::test]
+async fn lichii_s_folders_default_to_lichii_s_own() {
+    let home = tempfile::tempdir().unwrap();
+    let host = FakeHost::new().home(home.path()).platform(Some(Platform::Linux));
+    let test = host.built_in(nexus_api::PluginBox::code(LichiiPlugin)).boot_core().await;
+    test.core.dispatch(Command::Navigate(nexus_core::Route::Plugin(lichii()))).await.unwrap();
+    let folders = test.core.view().plugin_page.expect("Lichii's page").folders;
+    let default = |name: &str| folders.iter().find(|f| f.name == name).map(|f| f.default.clone());
+    assert_eq!(default("eden-data"), Some(home.path().join(".local/share/lichii").display().to_string()));
+    assert_eq!(default("eden-config"), Some(home.path().join(".config/lichii").display().to_string()));
+}
+
 #[tokio::test]
 async fn lichii_meets_every_contract() {
     let (test, _games) = boot().await;

@@ -42,21 +42,22 @@ folder = "packages"
 
 # Lichii's settings, as its window saves them (qt-config.ini): games start with them, and with
 # players 1 to 4 on the controllers you have. Read only; a restore from Settings → Backup
-# writes it, as the host.
+# writes it, as the host. The folder names keep Eden's name: backups and mappings use them.
 [[permissions.filesystem]]
 folder = "eden-config"
-default = "~/.config/eden"
+default = "~/.config/lichii"
 title = "Lichii settings"
 after = "own_build"
 
-# Eden's data folder: keys, firmware, saves and mods, which every Lichii build shares. The
+# Lichii's data folder: keys, firmware, saves and mods, which every Lichii build shares. The
 # plugin writes firmware (nand/system) and the selected keys version (keys), when firmware updates are on or the player
-# asks. Settings → Backup saves the folder, and a restore writes it, as the host.
+# asks. Settings → Backup saves the folder, and a restore writes it, as the host. From
+# build-150 on, Lichii keeps its own folders, in place of Eden's (~/.local/share/eden): its
+# window imports Eden's data once, and eden-cli starts no game until then.
 [[permissions.filesystem]]
 folder = "eden-data"
 write = true
-default = "~/.local/share/eden"
-default_on = { macos = "~/Library/Application Support/eden", windows = "~/AppData/Roaming/eden" }
+default = "~/.local/share/lichii"
 title = "Lichii data"
 after = "own_build"
 
