@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.2](https://github.com/mohamed-rekiba/nexus/compare/nexus-os-v0.11.1...nexus-os-v0.11.2) (2026-11-11)
+
+
+### Bug Fixes
+
+* **os:** bundle Nexus v0.16.2 ([9f7ae6a](https://github.com/mohamed-rekiba/nexus/commit/9f7ae6ab606a9484fa0db9d09fc9e34cc4fc842f))
+
 ## [0.11.1](https://github.com/mohamed-rekiba/nexus/compare/nexus-os-v0.11.0...nexus-os-v0.11.1) (2026-11-11)
 
 
