@@ -31,7 +31,7 @@ mod firmware;
 mod install;
 mod nsz;
 
-pub use firmware::FIRMWARE_RELEASE;
+pub use firmware::release_url;
 
 const MANIFEST: &str = include_str!("../plugin.toml");
 /// Every release is a pre-release; a build comes out several times a day.
@@ -52,7 +52,7 @@ const GAME_SETTINGS: &str = "eden-cli/config.ini";
 /// Lichii settings. Its other settings live in its own config file.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(crate = "nexus_api::serde", deny_unknown_fields)]
-#[schemars(crate = "nexus_api::schemars", extend("x-order" = ["own_build", "fullscreen", "gpu_split", "firmware_updates", "keys_version"]))]
+#[schemars(crate = "nexus_api::schemars", extend("x-order" = ["own_build", "fullscreen", "gpu_split", "firmware_updates", "firmware_release"]))]
 pub struct Settings {
     #[serde(default = "yes")]
     #[schemars(title = "Full screen")]
@@ -68,20 +68,27 @@ pub struct Settings {
     #[serde(default)]
     #[schemars(title = "Use your own build")]
     pub own_build: bool,
-    /// Downloads the newest Switch firmware from github.com/THZoria/NX_Firmware into Lichii's
-    /// data folder, in place of the firmware there, and the selected keys version from files.prodkeys.net.
+    /// Downloads the set firmware release from github.com/THZoria/NX_Firmware
+    /// into Lichii's data folder, in place of the firmware there, and the keys of the same
+    /// version from files.prodkeys.net.
     /// Nintendo's firmware: check that you may use it where you live.
     #[serde(default)]
     #[schemars(title = "Keep the firmware up to date")]
     pub firmware_updates: bool,
-    /// Version of the keys archive from files.prodkeys.net, independent of the firmware version.
-    /// Downloaded when firmware updates run or you press Update the firmware.
-    #[serde(default = "default_keys_version")]
-    #[schemars(title = "Keys version")]
-    pub keys_version: String,
+    /// The Switch firmware release to install, like 22.5.0, with the keys of the same version:
+    /// firmware newer than its keys can't be read. Both THZoria/NX_Firmware and
+    /// files.prodkeys.net must have it.
+    #[serde(default = "default_firmware_release")]
+    #[schemars(title = "Firmware release")]
+    pub firmware_release: String,
+    /// The keys version of Nexus 0.16 and older, which the firmware didn't follow. Read so
+    /// that saved settings still load, and not used: the firmware release replaces it.
+    #[serde(default, rename = "keys_version", skip_serializing)]
+    #[schemars(skip)]
+    pub old_keys_version: Option<String>,
 }
 
-fn default_keys_version() -> String {
+fn default_firmware_release() -> String {
     "22.5.0".into()
 }
 
@@ -96,7 +103,8 @@ impl Default for Settings {
             gpu_split: GpuSplit::default(),
             own_build: false,
             firmware_updates: false,
-            keys_version: default_keys_version(),
+            firmware_release: default_firmware_release(),
+            old_keys_version: None,
         }
     }
 }
@@ -292,9 +300,9 @@ impl Slots for Lichii {
         if request.slot == SlotId::EmulatorPanel && request.game.is_none() {
             let settings = self.emu.builds().settings().load().await;
             if settings.firmware_updates {
-                self.firmware.start_auto(settings.keys_version).await;
+                self.firmware.start_auto(settings.firmware_release.clone()).await;
             }
-            items.extend(self.firmware.panel(settings.firmware_updates).await);
+            items.extend(self.firmware.panel(settings.firmware_updates, &settings.firmware_release).await);
         }
         Ok(items)
     }
@@ -302,7 +310,7 @@ impl Slots for Lichii {
     async fn run_action(&self, action: &str, game: Option<&str>, args: &Value) -> PluginResult<()> {
         match action {
             firmware::UPDATE_NOW => {
-                self.firmware.start(true, self.emu.builds().settings().load().await.keys_version);
+                self.firmware.start(true, self.emu.builds().settings().load().await.firmware_release);
                 Ok(())
             }
             // The core reads the panel again after the action: turned on, a check starts then.
@@ -310,6 +318,15 @@ impl Slots for Lichii {
                 let settings = self.emu.builds().settings();
                 let on = settings.load().await.firmware_updates;
                 settings.set("firmware_updates", Value::Bool(!on)).await
+            }
+            // The player typed a firmware release into the Firmware block. Save it, so the next
+            // Update now installs it. The core reads the panel again, with the new version.
+            firmware::SET_RELEASE => {
+                let typed = args
+                    .as_str()
+                    .ok_or_else(|| PluginError::InvalidInput("the firmware release must be text".into()))?;
+                let version = firmware::check_version(typed)?;
+                self.emu.builds().settings().set("firmware_release", Value::String(version)).await
             }
             _ => self.emu.run_action(action, game, args).await,
         }

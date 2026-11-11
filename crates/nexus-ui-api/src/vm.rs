@@ -148,6 +148,9 @@ pub struct RowVm {
     pub args: serde_json::Value,
     /// "on" or "off" for a switch, "" for none.
     pub switch: String,
+    /// Whether picking the row opens an editor, and the typed line goes back as the action's
+    /// args (a JSON string).
+    pub input: bool,
     /// A button's place among the buttons of the page's blocks, from 0; -1 for a row that only
     /// shows. The page's focus moves through them after its build.
     pub at: i32,

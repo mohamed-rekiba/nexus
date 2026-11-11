@@ -8,9 +8,10 @@
 
 // A row of a section or a block. A section's rows have a label and a value only. A block's row
 // can have a hint under its label, a tone, a bar (progress from 0 to 1, -1 for none), and an
-// action that makes it a button; switch is "on" or "off" for a button drawn as a switch.
+// action that makes it a button; switch is "on" or "off" for a button drawn as a switch;
+// input means the button opens an editor and sends the typed line back as the action args.
 // at: the button's place among the page's block buttons, -1 for a row that only shows.
-export struct Row { label: string, value: string, hint: string, tone: string, progress: float, action: string, args: string, switch: string, at: int }
+export struct Row { label: string, value: string, hint: string, tone: string, progress: float, action: string, args: string, switch: string, input: bool, at: int }
 
 // A plugin's slot item. Render it with `accessible-role: text; accessible-label: label;`.
 // kind: badge | action | section | block | settings_panel

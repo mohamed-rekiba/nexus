@@ -1,11 +1,11 @@
-import { Vm, Host } from "../types.slint";
+import { Vm, Host, Json } from "../types.slint";
 import { Commands } from "commands.slint";
 import { SheetFrame } from "sheet-frame.slint";
 import { Tokens } from "../tokens.slint";
 import { Look } from "look.slint";
 import { BackButton } from "widgets.slint";
 import { SlotSections } from "slot-sections.slint";
-import { Prefs, Tab, Header, Row, Value, FieldRow, FolderRow } from "settings-rows.slint";
+import { Prefs, Tab, Header, Row, Value, Editor, FieldRow, FolderRow } from "settings-rows.slint";
 import { PluginList } from "plugin-list.slint";
 
 // One plugin's sheet, opened from Emulators or Themes and drawn at the edge beside the list.
@@ -223,8 +223,10 @@ export component PluginPage inherits SheetFrame {
                 accessible-role: groupbox;
                 accessible-label: block.label;
                 Header { text: block.text.to-uppercase(); }
-                for row[i] in block.rows : Row {
+                for row[i] in block.rows : blockrow := Row {
                     property <int> place: Prefs.builds + Prefs.actions + row.at;
+                    // A row the player types a line into, while it is focused.
+                    property <bool> typing: row.input && Prefs.editing && self.focused;
                     label: row.label;
                     hint: row.hint;
                     hint-kind: row.tone == "success" ? 1 : row.tone == "danger" ? 2 : 0;
@@ -242,14 +244,24 @@ export component PluginPage inherits SheetFrame {
                     property <int> seen: Prefs.serial;
                     // Return runs it; left and right turn a switch off and on.
                     changed seen => {
-                        if (self.focused && (Prefs.pending == 0 || (row.switch != "" && (Prefs.pending > 0) != (row.switch == "on")))) { self.run(); }
+                        if (self.focused && !Prefs.editing && (Prefs.pending == 0 || (row.switch != "" && (Prefs.pending > 0) != (row.switch == "on")))) { self.run(); }
                     }
-                    function run() { if (row.action != "") { Commands.run-action(block.plugin, row.action, "", row.args); } }
-                    Value {
+                    // An input row opens an editor; any other action runs at once.
+                    function run() {
+                        if (row.input) { Prefs.edit-text = row.value; Prefs.editing = true; }
+                        else if (row.action != "") { Commands.run-action(block.plugin, row.action, "", row.args); }
+                    }
+                    if !blockrow.typing : Value {
                         kind: row.switch != "" ? "toggle" : "text";
                         on: row.switch == "on";
-                        text: row.action != "" && row.switch == "" ? (row.value != "" ? row.value + "  ›" : "›") : row.value;
+                        text: row.input ? (row.value != "" ? row.value : "—")
+                            : row.action != "" && row.switch == "" ? (row.value != "" ? row.value + "  ›" : "›") : row.value;
                         tone: row.tone == "success" ? 1 : row.tone == "danger" ? 2 : row.tone == "warning" ? 4 : 0;
+                    }
+                    if blockrow.typing : Editor {
+                        horizontal-stretch: 2;
+                        title: row.label;
+                        done(text) => { Commands.run-action(block.plugin, row.action, "", Json.text(text)); }
                     }
                 }
             }

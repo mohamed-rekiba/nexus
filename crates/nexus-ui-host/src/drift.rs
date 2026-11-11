@@ -131,6 +131,7 @@ fn slot() -> SlotVm {
             action: s(),
             args: serde_json::json!({ "a": 1 }),
             switch: "on".into(),
+            input: false,
             at: 0,
         }],
         action: Some(s()),
