@@ -125,11 +125,21 @@ pub(crate) mod system {
         run("xdotool", args)
     }
 
+    /// The windows of the processes `ids`: those that name their process, and those
+    /// `keep_game` found the owner of, which `xdotool` can't see.
     fn windows(ids: &[u32]) -> Vec<String> {
-        ids.iter()
+        let mut found: Vec<String> = ids
+            .iter()
             .filter_map(|id| xdotool(&["search", "--onlyvisible", "--pid", &id.to_string()]))
             .flat_map(|out| out.split_whitespace().map(str::to_owned).collect::<Vec<_>>())
-            .collect()
+            .collect();
+        let seen = SEEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        for w in owned_by(&seen, ids) {
+            if !found.contains(&w) {
+                found.push(w);
+            }
+        }
+        found
     }
 
     pub fn front() -> Option<u32> {
@@ -139,7 +149,11 @@ pub(crate) mod system {
         if gamescope() {
             let focused = run("xprop", &["-root", "GAMESCOPE_FOCUSED_WINDOW"])?;
             let window = focused.rsplit('=').next().map(str::trim).filter(|w| w.parse::<u64>().is_ok())?;
-            return xdotool(&["getwindowpid", window]).and_then(|p| p.parse().ok()).or_else(|| window_owner(window));
+            return xdotool(&["getwindowpid", window]).and_then(|p| p.parse().ok()).or_else(|| {
+                // `keep_game` asked once already: this runs on each look at the game.
+                let seen = SEEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(window).copied();
+                seen.unwrap_or_else(|| window_owner(window))
+            });
         }
         xdotool(&["getactivewindow", "getwindowpid"])?.parse().ok()
     }
@@ -209,6 +223,11 @@ pub(crate) mod system {
     /// process is asked for once.
     static SEEN: std::sync::Mutex<std::collections::BTreeMap<String, Option<u32>>> =
         std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+    /// The windows in `seen` whose process is one of `ids`.
+    pub(super) fn owned_by(seen: &std::collections::BTreeMap<String, Option<u32>>, ids: &[u32]) -> Vec<String> {
+        seen.iter().filter(|(_, pid)| pid.is_some_and(|p| ids.contains(&p))).map(|(w, _)| w.clone()).collect()
+    }
 
     /// Under Gamescope, while the game's app id is the one Gamescope shows: tags each window
     /// of the game's processes `ids` that is new on screen with that id. The game's windows
@@ -802,6 +821,18 @@ pub mod login {
 
 #[cfg(test)]
 mod tests {
+    /// A window that names no process is the game's when its owner, found once, is one of
+    /// the game's processes: the PS button can bring it back after the game's other windows
+    /// closed.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_game_s_windows_include_those_whose_owner_was_found() {
+        use super::system::owned_by;
+        let seen = [("10".to_owned(), Some(500)), ("11".to_owned(), Some(600)), ("12".to_owned(), None)].into();
+        assert_eq!(owned_by(&seen, &[500, 501]), ["10"]);
+        assert!(owned_by(&seen, &[700]).is_empty());
+    }
+
     /// Gamescope shows the first app id in its root window's list.
     #[cfg(target_os = "linux")]
     #[test]
