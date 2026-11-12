@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.16.5](https://github.com/mohamed-rekiba/nexus/compare/v0.16.4...v0.16.5) (2026-11-12)
+
+
+### Bug Fixes
+
+* **lichii:** a cleared Lichii folder stays cleared, and review fixes to the firmware swap and docs ([478824a](https://github.com/mohamed-rekiba/nexus/commit/478824a54b0ec2ab9613f4f9e6577614f9d89d06))
+* **lichii:** keep the firmware settings in the Firmware block, and stop a game when qt-config.ini doesn't read ([6762198](https://github.com/mohamed-rekiba/nexus/commit/6762198f5b90c4820dea85e82a6fe7e547211752))
+* **lichii:** name its folders lichii-config and lichii-data, and keep folders saved under the Eden names ([e9df879](https://github.com/mohamed-rekiba/nexus/commit/e9df879683ea5209e95ce096597642da7feb07be))
+* **lichii:** no empty Keyboard controls block, and Switch packages known by name through the console spec ([b285f91](https://github.com/mohamed-rekiba/nexus/commit/b285f91454d0a7733314f6a36a3fda1e13aa89ef))
+* **lichii:** one firmware swap, the automatic check on the host's clock, and a notice when the firmware settings don't read ([8426418](https://github.com/mohamed-rekiba/nexus/commit/8426418e5f2e5b2f2d53622295fdcbdeb800df07))
+* **themes:** highlight the Library card the keys select ([9be55a1](https://github.com/mohamed-rekiba/nexus/commit/9be55a1928eb4ed861b87ede58118eacfa89bb93))
+
 ## [0.16.4](https://github.com/mohamed-rekiba/nexus/compare/v0.16.3...v0.16.4) (2026-11-12)
 
 
