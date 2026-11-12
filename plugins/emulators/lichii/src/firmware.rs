@@ -71,8 +71,8 @@ struct Swap {
 }
 
 impl Swap {
-    /// Puts right what a run that stopped between the renames left: `old` goes back in place of
-    /// a missing `live`, and goes when `live` is there.
+    /// Puts right what a run that stopped between the renames left: `old` moves back in place of
+    /// a missing `live`, and is removed when `live` is there.
     async fn recover(&self, folders: &dyn Folders) -> PluginResult<()> {
         if folders.exists(&self.old).await? {
             if folders.exists(&self.live).await? {
@@ -85,20 +85,30 @@ impl Swap {
     }
 
     /// Moves `live` to `old`, then `staged` into its place, and says whether there was a `live`.
-    /// When the second rename fails, `old` goes back; a failure to put it back is logged, and
-    /// the next [`Swap::recover`] puts it back.
+    /// When the second rename fails, `old` moves back; a failure to move it back is logged, and
+    /// the next [`Swap::recover`] moves it back.
     async fn swap(&self, folders: &dyn Folders, log: &Logger) -> PluginResult<bool> {
-        let had_old = folders.exists(&self.live).await?;
-        if had_old {
+        let had_live = folders.exists(&self.live).await?;
+        if had_live {
             folders.rename(&self.live, &self.old).await?;
         }
         if let Err(e) = folders.rename(&self.staged, &self.live).await {
-            if had_old && let Err(back) = folders.rename(&self.old, &self.live).await {
+            if had_live && let Err(back) = folders.rename(&self.old, &self.live).await {
                 log.warn(&format!("could not put {} back: {back}", self.live.path));
             }
             return Err(e);
         }
-        Ok(had_old)
+        Ok(had_live)
+    }
+
+    /// Undoes a swap that worked: the new `live` is removed, and `old` moves back when the swap
+    /// moved one there (`had_live`).
+    async fn undo(&self, folders: &dyn Folders, had_live: bool) -> PluginResult<()> {
+        folders.remove(&self.live).await?;
+        if had_live {
+            folders.rename(&self.old, &self.live).await?;
+        }
+        Ok(())
     }
 }
 
@@ -215,20 +225,22 @@ impl Firmware {
     /// gives the defaults too, and a warning in the log.
     async fn settings(&self) -> FirmwareSettings {
         self.read_settings().await.unwrap_or_else(|e| {
-            self.host.log.warn(&format!("{e}, so the defaults apply"));
+            self.host.log.warn(&format!("{e}. The defaults apply."));
             FirmwareSettings::default()
         })
     }
 
     /// The firmware settings, or why their file doesn't read. No file gives the defaults.
     async fn read_settings(&self) -> Result<FirmwareSettings, String> {
-        let unread = |why: String| format!("the firmware settings ({SETTINGS}) don't read: {why}");
-        let path = RelPath::new(SETTINGS).map_err(|e| unread(e.to_string()))?;
-        if !self.host.storage.exists(&path).await.map_err(|e| unread(e.to_string()))? {
-            return Ok(FirmwareSettings::default());
-        }
-        let bytes = self.host.storage.read(&path).await.map_err(|e| unread(e.to_string()))?;
-        serde_json::from_slice(&bytes).map_err(|e| unread(e.to_string()))
+        let read = async {
+            let path = RelPath::new(SETTINGS)?;
+            if !self.host.storage.exists(&path).await? {
+                return Ok(FirmwareSettings::default());
+            }
+            let bytes = self.host.storage.read(&path).await?;
+            Ok(serde_json::from_slice(&bytes)?)
+        };
+        read.await.map_err(|e: PluginError| format!("The firmware settings file ({SETTINGS}) doesn't read: {e}"))
     }
 
     async fn save(&self, settings: &FirmwareSettings) -> PluginResult<()> {
@@ -436,9 +448,9 @@ impl Firmware {
         let folders = self.host.folders.as_ref();
         let firmware =
             Swap { live: self.place(CONTENTS).await?, staged: self.place(PART).await?, old: self.place(OLD).await? };
-        let (contents, part, old, zip) = (&firmware.live, &firmware.staged, &firmware.old, self.place(ZIP).await?);
+        let zip = self.place(ZIP).await?;
         firmware.recover(folders).await?;
-        folders.remove(part).await?;
+        folders.remove(&firmware.staged).await?;
         folders.remove(&zip).await?;
 
         let cache_path = RelPath::new(release_cache(version))?;
@@ -506,28 +518,25 @@ impl Firmware {
         let unpacked = async {
             self.download(&asset.url, asset.size, &sha256, &zip).await?;
             self.set_phase(Phase::Updating(Step::new(format!("Unpacking firmware {}…", release.tag))));
-            unpack(folders, &zip, part).await
+            unpack(folders, &zip, &firmware.staged).await
         }
         .await;
         self.clean(&zip).await;
         if let Err(e) = unpacked {
-            self.clean(part).await;
+            self.clean(&firmware.staged).await;
             return Err(e);
         }
         self.set_phase(Phase::Updating(Step::new(format!("Installing firmware {} and keys {version}…", release.tag))));
-        let had_old = match firmware.swap(folders, &self.host.log).await {
-            Ok(had_old) => had_old,
+        let had_live = match firmware.swap(folders, &self.host.log).await {
+            Ok(had_live) => had_live,
             Err(e) => {
-                self.clean(part).await;
+                self.clean(&firmware.staged).await;
                 return Err(e);
             }
         };
         if let Err(e) = self.install_keys(keys).await {
             // Keep the previous firmware usable if the keys could not be installed.
-            folders.remove(contents).await?;
-            if had_old {
-                folders.rename(old, contents).await?;
-            }
+            firmware.undo(folders, had_live).await?;
             return Err(e);
         }
         self.host
@@ -537,7 +546,7 @@ impl Firmware {
         let marker = serde_json::json!({ "version": release.tag });
         self.host.storage.write(&RelPath::new(MARKER)?, marker.to_string().as_bytes()).await?;
         // The new firmware is in place: an old one left behind goes at the next update.
-        self.clean(old).await;
+        self.clean(&firmware.old).await;
         Ok(format!("Updated firmware to {}. Installed keys {version}.", release.tag))
     }
 

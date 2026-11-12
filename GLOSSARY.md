@@ -69,7 +69,8 @@ system plugin. One trait for all three; the kind decides only the privileges.
 list, settings and page, served from a console spec and a flavor.
 
 **Console spec** (`ConsoleSpec`, emulator-kit): what sets one console emulator apart besides its
-builds: its games, package formats, compatibility list, keyboard keys and game page section.
+builds: its games, how it knows a package to install (by format, or by file name), compatibility
+list, keyboard keys and game page section.
 
 **Copy store** (`CopyStore`): one folder of copies that the Game Catalog keeps: `fetched/`,
 `refreshed/` or `sources/`. Each copy has a meta file that names it. The copy is written first,

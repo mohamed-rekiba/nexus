@@ -65,17 +65,25 @@ pub(crate) fn roots(
 }
 
 /// Copies the player's folders saved under a renamed folder's old name (`was` in its grant) to
-/// its new name, while the new name has none. The old name keeps them: another plugin may still
-/// ask for it. A failed save is logged, and the next start tries again.
-pub(crate) fn move_renamed<'a>(config: &ConfigService, grants: impl IntoIterator<Item = &'a PathGrant>) {
+/// its new name, once, and only when the new name has none. The old name keeps them: another
+/// plugin may still ask for it. `app.copied_folders.<new name>` records the copy, so a player who
+/// clears the new folder later gets its default, not the old folders again. A failed save is
+/// logged, and the next start tries again.
+pub(crate) fn copy_renamed<'a>(config: &ConfigService, grants: impl IntoIterator<Item = &'a PathGrant>) {
     for grant in grants {
         let Some(was) = &grant.was else { continue };
-        let old = config.get(&["app", "folders", was]);
-        if old.is_null() || !config.get(&["app", "folders", &grant.folder]).is_null() {
+        let done = ["app", "copied_folders", grant.folder.as_str()];
+        if config.get(&done).as_bool() == Some(true) {
             continue;
         }
-        if let Err(e) = config.set(&["app", "folders", &grant.folder], old) {
-            tracing::warn!(folder = %grant.folder, %was, %e, "could not move the folders saved under the old name");
+        let old = config.get(&["app", "folders", was]);
+        let copied = if old.is_null() || !config.get(&["app", "folders", &grant.folder]).is_null() {
+            Ok(())
+        } else {
+            config.set(&["app", "folders", &grant.folder], old)
+        };
+        if let Err(e) = copied.and_then(|()| config.set(&done, Value::Bool(true))) {
+            tracing::warn!(folder = %grant.folder, %was, %e, "could not copy the folders saved under the old name");
         }
     }
 }
@@ -439,9 +447,19 @@ mod tests {
     fn a_folder_saved_under_its_old_name_is_saved_under_the_new_one() {
         let config = ConfigService::in_memory();
         config.set(&["app", "folders", "eden-data"], serde_json::json!(["/mine"])).unwrap();
-        move_renamed(&config, [&renamed("lichii-data", "eden-data")]);
+        copy_renamed(&config, [&renamed("lichii-data", "eden-data")]);
         assert_eq!(config.get(&["app", "folders", "lichii-data"]), serde_json::json!(["/mine"]));
         assert_eq!(config.get(&["app", "folders", "eden-data"]), serde_json::json!(["/mine"]), "kept for others");
+    }
+
+    #[test]
+    fn a_renamed_folder_the_player_cleared_stays_cleared() {
+        let config = ConfigService::in_memory();
+        config.set(&["app", "folders", "eden-data"], serde_json::json!(["/mine"])).unwrap();
+        copy_renamed(&config, [&renamed("lichii-data", "eden-data")]);
+        config.remove(&["app", "folders", "lichii-data"]).unwrap();
+        copy_renamed(&config, [&renamed("lichii-data", "eden-data")]);
+        assert!(config.get(&["app", "folders", "lichii-data"]).is_null(), "the default, not the old folders");
     }
 
     #[test]
@@ -449,7 +467,7 @@ mod tests {
         let config = ConfigService::in_memory();
         config.set(&["app", "folders", "eden-data"], serde_json::json!(["/old"])).unwrap();
         config.set(&["app", "folders", "lichii-data"], serde_json::json!(["/new"])).unwrap();
-        move_renamed(&config, [&renamed("lichii-data", "eden-data")]);
+        copy_renamed(&config, [&renamed("lichii-data", "eden-data")]);
         assert_eq!(config.get(&["app", "folders", "lichii-data"]), serde_json::json!(["/new"]));
     }
 

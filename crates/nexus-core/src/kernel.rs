@@ -511,7 +511,7 @@ impl Kernel {
         }
 
         let config = config.unwrap_or_else(|| Arc::new(ConfigService::open(host.data_dir.join("config.json"))));
-        crate::folders::move_renamed(&config, records.values().flat_map(|r| r.manifest.permissions.filesystem.iter()));
+        crate::folders::copy_renamed(&config, records.values().flat_map(|r| r.manifest.permissions.filesystem.iter()));
         let ports = Ports {
             http,
             spawner,

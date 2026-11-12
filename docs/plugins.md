@@ -430,7 +430,7 @@ host saves the mapping under `app.folders.<name>` as a list of paths.
 | `title` | What Settings calls the folder. The name when none. |
 | `help` | A line under the title. |
 | `after` | On the plugin page, the key of the setting that this folder's row follows. At the end of the settings when none. |
-| `was` | The folder's name before a rename. At start, the host copies the player's folders saved under it to the new name, while the new name has none. |
+| `was` | The folder's name before a rename. At the first start with it, the host copies the player's folders saved under it to the new name, when the new name has none. The old name keeps them. |
 | `listed_in` | More folders, read from a file in a default folder: `{ file, key, holds }`. Each value of `key` in `file` (Valve's text format) that is an absolute path to a folder holding `holds`. Read only. |
 
 Two host folders are shared (`SHARED_FOLDERS`). Settings shows them once, for every plugin
@@ -921,7 +921,8 @@ and logs, and its DLC as a large item.
 **Switch: Lichii** (`plugins/emulators/lichii`, `emu-lichii`, Linux only). Capabilities:
 `catalog`, `downloader`, `installer`, `configurator`, `launcher`, `slots`, `game_installer`,
 `backup`. Builds are Lichii's AppImage. Games are Switch game files. Its backup items are in
-Eden's folders, which it grants read only: the restore writes there anyway.
+its folders `lichii-data` and `lichii-config` and in its own data folder. It grants
+`lichii-config` read only: the restore writes there anyway.
 
 **PC** (`plugins/emulators/pc`, `emu-pc`). Capabilities: `catalog`, `launcher`, `slots`,
 `game_installer`, `configurator`, `backup`. No builds of its own. It installs PC games from a

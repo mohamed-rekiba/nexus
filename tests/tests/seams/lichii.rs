@@ -905,6 +905,12 @@ async fn a_firmware_settings_file_that_doesn_t_read_is_shown_in_the_block() {
     let warning = row(&rows, "Firmware settings").expect("a row about the settings file");
     assert!(warning.hint.contains("firmware-settings.json"), "{}", warning.hint);
     assert_eq!(row(&rows, "Firmware release").unwrap().value, "22.5.0", "the defaults apply");
+
+    set_firmware_release(&test, "22.1.0").await;
+    test.core.dispatch(Command::Navigate(nexus_core::Route::Emulators)).await.unwrap();
+    let rows = firmware_rows(&test.core).unwrap();
+    assert!(row(&rows, "Firmware settings").is_none(), "a saved setting writes a file that reads");
+    assert_eq!(row(&rows, "Firmware release").unwrap().value, "22.1.0");
 }
 
 /// Nexus 0.16.4 and older named Lichii's folders after Eden: a data folder the player set
