@@ -17,7 +17,7 @@
 use std::sync::Arc;
 
 use emulator_kit::builds::{Flavor, OwnBuild, ReleaseSource};
-use emulator_kit::console::{ConsoleEmulator, ConsoleSpec};
+use emulator_kit::console::{ConsoleEmulator, ConsoleSpec, Packages};
 use emulator_kit::games::Console;
 use emulator_kit::host::Host;
 use emulator_kit::versions;
@@ -234,9 +234,10 @@ impl CodePlugin for LichiiPlugin {
         let host = Host::of(&ctx);
         let spec = ConsoleSpec {
             console: Console::Switch,
-            packages: &[],
+            // A Switch game file, not an update or DLC.
+            packages: Packages::Named(|name| emulator_kit::games::switch_file(name).is_some()),
             compat: None,
-            // Lichii's keyboard keys aren't listed here yet: its own settings show them.
+            // Lichii's keyboard keys aren't listed here: its own window sets them.
             keys: &[],
             section: "lichii",
             version_row: true,

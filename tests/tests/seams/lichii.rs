@@ -869,6 +869,19 @@ async fn set_firmware_release(test: &TestCore, version: &str) {
     type_firmware_release(test, version).await.unwrap();
 }
 
+/// Lichii lists no keyboard keys (its own window sets them), so its panel has no Keyboard
+/// controls block: an empty one would say nothing.
+#[tokio::test]
+async fn lichii_s_panel_has_no_empty_keyboard_block() {
+    let (test, _games, _eden) = with_eden(&[]).await;
+    test.core.dispatch(Command::Navigate(nexus_core::Route::Emulators)).await.unwrap();
+    let view = test.core.view();
+    let emu = view.emulators.emulators.iter().find(|e| e.plugin == lichii()).expect("Lichii's panel");
+    let ids: Vec<_> = emu.panels.iter().map(|p| p.id.as_str()).collect();
+    assert!(ids.contains(&"firmware"), "{ids:?}");
+    assert!(!ids.contains(&"keyboard"), "{ids:?}");
+}
+
 /// The Firmware block has a Firmware release row: it shows the set version, and typing a new
 /// one into it saves the setting, so the next Update now installs that release.
 #[tokio::test]

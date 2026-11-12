@@ -20,7 +20,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use emulator_kit::builds::{Flavor, OwnBuild, ReleaseSource};
-use emulator_kit::console::{CompatList, ConsoleEmulator, ConsoleSpec};
+use emulator_kit::console::{CompatList, ConsoleEmulator, ConsoleSpec, Packages};
 use emulator_kit::games::Console;
 use emulator_kit::host::Host;
 use emulator_kit::installs::Format;
@@ -504,7 +504,7 @@ impl CodePlugin for KytyPlugin {
         let host = Host::of(&ctx);
         let spec = ConsoleSpec {
             console: Console::Ps5,
-            packages: &[Format::Ps5Package, Format::Exfat],
+            packages: Packages::Formats(&[Format::Ps5Package, Format::Exfat]),
             compat: Some(CompatList { url: COMPATIBILITY, page: LIST_PAGE, parse: compat::kyty }),
             keys: KEYS,
             section: "kyty",

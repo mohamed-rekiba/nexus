@@ -17,7 +17,7 @@
 use std::sync::Arc;
 
 use emulator_kit::builds::{Flavor, OwnBuild, ReleaseSource};
-use emulator_kit::console::{CompatList, ConsoleEmulator, ConsoleSpec};
+use emulator_kit::console::{CompatList, ConsoleEmulator, ConsoleSpec, Packages};
 use emulator_kit::games::Console;
 use emulator_kit::host::Host;
 use emulator_kit::installs::Format;
@@ -201,7 +201,7 @@ impl CodePlugin for ShadPlugin {
         let host = Host::of(&ctx);
         let spec = ConsoleSpec {
             console: Console::Ps4,
-            packages: &[Format::Ps4Package],
+            packages: Packages::Formats(&[Format::Ps4Package]),
             compat: Some(CompatList { url: COMPATIBILITY, page: LIST_PAGE, parse: compat::shad }),
             keys: KEYS,
             section: "shadps4",

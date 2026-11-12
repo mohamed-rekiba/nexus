@@ -33,8 +33,8 @@ pub struct CompatList {
 /// What sets one console emulator apart, besides its builds.
 pub struct ConsoleSpec {
     pub console: Console,
-    /// The package formats it installs games from.
-    pub packages: &'static [Format],
+    /// How it knows the packages it installs games from.
+    pub packages: Packages,
     /// `None` for an emulator without one: its games have no compatibility badge.
     pub compat: Option<CompatList>,
     /// Its default keyboard keys, as (button, keys).
@@ -45,6 +45,14 @@ pub struct ConsoleSpec {
     pub version_row: bool,
     /// The section's build row says "Your own build" while it is on.
     pub own_row: bool,
+}
+
+/// How a console emulator knows a package to install, in its folder of a packages folder.
+pub enum Packages {
+    /// By the format its first bytes show.
+    Formats(&'static [Format]),
+    /// By its file name alone: a Switch game file's contents are encrypted.
+    Named(fn(&str) -> bool),
 }
 
 pub struct ConsoleEmulator<F: Flavor> {
@@ -80,7 +88,7 @@ impl<F: Flavor> ConsoleEmulator<F> {
     }
 
     /// The packages to install in this console's folder of each packages folder, as installs go
-    /// to its folder of the games folder. For the Switch, its game files (not updates or DLC).
+    /// to its folder of the games folder, known as the spec's [`Packages`] says.
     pub async fn candidates(&self) -> PluginResult<Vec<Installable>> {
         let folders = &self.host.folders;
         let mut out = Vec::new();
@@ -93,15 +101,14 @@ impl<F: Flavor> ConsoleEmulator<F> {
                 }
                 // A name that can't be a path is no package this plugin can name.
                 let Ok(file) = dir.join(&entry.name) else { continue };
-                // A Switch game file is known by its name; its contents are encrypted.
-                if self.spec.console == Console::Switch {
-                    if games::switch_file(&entry.name).is_some() {
-                        out.push(Installable { source: file, label: entry.name });
+                let known = match &self.spec.packages {
+                    Packages::Named(known) => known(&entry.name),
+                    Packages::Formats(formats) => {
+                        let head = folders.read_range(&file, 0, 512).await.unwrap_or_default();
+                        installs::format(&head).is_some_and(|f| formats.contains(&f))
                     }
-                    continue;
-                }
-                let head = folders.read_range(&file, 0, 512).await.unwrap_or_default();
-                if installs::format(&head).is_some_and(|f| self.spec.packages.contains(&f)) {
+                };
+                if known {
                     out.push(Installable { source: file, label: entry.name });
                 }
             }
@@ -229,7 +236,10 @@ impl<F: Flavor> Slots for ConsoleEmulator<F> {
                         },
                     ));
                 }
-                items.push(self.controls().keyboard_panel());
+                // An emulator that lists no keys (its own window sets them) gets no empty block.
+                if !self.spec.keys.is_empty() {
+                    items.push(self.controls().keyboard_panel());
+                }
                 items.extend(self.builds.update_items().await);
                 items
             }
