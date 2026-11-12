@@ -239,7 +239,9 @@ impl Firmware {
             ..row(
                 "Automatic updates",
                 String::new(),
-                "Nexus keeps the set release installed, checked every 6 hours".into(),
+                "Nexus keeps the set release installed, checked every 6 hours. Nintendo's firmware: check that \
+                 you may use it where you live."
+                    .into(),
                 Tone::Neutral,
             )
         });

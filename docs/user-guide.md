@@ -262,9 +262,8 @@ Some emulator notes:
   build from before build-150, still reads `~/.local/share/eden`: set **Lichii data** on
   Lichii's page to that folder. For firmware and keys, use the
   **Firmware** block on Lichii's page. It shows the firmware installed and the update that runs,
-  with a bar while it downloads. Turn on **Automatic updates** there (the same setting as **Keep
-  the firmware up to date** in its settings), or press **Update now**. Nexus then downloads the
-  **Firmware release** set in Lichii's settings from
+  with a bar while it downloads. Turn on **Automatic updates** there, or press **Update now**. Nexus
+  then downloads the **Firmware release** set in that block from
   [THZoria/NX_Firmware](https://github.com/THZoria/NX_Firmware), checks its SHA-256 against the
   one GitHub gives, and puts it in place of the firmware in that folder. Lichii uses it from its next
   start. `prod.keys` and any `title.keys` from the versioned archive at
@@ -277,6 +276,9 @@ Some emulator notes:
   The badge beside the button names the firmware version Nexus installed. This is
   Nintendo's firmware: check that you may use it where you live. If an update fails, the old
   firmware stays.
+  Games have internet access: **Airplane mode** in Lichii's settings is off. Turn it on to keep
+  every Switch game offline. Lichii's own window has an airplane mode setting too, and Nexus's
+  setting wins over it.
 - **PC**: a Windows game runs through umu-launcher (Proton) or Wine. The PC page has **Install
   umu-launcher**, and then **Update umu-launcher**. On Linux a Windows game runs in a sandbox:
   see [PC games and your files](#pc-games-and-your-files).

@@ -1195,7 +1195,9 @@ fn downloading_block() -> FakeService {
         },
         BlockRow {
             label: "Automatic updates".into(),
-            hint: "Nexus keeps the set release installed, checked every 6 hours".into(),
+            hint: "Nexus keeps the set release installed, checked every 6 hours. Nintendo's firmware: check that \
+                       you may use it where you live."
+                .into(),
             action: Some("auto".into()),
             switch: Some(true),
             ..BlockRow::default()

@@ -40,9 +40,10 @@ write = true
 [[permissions.filesystem]]
 folder = "packages"
 
-# Lichii's settings, as its window saves them (qt-config.ini): games start with them, and with
-# players 1 to 4 on the controllers you have. Read only; a restore from Settings → Backup
-# writes it, as the host. The folder names keep Eden's name: backups and mappings use them.
+# Lichii's settings, as its window saves them (qt-config.ini): games start with them, with
+# airplane mode as set in Nexus and players 1 to 4 on the controllers you have. Read only; a restore from
+# Settings → Backup writes it, as the host. The folder names keep Eden's name: backups and
+# mappings use them.
 [[permissions.filesystem]]
 folder = "eden-config"
 default = "~/.config/lichii"
