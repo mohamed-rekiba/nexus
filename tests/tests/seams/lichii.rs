@@ -869,6 +869,44 @@ async fn set_firmware_release(test: &TestCore, version: &str) {
     type_firmware_release(test, version).await.unwrap();
 }
 
+/// With Automatic updates on, a read of the panel checks for the firmware release again once
+/// 6 hours have passed, and not before.
+#[tokio::test]
+async fn automatic_updates_check_again_after_6_hours_and_not_before() {
+    let (test, _games, _eden) = with_eden(&[]).await;
+    serve_firmware(&test.http, FIRMWARE, stored_zip(&[("1b.nca", b"nca")]), None);
+    turn_on_firmware_updates(&test).await;
+    test.core.dispatch(Command::Navigate(nexus_core::Route::Emulators)).await.unwrap();
+    firmware_settles(&test).await;
+    // The first check installs the firmware; a later one finds it up to date.
+    assert!(firmware_status(&test).starts_with("Updated firmware"), "{}", firmware_status(&test));
+
+    test.host.clock.advance(std::time::Duration::from_secs(5 * 60 * 60)).await;
+    test.core.dispatch(Command::Navigate(nexus_core::Route::Emulators)).await.unwrap();
+    firmware_settles(&test).await;
+    assert!(firmware_status(&test).starts_with("Updated firmware"), "no check before 6 hours");
+
+    test.host.clock.advance(std::time::Duration::from_secs(2 * 60 * 60)).await;
+    test.core.dispatch(Command::Navigate(nexus_core::Route::Emulators)).await.unwrap();
+    firmware_settles(&test).await;
+    assert!(firmware_status(&test).contains("is up to date"), "a check after 6 hours: {}", firmware_status(&test));
+}
+
+/// A firmware settings file that doesn't read gives the defaults, and the Firmware block says
+/// so: the player would otherwise not know why the release changed.
+#[tokio::test]
+async fn a_firmware_settings_file_that_doesn_t_read_is_shown_in_the_block() {
+    let (test, _games, _eden) = with_eden(&[]).await;
+    let plugin = test.data_dir().join("plugins/emu-lichii");
+    std::fs::create_dir_all(&plugin).unwrap();
+    std::fs::write(plugin.join("firmware-settings.json"), b"not json").unwrap();
+    test.core.dispatch(Command::Navigate(nexus_core::Route::Emulators)).await.unwrap();
+    let rows = firmware_rows(&test.core).unwrap();
+    let warning = row(&rows, "Firmware settings").expect("a row about the settings file");
+    assert!(warning.hint.contains("firmware-settings.json"), "{}", warning.hint);
+    assert_eq!(row(&rows, "Firmware release").unwrap().value, "22.5.0", "the defaults apply");
+}
+
 /// Lichii lists no keyboard keys (its own window sets them), so its panel has no Keyboard
 /// controls block: an empty one would say nothing.
 #[tokio::test]
