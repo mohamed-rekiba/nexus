@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.4](https://github.com/mohamed-rekiba/nexus/compare/v0.16.3...v0.16.4) (2026-11-12)
+
+
+### Bug Fixes
+
+* **app:** log why a hardware probe gives nothing ([#71](https://github.com/mohamed-rekiba/nexus/issues/71)) ([4578367](https://github.com/mohamed-rekiba/nexus/commit/4578367df0592eb23d0582b01967f9d580bcf1e2))
+
 ## [0.16.3](https://github.com/mohamed-rekiba/nexus/compare/v0.16.2...v0.16.3) (2026-11-11)
 
 
