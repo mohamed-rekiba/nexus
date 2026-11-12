@@ -41,12 +41,40 @@ impl Hardware for SystemHardware {
     }
 
     fn controllers(&self) -> Vec<nexus_api::Controller> {
-        let mut probe = std::process::Command::new(match std::env::current_exe() {
+        let exe = match std::env::current_exe() {
             Ok(exe) => exe,
-            Err(_) => return Vec::new(),
-        });
+            Err(error) => {
+                tracing::warn!(%error, "no controllers: the launcher's own path is unknown; games use the keyboard");
+                return Vec::new();
+            }
+        };
+        let mut probe = std::process::Command::new(exe);
         probe.arg("--probe-controllers");
-        run_probe(probe, CONTROLLER_PROBE_TIME).map(|text| crate::controller_probe::parse(&text)).unwrap_or_default()
+        // A controller probe that gives nothing leaves games on the keyboard, so say why.
+        match run_probe(probe, CONTROLLER_PROBE_TIME) {
+            ProbeRun::Printed(text) => {
+                let found = crate::controller_probe::parse(&text);
+                if found.is_empty() {
+                    tracing::info!("the controller probe found no controllers; games use the keyboard");
+                }
+                found
+            }
+            ProbeRun::NoStart(error) => {
+                tracing::warn!(
+                    %error,
+                    "the controller probe did not start; games use the keyboard: restart the launcher after a rebuild"
+                );
+                Vec::new()
+            }
+            ProbeRun::Failed(code) => {
+                tracing::warn!(?code, "the controller probe failed; games use the keyboard");
+                Vec::new()
+            }
+            ProbeRun::TooSlow => {
+                tracing::warn!("the controller probe took too long; games use the keyboard");
+                Vec::new()
+            }
+        }
     }
 }
 
@@ -99,28 +127,64 @@ fn probe_gpus(data_dir: &std::path::Path) -> Option<Vec<Gpu>> {
     let mut probe = std::process::Command::new(std::env::current_exe().ok()?);
     // MoltenVK writes its log to standard output.
     probe.arg("--probe-gpu").env("MVK_CONFIG_LOG_LEVEL", "0").arg("--data-dir").arg(data_dir);
-    run_probe(probe, PROBE_TIME).map(|text| crate::gpu_probe::parse(&text))
+    match run_probe(probe, PROBE_TIME) {
+        ProbeRun::Printed(text) => Some(crate::gpu_probe::parse(&text)),
+        ProbeRun::NoStart(error) => {
+            tracing::warn!(%error, "the graphics probe did not start; the cards come from the system instead");
+            None
+        }
+        ProbeRun::Failed(code) => {
+            tracing::warn!(?code, "the graphics probe failed; the cards come from the system instead");
+            None
+        }
+        ProbeRun::TooSlow => {
+            tracing::warn!("the graphics probe took too long; the cards come from the system instead");
+            None
+        }
+    }
 }
 
-/// Runs a probe child process for at most `time`, and gives what it printed. `None` when it
-/// failed or took too long.
-fn run_probe(mut probe: std::process::Command, time: Duration) -> Option<String> {
-    let mut child = probe.stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).spawn().ok()?;
+/// What a probe child did. Each way it can go wrong is kept apart, so a probe that gives
+/// nothing leaves a reason in the log instead of a silent fall back.
+enum ProbeRun {
+    /// It exited cleanly and printed this.
+    Printed(String),
+    /// It never started: the program is missing, or the system refused to run it.
+    NoStart(std::io::Error),
+    /// It ran and exited without success, with this exit code if it had one.
+    Failed(Option<i32>),
+    /// It was still running at the time limit.
+    TooSlow,
+}
+
+/// Runs a probe child process for at most `time`, and says what it did.
+fn run_probe(mut probe: std::process::Command, time: Duration) -> ProbeRun {
+    let mut child = match probe.stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).spawn() {
+        Ok(child) => child,
+        Err(error) => return ProbeRun::NoStart(error),
+    };
     let started = std::time::Instant::now();
     loop {
         match child.try_wait() {
             Ok(Some(status)) => {
                 if !status.success() {
-                    return None;
+                    return ProbeRun::Failed(status.code());
                 }
                 let mut text = String::new();
-                std::io::Read::read_to_string(&mut child.stdout.take()?, &mut text).ok()?;
-                return Some(text);
+                let Some(mut out) = child.stdout.take() else { return ProbeRun::Failed(status.code()) };
+                return match std::io::Read::read_to_string(&mut out, &mut text) {
+                    Ok(_) => ProbeRun::Printed(text),
+                    Err(error) => ProbeRun::NoStart(error),
+                };
             }
             Ok(None) if started.elapsed() < time => std::thread::sleep(Duration::from_millis(50)),
-            _ => {
+            Ok(None) => {
                 let _ = child.kill();
-                return None;
+                return ProbeRun::TooSlow;
+            }
+            Err(error) => {
+                let _ = child.kill();
+                return ProbeRun::NoStart(error);
             }
         }
     }
@@ -298,5 +362,43 @@ mod tests {
             (specs.cpu.as_str(), specs.cores, specs.threads, specs.memory_gb),
             ("Intel(R) Core(TM) i7-12700K", 12, 20, 32.0)
         );
+    }
+
+    // The probe outcomes, so a silent keyboard-only launch leaves a reason in the log.
+    #[cfg(unix)]
+    mod probe {
+        use std::process::Command;
+        use std::time::Duration;
+
+        use super::super::{ProbeRun, run_probe};
+
+        const LONG: Duration = Duration::from_secs(5);
+
+        #[test]
+        fn a_clean_exit_gives_what_it_printed() {
+            let mut echo = Command::new("printf");
+            echo.arg("one\ntwo\n");
+            assert!(matches!(run_probe(echo, LONG), ProbeRun::Printed(text) if text == "one\ntwo\n"));
+        }
+
+        #[test]
+        fn a_non_zero_exit_keeps_the_code() {
+            let mut fails = Command::new("sh");
+            fails.args(["-c", "exit 3"]);
+            assert!(matches!(run_probe(fails, LONG), ProbeRun::Failed(Some(3))));
+        }
+
+        #[test]
+        fn a_program_that_isn_t_there_doesn_t_start() {
+            let missing = Command::new("nexus-no-such-probe-program");
+            assert!(matches!(run_probe(missing, LONG), ProbeRun::NoStart(_)));
+        }
+
+        #[test]
+        fn a_program_past_the_limit_is_too_slow() {
+            let mut slow = Command::new("sleep");
+            slow.arg("5");
+            assert!(matches!(run_probe(slow, Duration::from_millis(100)), ProbeRun::TooSlow));
+        }
     }
 }
