@@ -147,7 +147,7 @@ async fn emulators(backups: &Path) -> (TestCore, Vec<(&'static str, tempfile::Te
         .boot_core()
         .await;
     let mut folders = Vec::new();
-    for name in ["eden-data", "eden-config", "shadps4-data", "kyty-data"] {
+    for name in ["lichii-data", "lichii-config", "shadps4-data", "kyty-data"] {
         let dir = tempfile::tempdir().unwrap();
         test.core.dispatch(Command::SetFolders { name: name.into(), paths: vec![dir.path().into()] }).await.unwrap();
         folders.push((name, dir));
@@ -165,10 +165,10 @@ fn at<'a>(folders: &'a [(&str, tempfile::TempDir)], name: &str) -> &'a Path {
 async fn the_emulators_keys_firmware_settings_and_saves_go_to_another_computer() {
     let backups = tempfile::tempdir().unwrap();
     let (a, a_folders) = emulators(backups.path()).await;
-    write(&at(&a_folders, "eden-data").join("keys/prod.keys"), b"keys");
-    write(&at(&a_folders, "eden-data").join("nand/system/Contents/registered/fw.nca"), b"firmware");
-    write(&at(&a_folders, "eden-data").join("log/eden_log.txt"), b"not an item");
-    write(&at(&a_folders, "eden-config").join("qt-config.ini"), b"[UI]");
+    write(&at(&a_folders, "lichii-data").join("keys/prod.keys"), b"keys");
+    write(&at(&a_folders, "lichii-data").join("nand/system/Contents/registered/fw.nca"), b"firmware");
+    write(&at(&a_folders, "lichii-data").join("log/eden_log.txt"), b"not an item");
+    write(&at(&a_folders, "lichii-config").join("qt-config.ini"), b"[UI]");
     write(&at(&a_folders, "shadps4-data").join("config.json"), b"{}");
     write(&at(&a_folders, "shadps4-data").join("savedata/1/CUSA1/SAVE.DAT"), b"ps4 save");
     write(&at(&a_folders, "shadps4-data").join("shader/big.bin"), b"cache");
@@ -179,10 +179,10 @@ async fn the_emulators_keys_firmware_settings_and_saves_go_to_another_computer()
     let (b, b_folders) = emulators(backups.path()).await;
     b.core.dispatch(Command::Backup(BackupCmd::Restore(file))).await.unwrap();
     let read = |folder: &str, path: &str| std::fs::read(at(&b_folders, folder).join(path)).ok();
-    assert_eq!(read("eden-data", "keys/prod.keys").as_deref(), Some(&b"keys"[..]));
-    assert_eq!(read("eden-data", "nand/system/Contents/registered/fw.nca").as_deref(), Some(&b"firmware"[..]));
-    assert_eq!(read("eden-data", "log/eden_log.txt"), None, "Eden's log isn't an item");
-    assert_eq!(read("eden-config", "qt-config.ini").as_deref(), Some(&b"[UI]"[..]));
+    assert_eq!(read("lichii-data", "keys/prod.keys").as_deref(), Some(&b"keys"[..]));
+    assert_eq!(read("lichii-data", "nand/system/Contents/registered/fw.nca").as_deref(), Some(&b"firmware"[..]));
+    assert_eq!(read("lichii-data", "log/eden_log.txt"), None, "Eden's log isn't an item");
+    assert_eq!(read("lichii-config", "qt-config.ini").as_deref(), Some(&b"[UI]"[..]));
     assert_eq!(read("shadps4-data", "savedata/1/CUSA1/SAVE.DAT").as_deref(), Some(&b"ps4 save"[..]));
     assert_eq!(read("shadps4-data", "config.json").as_deref(), Some(&b"{}"[..]));
     assert_eq!(read("shadps4-data", "shader/big.bin"), None, "shadPS4's caches stay out");

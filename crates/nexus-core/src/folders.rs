@@ -64,6 +64,22 @@ pub(crate) fn roots(
     roots
 }
 
+/// Copies the player's folders saved under a renamed folder's old name (`was` in its grant) to
+/// its new name, while the new name has none. The old name keeps them: another plugin may still
+/// ask for it. A failed save is logged, and the next start tries again.
+pub(crate) fn move_renamed<'a>(config: &ConfigService, grants: impl IntoIterator<Item = &'a PathGrant>) {
+    for grant in grants {
+        let Some(was) = &grant.was else { continue };
+        let old = config.get(&["app", "folders", was]);
+        if old.is_null() || !config.get(&["app", "folders", &grant.folder]).is_null() {
+            continue;
+        }
+        if let Err(e) = config.set(&["app", "folders", &grant.folder], old) {
+            tracing::warn!(folder = %grant.folder, %was, %e, "could not move the folders saved under the old name");
+        }
+    }
+}
+
 /// The most of a list file read: Steam's library list is a few kilobytes.
 const MAX_LIST: u64 = 256 * 1024;
 
@@ -414,6 +430,28 @@ pub(crate) fn resolve(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn renamed(folder: &str, was: &str) -> PathGrant {
+        serde_json::from_value(serde_json::json!({ "folder": folder, "was": was })).unwrap()
+    }
+
+    #[test]
+    fn a_folder_saved_under_its_old_name_is_saved_under_the_new_one() {
+        let config = ConfigService::in_memory();
+        config.set(&["app", "folders", "eden-data"], serde_json::json!(["/mine"])).unwrap();
+        move_renamed(&config, [&renamed("lichii-data", "eden-data")]);
+        assert_eq!(config.get(&["app", "folders", "lichii-data"]), serde_json::json!(["/mine"]));
+        assert_eq!(config.get(&["app", "folders", "eden-data"]), serde_json::json!(["/mine"]), "kept for others");
+    }
+
+    #[test]
+    fn a_folder_saved_under_the_new_name_wins_over_the_old_one() {
+        let config = ConfigService::in_memory();
+        config.set(&["app", "folders", "eden-data"], serde_json::json!(["/old"])).unwrap();
+        config.set(&["app", "folders", "lichii-data"], serde_json::json!(["/new"])).unwrap();
+        move_renamed(&config, [&renamed("lichii-data", "eden-data")]);
+        assert_eq!(config.get(&["app", "folders", "lichii-data"]), serde_json::json!(["/new"]));
+    }
 
     /// The folders of a plugin that asks for `packages` and `games`, with the player's `packages`
     /// and `games` mapped to the given folders.

@@ -43,21 +43,24 @@ folder = "packages"
 # Lichii's own settings file, as its window saves it (qt-config.ini): games Nexus starts with an
 # official build start with it, with airplane mode as set in Nexus and players 1 to 4 on the
 # controllers you have (see src/config.rs). Your own build and Lichii's window read it alone.
-# Read only; a restore from Settings → Backup writes it, as the host. The folder names keep Eden's name: backups and
-# mappings use them.
+# Read only; a restore from Settings → Backup writes it, as the host. Nexus 0.16.4 and older
+# named it eden-config: a folder the player set under that name still counts (`was`).
 [[permissions.filesystem]]
-folder = "eden-config"
+folder = "lichii-config"
+was = "eden-config"
 default = "~/.config/lichii"
 title = "Lichii settings"
 after = "own_build"
 
 # Lichii's data folder: keys, firmware, saves and mods, which every Lichii build shares. The
 # plugin writes firmware (nand/system) and the keys of the same version (keys), when firmware
-# updates are on or the player asks. Settings → Backup saves the folder, and a restore writes it, as the host. From
-# build-150 on, Lichii keeps its own folders, in place of Eden's (~/.local/share/eden): its
-# window imports Eden's data once, and eden-cli starts no game until then.
+# updates are on or the player asks. Settings → Backup saves the folder, and a restore writes
+# it, as the host. From build-150 on, Lichii keeps its own folders, in place of Eden's
+# (~/.local/share/eden): its window imports Eden's data once, and eden-cli starts no game until
+# then. Nexus 0.16.4 and older named it eden-data (`was`).
 [[permissions.filesystem]]
-folder = "eden-data"
+folder = "lichii-data"
+was = "eden-data"
 write = true
 default = "~/.local/share/lichii"
 title = "Lichii data"

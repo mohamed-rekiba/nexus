@@ -108,8 +108,8 @@ async fn lichii_s_folders_default_to_lichii_s_own() {
     test.core.dispatch(Command::Navigate(nexus_core::Route::Plugin(lichii()))).await.unwrap();
     let folders = test.core.view().plugin_page.expect("Lichii's page").folders;
     let default = |name: &str| folders.iter().find(|f| f.name == name).map(|f| f.default.clone());
-    assert_eq!(default("eden-data"), Some(home.path().join(".local/share/lichii").display().to_string()));
-    assert_eq!(default("eden-config"), Some(home.path().join(".config/lichii").display().to_string()));
+    assert_eq!(default("lichii-data"), Some(home.path().join(".local/share/lichii").display().to_string()));
+    assert_eq!(default("lichii-config"), Some(home.path().join(".config/lichii").display().to_string()));
 }
 
 #[tokio::test]
@@ -297,7 +297,7 @@ async fn with_eden_cli(controllers: Vec<Controller>) -> (TestCore, tempfile::Tem
     std::fs::write(eden.path().join("qt-config.ini"), QT_CONFIG).unwrap();
     let test = host.built_in(nexus_api::PluginBox::code(LichiiPlugin)).boot_core().await;
     extract_appimages(test.spawner.clone());
-    for (name, path) in [("games", games.path()), ("eden-config", eden.path())] {
+    for (name, path) in [("games", games.path()), ("lichii-config", eden.path())] {
         test.core.dispatch(Command::SetFolders { name: name.into(), paths: vec![path.into()] }).await.unwrap();
     }
     test.core.dispatch(Command::InstallEmulator { plugin: lichii(), version: None }).await.unwrap();
@@ -632,7 +632,7 @@ async fn with_eden_saved(
         std::fs::write(registered.join(name), b"old firmware").unwrap();
     }
     test.core
-        .dispatch(Command::SetFolders { name: "eden-data".into(), paths: vec![eden.path().into()] })
+        .dispatch(Command::SetFolders { name: "lichii-data".into(), paths: vec![eden.path().into()] })
         .await
         .unwrap();
     (test, games, eden)
@@ -905,6 +905,25 @@ async fn a_firmware_settings_file_that_doesn_t_read_is_shown_in_the_block() {
     let warning = row(&rows, "Firmware settings").expect("a row about the settings file");
     assert!(warning.hint.contains("firmware-settings.json"), "{}", warning.hint);
     assert_eq!(row(&rows, "Firmware release").unwrap().value, "22.5.0", "the defaults apply");
+}
+
+/// Nexus 0.16.4 and older named Lichii's folders after Eden: a data folder the player set
+/// under the old name is still Lichii's data folder.
+#[tokio::test]
+async fn lichii_s_data_folder_set_under_its_old_name_still_counts() {
+    let eden = tempfile::tempdir().unwrap();
+    let registered = eden.path().join("nand/system/Contents/registered");
+    std::fs::create_dir_all(&registered).unwrap();
+    std::fs::write(registered.join("old.nca"), b"old firmware").unwrap();
+    let host = FakeHost::new().platform(Some(Platform::Linux));
+    let config = serde_json::json!({ "app": { "folders": { "eden-data": [eden.path()] } } });
+    std::fs::write(host.data_dir().join("config.json"), config.to_string()).unwrap();
+    let test = host.built_in(nexus_api::PluginBox::code(LichiiPlugin)).boot_core().await;
+
+    test.core.dispatch(Command::Navigate(nexus_core::Route::Emulators)).await.unwrap();
+
+    let rows = firmware_rows(&test.core).unwrap();
+    assert_eq!(row(&rows, "Installed").unwrap().value, "Not from Nexus", "the firmware in that folder");
 }
 
 /// Lichii lists no keyboard keys (its own window sets them), so its panel has no Keyboard

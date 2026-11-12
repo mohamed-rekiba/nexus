@@ -211,6 +211,10 @@ pub struct PathGrant {
     /// Steam's own folder lists its libraries on other drives.
     #[serde(default)]
     pub listed_in: Option<ListedFolders>,
+    /// The folder's name before a rename. At start, the host copies the player's folders saved
+    /// under it to `folder`, while `folder` has none.
+    #[serde(default)]
+    pub was: Option<String>,
 }
 
 /// Folders a file lists, read by the host: each value of `key` in `file` (a path in the

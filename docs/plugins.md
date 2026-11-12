@@ -430,6 +430,7 @@ host saves the mapping under `app.folders.<name>` as a list of paths.
 | `title` | What Settings calls the folder. The name when none. |
 | `help` | A line under the title. |
 | `after` | On the plugin page, the key of the setting that this folder's row follows. At the end of the settings when none. |
+| `was` | The folder's name before a rename. At start, the host copies the player's folders saved under it to the new name, while the new name has none. |
 | `listed_in` | More folders, read from a file in a default folder: `{ file, key, holds }`. Each value of `key` in `file` (Valve's text format) that is an absolute path to a folder holding `holds`. Read only. |
 
 Two host folders are shared (`SHARED_FOLDERS`). Settings shows them once, for every plugin

@@ -173,6 +173,9 @@ async fn a_folder_grant_names_a_host_folder_never_a_path() {
             "folder = \"steam\"\nwrite = true\nlisted_in = { file = \"list.vdf\", key = \"path\", holds = \"steamapps\" }",
         ))
         .plugin(plugin("listed", "folder = \"steam\"\nlisted_in = { file = \"list.vdf\", key = \"path\", holds = \"steamapps\" }"))
+        // A renamed folder's old name is a name too, never a path.
+        .plugin(plugin("bad-was", "folder = \"new-data\"\nwas = \"/home\""))
+        .plugin(plugin("renamed", "folder = \"new-data\"\nwas = \"old-data\""))
         .boot()
         .await;
 
@@ -187,6 +190,8 @@ async fn a_folder_grant_names_a_host_folder_never_a_path() {
         "{report:?}"
     );
     assert_eq!(report.rejection(&id("listed")), None);
+    assert!(matches!(report.rejection(&id("bad-was")), Some(LoadError::Invalid(m)) if m.contains("was")), "{report:?}");
+    assert_eq!(report.rejection(&id("renamed")), None);
 }
 
 #[tokio::test]

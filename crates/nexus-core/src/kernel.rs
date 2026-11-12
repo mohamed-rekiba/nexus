@@ -511,6 +511,7 @@ impl Kernel {
         }
 
         let config = config.unwrap_or_else(|| Arc::new(ConfigService::open(host.data_dir.join("config.json"))));
+        crate::folders::move_renamed(&config, records.values().flat_map(|r| r.manifest.permissions.filesystem.iter()));
         let ports = Ports {
             http,
             spawner,
@@ -876,6 +877,12 @@ fn validate(host: &HostConfig, manifest: &PluginManifest, origin: Origin) -> Res
         if !nexus_api::PathGrant::valid_name(&grant.folder) {
             return Err(LoadError::Invalid(format!(
                 "folder name {:?}: use lowercase letters, digits and -",
+                grant.folder
+            )));
+        }
+        if let Some(was) = grant.was.as_deref().filter(|was| !nexus_api::PathGrant::valid_name(was)) {
+            return Err(LoadError::Invalid(format!(
+                "folder {:?}: was {was:?}: use lowercase letters, digits and -",
                 grant.folder
             )));
         }

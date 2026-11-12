@@ -41,9 +41,9 @@ const CONSOLE: &str = "SWITCH";
 /// The folder of Switch games in the games folder.
 pub const FOLDER: &str = "Switch";
 /// Lichii's settings folder, where its window saves `qt-config.ini`.
-pub const CONFIG: &str = "eden-config";
+pub const CONFIG: &str = "lichii-config";
 /// Lichii's data folder, which every Lichii build shares: keys, firmware, saves and mods.
-pub const DATA: &str = "eden-data";
+pub const DATA: &str = "lichii-data";
 /// The exit code eden-cli asks to be started again with (`kRestartExitCode` in Lichii).
 const RESTART_CODE: i32 = 75;
 
