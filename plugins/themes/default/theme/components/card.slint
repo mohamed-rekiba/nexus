@@ -17,7 +17,7 @@ export component Card inherits Rectangle {
     in property <length> cover-height: self.width * 1.5;
     callback activated();
 
-    property <bool> focused: (Vm.screen == "home" || Nav.catalog) && Nav.zone == "grid" && Nav.selected-key == root.game.key;
+    property <bool> focused: (Nav.library || Nav.catalog) && Nav.zone == "grid" && Nav.selected-key == root.game.key;
     property <bool> lit: root.focused || touch.has-hover;
     property <bool> small: root.width < 200 * Look.px;
     property <bool> offered: root.game.releases > 0;

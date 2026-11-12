@@ -56,6 +56,32 @@ fn the_d_pad_moves_the_selection_and_the_buttons_open_and_go_back() {
 }
 
 #[test]
+fn a_key_move_in_the_library_grid_highlights_the_selected_card() {
+    let mut host = tv();
+    // Open the Library grid from the top bar: Up to the bar, Right to Library, Cross to open.
+    for button in [PadButton::Up, PadButton::Right, PadButton::South] {
+        press(&mut host, button);
+    }
+    host.settle();
+    assert_eq!(host.count("default-game"), 3, "the Library grid is open");
+
+    // A move puts the focus highlight on a card. The card carries it as `accessible-item-selected`,
+    // the same signal the mouse lights it with; before the fix the Library's cards never lit from
+    // the keys, only from the pointer.
+    press(&mut host, PadButton::Right);
+    rest(&mut host);
+    let first: Vec<&str> = ["Alpha", "Beta", "Gamma"].into_iter().filter(|t| !host.focused(t).is_empty()).collect();
+    assert_eq!(first.len(), 1, "one Library card carries the keyboard highlight, not none: {first:?}");
+
+    // The highlight follows the keys to the next card.
+    press(&mut host, PadButton::Right);
+    rest(&mut host);
+    let next: Vec<&str> = ["Alpha", "Beta", "Gamma"].into_iter().filter(|t| !host.focused(t).is_empty()).collect();
+    assert_eq!(next.len(), 1, "still one card is highlighted: {next:?}");
+    assert_ne!(first, next, "the highlight follows the keys to the next card");
+}
+
+#[test]
 fn the_shoulder_button_goes_to_the_next_top_bar_item_and_the_guide_button_home() {
     let mut host = composed(|h| {
         h.plugin(FakeCatalog::new("emu-a").system("PS4").games(["Alpha", "Beta", "Gamma"]).build())

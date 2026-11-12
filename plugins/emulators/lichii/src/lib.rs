@@ -52,7 +52,7 @@ const GAME_SETTINGS: &str = "eden-cli/config.ini";
 /// Lichii settings. Its other settings live in its own config file.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(crate = "nexus_api::serde", deny_unknown_fields)]
-#[schemars(crate = "nexus_api::schemars", extend("x-order" = ["own_build", "fullscreen", "gpu_split", "firmware_updates", "firmware_release"]))]
+#[schemars(crate = "nexus_api::schemars", extend("x-order" = ["own_build", "fullscreen", "gpu_split", "airplane_mode"]))]
 pub struct Settings {
     #[serde(default = "yes")]
     #[schemars(title = "Full screen")]
@@ -62,6 +62,11 @@ pub struct Settings {
     #[serde(default)]
     #[schemars(title = "Split the GPU work")]
     pub gpu_split: GpuSplit,
+    /// Turns off the internet for games, as on a Switch in airplane mode. Off by default, so
+    /// online games can connect. Lichii's own default is on.
+    #[serde(default)]
+    #[schemars(title = "Airplane mode")]
+    pub airplane_mode: bool,
     /// Runs the Lichii you built or installed: from the folder you map as lichii-build, or
     /// from your PATH. Installing an official build turns this off. Saves are shared: Lichii
     /// keeps them in its data folder.
@@ -71,15 +76,17 @@ pub struct Settings {
     /// Downloads the set firmware release from github.com/THZoria/NX_Firmware
     /// into Lichii's data folder, in place of the firmware there, and the keys of the same
     /// version from files.prodkeys.net.
-    /// Nintendo's firmware: check that you may use it where you live.
+    /// Nintendo's firmware: check that you may use it where you live. Only the Firmware block
+    /// sets it (Automatic updates), so it isn't in the schema the settings list is made from.
     #[serde(default)]
-    #[schemars(title = "Keep the firmware up to date")]
+    #[schemars(skip)]
     pub firmware_updates: bool,
     /// The Switch firmware release to install, like 22.5.0, with the keys of the same version:
     /// firmware newer than its keys can't be read. Both THZoria/NX_Firmware and
-    /// files.prodkeys.net must have it.
+    /// files.prodkeys.net must have it. Only the Firmware block sets it, so it isn't in the
+    /// schema the settings list is made from.
     #[serde(default = "default_firmware_release")]
-    #[schemars(title = "Firmware release")]
+    #[schemars(skip)]
     pub firmware_release: String,
     /// The keys version of Nexus 0.16 and older, which the firmware didn't follow. Read so
     /// that saved settings still load, and not used: the firmware release replaces it.
@@ -101,6 +108,7 @@ impl Default for Settings {
         Self {
             fullscreen: true,
             gpu_split: GpuSplit::default(),
+            airplane_mode: false,
             own_build: false,
             firmware_updates: false,
             firmware_release: default_firmware_release(),
@@ -340,9 +348,9 @@ impl Lichii {
         self.emu.host().storage.exists(&cli).await.ok()?.then_some(cli)
     }
 
-    /// Writes the settings file games start with: Lichii's own settings, with players 1 to 4
-    /// on the controllers connected now.
-    async fn game_settings(&self) -> PluginResult<RelPath> {
+    /// Writes the settings file games start with: Lichii's own settings, with `airplane_mode`
+    /// and players 1 to 4 on the controllers connected now.
+    async fn game_settings(&self, airplane_mode: bool) -> PluginResult<RelPath> {
         let folders = &self.emu.host().folders;
         let mut base = String::new();
         if let Some(root) = folders.roots(CONFIG).await.unwrap_or_default().first() {
@@ -356,7 +364,11 @@ impl Lichii {
             None => Vec::new(),
         };
         let path = RelPath::new(GAME_SETTINGS)?;
-        self.emu.host().storage.write(&path, controls::settings_file(&base, &connected).as_bytes()).await?;
+        self.emu
+            .host()
+            .storage
+            .write(&path, controls::settings_file(&base, &connected, airplane_mode).as_bytes())
+            .await?;
         Ok(path)
     }
 }
@@ -386,7 +398,8 @@ impl Launcher for Lichii {
         });
         let program = match cli {
             Some(cli) => {
-                args.extend(["-c".into(), LaunchArg::path(Location::Data(self.game_settings().await?))]);
+                let file = self.game_settings(settings.airplane_mode).await?;
+                args.extend(["-c".into(), LaunchArg::path(Location::Data(file))]);
                 Location::Data(cli)
             }
             None => run.program,

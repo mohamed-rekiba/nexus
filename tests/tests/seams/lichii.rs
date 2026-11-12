@@ -266,9 +266,10 @@ const QT_CONFIG: &str = "[Renderer]\nbackend\\default=false\nbackend=1\n\n[Contr
 player_0_connected\\default=true\nplayer_0_connected=true\n\
 player_0_button_a\\default=true\nplayer_0_button_a=\"engine:keyboard,code:67,toggle:0\"\n";
 
-#[tokio::test]
-async fn games_start_in_eden_cli_with_a_settings_file_that_gives_each_controller_a_player() {
-    let host = FakeHost::new().platform(Some(Platform::Linux)).controllers(vec![xbox(0), xbox(1)]);
+/// A core with Lichii's official build, its eden-cli, Lichii's `qt-config.ini` ([`QT_CONFIG`])
+/// and Celeste, and `controllers` connected.
+async fn with_eden_cli(controllers: Vec<Controller>) -> (TestCore, tempfile::TempDir, tempfile::TempDir) {
+    let host = FakeHost::new().platform(Some(Platform::Linux)).controllers(controllers);
     let releases = serde_json::json!([release(host.http(), TAG)]);
     host.http().serve(RELEASES, serde_json::to_vec(&releases).unwrap());
     let games = tempfile::tempdir().unwrap();
@@ -285,13 +286,24 @@ async fn games_start_in_eden_cli_with_a_settings_file_that_gives_each_controller
     std::fs::create_dir_all(app_run(&test).parent().unwrap().join("usr/bin")).unwrap();
     std::fs::write(app_run(&test).parent().unwrap().join("usr/bin/eden-cli"), b"\x7fELF eden-cli").unwrap();
     test.core.dispatch(Command::Library(nexus_core::LibraryCmd::Refresh)).await.unwrap();
+    (test, games, eden)
+}
 
+/// Starts Celeste and returns its eden-cli command: the second process, after the AppImage's
+/// unpacking.
+async fn launch_celeste(test: &TestCore) -> nexus_testkit::SpawnedProcess {
     test.core
         .dispatch(Command::Session(SessionCmd::Launch("emu-lichii:01002B30028F6000".parse().unwrap())))
         .await
         .unwrap();
+    test.spawner.wait_for(2).await
+}
 
-    let process = test.spawner.wait_for(2).await;
+#[tokio::test]
+async fn games_start_in_eden_cli_with_a_settings_file_that_gives_each_controller_a_player() {
+    let (test, games, _eden) = with_eden_cli(vec![xbox(0), xbox(1)]).await;
+
+    let process = launch_celeste(&test).await;
     assert_eq!(process.command.program, app_run(&test).parent().unwrap().join("usr/bin/eden-cli"));
     let args = &process.command.args;
     assert_eq!(args[0], "-c");
@@ -302,6 +314,8 @@ async fn games_start_in_eden_cli_with_a_settings_file_that_gives_each_controller
     for line in [
         "[Renderer]".to_owned(),
         "backend=1".to_owned(),
+        "airplane_mode\\default=false".to_owned(),
+        "airplane_mode=false".to_owned(),
         "player_0_connected=true".to_owned(),
         "player_0_button_a\\default=false".to_owned(),
         format!("player_0_button_a=\"engine:sdl,port:0,guid:{guid},button:1\""),
@@ -320,6 +334,38 @@ async fn games_start_in_eden_cli_with_a_settings_file_that_gives_each_controller
     }
     assert!(!file.contains("engine:keyboard,code:67"), "player 1's keyboard keys give way to the controller");
     assert!(!file.contains("player_2_button_a="), "no third controller: player 3 stays as it was");
+}
+
+#[tokio::test]
+async fn settings_show_airplane_mode_as_a_switch_that_is_off_and_no_firmware_setting_twice() {
+    let (test, _games, _eden) = with_eden_cli(Vec::new()).await;
+    test.core.dispatch(Command::Navigate(nexus_core::Route::Settings)).await.unwrap();
+    let view = test.core.view();
+    let panel = view.settings.panels.iter().find(|p| p.slot.plugin == lichii()).expect("the Lichii panel");
+    let keys: Vec<_> = panel.fields.iter().map(|f| f.key.as_str()).collect();
+    assert_eq!(keys, ["own_build", "fullscreen", "gpu_split", "airplane_mode"], "the Firmware block has the rest");
+    let field = panel.fields.iter().find(|f| f.key == "airplane_mode").expect("an airplane mode field");
+    assert_eq!(field.label, "Airplane mode");
+    assert_eq!(field.kind, nexus_ui_api::FieldKind::Toggle);
+    assert_eq!(field.value, "false");
+}
+
+#[tokio::test]
+async fn a_game_starts_in_airplane_mode_once_the_player_turns_it_on() {
+    let (test, _games, _eden) = with_eden_cli(Vec::new()).await;
+    let on = Command::SetConfigField {
+        plugin: lichii(),
+        scope: ConfigScope::Emulator,
+        key: "airplane_mode".into(),
+        value: "true".into(),
+    };
+    test.core.dispatch(on).await.unwrap();
+
+    let process = launch_celeste(&test).await;
+
+    let file = std::fs::read_to_string(&process.command.args[1]).unwrap();
+    assert!(file.lines().any(|l| l == "airplane_mode=true"), "airplane mode on in:\n{file}");
+    assert!(!file.lines().any(|l| l == "airplane_mode=false"), "{file}");
 }
 
 /// A PFS0 of `files`, as an NSP or an NSZ holds them.
@@ -655,13 +701,7 @@ async fn nexus_checks_for_firmware_on_its_own_only_once_the_player_turns_it_on()
     assert!(!test.http.sent().iter().any(|u| u.contains("NX_Firmware/releases/tags")), "off by default");
     assert_eq!(firmware_badge(&test).as_deref(), Some("No firmware"));
 
-    let on = Command::SetConfigField {
-        plugin: lichii(),
-        scope: ConfigScope::Emulator,
-        key: "firmware_updates".into(),
-        value: "true".into(),
-    };
-    test.core.dispatch(on).await.unwrap();
+    turn_on_firmware_updates(&test).await;
     test.core.dispatch(Command::Navigate(nexus_core::Route::Emulators)).await.unwrap();
 
     assert_eq!(firmware_settles(&test).await, "Firmware 22.5.0");
@@ -745,7 +785,20 @@ async fn unavailable_matching_keys_name_the_version_and_preserve_existing_files(
     assert!(!test.http.sent().iter().any(|u| u.contains("/nx/")), "no firmware download without matching keys");
 }
 
-/// Sets Lichii's firmware release, as the player types it in Lichii's settings.
+/// Turns on automatic firmware updates with the Firmware block's switch, the one place that
+/// shows the setting.
+async fn turn_on_firmware_updates(test: &TestCore) {
+    test.core.dispatch(Command::Navigate(nexus_core::Route::Emulators)).await.unwrap();
+    let rows = firmware_rows(&test.core).unwrap();
+    let switch = row(&rows, "Automatic updates").unwrap();
+    assert_eq!(switch.switch, "off");
+    let flip =
+        Command::RunAction { plugin: lichii(), action: switch.action.clone(), game: None, args: switch.args.clone() };
+    test.core.dispatch(flip).await.unwrap();
+}
+
+/// Stores Lichii's firmware release as a saved setting, without the Firmware block row's check
+/// of the typed text: a bad value reaches the update, which must refuse it too.
 async fn set_firmware_release(test: &TestCore, version: &str) {
     let field = Command::SetConfigField {
         plugin: lichii(),
@@ -916,15 +969,7 @@ async fn deleted_firmware_is_restored_by_a_manual_update_despite_the_saved_versi
 async fn deleted_or_empty_firmware_bypasses_the_automatic_check_interval() {
     let (test, _games, eden) = with_eden(&[]).await;
     serve_firmware(&test.http, FIRMWARE, stored_zip(&[("1b.nca", b"nca")]), None);
-    test.core
-        .dispatch(Command::SetConfigField {
-            plugin: lichii(),
-            scope: ConfigScope::Emulator,
-            key: "firmware_updates".into(),
-            value: "true".into(),
-        })
-        .await
-        .unwrap();
+    turn_on_firmware_updates(&test).await;
     test.core.dispatch(Command::Navigate(nexus_core::Route::Emulators)).await.unwrap();
     firmware_settles(&test).await;
     let folder = eden.path().join("nand/system/Contents/registered");

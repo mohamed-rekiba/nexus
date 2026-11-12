@@ -1,5 +1,6 @@
 //! The settings file games start with (`eden-cli -c <file>`): Lichii's own settings, from its
-//! window's `qt-config.ini`, with players 1 to 4 set to the controllers the computer has.
+//! window's `qt-config.ini`, with players 1 to 4 set to the controllers the computer has, and
+//! airplane mode as Lichii's settings in Nexus set it.
 //!
 //! Lichii (like Eden and yuzu) names a controller by its SDL GUID and port, and each Switch
 //! button by the SDL input that gives it: `engine:sdl,port:0,guid:<guid>,button:1`. The Switch
@@ -9,6 +10,11 @@
 //!
 //! A player whose controls the player set in Lichii (any player 1 to 4 on something other than
 //! the keyboard) keeps them: then the controls stay as they are.
+//!
+//! Lichii's own default is airplane mode on, which blocks every TCP socket a game opens, so an
+//! online game shows "no internet connection". Nexus's setting wins over `qt-config.ini`, and
+//! is off by default. An empty `network_interface` is fine: Lichii then uses the first
+//! interface it finds.
 
 use std::collections::HashMap;
 
@@ -16,6 +22,8 @@ use nexus_api::Controller;
 
 /// The section Lichii keeps the controls in.
 const CONTROLS: &str = "Controls";
+/// The section Lichii keeps airplane mode in.
+const SERVICES: &str = "Services";
 /// The players Nexus sets.
 const PLAYERS: usize = 4;
 
@@ -49,13 +57,14 @@ const BUTTONS: [(&str, &str); 22] = [
 /// Each stick's key, and its SDL axes.
 const STICKS: [(&str, &str, &str); 2] = [("lstick", "leftx", "lefty"), ("rstick", "rightx", "righty")];
 
-/// The settings file for `eden-cli`: `base` (Lichii's `qt-config.ini`, or empty) with players 1
-/// to 4 on `controllers`, in order. `base` as it is when there is no controller, or when the
-/// player set a controller in Lichii.
-pub fn settings_file(base: &str, controllers: &[Controller]) -> String {
+/// The settings file for `eden-cli`: `base` (Lichii's `qt-config.ini`, or empty) with
+/// `airplane_mode` and players 1 to 4 on `controllers`, in order. The controls stay as they are
+/// when there is no controller, or when the player set a controller in Lichii.
+pub fn settings_file(base: &str, controllers: &[Controller], airplane_mode: bool) -> String {
     let mut ini = Ini::parse(base);
+    ini.set(SERVICES, "airplane_mode", if airplane_mode { "true" } else { "false" });
     if controllers.is_empty() || ini.has_own_controllers() {
-        return base.to_owned();
+        return ini.text();
     }
     let assigned = controllers.iter().take(PLAYERS).enumerate();
     let mut lines = Vec::new();
@@ -173,18 +182,30 @@ impl Ini {
                 })
             }) || set_keys.iter().any(|k| k == key)
         };
-        let at = match self.sections.iter().position(|(name, _)| name.as_deref() == Some(CONTROLS)) {
+        let section = self.section_mut(CONTROLS);
+        section.retain(|line| !ours(line));
+        end_section(section, lines);
+    }
+
+    /// `key` in `section` becomes `value`, and not its default: its old lines go, the new ones
+    /// end the section.
+    fn set(&mut self, section: &str, key: &str, value: &str) {
+        let default = format!("{key}\\default");
+        let section = self.section_mut(section);
+        section.retain(|line| line.split_once('=').is_none_or(|(k, _)| k.trim() != key && k.trim() != default));
+        end_section(section, vec![format!("{default}=false"), format!("{key}={value}")]);
+    }
+
+    /// The lines of section `name`, which is added at the end when there is none.
+    fn section_mut(&mut self, name: &str) -> &mut Vec<String> {
+        let at = match self.sections.iter().position(|(n, _)| n.as_deref() == Some(name)) {
             Some(at) => at,
             None => {
-                self.sections.push((Some(CONTROLS.to_owned()), Vec::new()));
+                self.sections.push((Some(name.to_owned()), Vec::new()));
                 self.sections.len() - 1
             }
         };
-        let section = &mut self.sections[at].1;
-        section.retain(|line| !ours(line));
-        // Before the blank lines that end the section.
-        let end = section.iter().rposition(|l| !l.trim().is_empty()).map_or(0, |i| i + 1);
-        section.splice(end..end, lines);
+        &mut self.sections[at].1
     }
 
     fn text(&self) -> String {
@@ -202,9 +223,18 @@ impl Ini {
     }
 }
 
+/// `lines` end `section`, before the blank lines that end it.
+fn end_section(section: &mut Vec<String>, lines: Vec<String>) {
+    let end = section.iter().rposition(|l| !l.trim().is_empty()).map_or(0, |i| i + 1);
+    section.splice(end..end, lines);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What Nexus adds to a file with no `[Services]` section.
+    const AIRPLANE_OFF: &str = "[Services]\nairplane_mode\\default=false\nairplane_mode=false\n";
 
     fn pad(port: u32, mapping: &str) -> Controller {
         Controller { name: "Pad".into(), guid: "0300".into(), port, mapping: mapping.into() }
@@ -220,20 +250,40 @@ mod tests {
     }
 
     #[test]
-    fn no_controller_or_the_player_s_own_controls_leave_the_file_as_it_is() {
+    fn no_controller_or_the_player_s_own_controls_leave_the_controls_as_they_are() {
         let base = "[Controls]\nplayer_0_button_a\\default=true\nplayer_0_button_a=\"engine:keyboard,code:67\"\n";
-        assert_eq!(settings_file(base, &[]), base);
+        assert_eq!(settings_file(base, &[], false), format!("{base}{AIRPLANE_OFF}"));
         let own =
             "[Controls]\nplayer_1_button_b\\default=false\nplayer_1_button_b=\"engine:sdl,port:0,guid:ab,button:0\"\n";
-        assert_eq!(settings_file(own, &[pad(0, "a:b0")]), own, "the player mapped a controller in Lichii");
+        assert_eq!(
+            settings_file(own, &[pad(0, "a:b0")], false),
+            format!("{own}{AIRPLANE_OFF}"),
+            "the player mapped a controller in Lichii"
+        );
+    }
+
+    #[test]
+    fn airplane_mode_is_nexus_s_and_the_other_services_stay() {
+        let base = "[Services]\nnetwork_interface\\default=true\nnetwork_interface=\n\
+                    airplane_mode\\default=true\nairplane_mode=true\nlan_play=false\n\n[UI]\ntheme=dark\n";
+        for on in [false, true] {
+            assert_eq!(
+                settings_file(base, &[], on),
+                format!(
+                    "[Services]\nnetwork_interface\\default=true\nnetwork_interface=\nlan_play=false\n\
+                     airplane_mode\\default=false\nairplane_mode={on}\n\n[UI]\ntheme=dark\n"
+                )
+            );
+        }
     }
 
     #[test]
     fn a_file_without_controls_gets_them_and_the_other_sections_stay() {
-        let out = settings_file("[Renderer]\nbackend=1\n\n[UI]\ntheme=dark\n", &[pad(0, "a:b0,b:b1")]);
+        let out = settings_file("[Renderer]\nbackend=1\n\n[UI]\ntheme=dark\n", &[pad(0, "a:b0,b:b1")], false);
         assert_eq!(
             out,
-            "[Renderer]\nbackend=1\n\n[UI]\ntheme=dark\n[Controls]\n\
+            "[Renderer]\nbackend=1\n\n[UI]\ntheme=dark\n\
+             [Services]\nairplane_mode\\default=false\nairplane_mode=false\n[Controls]\n\
              player_0_connected\\default=false\nplayer_0_connected=true\n\
              player_0_button_a\\default=false\nplayer_0_button_a=\"engine:sdl,port:0,guid:0300,button:1\"\n\
              player_0_button_b\\default=false\nplayer_0_button_b=\"engine:sdl,port:0,guid:0300,button:0\"\n"
