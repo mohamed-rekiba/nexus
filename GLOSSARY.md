@@ -190,6 +190,11 @@ other kit files.
 catalogs' copies and their offers, and the library's saved choices (hidden games, kept covers,
 the player's results). It asks no plugin; the core hands it the plugins' answers.
 
+**Lichii config** (`config.rs`, emu-lichii): what Nexus sets in Lichii's own settings. A game
+Nexus starts with an official build runs in eden-cli with a settings file: Lichii's
+`qt-config.ini` with Nexus's overrides (airplane mode) and the controllers over it. Your own
+build and Lichii's window read `qt-config.ini` alone.
+
 **Listed folders** (`ListedFolders`): more folders for a host folder grant (`listed_in`), from a
 file in its default folder, while the player hasn't set the folder. The host reads the file
 (`folders.rs`): Steam's `steamapps/libraryfolders.vdf` names its libraries on other drives. A

@@ -26,7 +26,7 @@ use nexus_api::serde::{Deserialize, Serialize};
 use nexus_api::serde_json::Value;
 use nexus_api::*;
 
-mod controls;
+mod config;
 mod firmware;
 mod install;
 mod nsz;
@@ -46,8 +46,6 @@ pub const CONFIG: &str = "eden-config";
 pub const DATA: &str = "eden-data";
 /// The exit code eden-cli asks to be started again with (`kRestartExitCode` in Lichii).
 const RESTART_CODE: i32 = 75;
-/// The settings file games start with, in the plugin's folder (see [`controls`]).
-const GAME_SETTINGS: &str = "eden-cli/config.ini";
 
 /// Lichii settings. Its other settings live in its own config file.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -63,7 +61,8 @@ pub struct Settings {
     #[schemars(title = "Split the GPU work")]
     pub gpu_split: GpuSplit,
     /// Turns off the internet for games, as on a Switch in airplane mode. Off by default, so
-    /// online games can connect. Lichii's own default is on.
+    /// online games can connect. For the games Nexus starts with an official build: your own
+    /// build and Lichii's window use the airplane mode set in Lichii, which is on by default.
     #[serde(default)]
     #[schemars(title = "Airplane mode")]
     pub airplane_mode: bool,
@@ -73,30 +72,20 @@ pub struct Settings {
     #[serde(default)]
     #[schemars(title = "Use your own build")]
     pub own_build: bool,
-    /// Downloads the set firmware release from github.com/THZoria/NX_Firmware
-    /// into Lichii's data folder, in place of the firmware there, and the keys of the same
-    /// version from files.prodkeys.net.
-    /// Nintendo's firmware: check that you may use it where you live. Only the Firmware block
-    /// sets it (Automatic updates), so it isn't in the schema the settings list is made from.
-    #[serde(default)]
+    /// The firmware settings of Nexus 0.16.4 and older: Automatic updates and the firmware
+    /// release. Read once, so that the Firmware block takes them over
+    /// ([`firmware::Firmware::adopt`]), and not used after.
+    #[serde(default, rename = "firmware_updates", skip_serializing)]
     #[schemars(skip)]
-    pub firmware_updates: bool,
-    /// The Switch firmware release to install, like 22.5.0, with the keys of the same version:
-    /// firmware newer than its keys can't be read. Both THZoria/NX_Firmware and
-    /// files.prodkeys.net must have it. Only the Firmware block sets it, so it isn't in the
-    /// schema the settings list is made from.
-    #[serde(default = "default_firmware_release")]
+    pub old_firmware_updates: Option<bool>,
+    #[serde(default, rename = "firmware_release", skip_serializing)]
     #[schemars(skip)]
-    pub firmware_release: String,
+    pub old_firmware_release: Option<String>,
     /// The keys version of Nexus 0.16 and older, which the firmware didn't follow. Read so
     /// that saved settings still load, and not used: the firmware release replaces it.
     #[serde(default, rename = "keys_version", skip_serializing)]
     #[schemars(skip)]
     pub old_keys_version: Option<String>,
-}
-
-fn default_firmware_release() -> String {
-    "22.5.0".into()
 }
 
 fn yes() -> bool {
@@ -110,8 +99,8 @@ impl Default for Settings {
             gpu_split: GpuSplit::default(),
             airplane_mode: false,
             own_build: false,
-            firmware_updates: false,
-            firmware_release: default_firmware_release(),
+            old_firmware_updates: None,
+            old_firmware_release: None,
             old_keys_version: None,
         }
     }
@@ -256,6 +245,10 @@ impl CodePlugin for LichiiPlugin {
         let emu = Arc::new(ConsoleEmulator::start(LichiiFlavor { platform: host.platform }, spec, host).await?);
         let controllers = ctx.services().get::<Controllers>().map(|c| (*c).clone());
         let firmware = Arc::new(firmware::Firmware::new(emu.host().clone(), ctx.events().clone()));
+        let saved = emu.builds().settings().load().await;
+        if let Err(e) = firmware.adopt(saved.old_firmware_updates, saved.old_firmware_release).await {
+            emu.host().log.warn(&format!("the firmware settings of an older Nexus didn't move: {e}"));
+        }
         let lichii = Arc::new(Lichii { emu: emu.clone(), controllers, firmware });
         Ok(Provided {
             catalog: Some(emu.clone()),
@@ -275,7 +268,8 @@ impl CodePlugin for LichiiPlugin {
 inventory::submit! { PluginFactory::code(|| Box::new(LichiiPlugin)) }
 
 /// What a backup holds of Lichii: from Lichii's data folder, the keys, the NAND (firmware and
-/// saves), the SD card, amiibo and mods; and the settings its window saves.
+/// saves), the SD card, amiibo and mods; the settings its window saves; and the firmware
+/// settings of the Firmware block.
 fn backup_items() -> std::sync::Arc<dyn Backup> {
     let data = |path: &str| BackupPlace::Folder(HostPath::new(DATA, 0, RelPath::new(path).expect("a plain path")));
     emulator_kit::backup::Items::provided(vec![
@@ -287,7 +281,12 @@ fn backup_items() -> std::sync::Arc<dyn Backup> {
         BackupItem::new(
             "settings",
             "Lichii settings",
-            BackupPlace::Folder(HostPath::new(CONFIG, 0, RelPath::new("qt-config.ini").expect("a plain path"))),
+            BackupPlace::Folder(HostPath::new(CONFIG, 0, RelPath::new(config::QT_CONFIG).expect("a plain path"))),
+        ),
+        BackupItem::new(
+            "firmware-settings",
+            "Switch firmware settings",
+            BackupPlace::Data(RelPath::new(firmware::SETTINGS).expect("a plain path")),
         ),
     ])
 }
@@ -299,44 +298,21 @@ struct Lichii {
     firmware: Arc<firmware::Firmware>,
 }
 
-/// The console emulator's slots, and the firmware's badge and button on Lichii's panel. With
-/// firmware updates on, a read of the panel starts a check, at most every few hours.
+/// The console emulator's slots, and the Firmware block on Lichii's panel.
 #[async_trait]
 impl Slots for Lichii {
     async fn items(&self, request: &SlotRequest) -> PluginResult<Vec<SlotItem>> {
         let mut items = self.emu.items(request).await?;
         if request.slot == SlotId::EmulatorPanel && request.game.is_none() {
-            let settings = self.emu.builds().settings().load().await;
-            if settings.firmware_updates {
-                self.firmware.start_auto(settings.firmware_release.clone()).await;
-            }
-            items.extend(self.firmware.panel(settings.firmware_updates, &settings.firmware_release).await);
+            items.extend(self.firmware.items().await);
         }
         Ok(items)
     }
 
     async fn run_action(&self, action: &str, game: Option<&str>, args: &Value) -> PluginResult<()> {
-        match action {
-            firmware::UPDATE_NOW => {
-                self.firmware.start(true, self.emu.builds().settings().load().await.firmware_release);
-                Ok(())
-            }
-            // The core reads the panel again after the action: turned on, a check starts then.
-            firmware::TOGGLE_AUTO => {
-                let settings = self.emu.builds().settings();
-                let on = settings.load().await.firmware_updates;
-                settings.set("firmware_updates", Value::Bool(!on)).await
-            }
-            // The player typed a firmware release into the Firmware block. Save it, so the next
-            // Update now installs it. The core reads the panel again, with the new version.
-            firmware::SET_RELEASE => {
-                let typed = args
-                    .as_str()
-                    .ok_or_else(|| PluginError::InvalidInput("the firmware release must be text".into()))?;
-                let version = firmware::check_version(typed)?;
-                self.emu.builds().settings().set("firmware_release", Value::String(version)).await
-            }
-            _ => self.emu.run_action(action, game, args).await,
+        match self.firmware.run_action(action, args).await {
+            Some(done) => done,
+            None => self.emu.run_action(action, game, args).await,
         }
     }
 }
@@ -346,30 +322,6 @@ impl Lichii {
     async fn cli(&self, tag: &str) -> Option<RelPath> {
         let cli = versions::folder(tag).ok()?.join("squashfs-root/usr/bin/eden-cli").ok()?;
         self.emu.host().storage.exists(&cli).await.ok()?.then_some(cli)
-    }
-
-    /// Writes the settings file games start with: Lichii's own settings, with `airplane_mode`
-    /// and players 1 to 4 on the controllers connected now.
-    async fn game_settings(&self, airplane_mode: bool) -> PluginResult<RelPath> {
-        let folders = &self.emu.host().folders;
-        let mut base = String::new();
-        if let Some(root) = folders.roots(CONFIG).await.unwrap_or_default().first() {
-            let file = HostPath::new(CONFIG, root.root, RelPath::new("qt-config.ini")?);
-            if let Ok(bytes) = folders.read_range(&file, 0, MAX_FOLDER_READ).await {
-                base = String::from_utf8_lossy(&bytes).into_owned();
-            }
-        }
-        let connected = match &self.controllers {
-            Some(controllers) => controllers.connected().await,
-            None => Vec::new(),
-        };
-        let path = RelPath::new(GAME_SETTINGS)?;
-        self.emu
-            .host()
-            .storage
-            .write(&path, controls::settings_file(&base, &connected, airplane_mode).as_bytes())
-            .await?;
-        Ok(path)
     }
 }
 
@@ -398,7 +350,11 @@ impl Launcher for Lichii {
         });
         let program = match cli {
             Some(cli) => {
-                let file = self.game_settings(settings.airplane_mode).await?;
+                let connected = match &self.controllers {
+                    Some(controllers) => controllers.connected().await,
+                    None => Vec::new(),
+                };
+                let file = config::write(self.emu.host(), &connected, &settings).await?;
                 args.extend(["-c".into(), LaunchArg::path(Location::Data(file))]);
                 Location::Data(cli)
             }

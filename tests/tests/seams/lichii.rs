@@ -49,7 +49,25 @@ fn release(http: &FakeHttp, tag: &str) -> serde_json::Value {
 }
 
 async fn boot() -> (TestCore, tempfile::TempDir) {
+    boot_with_saved(None, None).await
+}
+
+/// [`boot`], with what an earlier run of Nexus saved: `saved` as Lichii's settings, and
+/// `firmware` as the Firmware block's settings file.
+async fn boot_with_saved(
+    saved: Option<serde_json::Value>,
+    firmware: Option<serde_json::Value>,
+) -> (TestCore, tempfile::TempDir) {
     let host = FakeHost::new().platform(Some(Platform::Linux));
+    if let Some(saved) = saved {
+        let config = serde_json::json!({ "plugins": { "emu-lichii": { "emulator": saved } } });
+        std::fs::write(host.data_dir().join("config.json"), config.to_string()).unwrap();
+    }
+    if let Some(firmware) = firmware {
+        let plugin = host.data_dir().join("plugins/emu-lichii");
+        std::fs::create_dir_all(&plugin).unwrap();
+        std::fs::write(plugin.join("firmware-settings.json"), firmware.to_string()).unwrap();
+    }
     let releases = serde_json::json!([release(host.http(), TAG)]);
     host.http().serve(RELEASES, serde_json::to_vec(&releases).unwrap());
     let games = tempfile::tempdir().unwrap();
@@ -350,6 +368,35 @@ async fn settings_show_airplane_mode_as_a_switch_that_is_off_and_no_firmware_set
     assert_eq!(field.value, "false");
 }
 
+/// Lichii's settings file that can't be read stops the game, and says why: before, the game
+/// started with Lichii's defaults, airplane mode on among them.
+#[tokio::test]
+async fn an_unreadable_lichii_settings_file_stops_the_launch_and_says_why() {
+    let (test, _games, eden) = with_eden_cli(Vec::new()).await;
+    std::fs::remove_file(eden.path().join("qt-config.ini")).unwrap();
+    std::fs::create_dir(eden.path().join("qt-config.ini")).unwrap();
+
+    let launch = Command::Session(SessionCmd::Launch("emu-lichii:01002B30028F6000".parse().unwrap()));
+    let refused = test.core.dispatch(launch).await;
+
+    let shown = format!("{refused:?} {:?}", test.core.view().notices);
+    assert!(shown.contains("qt-config.ini"), "the reason names the file: {shown}");
+    assert_eq!(test.spawner.spawned().len(), 1, "only the AppImage's unpacking ran, no game");
+}
+
+/// No Lichii settings file yet (Lichii's window never saved one): the game starts with
+/// Nexus's settings over Lichii's defaults.
+#[tokio::test]
+async fn a_game_starts_without_a_lichii_settings_file() {
+    let (test, _games, eden) = with_eden_cli(Vec::new()).await;
+    std::fs::remove_file(eden.path().join("qt-config.ini")).unwrap();
+
+    let process = launch_celeste(&test).await;
+
+    let file = std::fs::read_to_string(&process.command.args[1]).unwrap();
+    assert!(file.lines().any(|l| l == "airplane_mode=false"), "{file}");
+}
+
 #[tokio::test]
 async fn a_game_starts_in_airplane_mode_once_the_player_turns_it_on() {
     let (test, _games, _eden) = with_eden_cli(Vec::new()).await;
@@ -568,7 +615,16 @@ fn serve_firmware(http: &FakeHttp, tag: &str, zip: Vec<u8>, digest: Option<&str>
 
 /// Lichii with Eden's folder in a temporary folder that has the firmware `old` in it.
 async fn with_eden(old: &[&str]) -> (TestCore, tempfile::TempDir, tempfile::TempDir) {
-    let (test, games) = boot().await;
+    with_eden_saved(old, None, None).await
+}
+
+/// [`with_eden`], with what an earlier run of Nexus saved (see [`boot_with_saved`]).
+async fn with_eden_saved(
+    old: &[&str],
+    saved: Option<serde_json::Value>,
+    firmware: Option<serde_json::Value>,
+) -> (TestCore, tempfile::TempDir, tempfile::TempDir) {
+    let (test, games) = boot_with_saved(saved, firmware).await;
     let eden = tempfile::tempdir().unwrap();
     let registered = eden.path().join("nand/system/Contents/registered");
     std::fs::create_dir_all(&registered).unwrap();
@@ -797,16 +853,20 @@ async fn turn_on_firmware_updates(test: &TestCore) {
     test.core.dispatch(flip).await.unwrap();
 }
 
-/// Stores Lichii's firmware release as a saved setting, without the Firmware block row's check
-/// of the typed text: a bad value reaches the update, which must refuse it too.
-async fn set_firmware_release(test: &TestCore, version: &str) {
-    let field = Command::SetConfigField {
+/// Types `version` into the Firmware block's Firmware release row, the one place that sets it.
+async fn type_firmware_release(test: &TestCore, version: &str) -> Result<(), nexus_core::CoreError> {
+    let edit = Command::RunAction {
         plugin: lichii(),
-        scope: ConfigScope::Emulator,
-        key: "firmware_release".into(),
-        value: version.into(),
+        action: "set-firmware-release".into(),
+        game: None,
+        args: serde_json::Value::String(version.into()),
     };
-    test.core.dispatch(field).await.unwrap();
+    test.core.dispatch(edit).await
+}
+
+/// Sets Lichii's firmware release in the Firmware block.
+async fn set_firmware_release(test: &TestCore, version: &str) {
+    type_firmware_release(test, version).await.unwrap();
 }
 
 /// The Firmware block has a Firmware release row: it shows the set version, and typing a new
@@ -858,6 +918,61 @@ async fn a_typed_release_that_isn_t_a_version_is_refused_and_the_version_stays()
     let result = test.core.dispatch(bad).await;
 
     assert!(result.is_err(), "a release that isn't a version is refused: {result:?}");
+    assert_eq!(row(&firmware_rows(&test.core).unwrap(), "Firmware release").unwrap().value, "22.5.0");
+}
+
+/// Nexus 0.16.4 and older kept the firmware settings among Lichii's settings. The Firmware
+/// block takes them over once, and the settings list no longer has them.
+#[tokio::test]
+async fn firmware_settings_saved_by_an_older_nexus_move_into_the_firmware_block() {
+    let saved = serde_json::json!({ "firmware_updates": true, "firmware_release": "22.1.0", "fullscreen": false });
+    let (test, _games, _eden) = with_eden_saved(&[], Some(saved), None).await;
+    serve_firmware(&test.http, "22.1.0", stored_zip(&[("21.nca", b"nca")]), None);
+    test.core.dispatch(Command::Navigate(nexus_core::Route::Emulators)).await.unwrap();
+
+    assert_eq!(firmware_settles(&test).await, "Firmware 22.1.0", "automatic updates stayed on");
+    let rows = firmware_rows(&test.core).unwrap();
+    assert_eq!(row(&rows, "Firmware release").unwrap().value, "22.1.0");
+    assert_eq!(row(&rows, "Automatic updates").unwrap().switch, "on");
+    test.core.dispatch(Command::Navigate(nexus_core::Route::Settings)).await.unwrap();
+    let view = test.core.view();
+    let panel = view.settings.panels.iter().find(|p| p.slot.plugin == lichii()).expect("the Lichii panel");
+    assert!(panel.fields.iter().all(|f| !f.key.starts_with("firmware")), "the settings list has no firmware row");
+}
+
+/// Firmware settings that are there already stay: the older Nexus's settings move only once.
+#[tokio::test]
+async fn the_firmware_settings_there_already_are_kept_over_older_saved_ones() {
+    let saved = serde_json::json!({ "firmware_updates": true, "firmware_release": "22.1.0" });
+    let ours = serde_json::json!({ "automatic": false, "release": "21.0.0" });
+    let (test, _games, _eden) = with_eden_saved(&[], Some(saved), Some(ours)).await;
+    test.core.dispatch(Command::Navigate(nexus_core::Route::Emulators)).await.unwrap();
+    let rows = firmware_rows(&test.core).unwrap();
+    assert_eq!(row(&rows, "Firmware release").unwrap().value, "21.0.0");
+    assert_eq!(row(&rows, "Automatic updates").unwrap().switch, "off");
+}
+
+/// A release that isn't a version, in the firmware settings file itself (written by hand, or
+/// by a restore), is refused at the update too, and nothing is fetched for it.
+#[tokio::test]
+async fn a_bad_release_in_the_firmware_settings_file_is_refused_at_the_update() {
+    let ours = serde_json::json!({ "automatic": false, "release": "../latest" });
+    let (test, _games, eden) = with_eden_saved(&["old.nca"], None, Some(ours)).await;
+
+    let badge = update_firmware(&test).await;
+
+    assert!(badge.starts_with("The firmware update failed") && badge.contains("../latest"), "{badge}");
+    assert!(test.http.sent().iter().all(|u| !u.contains("latest")), "nothing is fetched for it");
+    assert_eq!(files_in(&eden.path().join("nand/system/Contents/registered")), ["old.nca"]);
+}
+
+/// A saved firmware release that isn't a version doesn't move into the Firmware block: the
+/// block starts from its default.
+#[tokio::test]
+async fn a_saved_firmware_release_that_isn_t_a_version_is_left_behind() {
+    let saved = serde_json::json!({ "firmware_release": "../latest" });
+    let (test, _games, _eden) = with_eden_saved(&[], Some(saved), None).await;
+    test.core.dispatch(Command::Navigate(nexus_core::Route::Emulators)).await.unwrap();
     assert_eq!(row(&firmware_rows(&test.core).unwrap(), "Firmware release").unwrap().value, "22.5.0");
 }
 
@@ -914,11 +1029,11 @@ async fn a_typed_firmware_release_may_start_with_v_and_anything_else_but_a_versi
     assert_eq!(update_firmware(&test).await, "Firmware 22.1.0");
 
     for bad in ["../latest", "..", ".", "1..2"] {
-        set_firmware_release(&test, bad).await;
-        let sent = test.http.sent().len();
-        let badge = update_firmware(&test).await;
-        assert!(badge.starts_with("The firmware update failed") && badge.contains(bad), "{bad}: {badge}");
-        assert_eq!(test.http.sent().len(), sent, "{bad}: nothing is fetched for a version that isn't one");
+        let refused = type_firmware_release(&test, bad).await.unwrap_err();
+        assert!(refused.to_string().contains(bad), "{bad}: {refused}");
+        test.core.dispatch(Command::Navigate(nexus_core::Route::Emulators)).await.unwrap();
+        let release = row(&firmware_rows(&test.core).unwrap(), "Firmware release").unwrap().value.clone();
+        assert_eq!(release, "22.1.0", "{bad}: the release stays as it was");
     }
 }
 

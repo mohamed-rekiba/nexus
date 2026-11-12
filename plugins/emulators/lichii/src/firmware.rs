@@ -5,9 +5,11 @@
 //!   and the keys are of the same version. Firmware newer than its keys can't be read: Lichii
 //!   loops on "keys for gen … required".
 //!
-//! - The player turns it on (`firmware_updates`), or presses Update now on Lichii's
-//!   panel. With it on, a check starts when the core reads the panel (at the start and at each
-//!   update check), at most once every [`RELEASE_TTL`]. A failed update isn't tried again on
+//! - The player turns on Automatic updates, or presses Update now, in the Firmware block on
+//!   Lichii's panel. The block is the only place that shows or sets the firmware settings: the
+//!   release and Automatic updates, in the plugin's storage ([`SETTINGS`]). With Automatic
+//!   updates on, a check starts when the core reads the panel (at the start and at each update
+//!   check), at most once every [`RELEASE_TTL`]. A failed update isn't tried again on
 //!   its own until Nexus starts again.
 //! - A release is one zip of `.nca` files, stored without compression. The plugin downloads it
 //!   in pieces into Lichii's data folder, checks its SHA-256 against GitHub's, and unpacks the files
@@ -23,6 +25,7 @@ use std::time::{Duration, Instant};
 
 use emulator_kit::host::Host;
 use emulator_kit::{cache, github};
+use nexus_api::serde::{Deserialize, Serialize};
 use nexus_api::serde_json::{self, Value};
 use nexus_api::*;
 use sha2::{Digest, Sha256};
@@ -30,14 +33,36 @@ use sha2::{Digest, Sha256};
 use crate::DATA;
 
 /// The actions of the Firmware block's rows: Update now, and the automatic updates' switch.
-pub const UPDATE_NOW: &str = "update-firmware";
-pub const TOGGLE_AUTO: &str = "toggle-firmware-updates";
+const UPDATE_NOW: &str = "update-firmware";
+const TOGGLE_AUTO: &str = "toggle-firmware-updates";
 /// The action of the Firmware release row: the typed line is the version to install.
-pub const SET_RELEASE: &str = "set-firmware-release";
+const SET_RELEASE: &str = "set-firmware-release";
+
+/// The firmware settings, in the plugin's storage. A backup holds the file.
+pub const SETTINGS: &str = "firmware-settings.json";
+/// The release installed until the player types another.
+const DEFAULT_RELEASE: &str = "22.5.0";
+
+/// What the player set in the Firmware block.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(crate = "nexus_api::serde")]
+struct FirmwareSettings {
+    /// Automatic updates: a read of the panel starts a check, at most every [`RELEASE_TTL`].
+    automatic: bool,
+    /// The Switch firmware release to install, like 22.5.0, with the keys of the same version:
+    /// firmware newer than its keys can't be read.
+    release: String,
+}
+
+impl Default for FirmwareSettings {
+    fn default() -> Self {
+        Self { automatic: false, release: DEFAULT_RELEASE.into() }
+    }
+}
 
 /// Checks a typed firmware release before it is saved, and returns it cleaned (no leading "v",
 /// trimmed): it must be a version like 22.5.0.
-pub fn check_version(typed: &str) -> PluginResult<String> {
+fn check_version(typed: &str) -> PluginResult<String> {
     clean_version(typed).map(str::to_owned)
 }
 /// The GitHub API address of THZoria/NX_Firmware's release `version`.
@@ -58,9 +83,7 @@ fn clean_version(typed: &str) -> PluginResult<&str> {
     let is_version = !version.is_empty()
         && version.split('.').all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()));
     if !is_version {
-        return Err(PluginError::InvalidInput(format!(
-            "the firmware release \"{typed}\" isn't a version like 22.5.0: change it in Lichii's settings"
-        )));
+        return Err(PluginError::InvalidInput(format!("the firmware release \"{typed}\" isn't a version like 22.5.0")));
     }
     Ok(version)
 }
@@ -127,8 +150,90 @@ impl Firmware {
         Self { host, events, phase: Mutex::new(Phase::Idle), last_auto: Mutex::new(None) }
     }
 
+    /// Takes over the firmware settings that Nexus 0.16.4 and older saved among Lichii's
+    /// settings, once: not when the firmware settings are there already. A saved release that
+    /// isn't a version stays behind, and the default release applies.
+    pub async fn adopt(&self, automatic: Option<bool>, release: Option<String>) -> PluginResult<()> {
+        let path = RelPath::new(SETTINGS)?;
+        if (automatic.is_none() && release.is_none()) || self.host.storage.exists(&path).await? {
+            return Ok(());
+        }
+        let release = match release.map(|r| check_version(&r)) {
+            Some(Ok(release)) => release,
+            Some(Err(e)) => {
+                self.host.log.warn(&format!("the saved firmware release stays behind: {e}"));
+                DEFAULT_RELEASE.into()
+            }
+            None => DEFAULT_RELEASE.into(),
+        };
+        self.save(&FirmwareSettings { automatic: automatic.unwrap_or(false), release }).await
+    }
+
+    /// The firmware settings: the defaults until the player sets one. A file that doesn't read
+    /// gives the defaults too, and a warning in the log.
+    async fn settings(&self) -> FirmwareSettings {
+        let Ok(path) = RelPath::new(SETTINGS) else { return FirmwareSettings::default() };
+        if !self.host.storage.exists(&path).await.unwrap_or(false) {
+            return FirmwareSettings::default();
+        }
+        let read = self
+            .host
+            .storage
+            .read(&path)
+            .await
+            .map_err(|e| e.to_string())
+            .and_then(|bytes| serde_json::from_slice::<FirmwareSettings>(&bytes).map_err(|e| e.to_string()));
+        read.unwrap_or_else(|e| {
+            self.host.log.warn(&format!("the firmware settings ({SETTINGS}) don't read, so the defaults apply: {e}"));
+            FirmwareSettings::default()
+        })
+    }
+
+    async fn save(&self, settings: &FirmwareSettings) -> PluginResult<()> {
+        self.host.storage.write(&RelPath::new(SETTINGS)?, &serde_json::to_vec(settings)?).await
+    }
+
+    /// The Firmware block, for Lichii's panel. With Automatic updates on, a read of it starts a
+    /// check, at most every [`RELEASE_TTL`]: the core reads the panel at the start and at each
+    /// update check.
+    pub async fn items(self: &Arc<Self>) -> Vec<SlotItem> {
+        let settings = self.settings().await;
+        if settings.automatic {
+            self.start_auto(settings.release.clone()).await;
+        }
+        self.panel(settings.automatic, &settings.release).await
+    }
+
+    /// Runs `action` when it is one of the Firmware block's rows; `None` when it isn't. The
+    /// core reads the panel again after an action: with Automatic updates turned on, a check
+    /// starts then.
+    pub async fn run_action(self: &Arc<Self>, action: &str, args: &Value) -> Option<PluginResult<()>> {
+        Some(match action {
+            UPDATE_NOW => {
+                self.start(true, self.settings().await.release);
+                Ok(())
+            }
+            TOGGLE_AUTO => {
+                let mut settings = self.settings().await;
+                settings.automatic = !settings.automatic;
+                self.save(&settings).await
+            }
+            SET_RELEASE => self.set_release(args).await,
+            _ => return None,
+        })
+    }
+
+    /// The player typed `typed` into the Firmware release row: the next update installs it.
+    async fn set_release(&self, typed: &Value) -> PluginResult<()> {
+        let typed =
+            typed.as_str().ok_or_else(|| PluginError::InvalidInput("the firmware release must be text".into()))?;
+        let mut settings = self.settings().await;
+        settings.release = check_version(typed)?;
+        self.save(&settings).await
+    }
+
     /// Starts a check on its own, bypassing the normal interval when firmware is missing.
-    pub async fn start_auto(self: &Arc<Self>, version: String) {
+    async fn start_auto(self: &Arc<Self>, version: String) {
         if matches!(self.phase(), Phase::Updating(_)) {
             return;
         }
@@ -163,7 +268,7 @@ impl Firmware {
 
     /// Starts an update in the background, unless one is running. `asked`: the player pressed
     /// the button, so the release is asked for again, and an update that failed runs again.
-    pub fn start(self: &Arc<Self>, asked: bool, version: String) {
+    fn start(self: &Arc<Self>, asked: bool, version: String) {
         {
             let mut phase = self.phase.lock().unwrap_or_else(|p| p.into_inner());
             match &*phase {
@@ -191,7 +296,7 @@ impl Firmware {
     /// The Firmware block on Lichii's page: the firmware in Lichii's data folder, the update that
     /// runs or the last one's result, the firmware release to install (`release`), the automatic
     /// updates' switch (`auto`), and Update now.
-    pub async fn panel(&self, auto: bool, release: &str) -> Vec<SlotItem> {
+    async fn panel(&self, auto: bool, release: &str) -> Vec<SlotItem> {
         let phase = self.phase();
         let row = |label: &str, value: String, hint: String, tone| BlockRow {
             label: label.into(),

@@ -276,9 +276,11 @@ Some emulator notes:
   The badge beside the button names the firmware version Nexus installed. This is
   Nintendo's firmware: check that you may use it where you live. If an update fails, the old
   firmware stays.
-  Games have internet access: **Airplane mode** in Lichii's settings is off. Turn it on to keep
-  every Switch game offline. Lichii's own window has an airplane mode setting too, and Nexus's
-  setting wins over it.
+  Games have internet access: **Airplane mode** on the Switch page's **Settings** tab is off.
+  Turn it on to keep every Switch game offline. This applies to the games Nexus starts with an
+  official build. Your own build and Lichii's window use the airplane mode in Lichii's own
+  settings file (`qt-config.ini`), which is on until you turn it off in Lichii's window. If
+  Lichii's own settings file can't be read, the game doesn't start and Nexus says why.
 - **PC**: a Windows game runs through umu-launcher (Proton) or Wine. The PC page has **Install
   umu-launcher**, and then **Update umu-launcher**. On Linux a Windows game runs in a sandbox:
   see [PC games and your files](#pc-games-and-your-files).
@@ -414,8 +416,8 @@ A backup is one file, `nexus-backup-<date>-<time>.tar.gz`, with the time in UTC.
   that build's folder and out of the backup.
 - PS4: "PS4 settings and saves", shadPS4's data folder without its caches, logs and downloads.
   "PS4 DLC" is a large item.
-- Switch: "Switch keys", "Switch firmware and saves", "Switch SD card", "amiibo", "Switch mods"
-  and "Lichii settings".
+- Switch: "Switch keys", "Switch firmware and saves", "Switch SD card", "amiibo", "Switch mods",
+  "Lichii settings" and "Switch firmware settings".
 - PC: "PC games' Wine prefixes", where the games keep their saves. A large item.
 
 The file can hold your console keys. Keep it private.
