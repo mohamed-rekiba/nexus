@@ -66,7 +66,8 @@ _Avoid_: timer, time source
 system plugin. One trait for all three; the kind decides only the privileges.
 
 **Console emulator** (`ConsoleEmulator`, emulator-kit): a console emulator's games, compatibility
-list, settings and page, served from a console spec and a flavor.
+list, settings and page, served from a console spec and a flavor, with the plugin's own panel
+block when it gives one (`Panel`).
 
 **Console spec** (`ConsoleSpec`, emulator-kit): what sets one console emulator apart besides its
 builds: its games, how it knows a package to install (by format, or by file name), compatibility

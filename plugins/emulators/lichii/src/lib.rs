@@ -243,14 +243,17 @@ impl CodePlugin for LichiiPlugin {
             version_row: true,
             own_row: false,
         };
-        let emu = Arc::new(ConsoleEmulator::start(LichiiFlavor { platform: host.platform }, spec, host).await?);
-        let controllers = ctx.services().get::<Controllers>().map(|c| (*c).clone());
-        let firmware = Arc::new(firmware::Firmware::new(emu.host().clone(), ctx.events().clone()));
+        let firmware = firmware::Firmware::new(host.clone(), ctx.events().clone());
+        let emu = ConsoleEmulator::start(LichiiFlavor { platform: host.platform }, spec, host)
+            .await?
+            .with_panel(firmware.clone());
         let saved = emu.builds().settings().load().await;
         if let Err(e) = firmware.adopt(saved.old_firmware_updates, saved.old_firmware_release).await {
             emu.host().log.warn(&format!("the firmware settings of an older Nexus didn't move: {e}"));
         }
-        let lichii = Arc::new(Lichii { emu: emu.clone(), controllers, firmware });
+        let emu = Arc::new(emu);
+        let controllers = ctx.services().get::<Controllers>().map(|c| (*c).clone());
+        let lichii = Arc::new(Lichii { emu: emu.clone(), controllers });
         Ok(Provided {
             catalog: Some(emu.clone()),
             downloader: Some(emu.builds().clone()),
@@ -258,7 +261,7 @@ impl CodePlugin for LichiiPlugin {
             configurator: Some(emu.clone()),
             launcher: Some(lichii.clone()),
             game_installer: Some(lichii.clone()),
-            slots: Some(lichii.clone()),
+            slots: Some(emu.clone()),
             backup: Some(backup_items()),
             assets: Some(nexus_api::system_art!()),
             ..Provided::default()
@@ -296,26 +299,6 @@ struct Lichii {
     emu: Arc<ConsoleEmulator<LichiiFlavor>>,
     /// The host's controllers; `None` on a host without them.
     controllers: Option<Controllers>,
-    firmware: Arc<firmware::Firmware>,
-}
-
-/// The console emulator's slots, and the Firmware block on Lichii's panel.
-#[async_trait]
-impl Slots for Lichii {
-    async fn items(&self, request: &SlotRequest) -> PluginResult<Vec<SlotItem>> {
-        let mut items = self.emu.items(request).await?;
-        if request.slot == SlotId::EmulatorPanel && request.game.is_none() {
-            items.extend(self.firmware.items().await);
-        }
-        Ok(items)
-    }
-
-    async fn run_action(&self, action: &str, game: Option<&str>, args: &Value) -> PluginResult<()> {
-        match self.firmware.run_action(action, args).await {
-            Some(done) => done,
-            None => self.emu.run_action(action, game, args).await,
-        }
-    }
 }
 
 impl Lichii {

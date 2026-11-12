@@ -808,7 +808,10 @@ Kraken decoder (`third_party/oozextract`) for PS5 packages.
 
 A console emulator describes itself and the kit runs the rest. The plugin gives a `Flavor` for
 its builds, which the `BuildManager` installs, updates and rolls back. It gives a `ConsoleSpec`
-for its games, compatibility list and page, which the `ConsoleEmulator` serves. The plugin keeps
+for its games, compatibility list and page, which the `ConsoleEmulator` serves. A plugin with a
+block of its own on its emulator panel, such as Lichii's firmware, gives a `Panel` with
+`with_panel`: the `ConsoleEmulator` shows its items after its own and offers it each action
+first. The plugin keeps
 its settings type, its launch arguments and its game installs. The kit reaches the host only
 through the host facades in `host::Host`, never the whole `PluginContext`, so its tests run on
 in-memory doubles.

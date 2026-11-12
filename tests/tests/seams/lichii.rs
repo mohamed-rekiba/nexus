@@ -932,6 +932,21 @@ async fn lichii_s_data_folder_set_under_its_old_name_still_counts() {
     assert_eq!(row(&rows, "Installed").unwrap().value, "Not from Nexus", "the firmware in that folder");
 }
 
+/// On Lichii's panel, an action that isn't the Firmware block's goes on to the build panel:
+/// "Use your own build" turns the setting on.
+#[tokio::test]
+async fn a_build_action_on_lichii_s_panel_passes_the_firmware_block() {
+    let (test, _games, _eden) = with_eden(&[]).await;
+    let own =
+        Command::RunAction { plugin: lichii(), action: "use-own".into(), game: None, args: serde_json::Value::Null };
+    test.core.dispatch(own).await.unwrap();
+
+    test.core.dispatch(Command::Navigate(nexus_core::Route::Settings)).await.unwrap();
+    let view = test.core.view();
+    let panel = view.settings.panels.iter().find(|p| p.slot.plugin == lichii()).expect("the Lichii panel");
+    assert_eq!(panel.fields.iter().find(|f| f.key == "own_build").unwrap().value, "true");
+}
+
 /// Lichii lists no keyboard keys (its own window sets them), so its panel has no Keyboard
 /// controls block: an empty one would say nothing.
 #[tokio::test]

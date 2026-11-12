@@ -1,7 +1,7 @@
 //! A console emulator as a plugin: its games in the player's game folders, the community
 //! compatibility list, its settings, its packages to install, and its page on the Emulators
 //! screen. The plugin gives a [`ConsoleSpec`] and a [`Flavor`]; it keeps its launch arguments
-//! and its game installs.
+//! and its game installs. A plugin with a block of its own on its panel gives a [`Panel`].
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -55,11 +55,22 @@ pub enum Packages {
     Named(fn(&str) -> bool),
 }
 
+/// A plugin's own block on its emulator panel, such as Lichii's firmware. The console emulator
+/// shows its items after its own, and offers it each action before its own.
+#[async_trait]
+pub trait Panel: Send + Sync {
+    /// Its items on the emulator panel.
+    async fn items(&self) -> Vec<SlotItem>;
+    /// Runs `action` when it is one of its rows; `None` when it isn't.
+    async fn run_action(&self, action: &str, args: &Value) -> Option<PluginResult<()>>;
+}
+
 pub struct ConsoleEmulator<F: Flavor> {
     spec: ConsoleSpec,
     host: Host,
     games: GameIndex,
     builds: Arc<BuildManager<F>>,
+    panel: Option<Arc<dyn Panel>>,
 }
 
 impl<F: Flavor> ConsoleEmulator<F> {
@@ -68,7 +79,13 @@ impl<F: Flavor> ConsoleEmulator<F> {
         let builds = Arc::new(BuildManager::new(flavor, host.clone()));
         builds.settings().migrate().await?;
         let games = GameIndex::new(GAMES_FOLDER, spec.console);
-        Ok(Self { spec, host, games, builds })
+        Ok(Self { spec, host, games, builds, panel: None })
+    }
+
+    /// The emulator with `panel`, the plugin's own block, on its panel.
+    pub fn with_panel(mut self, panel: Arc<dyn Panel>) -> Self {
+        self.panel = Some(panel);
+        self
     }
 
     pub fn builds(&self) -> &Arc<BuildManager<F>> {
@@ -241,6 +258,9 @@ impl<F: Flavor> Slots for ConsoleEmulator<F> {
                     items.push(self.controls().keyboard_panel());
                 }
                 items.extend(self.builds.update_items().await);
+                if let Some(panel) = &self.panel {
+                    items.extend(panel.items().await);
+                }
                 items
             }
             (SlotId::SettingsPanel, None) => vec![item(
@@ -251,7 +271,12 @@ impl<F: Flavor> Slots for ConsoleEmulator<F> {
         })
     }
 
-    async fn run_action(&self, action: &str, _game: Option<&str>, _args: &Value) -> PluginResult<()> {
+    async fn run_action(&self, action: &str, _game: Option<&str>, args: &Value) -> PluginResult<()> {
+        if let Some(panel) = &self.panel
+            && let Some(done) = panel.run_action(action, args).await
+        {
+            return done;
+        }
         self.builds.run_action(action).await
     }
 }

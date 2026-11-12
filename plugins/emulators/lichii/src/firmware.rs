@@ -20,9 +20,10 @@
 //! - The version Nexus installed last is kept in the plugin's storage ([`MARKER`]).
 
 use std::io::{Cursor, Read};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
+use emulator_kit::console::Panel;
 use emulator_kit::host::Host;
 use emulator_kit::{cache, github};
 use nexus_api::serde::{Deserialize, Serialize};
@@ -59,6 +60,39 @@ struct FirmwareSettings {
 impl Default for FirmwareSettings {
     fn default() -> Self {
         Self { automatic: false, release: DEFAULT_RELEASE.into() }
+    }
+}
+
+/// The Firmware block on Lichii's panel, through the console emulator.
+#[async_trait]
+impl Panel for Firmware {
+    /// With Automatic updates on, a read of the block starts a check, at most every
+    /// [`RELEASE_TTL`]: the core reads the panel at the start and at each update check.
+    async fn items(&self) -> Vec<SlotItem> {
+        let read = self.read_settings().await;
+        let settings = read.clone().unwrap_or_default();
+        if settings.automatic {
+            self.start_auto(settings.release.clone()).await;
+        }
+        self.panel(settings.automatic, &settings.release, read.err()).await
+    }
+
+    /// The core reads the panel again after an action: with Automatic updates turned on, a
+    /// check starts then.
+    async fn run_action(&self, action: &str, args: &Value) -> Option<PluginResult<()>> {
+        Some(match action {
+            UPDATE_NOW => {
+                self.start(true, self.settings().await.release);
+                Ok(())
+            }
+            TOGGLE_AUTO => {
+                let mut settings = self.settings().await;
+                settings.automatic = !settings.automatic;
+                self.save(&settings).await
+            }
+            SET_RELEASE => self.set_release(args).await,
+            _ => return None,
+        })
     }
 }
 
@@ -190,6 +224,8 @@ impl Step {
 }
 
 pub struct Firmware {
+    /// Itself, for the update it runs in the background.
+    me: Weak<Firmware>,
     host: Host,
     events: Arc<dyn EventSink>,
     phase: Mutex<Phase>,
@@ -198,8 +234,14 @@ pub struct Firmware {
 }
 
 impl Firmware {
-    pub fn new(host: Host, events: Arc<dyn EventSink>) -> Self {
-        Self { host, events, phase: Mutex::new(Phase::Idle), last_auto: Mutex::new(None) }
+    pub fn new(host: Host, events: Arc<dyn EventSink>) -> Arc<Self> {
+        Arc::new_cyclic(|me| Self {
+            me: me.clone(),
+            host,
+            events,
+            phase: Mutex::new(Phase::Idle),
+            last_auto: Mutex::new(None),
+        })
     }
 
     /// Takes over the firmware settings that Nexus 0.16.4 and older saved among Lichii's
@@ -247,37 +289,6 @@ impl Firmware {
         self.host.storage.write(&RelPath::new(SETTINGS)?, &serde_json::to_vec(settings)?).await
     }
 
-    /// The Firmware block, for Lichii's panel. With Automatic updates on, a read of it starts a
-    /// check, at most every [`RELEASE_TTL`]: the core reads the panel at the start and at each
-    /// update check.
-    pub async fn items(self: &Arc<Self>) -> Vec<SlotItem> {
-        let read = self.read_settings().await;
-        let settings = read.clone().unwrap_or_default();
-        if settings.automatic {
-            self.start_auto(settings.release.clone()).await;
-        }
-        self.panel(settings.automatic, &settings.release, read.err()).await
-    }
-
-    /// Runs `action` when it is one of the Firmware block's rows; `None` when it isn't. The
-    /// core reads the panel again after an action: with Automatic updates turned on, a check
-    /// starts then.
-    pub async fn run_action(self: &Arc<Self>, action: &str, args: &Value) -> Option<PluginResult<()>> {
-        Some(match action {
-            UPDATE_NOW => {
-                self.start(true, self.settings().await.release);
-                Ok(())
-            }
-            TOGGLE_AUTO => {
-                let mut settings = self.settings().await;
-                settings.automatic = !settings.automatic;
-                self.save(&settings).await
-            }
-            SET_RELEASE => self.set_release(args).await,
-            _ => return None,
-        })
-    }
-
     /// The player typed `typed` into the Firmware release row: the next update installs it.
     async fn set_release(&self, typed: &Value) -> PluginResult<()> {
         let typed =
@@ -288,7 +299,7 @@ impl Firmware {
     }
 
     /// Starts a check on its own, bypassing the normal interval when firmware is missing.
-    async fn start_auto(self: &Arc<Self>, version: String) {
+    async fn start_auto(&self, version: String) {
         if matches!(self.phase(), Phase::Updating(_)) {
             return;
         }
@@ -323,7 +334,7 @@ impl Firmware {
 
     /// Starts an update in the background, unless one is running. `asked`: the player pressed
     /// the button, so the release is asked for again, and an update that failed runs again.
-    fn start(self: &Arc<Self>, asked: bool, version: String) {
+    fn start(&self, asked: bool, version: String) {
         {
             let mut phase = self.phase.lock().unwrap_or_else(|p| p.into_inner());
             match &*phase {
@@ -335,7 +346,7 @@ impl Firmware {
         if let Err(e) = self.events.publish(SLOTS_CHANGED, Value::Null) {
             self.host.log.warn(&format!("could not tell the core the firmware check started: {e}"));
         }
-        let this = self.clone();
+        let Some(this) = self.me.upgrade() else { return };
         tokio::spawn(async move {
             let phase = match this.update(asked, &version).await {
                 Ok(message) => Phase::Complete(message),
