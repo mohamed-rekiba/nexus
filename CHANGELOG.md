@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/mohamed-rekiba/nexus/compare/v0.16.5...v0.17.0) (2026-11-13)
+
+
+### Features
+
+* **kyty:** pass readback, notice-skip and shader-cache flags by default ([#76](https://github.com/mohamed-rekiba/nexus/issues/76)) ([2c27d28](https://github.com/mohamed-rekiba/nexus/commit/2c27d28970a2aba04163149f655e4d116adfc119))
+
 ## [0.16.5](https://github.com/mohamed-rekiba/nexus/compare/v0.16.4...v0.16.5) (2026-11-12)
 
 
