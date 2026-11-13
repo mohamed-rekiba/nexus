@@ -312,6 +312,12 @@ fn setting_options(settings: &Settings) -> Vec<(&'static str, Option<String>)> {
     if settings.amd_cpu {
         options.push(("--amd-cpu", None));
     }
+    // Defaults Nexus always passes. A build that doesn't list one in its `--help` is left
+    // without it (see [`kyty_args`]), since KytyPS5 stops at an unknown option.
+    options.push(("--readback-tiled-images", None));
+    options.push(("--readback-storage-images", None));
+    options.push(("--skip-notice-screen", None));
+    options.push(("--shader-cache", None));
     options
 }
 
@@ -687,6 +693,23 @@ mod tests {
     }
 
     #[test]
+    fn the_readback_and_notice_flags_are_on_by_default_and_skipped_when_a_build_lacks_them() {
+        let settings = Settings::default();
+        let defaults = ["--readback-tiled-images", "--readback-storage-images", "--skip-notice-screen"];
+        // A build that lists them (or whose --help didn't answer: None) gets them.
+        let args = texts(kyty_args(&settings, "/g/PPSA1".into(), "/g/PPSA1/addcont".into(), None, None));
+        for flag in defaults {
+            assert!(args.contains(&flag.to_owned()), "{flag} is a default: {args:?}");
+        }
+        // A build that doesn't list them is left without, since KytyPS5 stops at an unknown option.
+        let known: BTreeSet<String> = ["--game", "--addcont-dir", "--present-mode"].map(String::from).into();
+        let args = texts(kyty_args(&settings, "/g/PPSA1".into(), "/g/PPSA1/addcont".into(), None, Some(&known)));
+        for flag in defaults {
+            assert!(!args.contains(&flag.to_owned()), "{flag} is left out of a build that lacks it: {args:?}");
+        }
+    }
+
+    #[test]
     fn the_command_line_puts_extra_arguments_last() {
         let settings = Settings { amd_cpu: true, extra_args: "--x 'a b'".into(), ..Settings::default() };
         let args: Vec<String> = kyty_args(&settings, "/g/PPSA1".into(), "/g/PPSA1/addcont".into(), None, None)
@@ -713,6 +736,10 @@ mod tests {
                 "Title",
                 "--fullscreen",
                 "--amd-cpu",
+                "--readback-tiled-images",
+                "--readback-storage-images",
+                "--skip-notice-screen",
+                "--shader-cache",
                 "--x",
                 "a b"
             ]
